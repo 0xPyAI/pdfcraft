@@ -1724,13 +1724,9 @@ pub(crate) fn rewrite_block_with_limit(
     // The chosen style also determines the real Japanese fallback outlines and advances.
     let (family, bold, italic) = style.family.unwrap_or((source_family(&b.base_font), b.bold, b.italic));
     let bold = style.bold.unwrap_or(bold);
-    let std_width = move |s: &str, size: f64| -> f64 {
-        match family {
-            crate::added::Family::Courier => s.chars().count() as f64 * 0.6 * size,
-            crate::added::Family::Times => pdfcraft_fonts::helvetica_width(s, size) * 0.92,
-            crate::added::Family::Helvetica => pdfcraft_fonts::helvetica_width(s, size) * if bold { 1.05 } else { 1.0 },
-        }
-    };
+    // The face is chosen after `bold` settles, so a bold request measures with the bold metrics.
+    let face = family.std14(bold, italic);
+    let std_width = move |s: &str, size: f64| -> f64 { face.text_width(s, size) };
     let [dx, dy] = style.offset.unwrap_or([0.0, 0.0]);
     if !(dx.is_finite() && dy.is_finite()) {
         return Err(EditError::Invalid("the paragraph can't be moved that far".into()));

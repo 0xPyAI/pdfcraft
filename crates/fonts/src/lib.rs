@@ -1,7 +1,9 @@
 //! pdfcraft-fonts — font metrics and encodings for generated appearances (L2).
 //!
-//! See the README: the metrics are approximations by character class (no vendor metrics files
-//! are bundled). The full font subsystem lands in M2.2/M7.
+//! Standard-14 advance widths are exact (`Std14`, ISO 32000-2 Annex D). What remains approximate
+//! is everything that needs a font *program*: this crate reads font dictionaries, never embedded
+//! programs, so it has no glyph outlines for document fonts and cannot subset or re-embed. That
+//! is phase F 4.2 in docs/plan/execution-plan.md.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -12,6 +14,7 @@ pub mod pdf;
 mod script;
 mod shaping;
 pub mod source_shaping;
+mod std14;
 pub use craft::{
     CRAFT_FONTS, CraftFont, SHIPPORI_MINCHO, document_arabic_font, document_hebrew_font, document_japanese_font, document_japanese_font_for_style,
     document_japanese_fonts_for_style, document_thai_font, ui_arabic_fonts, ui_chinese_fonts, ui_cjk_fonts, ui_hebrew_fonts, ui_japanese_fonts,
@@ -21,27 +24,14 @@ pub use script::{
     GlyphError, GlyphOutline, INTER_REGULAR, MAX_SIGNATURE_CHARS, ScriptOutline, japanese_glyph, japanese_glyph_from, script_missing, script_outline,
 };
 pub use shaping::{ShapedCluster, ShapedScript, arabic_glyph, arabic_has, shape_arabic, shape_thai, shaped_glyph, thai_has};
+pub use std14::Std14;
 
-/// Approximate advance of `s` in Helvetica (or Arial) at `size` points.
+/// Advance of `s` in Helvetica at `size` points, using the exact standard-14 metrics.
+///
+/// Kept as a free function because generated appearances overwhelmingly use Helvetica; reach for
+/// [`Std14`] directly for any other face, and never for a scaled approximation of this one.
 pub fn helvetica_width(s: &str, size: f64) -> f64 {
-    let units: f64 = s
-        .chars()
-        .map(|c| match c {
-            ' ' | 'i' | 'j' | 'l' | '\'' | '!' | '|' | '.' | ',' | ':' | ';' | 'I' => 260.0,
-            'f' | 't' | 'r' | '(' | ')' | '[' | ']' | '/' | '-' | '"' => 333.0,
-            'm' => 833.0,
-            'w' => 722.0,
-            'M' => 833.0,
-            'W' => 944.0,
-            'J' | 'c' | 'k' | 's' | 'v' | 'x' | 'y' | 'z' => 500.0,
-            '0'..='9' | 'a'..='z' | '$' | '#' | '?' | '_' => 556.0,
-            'A'..='Z' => 680.0,
-            '@' => 1015.0,
-            _ if c.is_whitespace() => 260.0,
-            _ => 584.0,
-        })
-        .sum();
-    units * size / 1000.0
+    Std14::Helvetica.text_width(s, size)
 }
 
 /// Approximate advance of `s` at `size` points in a CJK font: full-width characters take one
