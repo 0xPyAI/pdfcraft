@@ -3,6 +3,7 @@
 **Stage: alpha** · next: beta, ~26% (ready for real work 49% → 75%) and ~400–700 h away
 
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (M3 candidate: native opens retain chosen tools through password retries and defer startup intake while preparation is pending; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-13 · **Change:** minor (M14 Indonesian and Vietnamese catalogs: localization re-measures at ≈ 76%; the weighted sum is not re-measured here) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (M13: CLI check visits each directory once through aliases and cycles; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (M4: Extract and Split preserve shared Type 3 glyph resources; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (M2: packed TIFF-predictor RGB rows retain their byte boundaries; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
@@ -79,7 +80,7 @@ Hours are calibrated as in [Effort and calibration](docs/target-app-parity.md#ef
 | File formats and conversion | ≈ 40% | 12% | 120–220 (within features) | [file-format-parity.md](docs/file-format-parity.md) |
 | PDF specification and standards | ≈ 60% | 8% | 150–260 (within features) | [pdf-spec-parity.md](docs/pdf-spec-parity.md) |
 | Hardware | ≈ 35% | 4% | 25–50 | [hardware-parity.md](docs/hardware-parity.md) |
-| Localization | ≈ 59% | 5% | 35–60 | [localization-parity.md](docs/localization-parity.md) |
+| Localization | ≈ 76% | 5% | 25–50 | [localization-parity.md](docs/localization-parity.md) |
 | Performance | ≈ 40% | 6% | 25–45 | [gaps.md](docs/gaps.md) gap 13 |
 | Stability | ≈ 50% | 8% | 45–80 | [gaps.md](docs/gaps.md) gap 6 |
 | Platforms | ≈ 70% | 5% | 15–30 | [hardware-parity.md](docs/hardware-parity.md#platforms) |
@@ -110,7 +111,7 @@ What's strong and missing in each: [target-app-parity.md](docs/target-app-parity
 
 ## Languages
 
-Measured from `crates/ui-egui/src/i18n/*.tsv` (2,143 keys). Detail and script notes:
+Measured from `crates/ui-egui/src/i18n/*.tsv` (2,578 keys). Detail and script notes:
 [localization-parity.md](docs/localization-parity.md).
 
 | Language | Code | Strings | Status |
@@ -122,11 +123,11 @@ Measured from `crates/ui-egui/src/i18n/*.tsv` (2,143 keys). Detail and script no
 | Arabic | `ar` | 100% | partial (layout not mirrored) |
 | French | `fr` | 99.3% | partial |
 | Portuguese (Brazil) | `pt-br` | 99.4% | partial |
-| Indonesian | `id` | 0% | none |
+| Indonesian | `id` | 100% | partial |
 | Japanese | `ja` | 99.1% | partial |
 | German | `de` | 99.3% | partial |
 | Korean | `ko` | 0% | none |
-| Vietnamese | `vi` | 0% | none |
+| Vietnamese | `vi` | 100% | partial |
 
 Also shipped: Traditional Chinese, Russian, Bulgarian, Telugu, Hungarian, Ukrainian, Italian
 (94–100%) and Czech (menus only): **8 more languages**.
@@ -150,6 +151,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 ## Progress log
 
 - **2026-10-13 (M3, native-opening candidate):** Chosen tools survive preparation, conversion and password retries; startup intake waits for pending preparation. Regression tests cover completion, cancellation and document identity. Estimates unchanged.
+- **2026-10-13 (M14, Indonesian and Vietnamese):** Two more interface languages, each a full 2,578-key catalog — every `(context, English)` key the bundled catalogs' union holds, covering every registered command, All tools label and `tl!` literal (tests fail if either lags). Neither language inflects nouns for number (CLDR `id` and `vi` have one plural form), so `@plural` entries list one form; month and weekday names for stamps come with them. The bundled Latin faces cover both catalogs, stacked Vietnamese diacritics included (checked in `crates/ui-egui/tests/fonts.rs`, which found and fixed one `▸` Inter cannot draw). Localization re-measures at ≈ 76% (from ≈ 59%: the key union moved to 2,578 with Lithuanian, and Indonesian and Vietnamese now ship); remaining are Hindi and Korean, which need a Devanagari and a Hangul face in craft-fonts. The overall weighted sum still reads ≈ 49% and is not re-measured here.
 - **2026-10-12 (M10, Windows printing without PowerShell, #1107):** craft-print now prints on Windows in-process: printers from EnumPrinters/GetDefaultPrinter, jobs drawn as vectors by Windows.Data.Pdf into the XPS print API with a driver-validated PrintTicket (exact paper, orientation, no scaling), so printing works where App Control for Business or AppLocker run PowerShell in Constrained Language Mode. Portrait and landscape sheets still print as one job (turned with /Rotate); a sheet size the driver lacks is refused rather than shrunk. Pins craft-libs f03ec27 (craft-libs#28); deny.toml allows the storytold/winprint.rs fork and adds a webpki-root-certs licence exception and a RUSTSEC-2024-0370 ignore for winprint's build-dependencies. An earlier craft-print revision was checked in Windows Sandbox under enforced WDAC: printers listed, CLI and desktop jobs spooled, and no powershell.exe in the 4688 audit. The final pinned revision passed craft-libs Windows CI, including a real paused-queue job; that Sandbox run has not been repeated. Estimates unchanged.
 - **2026-10-12 (M13, CLI robustness scans):** `pdfcraft-cli check` visits a directory once even when input roots overlap or directory symlinks lead back into the tree. PDFs reached through file symlinks remain accepted. Three real CLI regressions cover overlapping roots, a directory cycle and directory/file aliases. Estimates unchanged.
 - **2026-10-12 (M4, Type 3 extraction fidelity):** Extract and Split preserve shared image/resource dictionaries reached through Type 3 glyphs, including nested forms, patterns and soft masks. A bounded object-graph walk protects unknown glyph content; unreadable pages/forms retain their glyph resources, and shared explicit fonts are visited once. Separate page dictionaries still prune unused images. Synthetic save/reopen regressions and an opt-in Poppler pixel oracle cover resource ownership, nested forms, cycles, limits and repeated fonts. Estimates unchanged.
@@ -165,7 +167,6 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 - **2026-10-12 (M1, #1339):** An incremental save of an unchanged classic-table file used to append `xref` and then `trailer` with no subsection, which qpdf reports as a damaged file. The section now has a zero-length subsection, so no object entry changes and a trailer-only edit is still written. Estimates unchanged.
 - **2026-10-12 (M12, auto-tag preview):** The engine and `accessibility_autotag_preview` propose paragraph and large-heading roles for bounded text blocks on one page, with locations and reasons. Every proposal needs review; images remain unclassified. No PDF tags are written yet. Synthetic tool tests cover normal text, a larger heading, bounds and unchanged source bytes. Estimates unchanged.
 - **2026-10-12 (M10, editing OCR text on scans):** Editing a recognised word on a scanned page now changes what the page shows. Before, the rewrite stayed invisible OCR text, so the scan still showed the old word; on a form, the whole OCR layer also grouped into one paragraph that rewrapped when one word changed. OCR words now group into phrases (a table cell or a tab stop splits them, and lines stay apart); an edit draws the phrase visibly in the scan's sampled ink colour over a cover in the sampled paper colour, keeping each word's width and growing rightwards. The editor covers the scanned word while typing. OCR words are now sized from their letters (a capitals-only word's box spans the cap height, not the full ascender-descender span), so recognised and rewritten text is as tall as the scanned word and sits on its baseline. Five engine tests on synthetic scans and a kittest UI test; `ocr.editable-text-output` is partial.
-- **2026-10-12 (M2, Lab Bradford follow-up):** Lab white-point adaptation scales Bradford LMS cone responses using LMS white-point ratios. Independent D50 and equal-energy neutral/chromatic render oracles, D65 identity, direct/Indexed consistency with asymmetric chromatic Range, and degenerate-cone fallback cover the correction. CalRGB and the merged Indexed/Range scaling retain their behavior. Estimates unchanged.
 - **2026-10-12 (community, M14, recovery metadata):** A recovery snapshot whose metadata is missing, damaged or names another snapshot is no longer deleted when the folder is listed: it is offered for recovery without an original path (Save asks for a destination), and encrypted snapshots still ask for their password. Recovering one writes fresh metadata in place of the damaged file, and clearing the folder also removes metadata left without a snapshot. Before, a failed metadata write meant the next start deleted the finished snapshot. Synthetic regressions cover the failed write, missing, corrupt, mismatched and encrypted cases. Estimates unchanged.
 - **2026-10-12 (M7, Arabic ActualText):** Add text records each shaped line in typing order with `/ActualText`, so copy and search preserve mixed Arabic, Latin, digits and brackets. Edit text keeps the logical order supplied by `/ActualText` instead of reversing Arabic or Hebrew a second time. Adjacent visual glyph runs retain their own bidi recovery. Font-independent tests cover Arabic marks, numbers, Latin words, reopen and complete replacement; automation checks saved editor text and unchanged rendering. Font fallback and bidi typing remain separate gaps; estimates unchanged.
 - **2026-10-12 (M5, Fill & Sign text size):** The active Fill & Sign toolbar now chooses 4–300 pt for new text and dates; the in-place editor and saved annotation use that size, which persists in local settings. `fill_sign_add` accepts the same `font_size`. Feature and readiness estimates unchanged.
@@ -198,8 +199,6 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 Newest first: the date, what moved, and the new overall estimate.
 
-- **2026-10-12 (M3, GNOME title bar, #553):** On GNOME's Wayland session, whose compositor draws no window frames (it offers no `zxdg_decoration_manager_v1`), PdfCraft no longer shows winit's fallback title bar: it turns the frame off and the tab strip becomes the header bar, as in GNOME's own apps. Minimize, maximize/restore and close are drawn in Adwaita's style, in the order and on the side GNOME's `button-layout` names (Fedora's default shows only close); the window's edges and corners resize it, and a hairline outlines it while it isn't maximized. Preferences ▸ Use system title bar (shown only there) gives the window back winit's frame at once, without a restart (part of #1001), and `PDFCRAFT_TITLEBAR=app|system` overrides the choice. KDE, Sway, Hyprland, COSMIC and X11 keep the frame their desktop draws. Not done: right-clicking the header bar doesn't open GNOME's window menu (egui can't ask for it), the window has no shadow or rounded corners, the resize edges lie just inside the window rather than outside it, and Windows still uses its system frame (the rest of #1001). Estimates unchanged.
-- **2026-10-12 (M0, build label):** A local or patched build can carry a label, set at compile time with `PDFCRAFT_BUILD_LABEL`: `pdfcraft --version`, `pdfcraft-cli --version`, About and the log show `0.7.1 (titlebar)`, and `packaging/linux/package.sh` names the files `pdfcraft-0.7.1-titlebar-…` and makes the .rpm/.deb release `1.titlebar`, which upgrades over the release of the same version (and the next release over it). The version itself is unchanged, so the update check still compares it with published releases. Unlabelled builds are as before. Estimates unchanged.
 - 2026-10-11: Organize Pages shows an editable, synchronized physical page-range selection (#1092), with bounded validation and UI/operation regression coverage; overall estimate unchanged.
 
 - **2026-10-11 (M5.7, scanned signatures, #1110):** Fill & Sign ▸ Add signature has a Scan tab: a phone photo of a signature on paper is framed automatically (all words; table, sheet edge and dust ignored; a sideways signature turned upright), the frame can be moved, resized or redrawn, the photo turned, and an ink-sensitivity slider picks up faint ink. A morphological paper estimate removes shadows and uneven light, and the trimmed ink is saved and reused like an image signature. Photos and images can also be dropped on the Image and Scan tabs. Photos keep the image-signature limits (#1124: a 4 MiB file, up to 32 megapixels decoded, scaled down to 4 megapixels), so a scan never processes more than 4 megapixels. `fill_sign_add` takes `scan` and `sensitivity`. Synthetic engine, UI and automation tests; checked by hand on real phone photos. Milestone and effort estimates unchanged.
@@ -427,8 +426,6 @@ Newest first: the date, what moved, and the new overall estimate.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-12 | minor | M3/#1364 candidate: absolute local GoToR links require desktop consent or headless allow_absolute; existing relative navigation and validation retained. Estimates unchanged. |
-| 2026-10-12 | minor | M8: redaction retires inherited `/Resources` so a parent `/Pages` can't keep a removed XObject reachable; only redacted pages that inherit are pinned (one shared reference), unredacted pages are untouched; estimates unchanged |
 | 2026-10-12 | minor | M7/#1200 candidate: bounded local GoToR opening, root-confined automation, and action-preserving appearance edits; named destinations and window behavior remain partial; estimates unchanged. |
 | 2026-10-12 | minor | Exclusive image crops resize with their pixels across nested states, intervening operators and content streams; shared clips remain fixed. Synthetic engine/tool regressions and private image save/reopen checks; estimates unchanged. |
 | 2026-10-11 | minor | M10: borderless inferred tables and positioned invoice watermarks (#773); estimates unchanged. |

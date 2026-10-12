@@ -147,7 +147,7 @@ fn plural_sl(n: u64) -> usize {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 22] = [
+pub static LANGUAGES: [LangInfo; 24] = [
     LangInfo { code: "en", name: "English", source: "", plural: plural_one_other, rtl: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Simplified Chinese; `zh`, `zh-CN`, `zh-SG` and `zh-Hans-*` locales resolve here (see `candidates`).
@@ -207,6 +207,12 @@ pub static LANGUAGES: [LangInfo; 22] = [
     LangInfo { code: "tr", name: "Türkçe", source: include_str!("tr.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Lithuanian; every `lt-*` locale (`lt-LT`, `lt_LT.UTF-8`) resolves here. Three plural forms (one, few, other).
     LangInfo { code: "lt", name: "Lietuvių", source: include_str!("lt.tsv"), plural: plural_lithuanian, rtl: false, catalog: OnceLock::new() },
+    // Indonesian; every `id-*` locale (`id-ID`, `id_ID.UTF-8`) resolves here. CLDR `id` counts have
+    // one form ("other"), so `@plural` entries list a single form.
+    LangInfo { code: "id", name: "Bahasa Indonesia", source: include_str!("id.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
+    // Vietnamese; every `vi-*` locale (`vi-VN`, `vi_VN.UTF-8`) resolves here. CLDR `vi` counts have
+    // one form ("other"), so `@plural` entries list a single form.
+    LangInfo { code: "vi", name: "Tiếng Việt", source: include_str!("vi.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
@@ -2376,6 +2382,125 @@ mod tests {
         assert!(literals.len() > 900, "source scan found only {} literals", literals.len());
         let missing: Vec<_> = literals.iter().filter(|label| !has(sl, label)).collect();
         assert!(missing.is_empty(), "untranslated Slovene UI literals: {missing:#?}");
+    }
+
+    #[test]
+    fn indonesian_and_vietnamese_are_registered_and_persist() {
+        let id = Lang::from_code("id").expect("id registered");
+        let vi = Lang::from_code("vi").expect("vi registered");
+        assert_eq!(id.name(), "Bahasa Indonesia");
+        assert_eq!(vi.name(), "Tiếng Việt");
+        assert_eq!(normalize_pref("ID"), Some("id"));
+        assert_eq!(normalize_pref("Vi"), Some("vi"));
+        for tag in ["id", "id-ID", "id_ID.UTF-8", "ID-id"] {
+            assert_eq!(lang_from_tag(tag), Some(id), "{tag}");
+        }
+        for tag in ["vi", "vi-VN", "vi_VN.UTF-8", "VI-vn"] {
+            assert_eq!(lang_from_tag(tag), Some(vi), "{tag}");
+        }
+        assert_eq!(first_supported("id-ID\r\nen-US"), Some(id));
+        assert_eq!(first_supported("vi-VN\r\nen-US"), Some(vi));
+        assert_eq!(tr(id, "Save"), "Simpan");
+        assert_eq!(tr(id, "Save as…"), "Simpan sebagai…");
+        assert_eq!(tr(id, "Bookmarks"), "Bookmark");
+        assert_eq!(tr(id, "Fill & Sign"), "Isi & Tanda Tangani");
+        assert_eq!(tr(vi, "Save"), "Lưu");
+        assert_eq!(tr(vi, "Save as…"), "Lưu thành…");
+        assert_eq!(tr(vi, "Bookmarks"), "Dấu trang");
+        assert_eq!(tr(vi, "Fill & Sign"), "Điền & Ký");
+        assert_eq!(tr(vi, "Interface language"), "Ngôn ngữ giao diện");
+        assert_eq!(tr(id, "Interface language"), "Bahasa antarmuka");
+        // One CLDR plural form (CLDR `id`, `vi`): the message reads the same for every count.
+        assert_eq!((0..=3).map(|n| (id.0.plural)(n)).collect::<Vec<_>>(), [0, 0, 0, 0]);
+        assert_eq!((0..=3).map(|n| (vi.0.plural)(n)).collect::<Vec<_>>(), [0, 0, 0, 0]);
+        for n in [0, 1, 2, 5] {
+            assert_eq!(trn(id, n, "{n} page", "{n} pages"), format!("{n} halaman"));
+            assert_eq!(trn(vi, n, "{n} page", "{n} pages"), format!("{n} trang"));
+            assert_eq!(trn(id, n, "{n} field", "{n} fields"), format!("{n} kolom"));
+            assert_eq!(trn(vi, n, "{n} field", "{n} fields"), format!("{n} ô"));
+        }
+        let mut app = crate::PdfCraftApp::default();
+        app.set_option("language", "ID").unwrap();
+        assert_eq!(app.language, "id");
+        let mut restored = crate::PdfCraftApp::default();
+        restored.restore(&app.persist());
+        assert_eq!(restored.language, "id");
+        let mut app = crate::PdfCraftApp::default();
+        app.set_option("language", "vi").unwrap();
+        assert_eq!(app.language, "vi");
+        let mut restored = crate::PdfCraftApp::default();
+        restored.restore(&app.persist());
+        assert_eq!(restored.language, "vi");
+        assert!(restored.set_option("language", "xx").is_err());
+        assert_eq!(restored.language, "vi");
+    }
+
+    /// Indonesian and Vietnamese translate every registered command and every All tools group,
+    /// section and item.
+    #[test]
+    fn indonesian_and_vietnamese_cover_commands_and_catalogue() {
+        for lang in [Lang::from_code("id").expect("id registered"), Lang::from_code("vi").expect("vi registered")] {
+            for command in pdfcraft_engine::commands::COMMANDS {
+                assert!(has(lang, command.label), "{} missing command: {}", lang.code(), command.label);
+                if let Some(menu) = command.menu {
+                    assert!(has(lang, menu), "{} missing menu: {menu}", lang.code());
+                }
+            }
+            for group in pdfcraft_engine::catalog::TOOL_GROUPS {
+                assert!(has(lang, group.label), "{} missing group: {}", lang.code(), group.label);
+                for section in group.sections {
+                    assert!(has(lang, section.title), "{} missing section: {}", lang.code(), section.title);
+                    for item in section.items {
+                        assert!(has(lang, item.label), "{} missing item: {}", lang.code(), item.label);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Every `tl!("…")` literal in the UI source is translated in Indonesian and Vietnamese, so a
+    /// new label cannot silently fall back to English in either.
+    #[test]
+    fn indonesian_and_vietnamese_cover_ui_literals() {
+        let mut stack = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+        let mut literals = std::collections::BTreeSet::new();
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(dir).expect("UI source directory") {
+                let path = entry.expect("UI source entry").path();
+                if path.is_dir() {
+                    if path.file_name().is_some_and(|name| name != "i18n") {
+                        stack.push(path);
+                    }
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    let source = std::fs::read_to_string(path).expect("UI source file").replace("\r\n", "\n");
+                    let mut rest = source.split("#[cfg(test)]\nmod ").next().unwrap_or_default();
+                    while let Some((_, after)) = rest.split_once("tl!(\"") {
+                        let mut escaped = false;
+                        let end = after
+                            .char_indices()
+                            .find_map(|(i, c)| {
+                                if c == '"' && !escaped {
+                                    return Some(i);
+                                }
+                                escaped = c == '\\' && !escaped;
+                                None
+                            })
+                            .expect("closed tl! literal");
+                        let (raw, tail) = after.split_at(end);
+                        if tail.starts_with("\")") {
+                            let label: String = serde_json::from_str(&format!("\"{raw}\"")).expect("UI literal escapes");
+                            literals.insert(label);
+                        }
+                        rest = tail.strip_prefix('"').expect("closing quote");
+                    }
+                }
+            }
+        }
+        assert!(literals.len() > 900, "source scan found only {} literals", literals.len());
+        for lang in [Lang::from_code("id").expect("id registered"), Lang::from_code("vi").expect("vi registered")] {
+            let missing: Vec<_> = literals.iter().filter(|label| !has(lang, label)).collect();
+            assert!(missing.is_empty(), "untranslated {} UI literals: {missing:#?}", lang.code());
+        }
     }
 
     #[test]

@@ -231,6 +231,28 @@ usage = "Lithuanian UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
 sha256 = "35b6b03dae01b9a2e98f6d1f682d0699d77772e6efec7e28e1f26039c57b151f"
 
 [[asset]]
+path = "crates/ui-egui/src/i18n/id.tsv"
+title = "Indonesian interface translation catalog"
+author = "PdfCraft contributors"
+source = "Contributor-original: clean-room translations of PdfCraft's English UI labels, no proprietary localisation resources"
+licence = "MIT OR Apache-2.0"
+licence_file = "LICENSE-MIT"
+kind = "translation"
+usage = "Indonesian UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
+sha256 = "18b59a25fc0798b9f426a2d7d1e4272847df9fa8310de4754bd0b90098dc5cd1"
+
+[[asset]]
+path = "crates/ui-egui/src/i18n/vi.tsv"
+title = "Vietnamese interface translation catalog"
+author = "PdfCraft contributors"
+source = "Contributor-original: clean-room translations of PdfCraft's English UI labels, no proprietary localisation resources"
+licence = "MIT OR Apache-2.0"
+licence_file = "LICENSE-MIT"
+kind = "translation"
+usage = "Vietnamese UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
+sha256 = "21215a2a3489a03050d884b51a512e5c8b58b690dd36e182a4917ddd87b7b922"
+
+[[asset]]
 path = "assets/icons/accessibility.svg"
 title = "Lucide icon \"accessibility\""
 author = "Lucide Contributors (portions Cole Bemis, Feather)"
