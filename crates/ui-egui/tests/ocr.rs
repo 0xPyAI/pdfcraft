@@ -222,6 +222,38 @@ fn the_edit_panel_recognizes_a_scanned_page_too() {
     assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Recognize text"));
 }
 
+/// A scanned page that also carries some text of its own (a comment or text box over the map) is
+/// still a scan: Edit reads the picture, and the page's own words are not added a second time.
+#[test]
+fn editing_a_scan_that_carries_some_text_still_recognizes_the_picture_once() {
+    if !pdfcraft_engine::ocr::available() {
+        eprintln!("skipped: OCR models not installed");
+        return;
+    }
+    let hybrid = {
+        let mut s = Session::new();
+        let id = s.open("scan.pdf", None, std::sync::Arc::new(scan()), None).unwrap();
+        let (w, h) = {
+            let p = &s.get(id).unwrap().info.pages[0];
+            (p.width as f64, p.height as f64)
+        };
+        let note =
+            AddedText { rect: [w * 0.1, h * 0.75, w * 0.9, h * 0.85], text: "Invoice reference 4711".into(), size: 18.0, ..Default::default() };
+        s.apply(id, Edit::AddText { page: 0, text: note }).unwrap();
+        s.save_bytes(id).unwrap().to_vec()
+    };
+    let mut h = edit_harness(hybrid);
+    let id = h.state().active_ids().unwrap().1;
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(4);
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Recognize text"));
+    let doc = h.state().session.get(id).unwrap();
+    let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), Default::default());
+    let text = r.render(pdfcraft_render::RenderRequest { page: 0, kind: pdfcraft_render::RequestKind::Text, scale: 1.0, ..Default::default() });
+    let text = text.text.unwrap().plain_text().to_lowercase();
+    assert_eq!((text.matches("invoice").count(), text.matches("scanned").count()), (1, 1), "{text}");
+}
+
 #[test]
 fn editing_a_page_that_has_text_does_not_recognize_anything() {
     let mut h = edit_harness(text_page());

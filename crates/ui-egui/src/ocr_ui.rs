@@ -201,7 +201,10 @@ impl PdfCraftApp {
         if !covered || !pdfcraft_engine::ocr::available() {
             return;
         }
-        let settings = self.ocr_draft.settings();
+        // A picture on a page that has some text of its own (a comment, a text box) is still a
+        // scan, as in Acrobat; the words the page's text already has are not added twice.
+        let mut settings = self.ocr_draft.settings();
+        settings.skip_text_pages = false;
         self.start_ocr_pages(id, &[page], settings);
     }
 
