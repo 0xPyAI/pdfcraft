@@ -3436,8 +3436,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["file.properties"]
 tools = ["doc_info"]
-evidence = ["crates/ui-egui/tests/view.rs::fonts_tab_lists_fonts_and_embedding"]
-notes = ""
+evidence = ["crates/ui-egui/tests/view.rs::fonts_tab_lists_fonts_and_embedding", "crates/render/src/inspect.rs::doc_info_says_which_face_stands_in_and_why", "crates/render/src/inspect.rs::an_embedded_font_reports_no_substitution_at_all"]
+notes = "name, type, embedding, subset and encoding; doc_info also reports the face standing in for a program the document does not embed and why it was chosen (Acrobat's Actual Font), including the case where no licensed face exists so nothing is drawn. Still missing: the Fonts tab in the interface does not show the substituted face yet, only the data layer does"
 
 [[feature]]
 id = "organize.initial-view"

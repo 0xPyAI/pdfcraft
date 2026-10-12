@@ -2205,8 +2205,13 @@ fn info(d: &Document) -> Value {
         })).collect::<Vec<_>>(),
         "layers": i.layers.iter().map(|l| json!({ "name": l.name, "visible": l.visible })).collect::<Vec<_>>(),
         "attachments": i.attachments.iter().map(|a| json!({ "name": a.name, "description": a.description, "size": a.size })).collect::<Vec<_>>(),
+        // `substitute` names the face standing in for a program the document does not embed, and
+        // `substitution` says why. Both are null for an embedded font: nothing stands in. A null
+        // `substitute` with a non-null `substitution` means no face was available at all, so
+        // nothing is drawn for that font -- which is the answer to "why is my text missing?".
         "fonts": i.fonts.iter().map(|f| json!({
             "name": f.name, "kind": f.kind, "embedded": f.embedded, "subset": f.subset, "encoding": f.encoding,
+            "substitute": f.substitute, "substitution": f.substitution,
         })).collect::<Vec<_>>(),
         "warnings": i.warnings,
         "repairs": d.repair_log(),
