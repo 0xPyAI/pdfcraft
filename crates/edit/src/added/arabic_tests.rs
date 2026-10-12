@@ -8,7 +8,12 @@ use super::*;
 
 /// Regression fingerprint for the small-item fixture: drawing bytes, font map and document
 /// objects, with generated streams decoded so Flate backend selection cannot change the hash.
-const SMALL_ITEM_FINGERPRINT: u64 = 4_811_174_621_764_261_623;
+// Re-pinned when the standard-14 metrics became exact (F1). The Latin run in the fingerprinted
+// item is "Hi " in Helvetica 12pt: the old character-class guess called H 680, i 260 and space
+// 260 (14.4pt), where the published metrics are 722, 222 and 278 (14.664pt). The Arabic clusters
+// that follow therefore start 0.264pt further right, which is the whole point of F1 -- the glyphs
+// now land where the font says they do. Nothing about the Arabic path changed.
+const SMALL_ITEM_FINGERPRINT: u64 = 9_200_256_185_091_160_371;
 
 /// A cluster that shows one character with the single glyph `id`, at `advance` em.
 fn cluster(id: u32, advance: f64) -> ShapedCluster {

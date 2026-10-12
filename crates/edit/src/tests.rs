@@ -3251,11 +3251,7 @@ fn an_items_measured_face_is_the_face_it_is_written_as() {
                 let measured = family.std14(bold, italic);
                 assert_eq!(written, measured.base_font(), "{family:?} bold={bold} italic={italic}");
                 // ... and the public measure reaches that face, rather than an upright stand-in.
-                assert_eq!(
-                    family.width("Anna", 12.0, bold, italic),
-                    measured.text_width("Anna", 12.0),
-                    "{family:?} bold={bold} italic={italic}"
-                );
+                assert_eq!(family.width("Anna", 12.0, bold, italic), measured.text_width("Anna", 12.0), "{family:?} bold={bold} italic={italic}");
             }
         }
     }

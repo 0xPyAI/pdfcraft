@@ -1729,7 +1729,7 @@ mod encoding_tests {
         let (doc, d) = simple("Custom", None, Some(differences(vec![Object::Int(65), Object::name("g7")])));
         let m = Metrics::from_dict(&doc, &d);
         assert_eq!(m.text_of(65), None);
-        assert_eq!(m.text_of(66), Some("B"), "neighbouring codes keep their meaning");
+        assert_eq!(m.text_of(66).as_deref(), Some("B"), "neighbouring codes keep their meaning");
     }
 
     #[test]
@@ -1751,7 +1751,7 @@ mod encoding_tests {
         // /Differences still applies on top of a built-in encoding we cannot read.
         let (doc, d) = simple("Symbol", Some(4), Some(differences(vec![Object::Int(0x61), Object::name("uni03B1")])));
         let m = Metrics::from_dict(&doc, &d);
-        assert_eq!(m.text_of(0x61), Some("\u{3b1}"), "the font told us this one");
+        assert_eq!(m.text_of(0x61).as_deref(), Some("\u{3b1}"), "the font told us this one");
         assert_eq!(m.text_of(0x62), None, "and nothing about this one");
     }
 
@@ -1763,7 +1763,7 @@ mod encoding_tests {
             enc.set(b"BaseEncoding".to_vec(), Object::name(name));
             let (doc, d) = simple("Symbol", Some(4), Some(Object::Dict(enc)));
             let m = Metrics::from_dict(&doc, &d);
-            assert_eq!(m.text_of(0x61), Some("a"), "{name} was asked for by name");
+            assert_eq!(m.text_of(0x61).as_deref(), Some("a"), "{name} was asked for by name");
         }
     }
 
@@ -1775,7 +1775,7 @@ mod encoding_tests {
     fn the_symbolic_flag_alone_does_not_suppress_the_latin_default() {
         let (doc, d) = simple("SomeSubsetFont", Some(4), None);
         let m = Metrics::from_dict(&doc, &d);
-        assert_eq!(m.text_of(0x61), Some("a"));
+        assert_eq!(m.text_of(0x61).as_deref(), Some("a"));
         assert_eq!(m.decode(b"abc"), "abc");
     }
 }
