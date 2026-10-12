@@ -445,3 +445,4 @@ Newest first: the date, what moved, and the new overall estimate.
 | 2026-10-05 | major | Honest assessment and "Where we're lacking" added |
 
 - **2026-10-12 (M8):** Redaction cleans indirect and form structure references, preserving surviving form tags.
+- **2026-10-12 (i18n):** Albanian (`sq`, Shqip) added: 2,343-entry catalog, month and weekday names, Preferences entry; not yet reviewed by a native speaker.

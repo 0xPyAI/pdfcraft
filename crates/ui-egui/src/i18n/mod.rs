@@ -147,7 +147,7 @@ fn plural_sl(n: u64) -> usize {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 22] = [
+pub static LANGUAGES: [LangInfo; 23] = [
     LangInfo { code: "en", name: "English", source: "", plural: plural_one_other, rtl: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Simplified Chinese; `zh`, `zh-CN`, `zh-SG` and `zh-Hans-*` locales resolve here (see `candidates`).
@@ -207,6 +207,8 @@ pub static LANGUAGES: [LangInfo; 22] = [
     LangInfo { code: "tr", name: "Türkçe", source: include_str!("tr.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Lithuanian; every `lt-*` locale (`lt-LT`, `lt_LT.UTF-8`) resolves here. Three plural forms (one, few, other).
     LangInfo { code: "lt", name: "Lietuvių", source: include_str!("lt.tsv"), plural: plural_lithuanian, rtl: false, catalog: OnceLock::new() },
+    // Albanian; every `sq-*` locale (`sq-AL`, `sq_AL.UTF-8`, `sq-XK`) resolves here. One/other plural, like English.
+    LangInfo { code: "sq", name: "Shqip", source: include_str!("sq.tsv"), plural: plural_one_other, rtl: false, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
@@ -2286,6 +2288,60 @@ mod tests {
         assert_eq!(restored.language, "sl");
         assert!(restored.set_option("language", "xx").is_err());
         assert_eq!(restored.language, "sl");
+    }
+
+    #[test]
+    fn albanian_is_registered_and_persists() {
+        let sq = Lang::from_code("sq").expect("sq registered");
+        assert_eq!(sq.name(), "Shqip");
+        assert_eq!(normalize_pref("SQ"), Some("sq"));
+        for tag in ["sq", "sq-AL", "sq_AL.UTF-8", "SQ-xk", "sq_XK@variant"] {
+            assert_eq!(lang_from_tag(tag), Some(sq), "{tag}");
+        }
+        assert_eq!(first_supported("sq-AL\r\nen-US"), Some(sq));
+        assert_eq!(tr(sq, "File"), "Skedari");
+        // one (1), other (0, 2+)
+        assert_eq!((0..=3).map(|n| (sq.0.plural)(n)).collect::<Vec<_>>(), [1, 0, 1, 1]);
+        assert_eq!(trn(sq, 1, "{n} page", "{n} pages"), "1 faqe");
+        assert_eq!(trn(sq, 0, "{n} page", "{n} pages"), "0 faqe");
+        assert_eq!(trn(sq, 5, "{n} page", "{n} pages"), "5 faqe");
+        let mut app = crate::PdfCraftApp::default();
+        app.set_option("language", "SQ").unwrap();
+        assert_eq!(app.language, "sq");
+        let mut restored = crate::PdfCraftApp::default();
+        restored.restore(&app.persist());
+        assert_eq!(restored.language, "sq");
+        assert!(restored.set_option("language", "xx").is_err());
+        assert_eq!(restored.language, "sq");
+    }
+
+    /// Albanian translates every registered command and every All tools group, section and item.
+    #[test]
+    fn albanian_covers_commands_and_catalogue() {
+        let sq = Lang::from_code("sq").expect("sq registered");
+        for command in pdfcraft_engine::commands::COMMANDS {
+            assert!(has(sq, command.label), "missing command: {}", command.label);
+            if let Some(menu) = command.menu {
+                assert!(has(sq, menu), "missing menu: {menu}");
+            }
+        }
+        for group in pdfcraft_engine::catalog::TOOL_GROUPS {
+            assert!(has(sq, group.label), "missing group: {}", group.label);
+            for section in group.sections {
+                assert!(has(sq, section.title), "missing section: {}", section.title);
+                for item in section.items {
+                    assert!(has(sq, item.label), "missing item: {}", item.label);
+                }
+            }
+        }
+    }
+
+    /// New tl!("literal") labels must not silently fall back to English.
+    #[test]
+    fn albanian_covers_ui_literals() {
+        let sq = Lang::from_code("sq").expect("sq registered");
+        let missing: Vec<_> = scan_ui_literals(false).into_iter().filter(|label| !has(sq, label)).collect();
+        assert!(missing.is_empty(), "untranslated Albanian UI literals: {missing:#?}");
     }
 
     #[test]
