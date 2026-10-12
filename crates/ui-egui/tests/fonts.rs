@@ -8,6 +8,7 @@ const JAPANESE: &str = "日本語の文字";
 const CHINESE: &str = "简体中文欢迎";
 const ARABIC: &str = "واحد اثنين";
 const TELUGU: &str = "తెలుగు ఫైల్";
+const HEBREW: &str = "ייפוי כח.pdf";
 
 fn families() -> Vec<FontId> {
     vec![FontId::proportional(13.0), FontId::monospace(13.0), theme::medium(13.0), theme::semibold(17.0)]
@@ -217,6 +218,29 @@ fn system_fallback_covers_sinhala_and_tamil() {
         }
         assert!(layout_widths(&mut fonts, text).iter().all(|w| w.is_finite() && *w > 0.0));
     }
+}
+
+/// On a machine with an installed Hebrew font, the installed definitions include it and a
+/// Hebrew file name has glyphs in the document tab and the recent files (#586). macOS always
+/// ships Arial Hebrew and SF Hebrew, so there the test never skips.
+#[test]
+fn system_fallback_covers_hebrew() {
+    assert!(!theme::font_definitions().font_data.contains_key(theme::SYSTEM_HEBREW_FALLBACK));
+    let defs = theme::installed_font_definitions(theme::CjkPreference::Default);
+    let off = std::env::var_os("PDFCRAFT_SYSTEM_FONTS").is_some_and(|v| v == "0");
+    if !defs.font_data.contains_key(theme::SYSTEM_HEBREW_FALLBACK) && (off || !cfg!(target_os = "macos")) {
+        eprintln!("skipping system_fallback_covers_hebrew: no installed Hebrew fallback font (or PDFCRAFT_SYSTEM_FONTS=0)");
+        assert!(defs.families.values().all(|stack| !stack.iter().any(|n| n == theme::SYSTEM_HEBREW_FALLBACK)));
+        return;
+    }
+    for (family, stack) in &defs.families {
+        assert_eq!(stack.iter().filter(|n| *n == theme::SYSTEM_HEBREW_FALLBACK).count(), 1, "{family:?}: {stack:?}");
+    }
+    let mut fonts = Fonts::new(TextOptions::default(), defs);
+    for id in families() {
+        assert!(fonts.has_glyphs(&id, HEBREW), "{id:?} lacks {HEBREW}");
+    }
+    assert!(layout_widths(&mut fonts, HEBREW).iter().all(|w| w.is_finite() && *w > 0.0));
 }
 
 /// The Han characters of a catalog's translations.
