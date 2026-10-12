@@ -162,3 +162,64 @@ fn an_ocr_word_opens_for_editing_and_stays_open() {
     h.run_steps(4);
     assert_eq!(opened(&h).as_deref(), Some("Recognize"), "moving the pointer away keeps the word open");
 }
+
+/// A page of real text, not a picture.
+fn text_page() -> Vec<u8> {
+    let s = Session::new();
+    s.create_from_text("t", "This page already has its own text").unwrap().to_vec()
+}
+
+fn edit_harness(pdf: Vec<u8>) -> Harness<'static, PdfCraftApp> {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("doc.pdf", None, pdf).unwrap();
+        app.run_inline = true;
+        app
+    });
+    h.run_steps(4);
+    h
+}
+
+/// Like Acrobat's "Converting scanned page to Editable Text and Images": turning Edit on for a
+/// scanned page recognizes its words first (one undoable "Recognize text" step), once. Undoing it
+/// is not undone again by the next frame.
+#[test]
+fn editing_a_scanned_page_recognizes_its_text_first_and_only_once() {
+    if !pdfcraft_engine::ocr::available() {
+        eprintln!("skipped: OCR models not installed");
+        return;
+    }
+    let mut h = edit_harness(scan());
+    let id = h.state().active_ids().unwrap().1;
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), None, "nothing is recognized before Edit");
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(4);
+    assert!(h.state().ocr_run.is_none(), "finished");
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Recognize text"));
+    // Undo takes the text layer away and Edit does not put it back.
+    h.state_mut().undo();
+    h.run_steps(4);
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), None);
+    h.run_steps(4);
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), None, "recognized only once per page");
+}
+
+#[test]
+fn editing_a_page_that_has_text_does_not_recognize_anything() {
+    let mut h = edit_harness(text_page());
+    let id = h.state().active_ids().unwrap().1;
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(6);
+    assert!(h.state().ocr_run.is_none());
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), None);
+}
+
+/// Only the Edit tool recognizes: viewing a scan, or any other tool, leaves the file as it is.
+#[test]
+fn only_the_edit_tool_recognizes_a_scanned_page() {
+    let mut h = edit_harness(scan());
+    let id = h.state().active_ids().unwrap().1;
+    h.run_steps(6);
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), None);
+}

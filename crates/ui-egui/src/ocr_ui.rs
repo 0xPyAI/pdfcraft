@@ -165,7 +165,45 @@ impl PdfCraftApp {
             OcrPages::Range => (d.from.saturating_sub(1)..d.to).collect(),
         };
         let settings = d.settings();
-        let Some(job) = self.session.ocr_job(id, &pages, settings) else { return };
+        self.start_ocr_pages(id, &pages, settings);
+    }
+
+    /// Edit on a scanned page: like Acrobat's "Converting scanned page to Editable Text and
+    /// Images", the page's words are recognized first, so that they open for editing (Edit text &
+    /// images groups the recognised words into phrases). Runs once per page, for the page in view
+    /// while the Edit tool is on, and only for a page that is a picture (an image covering at least
+    /// half of it, no text of its own: a page with text is skipped by the run). It is one undoable
+    /// step, "Recognize text", and Undo is not offered again for that page.
+    pub(crate) fn auto_ocr_scanned_page(&mut self) {
+        if self.quick_tool != crate::QuickTool::EditText || self.ocr_run.is_some() || self.ocr_batch.is_some() {
+            return;
+        }
+        let Some((vi, id)) = self.active_ids() else { return };
+        let page = self.views[vi].current;
+        if self.views[vi].auto_ocr_tried.contains(&page) {
+            return;
+        }
+        let Some(doc) = self.session.get(id) else { return };
+        if doc.read_only_reason.is_some() || !doc.allows_modification() {
+            return;
+        }
+        let Some(info) = doc.info.pages.get(page) else { return };
+        let page_area = f64::from(info.width) * f64::from(info.height);
+        let covered = doc.page_images(page).iter().any(|i| {
+            let [x0, y0, x1, y1] = i.visible_rect.unwrap_or(i.rect);
+            page_area > 0.0 && ((x1 - x0) * (y1 - y0)).abs() >= 0.5 * page_area
+        });
+        self.views[vi].auto_ocr_tried.insert(page);
+        if !covered || !pdfcraft_engine::ocr::available() {
+            return;
+        }
+        let settings = self.ocr_draft.settings();
+        self.start_ocr_pages(id, &[page], settings);
+    }
+
+    /// Recognize `pages` (0-based; empty = all) of document `id` in the background.
+    fn start_ocr_pages(&mut self, id: DocId, pages: &[usize], settings: OcrSettings) {
+        let Some(job) = self.session.ocr_job(id, pages, settings) else { return };
         let progress = Arc::new(Mutex::new(OcrProgress { total: job.pages.len(), ..Default::default() }));
         let p = progress.clone();
         let work = move || {
