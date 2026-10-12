@@ -171,11 +171,15 @@ impl PdfCraftApp {
     /// Edit on a scanned page: like Acrobat's "Converting scanned page to Editable Text and
     /// Images", the page's words are recognized first, so that they open for editing (Edit text &
     /// images groups the recognised words into phrases). Runs once per page, for the page in view
-    /// while the Edit tool is on, and only for a page that is a picture (an image covering at least
+    /// while Edit is on (its tab, or the Edit text & images or Add text tool), and only for a page that is a picture (an image covering at least
     /// half of it, no text of its own: a page with text is skipped by the run). It is one undoable
     /// step, "Recognize text", and Undo is not offered again for that page.
     pub(crate) fn auto_ocr_scanned_page(&mut self) {
-        if self.quick_tool != crate::QuickTool::EditText || self.ocr_run.is_some() || self.ocr_batch.is_some() {
+        // Edit is on when its panel is open (the Edit tab) or Edit text & images or Add text is picked,
+        // the same test the page view uses for editing content.
+        let editing = (self.left_open && self.left == crate::LeftPanel::Tool("edit"))
+            || matches!(self.quick_tool, crate::QuickTool::EditText | crate::QuickTool::AddText);
+        if !editing || self.ocr_run.is_some() || self.ocr_batch.is_some() {
             return;
         }
         let Some((vi, id)) = self.active_ids() else { return };

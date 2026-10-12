@@ -205,6 +205,23 @@ fn editing_a_scanned_page_recognizes_its_text_first_and_only_once() {
     assert_eq!(h.state().session.get(id).unwrap().can_undo(), None, "recognized only once per page");
 }
 
+/// The Edit tab (its tool panel) turns Edit on without picking Edit text & images, and Acrobat's
+/// conversion happens there too.
+#[test]
+fn the_edit_panel_recognizes_a_scanned_page_too() {
+    if !pdfcraft_engine::ocr::available() {
+        eprintln!("skipped: OCR models not installed");
+        return;
+    }
+    let mut h = edit_harness(scan());
+    let id = h.state().active_ids().unwrap().1;
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), None);
+    h.state_mut().set_option("tool", "edit").unwrap();
+    h.run_steps(4);
+    assert!(h.state().ocr_run.is_none(), "finished");
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Recognize text"));
+}
+
 #[test]
 fn editing_a_page_that_has_text_does_not_recognize_anything() {
     let mut h = edit_harness(text_page());
