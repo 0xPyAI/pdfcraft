@@ -149,18 +149,32 @@ impl PageText {
     /// separated by one space, original case). Used for pattern search (Search & Redact).
     pub fn find_with(&self, matcher: impl Fn(&[char]) -> Vec<std::ops::Range<usize>>) -> Vec<std::ops::Range<usize>> {
         let mut chars: Vec<char> = Vec::new();
-        let mut owner: Vec<usize> = Vec::new();
+        // `None` is a word or line separator inserted between glyphs. It is not part of either
+        // glyph, so a match that starts or ends on it must not take the neighbouring glyph.
+        let mut owner: Vec<Option<usize>> = Vec::new();
         for (i, g) in self.glyphs.iter().enumerate() {
-            if i > 0 && (self.space_before[i] || self.line_of[i] != self.line_of[i - 1]) && chars.last().is_some_and(|c| *c != ' ') {
+            let gap = self.space_before.get(i).copied().unwrap_or(false) || self.line_of.get(i) != self.line_of.get(i.saturating_sub(1));
+            if i > 0 && gap && chars.last().is_some_and(|c| *c != ' ') {
                 chars.push(' ');
-                owner.push(i);
+                owner.push(None);
             }
             for c in g.text.chars() {
                 chars.push(if c.is_whitespace() { ' ' } else { c });
-                owner.push(i);
+                owner.push(Some(i));
             }
         }
-        matcher(&chars).into_iter().filter(|r| r.start < r.end && r.end <= chars.len()).map(|r| owner[r.start]..owner[r.end - 1] + 1).collect()
+        matcher(&chars)
+            .into_iter()
+            .filter_map(|r| {
+                if r.start >= r.end || r.end > chars.len() {
+                    return None;
+                }
+                let glyphs = owner.get(r.start..r.end)?;
+                let start = glyphs.iter().find_map(|g| *g)?;
+                let end = glyphs.iter().rev().find_map(|g| *g)?.checked_add(1)?;
+                (start < end).then_some(start..end)
+            })
+            .collect()
     }
 
     /// Index of the glyph nearest to a view-space point (for selection anchors).
@@ -1855,6 +1869,36 @@ mod tests {
         assert_eq!(t.find("o"), vec![4..5, 6..7]);
         assert_eq!(t.line_rects(3..12).len(), 2);
         assert_eq!(t.nearest(52.0, 14.0), Some(5));
+    }
+
+    /// #1315: a custom match that ends on a reconstructed word or line separator does not take
+    /// the following glyph.
+    #[test]
+    fn a_match_ending_on_a_separator_stops_before_the_next_glyph() {
+        let glyphs: Vec<TextGlyph> = "quickbrown"
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                let x = i as f32 * 6.0;
+                g(&c.to_string(), x, 0.0, x + 6.0)
+            })
+            .collect();
+        for line_break in [false, true] {
+            let mut space_before = vec![false; 10];
+            space_before[5] = !line_break;
+            let line_of = (0..10).map(|i| u32::from(line_break && i >= 5)).collect();
+            let page = PageText { glyphs: glyphs.clone(), line_of, space_before };
+            let plain = if line_break { "quick\nbrown" } else { "quick brown" };
+            assert_eq!(page.plain_text(), plain);
+            assert_eq!(page.find("quick "), vec![0..5]);
+            let span = |r: std::ops::Range<usize>| Vec::from([r]);
+            assert_eq!(page.find_with(|_| span(0..5)), vec![0..5]);
+            assert_eq!(page.find_with(|_| span(5..11)), vec![5..10]);
+            assert_eq!(page.find_with(|_| span(6..11)), vec![5..10]);
+            let hits = page.find_with(|_| span(0..6));
+            assert_eq!(page.text_of(hits[0].clone()), "quick");
+            assert_eq!(hits, vec![0..5]);
+        }
     }
 
     #[test]

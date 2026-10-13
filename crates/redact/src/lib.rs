@@ -42,7 +42,9 @@ pub enum RedactError {
     /// A mark's overlay text has a character Helvetica can't draw; nothing was redacted.
     #[error("{0}")]
     Undrawable(String),
-    #[error("page {0} has vertical-writing text under a redaction mark, which PdfCraft cannot remove yet, so nothing was changed")]
+    #[error(
+        "page {0} has vertical-writing text while a redaction mark is pending, and PdfCraft cannot tell whether that text lies under the mark yet, so nothing was changed"
+    )]
     VerticalText(usize),
     #[error(transparent)]
     Edit(#[from] pdfcraft_edit::EditError),
@@ -406,9 +408,10 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
             process(doc, &mut scope, &data, &resources, pdfcraft_content::Matrix::IDENTITY)
         };
         // Fail closed: the interpreter lays vertical-writing text out horizontally, so it cannot
-        // place such glyphs under a mark or confirm they are gone. Rather than report success and
-        // ship the text under the box, refuse the whole operation (the caller keeps the previous
-        // document). Full vertical-text removal is a future enhancement.
+        // tell whether those glyphs lie under a mark. Rather than report success and possibly
+        // leave the text in place, refuse the whole operation (the caller keeps the previous
+        // document). The error does not claim the text was under the mark. Full vertical-text
+        // removal is a future enhancement.
         if out.vertical {
             return Err(RedactError::VerticalText(pi + 1));
         }
