@@ -849,6 +849,7 @@
 	, Expires: 	, Истекает:
 	No digital IDs yet.	Нет цифровых идентификаторов.
 	Configure New Digital ID	Настроить новый цифровой идентификатор
+	Remove "{name}" from this list? The file itself is not deleted.	Убрать «{name}» из этого списка? Сам файл не удаляется.
 	Continue	Продолжить
 	Configure a Digital ID for Signing	Настроить цифровой идентификатор для подписи
 	Use a Digital ID from a file	Использовать цифровой идентификатор из файла

@@ -811,6 +811,7 @@
 	, Expires: 	, Жарамдылық мерзімі: 
 	No digital IDs yet.	Әзірге цифрлық ID жоқ.
 	Configure New Digital ID	Жаңа цифрлық ID теңшеу
+	Remove "{name}" from this list? The file itself is not deleted.	«{name}» осы тізімнен алып тасталсын ба? Файлдың өзі жойылмайды.
 	Continue	Жалғастыру
 	Configure a Digital ID for Signing	Қол қоюға арналған цифрлық ID теңшеу
 	Use a Digital ID from a file	Файлдағы цифрлық ID-ді пайдалану

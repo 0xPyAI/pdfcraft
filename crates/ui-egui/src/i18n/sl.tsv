@@ -425,6 +425,7 @@
 	Compress document structure (object streams)	Stisni strukturo dokumenta (tokovi objektov)
 	Compression	Stiskanje
 	Configure New Digital ID	Nastavi novo digitalno identiteto
+	Remove "{name}" from this list? The file itself is not deleted.	Odstranim »{name}« s tega seznama? Sama datoteka ne bo izbrisana.
 	Configure a Digital ID for Signing	Nastavite digitalno identiteto za podpisovanje
 	Confirm Password	Potrdite geslo
 	Conformance level:	Raven skladnosti:

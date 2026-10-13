@@ -856,6 +856,7 @@
 	, Expires: 	、有効期限: 
 	No digital IDs yet.	デジタル ID はまだありません。
 	Configure New Digital ID	新しいデジタル ID を設定
+	Remove "{name}" from this list? The file itself is not deleted.	「{name}」をこの一覧から削除しますか？ファイル自体は削除されません。
 	Continue	続行
 	Configure a Digital ID for Signing	署名用のデジタル ID を設定
 	Use a Digital ID from a file	ファイルのデジタル ID を使用

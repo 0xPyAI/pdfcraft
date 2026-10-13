@@ -829,6 +829,7 @@
 	, Expires: 	, expire : 
 	No digital IDs yet.	Aucun ID numérique pour l'instant.
 	Configure New Digital ID	Configurer un nouvel ID numérique
+	Remove "{name}" from this list? The file itself is not deleted.	Retirer « {name} » de cette liste ? Le fichier lui-même n’est pas supprimé.
 	Continue	Continuer
 	Configure a Digital ID for Signing	Configurer un ID numérique pour signer
 	Use a Digital ID from a file	Utiliser un ID numérique provenant d'un fichier

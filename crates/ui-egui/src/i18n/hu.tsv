@@ -826,6 +826,7 @@
 	, Expires: 	, lejár: 
 	No digital IDs yet.	Még nincs digitális azonosító.
 	Configure New Digital ID	Új digitális azonosító beállítása
+	Remove "{name}" from this list? The file itself is not deleted.	Eltávolítja a(z) „{name}” elemet erről a listáról? Maga a fájl nem törlődik.
 	Continue	Tovább
 	Configure a Digital ID for Signing	Digitális azonosító beállítása aláíráshoz
 	Use a Digital ID from a file	Digitális azonosító használata fájlból

@@ -833,6 +833,7 @@
 	, Expires: 	, läuft ab: 
 	No digital IDs yet.	Noch keine digitalen IDs.
 	Configure New Digital ID	Neue digitale ID einrichten
+	Remove "{name}" from this list? The file itself is not deleted.	„{name}“ aus dieser Liste entfernen? Die Datei selbst wird nicht gelöscht.
 	Continue	Weiter
 	Configure a Digital ID for Signing	Digitale ID zum Signieren einrichten
 	Use a Digital ID from a file	Digitale ID aus einer Datei verwenden

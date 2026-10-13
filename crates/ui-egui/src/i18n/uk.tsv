@@ -853,6 +853,7 @@
 	, Expires: 	, Дійсний до: 
 	No digital IDs yet.	Ще немає цифрових посвідчень.
 	Configure New Digital ID	Налаштувати нове цифрове посвідчення
+	Remove "{name}" from this list? The file itself is not deleted.	Прибрати «{name}» з цього списку? Сам файл не видаляється.
 	Continue	Продовжити
 	Configure a Digital ID for Signing	Налаштувати цифрове посвідчення для підписування
 	Use a Digital ID from a file	Використати цифрове посвідчення з файлу

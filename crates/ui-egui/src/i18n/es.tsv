@@ -849,6 +849,7 @@
 	, Expires: 	, caduca: 
 	No digital IDs yet.	Aún no hay ningún ID digital.
 	Configure New Digital ID	Configurar un nuevo ID digital
+	Remove "{name}" from this list? The file itself is not deleted.	¿Quitar «{name}» de esta lista? El archivo en sí no se elimina.
 	Continue	Continuar
 	Configure a Digital ID for Signing	Configurar un ID digital para firmar
 	Use a Digital ID from a file	Usar un ID digital de un archivo

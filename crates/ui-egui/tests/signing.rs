@@ -444,3 +444,48 @@ fn an_unusable_id_is_shown_with_its_reason_and_cannot_be_chosen() {
     h.run_steps(3);
     assert_eq!(h.state().sign_draft.as_ref().unwrap().selected, Some(1));
 }
+
+/// Issue #1396: an imported digital ID can be removed from Sign with a Digital ID, after a
+/// confirmation, and its file stays where it was.
+#[test]
+fn an_imported_digital_id_can_be_removed() {
+    let dir = dir().join("remove");
+    std::fs::create_dir_all(&dir).unwrap();
+    let p12 = dir.join("signer.p12");
+    std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12"), &p12).unwrap();
+    let mut h = harness(dir.clone());
+    assert!(h.state_mut().execute("sign.certify_invisible"));
+    h.run_steps(2);
+    {
+        let d = h.state_mut().sign_draft.as_mut().unwrap();
+        d.new_id.create = false;
+        d.new_id.file = p12.to_string_lossy().into_owned();
+        d.new_id.file_password = "test".into();
+    }
+    h.run_steps(1);
+    h.get_by_label("Continue").click();
+    h.run_steps(4);
+    assert_eq!(h.state().digital_ids.len(), 1);
+    assert_eq!(h.state().sign_draft.as_ref().map(|d| d.step), Some(SignStep::Choose));
+
+    // Remove asks first, and Cancel keeps the ID. The dialog changes size with the question;
+    // egui centres it from the previous frame's size, so let it settle before each click.
+    h.get_by_label("Remove").click();
+    h.run_steps(4);
+    h.get_by_label("Remove \"Test Signer EC\" from this list? The file itself is not deleted.");
+    // The question's Cancel comes before the dialog's own.
+    h.get_all_by_label("Cancel").next().unwrap().click();
+    h.run_steps(4);
+    assert!(h.query_by_label_contains("from this list?").is_none());
+    assert_eq!(h.state().digital_ids.len(), 1);
+
+    h.get_by_label("Remove").click();
+    h.run_steps(4);
+    h.get_by_label("Remove").click();
+    h.run_steps(3);
+    assert!(h.state().digital_ids.is_empty());
+    assert!(p12.exists(), "the file itself is not deleted");
+    // With no IDs left the dialog offers to configure one.
+    assert_eq!(h.state().sign_draft.as_ref().map(|d| d.step), Some(SignStep::Configure));
+    h.get_by_label("Configure a Digital ID for Signing");
+}

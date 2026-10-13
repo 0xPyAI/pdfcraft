@@ -828,6 +828,7 @@ comment menu	Edit	సవరించు
 	, Expires: 	, గడువు: 
 	No digital IDs yet.	ఇంకా డిజిటల్ ఐడీలు ఏవీ లేవు.
 	Configure New Digital ID	కొత్త డిజిటల్ ఐడీని కాన్ఫిగర్ చేయి
+	Remove "{name}" from this list? The file itself is not deleted.	ఈ జాబితా నుండి "{name}"ని తీసివేయాలా? ఫైల్ తొలగించబడదు.
 	Continue	కొనసాగించు
 	Configure a Digital ID for Signing	సంతకం కోసం డిజిటల్ ఐడీని కాన్ఫిగర్ చేయి
 	Use a Digital ID from a file	ఫైల్‌లోని డిజిటల్ ఐడీని ఉపయోగించు

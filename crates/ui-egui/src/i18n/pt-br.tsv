@@ -484,6 +484,7 @@
 	, Expires: 	, Expira em: 
 	No digital IDs yet.	Nenhuma ID digital ainda.
 	Configure New Digital ID	Configurar nova ID digital
+	Remove "{name}" from this list? The file itself is not deleted.	Remover "{name}" desta lista? O arquivo em si não é excluído.
 	Continue	Continuar
 	Configure a Digital ID for Signing	Configurar uma ID digital para assinatura
 	Use a Digital ID from a file	Usar uma ID digital de um arquivo

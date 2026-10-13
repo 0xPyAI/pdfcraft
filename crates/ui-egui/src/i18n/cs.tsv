@@ -929,6 +929,7 @@ key	Space	Mezerník
 	, Expires: 	, platnost do: 
 	No digital IDs yet.	Zatím žádná digitální ID.
 	Configure New Digital ID	Nastavit nové digitální ID
+	Remove "{name}" from this list? The file itself is not deleted.	Odebrat „{name}“ z tohoto seznamu? Samotný soubor se nesmaže.
 	Continue	Pokračovat
 	Configure a Digital ID for Signing	Nastavení digitálního ID pro podepisování
 	Use a Digital ID from a file	Použít digitální ID ze souboru

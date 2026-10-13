@@ -530,6 +530,7 @@
 	, Expires: 	, валиден до: 
 	No digital IDs yet.	Все още няма цифрови идентификатори.
 	Configure New Digital ID	Конфигурирай нов цифров идентификатор
+	Remove "{name}" from this list? The file itself is not deleted.	Да се премахне ли „{name}“ от този списък? Самият файл няма да бъде изтрит.
 	Continue	Продължи
 	Configure a Digital ID for Signing	Конфигуриране на цифров идентификатор за подписване
 	Use a Digital ID from a file	Използвай цифров идентификатор от файл

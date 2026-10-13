@@ -847,6 +847,7 @@
 	, Expires: 	, Wygasa: 
 	No digital IDs yet.	Brak identyfikatorów cyfrowych.
 	Configure New Digital ID	Skonfiguruj nowy identyfikator cyfrowy
+	Remove "{name}" from this list? The file itself is not deleted.	Usunąć „{name}” z tej listy? Sam plik nie zostanie usunięty.
 	Continue	Kontynuuj
 	Configure a Digital ID for Signing	Skonfiguruj identyfikator cyfrowy do podpisywania
 	Use a Digital ID from a file	Użyj identyfikatora cyfrowego z pliku

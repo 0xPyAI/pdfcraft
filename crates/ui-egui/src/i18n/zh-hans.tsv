@@ -537,6 +537,7 @@
 	, Expires: 	，有效期至：
 	No digital IDs yet.	尚无数字 ID。
 	Configure New Digital ID	配置新数字 ID
+	Remove "{name}" from this list? The file itself is not deleted.	从此列表中移除“{name}”？文件本身不会被删除。
 	Continue	继续
 	Configure a Digital ID for Signing	配置用于签名的数字 ID
 	Use a Digital ID from a file	使用文件中的数字 ID

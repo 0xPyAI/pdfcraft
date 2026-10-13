@@ -390,6 +390,7 @@
 	Compress document structure (object streams)	Suglaudinti dokumento struktūrą (objektų srautus)
 	Compression	Glaudinimas
 	Configure New Digital ID	Konfigūruoti naują skaitmeninį ID
+	Remove "{name}" from this list? The file itself is not deleted.	Pašalinti „{name}“ iš šio sąrašo? Pats failas nebus ištrintas.
 	Confirm Password	Patvirtinti slaptažodį
 	Conformance level:	Atitikties lygis:
 	Continue	Tęsti

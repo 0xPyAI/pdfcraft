@@ -489,6 +489,7 @@
 	, Expires: 	，有效期至：
 	No digital IDs yet.	尚無數位 ID。
 	Configure New Digital ID	配置新數位 ID
+	Remove "{name}" from this list? The file itself is not deleted.	從此清單中移除「{name}」？檔案本身不會被刪除。
 	Continue	繼續
 	Configure a Digital ID for Signing	設定簽署用的數位 ID
 	Use a Digital ID from a file	使用檔案中的數位 ID

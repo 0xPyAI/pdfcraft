@@ -464,6 +464,7 @@
 	, Expires: 	, Λήξη: 
 	No digital IDs yet.	Δεν υπάρχουν ακόμη ψηφιακές ταυτότητες.
 	Configure New Digital ID	Ρύθμιση νέας ψηφιακής ταυτότητας
+	Remove "{name}" from this list? The file itself is not deleted.	Αφαίρεση του «{name}» από αυτή τη λίστα; Το ίδιο το αρχείο δεν διαγράφεται.
 	Configure a Digital ID for Signing	Ρύθμιση ψηφιακής ταυτότητας για υπογραφή
 	Use a Digital ID from a file	Χρήση ψηφιακής ταυτότητας από αρχείο
 	Create a new Digital ID (self-signed, saved to a password-protected file)	Δημιουργία νέας ψηφιακής ταυτότητας (αυτοϋπογεγραμμένης, αποθηκευμένης σε αρχείο με κωδικό πρόσβασης)

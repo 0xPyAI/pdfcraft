@@ -810,6 +810,7 @@
 	, Expires: 	, Son kullanma tarihi: 
 	No digital IDs yet.	Henüz dijital kimlik yok.
 	Configure New Digital ID	Yeni Dijital Kimlik Yapılandır
+	Remove "{name}" from this list? The file itself is not deleted.	"{name}" bu listeden kaldırılsın mı? Dosyanın kendisi silinmez.
 	Continue	Devam Et
 	Configure a Digital ID for Signing	İmzalama için Dijital Kimlik Yapılandır
 	Use a Digital ID from a file	Dosyadan Dijital Kimlik Kullan

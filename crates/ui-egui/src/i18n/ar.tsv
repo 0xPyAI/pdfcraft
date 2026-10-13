@@ -855,6 +855,7 @@
 	, Expires: 	، تنتهي: 
 	No digital IDs yet.	لا توجد معرّفات رقمية بعد.
 	Configure New Digital ID	إعداد معرّف رقمي جديد
+	Remove "{name}" from this list? The file itself is not deleted.	إزالة "{name}" من هذه القائمة؟ لن يُحذف الملف نفسه.
 	Continue	متابعة
 	Configure a Digital ID for Signing	إعداد معرّف رقمي للتوقيع
 	Use a Digital ID from a file	استخدام معرّف رقمي من ملف

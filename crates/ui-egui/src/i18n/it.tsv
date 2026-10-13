@@ -852,6 +852,7 @@
 	, Expires: 	, Scadenza: 
 	No digital IDs yet.	Ancora nessun ID digitale.
 	Configure New Digital ID	Configura nuovo ID digitale
+	Remove "{name}" from this list? The file itself is not deleted.	Rimuovere "{name}" da questo elenco? Il file non viene eliminato.
 	Continue	Continua
 	Configure a Digital ID for Signing	Configura un ID digitale per la firma
 	Use a Digital ID from a file	Usa un ID digitale da file
