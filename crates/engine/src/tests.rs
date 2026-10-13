@@ -4295,6 +4295,11 @@ fn xfa_data_exports_imports_and_pictures_round_trip_through_the_session() {
     assert!(pdfcraft_xfa::read_packets(&cos).unwrap().unwrap().xdp.contains("xfa:contentType=\"image/gif\""));
     assert_eq!(s.get(id).unwrap().page_images(0).len(), 2, "the field's picture (now the GIF) and the logo");
     // Only pictures the form can show; only image fields.
+    for (data, declared) in [(pdfcraft_xfa::fixtures::tiny_bmp(false), "image/bmp"), (pdfcraft_xfa::fixtures::tiny_tiff(false), "image/tiff")] {
+        s.apply(id, Edit::SetFieldImage { name: "photo".into(), image: Arc::new(data) }).unwrap();
+        let cos = pdfcraft_cos::Document::open(s.save_bytes(id).unwrap()).unwrap();
+        assert!(pdfcraft_xfa::read_packets(&cos).unwrap().unwrap().xdp.contains(&format!("xfa:contentType=\"{declared}\"")));
+    }
     assert!(s.apply(id, Edit::SetFieldImage { name: "photo".into(), image: Arc::new(b"BM\0\0\0\0".to_vec()) }).is_err());
     assert!(s.apply(id, Edit::SetFieldImage { name: "country".into(), image: Arc::new(pdfcraft_xfa::fixtures::TINY_GIF.to_vec()) }).is_err());
     // One datasets stream per edit, however many steps it took.

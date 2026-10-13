@@ -1529,7 +1529,7 @@ impl Layouter<'_> {
                     match base64::engine::general_purpose::STANDARD.decode(&text) {
                         Ok(d) if crate::image::kind(&d).is_some() => Some(d),
                         Ok(_) => {
-                            self.warn_once(format!("{field_name}: the picture in the data is not a JPEG, PNG or GIF and is left out"));
+                            self.warn_once(format!("{field_name}: the picture in the data is not a JPEG, PNG, GIF, BMP or TIFF and is left out"));
                             None
                         }
                         Err(_) => {

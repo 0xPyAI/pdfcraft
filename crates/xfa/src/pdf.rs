@@ -491,8 +491,8 @@ impl Emitter<'_> {
         Ok(Some(r))
     }
 
-    /// An image XObject for a picture: JPEGs as they are (`DCTDecode`), PNGs and GIFs decoded
-    /// to samples (`FlateDecode`, with a soft mask for transparency). `None`, with a warning,
+    /// An image XObject for a picture: JPEGs as they are (`DCTDecode`), PNGs, GIFs, BMPs and TIFFs
+    /// decoded to samples (`FlateDecode`, with a soft mask for transparency). `None`, with a warning,
     /// for anything else.
     fn image_xobject(&mut self, data: &[u8], content_type: &str) -> Option<ObjRef> {
         let hash = content_hash(data);
@@ -539,7 +539,7 @@ impl Emitter<'_> {
                 d.set(b"Filter".to_vec(), Object::name("DCTDecode"));
                 Some(self.doc.add(Object::Stream(Stream::from_raw(d, data.to_vec()))))
             }
-            Some(crate::image::Kind::Png | crate::image::Kind::Gif) => {
+            Some(crate::image::Kind::Png | crate::image::Kind::Gif | crate::image::Kind::Bmp | crate::image::Kind::Tiff) => {
                 let img = match crate::image::decode(data) {
                     Ok(img) => img,
                     Err(why) => {
@@ -564,7 +564,7 @@ impl Emitter<'_> {
                 Some(self.doc.add(Object::Stream(Stream::flate(d, &img.samples))))
             }
             None => {
-                self.warnings.push(format!("a {what} image is not a JPEG, PNG or GIF and is left out"));
+                self.warnings.push(format!("a {what} image is not a JPEG, PNG, GIF, BMP or TIFF and is left out"));
                 None
             }
         }

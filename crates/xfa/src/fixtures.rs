@@ -267,6 +267,62 @@ const TINY_PNG: &[u8] = b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x
 /// A 1 × 1 white GIF.
 pub const TINY_GIF: &[u8] = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;";
 
+/// A 2 × 1 BMP, red then blue: 24-bit, or 8-bit with a two-colour palette.
+pub fn tiny_bmp(palette: bool) -> Vec<u8> {
+    let (bpp, colours, pixels): (u16, &[u8], &[u8]) =
+        if palette { (8, &[0, 0, 255, 0, 255, 0, 0, 0], &[0, 1, 0, 0]) } else { (24, &[], &[0, 0, 255, 255, 0, 0, 0, 0]) };
+    let offset = 54 + colours.len() as u32;
+    let mut b = b"BM".to_vec();
+    b.extend_from_slice(&(offset + pixels.len() as u32).to_le_bytes());
+    b.extend_from_slice(&[0; 4]);
+    b.extend_from_slice(&offset.to_le_bytes());
+    for v in [40u32, 2, 1] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&bpp.to_le_bytes());
+    for v in [0u32, pixels.len() as u32, 0, 0, (colours.len() / 4) as u32, 0] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    b.extend_from_slice(colours);
+    b.extend_from_slice(pixels);
+    b
+}
+
+/// A 1 × 1 little-endian RGB TIFF of colour `#123456`, uncompressed or LZW.
+pub fn tiny_tiff(lzw: bool) -> Vec<u8> {
+    // Clear, 0x12, 0x34, 0x56, end of information, as 9-bit codes, most significant bit first.
+    let strip: &[u8] = if lzw { &[0x80, 0x04, 0x86, 0x85, 0x68, 0x08] } else { &[0x12, 0x34, 0x56] };
+    // Header (8), the IFD (2 + 9 entries of 12 + 4), then BitsPerSample's three values (6).
+    let (bps_at, strip_at) = (122u32, 128u32);
+    let (short, long) = (3u16, 4u16);
+    let mut b = b"II*\0".to_vec();
+    b.extend_from_slice(&8u32.to_le_bytes());
+    b.extend_from_slice(&9u16.to_le_bytes());
+    for (tag, ty, count, value) in [
+        (256u16, short, 1u32, 1u32),
+        (257, short, 1, 1),
+        (258, short, 3, bps_at),
+        (259, short, 1, if lzw { 5 } else { 1 }),
+        (262, short, 1, 2),
+        (273, long, 1, strip_at),
+        (277, short, 1, 3),
+        (278, short, 1, 1),
+        (279, long, 1, strip.len() as u32),
+    ] {
+        b.extend_from_slice(&tag.to_le_bytes());
+        b.extend_from_slice(&ty.to_le_bytes());
+        b.extend_from_slice(&count.to_le_bytes());
+        b.extend_from_slice(&value.to_le_bytes());
+    }
+    b.extend_from_slice(&0u32.to_le_bytes());
+    for _ in 0..3 {
+        b.extend_from_slice(&8u16.to_le_bytes());
+    }
+    b.extend_from_slice(strip);
+    b
+}
+
 /// A form with the other field kinds: `country`, a drop-down whose shown names save as codes
 /// (`Canada`/`CA`, `France`/`FR`, `Japan`/`JP`; default `FR`); `langs`, a multi-select list
 /// box (`English`, `French`, `Spanish`); `other`, an editable drop-down (`A`, `B`); `pin`, a
