@@ -3,7 +3,8 @@
 //! The embedded faces (Inter, egui's defaults, craft-fonts) come first in every family; this one
 //! only draws characters none of them has, such as an Arabic file name in a build without
 //! craft-fonts, or the Simplified Chinese interface in a build without a `Hans` face (#826). A
-//! second installed face, [`devanagari_fallback`], draws Hindi when one is installed. It is
+//! second and a third installed face, [`devanagari_fallback`] and [`telugu_fallback`], draw Hindi
+//! and Telugu when one is installed. It is
 //! read at runtime and never embedded or shipped (AGENTS.md §1.4), and `PDFCRAFT_SYSTEM_FONTS=0`
 //! turns it off (published screenshots do).
 
@@ -22,6 +23,8 @@ const MAX_FACES: u32 = 16;
 const PROBE: char = '\u{0627}';
 /// Devanagari letter ka: the face must have it to cover Hindi.
 const DEVANAGARI_PROBE: char = '\u{0915}';
+/// Telugu letter ka: the face must have it to cover Telugu.
+const TELUGU_PROBE: char = '\u{0C15}';
 /// 欢 (U+6B22): Simplified only, absent from the Japanese craft-fonts faces.
 const HANS_PROBE: char = '\u{6B22}';
 /// 說 (U+8AAA): Traditional only, absent from the Japanese craft-fonts faces.
@@ -69,14 +72,21 @@ fn load(need: Need) -> Option<Arc<FontData>> {
 /// or no candidate is installed; the interface then draws what the embedded faces can.
 pub fn devanagari_fallback() -> Option<Arc<FontData>> {
     static CACHE: OnceLock<Option<Arc<FontData>>> = OnceLock::new();
-    CACHE
-        .get_or_init(|| {
-            if std::env::var_os("PDFCRAFT_SYSTEM_FONTS").is_some_and(|v| v == "0") {
-                return None;
-            }
-            devanagari_candidates().iter().find_map(|path| read(path, DEVANAGARI_PROBE, MAX_BYTES))
-        })
-        .clone()
+    CACHE.get_or_init(|| script_fallback(&devanagari_candidates(), DEVANAGARI_PROBE)).clone()
+}
+
+/// The installed fallback face for Telugu, read once. `None` when it is turned off or no
+/// candidate is installed; the interface then draws what the embedded faces can.
+pub fn telugu_fallback() -> Option<Arc<FontData>> {
+    static CACHE: OnceLock<Option<Arc<FontData>>> = OnceLock::new();
+    CACHE.get_or_init(|| script_fallback(&telugu_candidates(), TELUGU_PROBE)).clone()
+}
+
+fn script_fallback(candidates: &[PathBuf], probe: char) -> Option<Arc<FontData>> {
+    if std::env::var_os("PDFCRAFT_SYSTEM_FONTS").is_some_and(|v| v == "0") {
+        return None;
+    }
+    candidates.iter().find_map(|path| read(path, probe, MAX_BYTES))
 }
 
 /// Well-known locations of Devanagari (Hindi) faces, best first.
@@ -110,6 +120,37 @@ fn devanagari_candidates() -> Vec<PathBuf> {
             "google-droid-sans-fonts/DroidSansDevanagari-Regular.ttf",
             "samyak-fonts/Samyak-Devanagari.ttf",
             "gargi/Gargi.ttf",
+        ])
+    }
+}
+
+/// Well-known locations of Telugu faces, best first.
+fn telugu_candidates() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        ["Nirmala.ttc", "Nirmala.ttf", "gautami.ttf"].iter().map(|f| windows_fonts().join(f)).collect()
+    } else if cfg!(target_os = "macos") {
+        [
+            "/System/Library/Fonts/KohinoorTelugu.ttc",
+            "/System/Library/Fonts/Supplemental/Telugu Sangam MN.ttc",
+            "/System/Library/Fonts/Supplemental/Telugu MN.ttc",
+            "/Library/Fonts/Arial Unicode.ttf",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect()
+    } else {
+        unix_fonts(&[
+            "google-noto/NotoSansTeluguUI-Regular.ttf",
+            "google-noto/NotoSansTelugu-Regular.ttf",
+            "google-noto-vf/NotoSansTelugu[wght].ttf",
+            "google-noto-vf/NotoSansTelugu-UI[wght].ttf",
+            "truetype/noto/NotoSansTelugu-Regular.ttf",
+            "truetype/noto/NotoSansTeluguUI-Regular.ttf",
+            "noto/NotoSansTelugu-Regular.ttf",
+            "noto/NotoSansTeluguUI-Regular.ttf",
+            "lohit-telugu-fonts/Lohit-Telugu.ttf",
+            "truetype/lohit-telugu/Lohit-Telugu.ttf",
+            "truetype/fonts-telu-extra/Pothana2000.ttf",
         ])
     }
 }
@@ -241,6 +282,24 @@ mod tests {
             let list = candidates(need);
             assert!(!list.is_empty(), "{need:?}");
             assert!(list.iter().all(|p| p.extension().is_some_and(|e| e == "ttf" || e == "ttc")), "{need:?}");
+        }
+    }
+
+    #[test]
+    fn a_script_fallback_is_the_first_candidate_with_the_probe() {
+        let inter = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/Inter-Regular.ttf"));
+        let candidates = [PathBuf::from("definitely/not/here.ttf"), inter];
+        assert!(script_fallback(&candidates, 'A').is_some());
+        assert!(script_fallback(&candidates, TELUGU_PROBE).is_none());
+        assert!(script_fallback(&candidates, DEVANAGARI_PROBE).is_none());
+    }
+
+    #[test]
+    fn script_candidates_are_absolute_font_files() {
+        for list in [devanagari_candidates(), telugu_candidates()] {
+            assert!(!list.is_empty());
+            assert!(list.iter().all(|p| p.is_absolute() || cfg!(windows)), "{list:?}");
+            assert!(list.iter().all(|p| p.extension().is_some_and(|e| e == "ttf" || e == "ttc")), "{list:?}");
         }
     }
 
