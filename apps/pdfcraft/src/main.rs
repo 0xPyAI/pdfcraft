@@ -155,7 +155,7 @@ fn main() -> eframe::Result {
     while let Some(a) = args.next() {
         match a.as_str() {
             "--version" => {
-                println!("pdfcraft {}", env!("CARGO_PKG_VERSION"));
+                println!("pdfcraft {}", pdfcraft_engine::build_info::version());
                 return Ok(());
             }
             "--control" => control_file = args.next(),
@@ -175,7 +175,7 @@ fn main() -> eframe::Result {
     // Records logged until now are written to it first.
     if let (Some(logger), Some(dir)) = (logger, settings_dir()) {
         match logger.attach_dir(&dir.join("logs")) {
-            Ok(path) => log::info!("PdfCraft {}, log file {}", env!("CARGO_PKG_VERSION"), path.display()),
+            Ok(path) => log::info!("PdfCraft {}, log file {}", pdfcraft_engine::build_info::version(), path.display()),
             // Standard error only by now (`attach_dir` gave up on the file); unlike `eprintln!`, never panics.
             Err(e) => log::warn!("no log file: {e}"),
         }

@@ -14,6 +14,7 @@
 
 pub mod actions;
 pub mod autotag;
+pub mod build_info;
 pub mod camera;
 pub mod camera_clean;
 pub mod camera_edges;
