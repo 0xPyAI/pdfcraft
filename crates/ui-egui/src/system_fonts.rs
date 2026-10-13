@@ -3,7 +3,8 @@
 //! The embedded faces (Inter, egui's defaults, craft-fonts) come first in every family; this one
 //! only draws characters none of them has, such as an Arabic file name in a build without
 //! craft-fonts, or the Simplified Chinese interface in a build without a `Hans` face (#826). A
-//! second installed face, [`devanagari_fallback`], draws Hindi when one is installed. It is
+//! second, a third and a fourth installed face, [`devanagari_fallback`], [`telugu_fallback`] and
+//! [`hangul_fallback`], draw Hindi, Telugu and Korean when one is installed. It is
 //! read at runtime and never embedded or shipped (AGENTS.md §1.4), and `PDFCRAFT_SYSTEM_FONTS=0`
 //! turns it off (published screenshots do).
 
@@ -22,6 +23,8 @@ const MAX_FACES: u32 = 16;
 const PROBE: char = '\u{0627}';
 /// Devanagari letter ka: the face must have it to cover Hindi.
 const DEVANAGARI_PROBE: char = '\u{0915}';
+/// Telugu letter ka: the face must have it to cover Telugu.
+const TELUGU_PROBE: char = '\u{0C15}';
 /// Hangul syllable han (한, U+D55C): the face must have it to cover Korean.
 const HANGUL_PROBE: char = '\u{D55C}';
 /// 欢 (U+6B22): Simplified only, absent from the Japanese craft-fonts faces.
@@ -71,14 +74,14 @@ fn load(need: Need) -> Option<Arc<FontData>> {
 /// or no candidate is installed; the interface then draws what the embedded faces can.
 pub fn devanagari_fallback() -> Option<Arc<FontData>> {
     static CACHE: OnceLock<Option<Arc<FontData>>> = OnceLock::new();
-    CACHE
-        .get_or_init(|| {
-            if std::env::var_os("PDFCRAFT_SYSTEM_FONTS").is_some_and(|v| v == "0") {
-                return None;
-            }
-            devanagari_candidates().iter().find_map(|path| read(path, DEVANAGARI_PROBE, MAX_BYTES))
-        })
-        .clone()
+    CACHE.get_or_init(|| script_fallback(&devanagari_candidates(), DEVANAGARI_PROBE, MAX_BYTES)).clone()
+}
+
+/// The installed fallback face for Telugu, read once. `None` when it is turned off or no
+/// candidate is installed; the interface then draws what the embedded faces can.
+pub fn telugu_fallback() -> Option<Arc<FontData>> {
+    static CACHE: OnceLock<Option<Arc<FontData>>> = OnceLock::new();
+    CACHE.get_or_init(|| script_fallback(&telugu_candidates(), TELUGU_PROBE, MAX_BYTES)).clone()
 }
 
 /// The installed fallback face for Hangul (Korean), read once. `None` when it is turned off or no
@@ -86,14 +89,14 @@ pub fn devanagari_fallback() -> Option<Arc<FontData>> {
 /// has Hangul, so Korean text shows replacement boxes).
 pub fn hangul_fallback() -> Option<Arc<FontData>> {
     static CACHE: OnceLock<Option<Arc<FontData>>> = OnceLock::new();
-    CACHE
-        .get_or_init(|| {
-            if std::env::var_os("PDFCRAFT_SYSTEM_FONTS").is_some_and(|v| v == "0") {
-                return None;
-            }
-            hangul_candidates().iter().find_map(|path| read(path, HANGUL_PROBE, MAX_HAN_BYTES))
-        })
-        .clone()
+    CACHE.get_or_init(|| script_fallback(&hangul_candidates(), HANGUL_PROBE, MAX_HAN_BYTES)).clone()
+}
+
+fn script_fallback(candidates: &[PathBuf], probe: char, max: u64) -> Option<Arc<FontData>> {
+    if std::env::var_os("PDFCRAFT_SYSTEM_FONTS").is_some_and(|v| v == "0") {
+        return None;
+    }
+    candidates.iter().find_map(|path| read(path, probe, max))
 }
 
 /// Well-known locations of Korean system faces, best first. Noto CJK and Source Han are left out
@@ -151,6 +154,37 @@ fn devanagari_candidates() -> Vec<PathBuf> {
             "google-droid-sans-fonts/DroidSansDevanagari-Regular.ttf",
             "samyak-fonts/Samyak-Devanagari.ttf",
             "gargi/Gargi.ttf",
+        ])
+    }
+}
+
+/// Well-known locations of Telugu faces, best first.
+fn telugu_candidates() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        ["Nirmala.ttc", "Nirmala.ttf", "gautami.ttf"].iter().map(|f| windows_fonts().join(f)).collect()
+    } else if cfg!(target_os = "macos") {
+        [
+            "/System/Library/Fonts/KohinoorTelugu.ttc",
+            "/System/Library/Fonts/Supplemental/Telugu Sangam MN.ttc",
+            "/System/Library/Fonts/Supplemental/Telugu MN.ttc",
+            "/Library/Fonts/Arial Unicode.ttf",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect()
+    } else {
+        unix_fonts(&[
+            "google-noto/NotoSansTeluguUI-Regular.ttf",
+            "google-noto/NotoSansTelugu-Regular.ttf",
+            "google-noto-vf/NotoSansTelugu[wght].ttf",
+            "google-noto-vf/NotoSansTelugu-UI[wght].ttf",
+            "truetype/noto/NotoSansTelugu-Regular.ttf",
+            "truetype/noto/NotoSansTeluguUI-Regular.ttf",
+            "noto/NotoSansTelugu-Regular.ttf",
+            "noto/NotoSansTeluguUI-Regular.ttf",
+            "lohit-telugu-fonts/Lohit-Telugu.ttf",
+            "truetype/lohit-telugu/Lohit-Telugu.ttf",
+            "truetype/fonts-telu-extra/Pothana2000.ttf",
         ])
     }
 }
@@ -282,6 +316,24 @@ mod tests {
             let list = candidates(need);
             assert!(!list.is_empty(), "{need:?}");
             assert!(list.iter().all(|p| p.extension().is_some_and(|e| e == "ttf" || e == "ttc")), "{need:?}");
+        }
+    }
+
+    #[test]
+    fn a_script_fallback_is_the_first_candidate_with_the_probe() {
+        let inter = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/Inter-Regular.ttf"));
+        let candidates = [PathBuf::from("definitely/not/here.ttf"), inter];
+        assert!(script_fallback(&candidates, 'A', MAX_BYTES).is_some());
+        assert!(script_fallback(&candidates, TELUGU_PROBE, MAX_BYTES).is_none());
+        assert!(script_fallback(&candidates, DEVANAGARI_PROBE, MAX_BYTES).is_none());
+    }
+
+    #[test]
+    fn script_candidates_are_absolute_font_files() {
+        for list in [devanagari_candidates(), telugu_candidates(), hangul_candidates()] {
+            assert!(!list.is_empty());
+            assert!(list.iter().all(|p| p.is_absolute() || cfg!(windows)), "{list:?}");
+            assert!(list.iter().all(|p| p.extension().is_some_and(|e| e == "ttf" || e == "ttc")), "{list:?}");
         }
     }
 
