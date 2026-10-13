@@ -39,3 +39,6 @@ pub enum OpenError {
     #[error("{0}")]
     Unsupported(String),
 }
+
+#[cfg(test)]
+mod lab_bradford_tests;

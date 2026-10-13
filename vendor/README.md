@@ -32,3 +32,10 @@ Later rendering errors, device loss, and non-winit renderer construction are unc
 Temporary: hayro is the bootstrap renderer and lopdf the bootstrap inspector (ADR-0004); M2.6 replaces them with our own devices and `cos`/`model`.
 
 Text extraction: hayro-interpret exposes `OutlineGlyph::is_vertical` from a Type0 font’s CMap writing mode. PdfCraft follows negative glyph-space y for WMode 1 so upright vertical columns can be searched (#126).
+
+Lab Bradford follow-up to #1237: Lab adapts XYZ to D65 with white-point ratios
+computed in Bradford LMS coordinates. CalRGB's existing flat-white and
+black-point normalization is unchanged. `lab_bradford_tests` checks independent
+D50/equal-energy neutral and chromatic oracles, D65 identity, and direct/Indexed
+consistency (including an asymmetric chromatic Range), and zero/overflowing
+cone-response fallback.
