@@ -1208,8 +1208,24 @@ impl PdfCraftApp {
         }
     }
 
+    /// The tab already showing the file at `path`, if any: its position in `views`. Paths are
+    /// compared after `absolute` normalization, so another spelling of the same file matches
+    /// (#1620).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn view_showing(&self, path: &str) -> Option<usize> {
+        let path = crate::last_session::absolute(path);
+        self.views
+            .iter()
+            .position(|v| self.session.get(v.id).and_then(|d| d.path.as_deref()).map(crate::last_session::absolute).as_deref() == Some(path.as_str()))
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open_path(&mut self, path: &str) {
+        if let Some(i) = self.view_showing(path) {
+            self.startup_superseded = true;
+            self.active = Some(i);
+            return;
+        }
         let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
         match std::fs::read(path) {
             Ok(bytes) => {

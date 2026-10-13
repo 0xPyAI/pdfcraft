@@ -654,6 +654,36 @@ fn the_last_session_is_off_by_default_and_skips_missing_and_duplicate_files() {
 }
 
 #[test]
+fn opening_the_same_path_again_focuses_its_tab() {
+    let pdfs = TempPdfs::new("dedup-open");
+    let a = pdfs.file("a.pdf", 1);
+    let b = pdfs.file("b.pdf", 1);
+    let mut h = session_harness(|_| {});
+    h.state_mut().open_path(&a);
+    h.state_mut().open_path(&b);
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 2, "two different files open two tabs");
+    h.state_mut().open_path(&a);
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 2, "opening an open file again adds no tab");
+    assert_eq!(h.state().active, Some(0), "the existing tab comes to the front");
+    assert_eq!(open_paths(h.state()), vec![a, b], "the tab order is untouched");
+}
+
+#[test]
+fn opening_the_same_file_with_a_dot_component_focuses_its_tab() {
+    let pdfs = TempPdfs::new("dedup-dot");
+    let a = pdfs.file("a.pdf", 1);
+    let dotted = format!("{}/./a.pdf", pdfs.0.display());
+    let mut h = session_harness(|_| {});
+    h.state_mut().open_path(&a);
+    h.state_mut().open_path(&dotted);
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 1, "another spelling of the same file matches");
+    assert_eq!(h.state().active, Some(0));
+}
+
+#[test]
 fn save_prompt_stays_inside_the_screen_for_a_long_filename() {
     // Issue #161: an unwrapped title carrying a long filename widened the centered modal past
     // the viewport, clipping the message and pushing the Save/Cancel buttons off-screen.
