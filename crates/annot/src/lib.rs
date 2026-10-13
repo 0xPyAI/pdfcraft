@@ -1091,6 +1091,11 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
             if let Some(b) = by {
                 d.set(b"PCByLine".to_vec(), PdfString::text(b));
             }
+            // The label is drawn for the page as displayed. A later page rotation is a new edit.
+            let turn = pdfcraft_model::pages(doc).get(new.page).map_or(0, |p| p.rotation(doc));
+            if matches!(turn, 90 | 180 | 270) {
+                d.set(b"PCStampRotate".to_vec(), Object::Int(turn));
+            }
         }
         Shape::TypedSignature { contours, .. } => {
             d.set(b"C".to_vec(), rgb(style.color));
@@ -1237,8 +1242,9 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
     Ok(index)
 }
 
-/// Counterrotate a newly placed image stamp's appearance into displayed-page axes.
-/// The normal appearance's transformed bounding box is fitted to `/Rect` by PDF viewers.
+/// Counterrotate a newly placed picture stamp's appearance into displayed-page axes.
+/// The picture may be an image or a PDF page. The normal appearance's transformed bounding
+/// box is fitted to `/Rect` by PDF viewers.
 pub fn orient_image_stamp(doc: &mut Document, page: usize, index: usize, rotation: i64) -> Result<(), AnnotError> {
     let matrix = match rotation {
         90 => [0.0, 1.0, -1.0, 0.0, 0.0, 0.0],
@@ -1248,8 +1254,8 @@ pub fn orient_image_stamp(doc: &mut Document, page: usize, index: usize, rotatio
     };
     let (_, r) = annot_ref(doc, page, index)?;
     let d = annot_dict(doc, r);
-    if d.name(b"Subtype") != Some(b"Stamp") || !matches!(d.get(b"PCPictureImage"), Some(Object::Bool(true))) {
-        return Err(AnnotError::Invalid("only an image stamp can be oriented".into()));
+    if d.name(b"Subtype") != Some(b"Stamp") || d.get(b"PCPicture").is_none() {
+        return Err(AnnotError::Invalid("only a picture stamp can be oriented".into()));
     }
     let normal = d
         .get(b"AP")
@@ -1316,8 +1322,8 @@ fn draw_appearance(doc: &mut Document, r: ObjRef) -> Result<(), AnnotError> {
 /// Pure from the dictionary and the objects it points at, so [`AppearanceCache`] can reuse it.
 fn build_appearance(doc: &Document, d: &Dict) -> Option<Stream> {
     let mut stream = appearance::build(d)?;
-    // Image stamp restyling must retain the placement's page-axis correction.
-    if matches!(d.get(b"PCPictureImage"), Some(Object::Bool(true))) {
+    // Picture-stamp restyling must retain the placement's page-axis correction.
+    if d.get(b"PCPicture").is_some() {
         let matrix = d.get(b"AP").and_then(|ap| {
             let ap = doc.resolve(ap);
             let normal = doc.resolve(ap.as_dict()?.get(b"N")?);

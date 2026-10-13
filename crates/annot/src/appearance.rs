@@ -264,6 +264,11 @@ pub(crate) fn picture_turn(d: &Dict) -> i64 {
     d.get(b"PCPictureRotate").and_then(Object::as_int).unwrap_or(0).rem_euclid(360) / 90 * 90
 }
 
+/// The page `/Rotate` a rubber stamp's label is turned back by (`/PCStampRotate`).
+fn stamp_turn(d: &Dict) -> i64 {
+    d.get(b"PCStampRotate").and_then(Object::as_int).unwrap_or(0).rem_euclid(360) / 90 * 90
+}
+
 /// The first text [`build`] would draw in the standard fonts (Helvetica, WinAnsiEncoding) that
 /// they can't, which would come out as `?`: what it is (for the message) and the character. The
 /// text of a text box, callout or Fill & Sign text, a measurement's label, a dynamic stamp's
@@ -632,7 +637,26 @@ pub fn build(d: &Dict) -> Option<Stream> {
                     }
                     let kind = crate::StampKind::from_name(other)?;
                     let by = d.get(b"PCByLine").and_then(|o| o.as_string()).map(PdfString::to_text);
-                    return Some(stamp(kind, rect, stroke.unwrap_or(kind.color()), by.as_deref(), opacity, res));
+                    let turn = stamp_turn(d);
+                    let draw = if turn == 0 {
+                        rect
+                    } else {
+                        let (rw, rh) = (rect[2] - rect[0], rect[3] - rect[1]);
+                        let (dw, dh) = if matches!(turn, 90 | 270) { (rh, rw) } else { (rw, rh) };
+                        if dw < 1.0 || dh < 1.0 {
+                            return None;
+                        }
+                        [0.0, 0.0, dw, dh]
+                    };
+                    let mut stream = stamp(kind, draw, stroke.unwrap_or(kind.color()), by.as_deref(), opacity, res);
+                    if turn != 0 {
+                        // Upright in the stamp's displayed box, then mapped into `/Rect` the way
+                        // the page maps display space into user space. Viewers fit that box to
+                        // `/Rect`; the page rotation then shows the label the right way up.
+                        let m = pdfcraft_model::view_matrix_for(turn, rect);
+                        stream.dict.set(b"Matrix".to_vec(), Object::Array(m.iter().copied().map(Object::Real).collect()));
+                    }
+                    return Some(stream);
                 }
             }
         }

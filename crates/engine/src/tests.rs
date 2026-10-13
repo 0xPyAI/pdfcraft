@@ -114,6 +114,191 @@ fn custom_image_stamp_keeps_displayed_orientation_on_rotated_pages() {
     }
 }
 
+/// A blank page turned `degrees`, with one annotation placed from displayed coordinates.
+fn rotated_blank(degrees: i64) -> (Session, DocId) {
+    let mut session = Session::new().with_clock(|| 1_700_000_000);
+    let blank = session.create_blank(200.0, 300.0, 1).unwrap();
+    let id = session.open_new("drawing.pdf", blank).unwrap();
+    session.apply(id, Edit::RotatePages { pages: vec![0], degrees }).unwrap();
+    (session, id)
+}
+
+/// The user-space box of a `w` by `h` point rectangle centred at a displayed point.
+fn displayed_rect(info: &pdfcraft_render::PageInfo, vx: f64, vy: f64, w: f64, h: f64) -> [f64; 4] {
+    let corners = [(vx - w / 2.0, vy - h / 2.0), (vx + w / 2.0, vy + h / 2.0)];
+    let mapped: Vec<[f32; 2]> = corners.iter().map(|(x, y)| info.view_to_user(*x as f32, *y as f32)).collect();
+    [
+        f64::from(mapped[0][0].min(mapped[1][0])),
+        f64::from(mapped[0][1].min(mapped[1][1])),
+        f64::from(mapped[0][0].max(mapped[1][0])),
+        f64::from(mapped[0][1].max(mapped[1][1])),
+    ]
+}
+
+fn render_page(session: &Session, id: DocId) -> pdfcraft_render::RenderedPage {
+    let doc = session.get(id).unwrap();
+    let mut renderer = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), doc.config.clone());
+    let rendered = renderer.render(pdfcraft_render::RenderRequest { page: 0, scale: 2.0, ..Default::default() });
+    assert!(rendered.error.is_none(), "{:?}", rendered.error);
+    rendered
+}
+
+fn stamp_pixel(rendered: &pdfcraft_render::RenderedPage, x: u32, y: u32) -> [u8; 4] {
+    let offset = ((y * rendered.width + x) * 4) as usize;
+    rendered.rgba[offset..offset + 4].try_into().unwrap()
+}
+
+/// #1398: a Sign Here tag points left as displayed, on every page rotation, including after save.
+#[test]
+fn rubber_stamps_point_left_as_displayed_on_rotated_pages() {
+    let (w, h) = StampKind::SignHere.size();
+    for degrees in [0, 90, 180, 270] {
+        let (mut session, id) = rotated_blank(degrees);
+        let info = session.get(id).unwrap().info.pages[0].clone();
+        let rect = displayed_rect(&info, 100.0, 40.0, w, h);
+        let shape = Shape::Stamp { rect, stamp: StampKind::SignHere, by: None };
+        session
+            .apply(
+                id,
+                Edit::AddAnnotation(NewAnnotation {
+                    page: 0,
+                    style: Style::default_for(&shape),
+                    shape,
+                    contents: String::new(),
+                    author: "Test".into(),
+                }),
+            )
+            .unwrap();
+        let check = |session: &Session, id: DocId| {
+            let rendered = render_page(session, id);
+            let doc = session.get(id).unwrap();
+            let info = doc.info.pages[0].clone();
+            let stamp = doc.info.annotations[0].rect;
+            let a = info.user_to_view(stamp[0], stamp[1]);
+            let b = info.user_to_view(stamp[2], stamp[3]);
+            let (left, top) = (a[0].min(b[0]), a[1].min(b[1]));
+            let (right, bottom) = (a[0].max(b[0]), a[1].max(b[1]));
+            let scale = 2.0;
+            let at = |x: f32, y: f32| stamp_pixel(&rendered, (x * scale) as u32, (y * scale) as u32);
+            // The tag's point is the left edge. The flat end fills the right edge.
+            let tip = at(left + 4.0, (top + bottom) / 2.0);
+            let outside = at(left + 4.0, top + 4.0);
+            let end = at(right - 4.0, top + 4.0);
+            assert!(tip[0] > 180 && tip[2] < 80, "rotation {degrees}: tip {tip:?} should be the orange point");
+            assert!(outside.iter().all(|c| *c > 240), "rotation {degrees}: above the point {outside:?} should be paper");
+            assert!(end[0] > 180 && end[2] < 80, "rotation {degrees}: flat end {end:?} should be orange");
+        };
+        check(&session, id);
+        let saved = session.save_bytes(id).unwrap();
+        let mut reopened = Session::new().with_clock(|| 1_700_000_000);
+        let again = reopened.open("drawing.pdf", None, saved, None).unwrap();
+        check(&reopened, again);
+    }
+}
+
+/// A one-page PDF whose left half is red and whose right half is white, as displayed.
+fn half_red_page() -> Vec<u8> {
+    let content = "1 0 0 rg 0 0 40 40 re f";
+    let objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 80 40] >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents 4 0 R /MediaBox [0 0 80 40] >>".to_vec(),
+        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()).into_bytes(),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, obj) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend_from_slice(obj);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for offset in offsets {
+        out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+fn quadrant_png() -> Arc<Vec<u8>> {
+    let colours = [[240, 20, 20, 255], [20, 180, 20, 255], [20, 20, 240, 255], [230, 180, 20, 255]];
+    let image = image::RgbaImage::from_fn(80, 40, |x, y| image::Rgba(colours[usize::from(y >= 20) * 2 + usize::from(x >= 40)]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+    Arc::new(png.into_inner())
+}
+
+fn assert_upright_quadrants(session: &Session, id: DocId, degrees: i64) {
+    let doc = session.get(id).unwrap();
+    let mut renderer = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), doc.config.clone());
+    let rendered = renderer.render(pdfcraft_render::RenderRequest { page: 0, scale: 1.0, ..Default::default() });
+    assert!(rendered.error.is_none(), "{:?}", rendered.error);
+    let colours = [[240, 20, 20, 255], [20, 180, 20, 255], [20, 20, 240, 255], [230, 180, 20, 255]];
+    for ((x, y), colour) in [(80, 90), (120, 90), (80, 110), (120, 110)].into_iter().zip(colours) {
+        assert_eq!(stamp_pixel(&rendered, x, y), colour, "rotation {degrees}; displayed point ({x}, {y})");
+    }
+}
+
+/// #1398: an explicit rectangle keeps the caller's box and turns the picture upright.
+#[test]
+fn explicit_image_stamps_keep_displayed_orientation_on_rotated_pages() {
+    let bytes = quadrant_png();
+    for degrees in [0, 90, 180, 270] {
+        let (mut session, id) = rotated_blank(degrees);
+        let info = session.get(id).unwrap().info.pages[0].clone();
+        let rect = displayed_rect(&info, 100.0, 100.0, 80.0, 40.0);
+        session
+            .apply(
+                id,
+                Edit::AddCustomStamp {
+                    page: 0,
+                    rect,
+                    name: "Original quadrants".into(),
+                    file: MarkFile { name: "quadrants.png".into(), bytes: bytes.clone(), page: 0 },
+                    author: "Test".into(),
+                },
+            )
+            .unwrap();
+        assert_upright_quadrants(&session, id, degrees);
+        session.apply(id, Edit::StyleAnnotation { page: 0, index: 0, color: None, opacity: Some(1.0), width: None, endings: None }).unwrap();
+        assert_upright_quadrants(&session, id, degrees);
+    }
+}
+
+/// #1398: a PDF page used as a stamp stays upright, at its natural size and in an explicit box.
+#[test]
+fn pdf_page_stamps_keep_displayed_orientation_on_rotated_pages() {
+    let bytes = Arc::new(half_red_page());
+    for (natural, degrees) in [true, false].into_iter().flat_map(|natural| [0, 90, 180, 270].map(|degrees| (natural, degrees))) {
+        let (mut session, id) = rotated_blank(degrees);
+        let info = session.get(id).unwrap().info.pages[0].clone();
+        let at = info.view_to_user(100.0, 100.0).map(f64::from);
+        let rect = if natural { [at[0], at[1], at[0], at[1]] } else { displayed_rect(&info, 100.0, 100.0, 80.0, 40.0) };
+        session
+            .apply(
+                id,
+                Edit::AddCustomStamp {
+                    page: 0,
+                    rect,
+                    name: "Half red".into(),
+                    file: MarkFile { name: "half.pdf".into(), bytes: bytes.clone(), page: 0 },
+                    author: "Test".into(),
+                },
+            )
+            .unwrap();
+        let doc = session.get(id).unwrap();
+        let mut renderer = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), doc.config.clone());
+        let rendered = renderer.render(pdfcraft_render::RenderRequest { page: 0, scale: 1.0, ..Default::default() });
+        assert!(rendered.error.is_none(), "{:?}", rendered.error);
+        let left = stamp_pixel(&rendered, 80, 100);
+        let right = stamp_pixel(&rendered, 120, 100);
+        assert!(left[0] > 200 && left[1] < 40, "rotation {degrees}, natural {natural}: left {left:?} should be red");
+        assert!(right.iter().all(|c| *c > 240), "rotation {degrees}, natural {natural}: right {right:?} should be paper");
+    }
+}
+
 fn page_texts(s: &Session, id: DocId) -> Vec<String> {
     let doc = s.get(id).unwrap();
     let config = pdfcraft_render::RenderConfig { password: doc.password.as_deref().map(Arc::from), ..Default::default() };

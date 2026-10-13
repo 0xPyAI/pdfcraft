@@ -4052,8 +4052,8 @@ milestone = "M5"
 status = "shipped"
 commands = ["comment.stamp"]
 tools = ["comment_add"]
-evidence = ["crates/annot/src/tests.rs::stamps_draw_their_label_and_by_line", "crates/ui-egui/tests/stamps.rs::choosing_and_placing_stamps", "crates/automation/tests/automation.rs::stamps_through_tools"]
-notes = "12 standard business stamps in PdfCraft's own design; ISO 32000 stamp names where defined"
+evidence = ["crates/annot/src/tests.rs::stamps_draw_their_label_and_by_line", "crates/ui-egui/tests/stamps.rs::choosing_and_placing_stamps", "crates/automation/tests/automation.rs::stamps_through_tools", "crates/engine/src/tests.rs::rubber_stamps_point_left_as_displayed_on_rotated_pages"]
+notes = "12 standard business stamps in PdfCraft's own design; ISO 32000 stamp names where defined. A stamp placed on a rotated page reads upright as the page is displayed (#1398)"
 
 [[feature]]
 id = "comment.stamps-sign-here"
@@ -4064,8 +4064,8 @@ milestone = "M5"
 status = "shipped"
 commands = ["comment.stamp"]
 tools = ["comment_add"]
-evidence = ["crates/annot/src/tests.rs::stamps_draw_their_label_and_by_line", "crates/ui-egui/tests/stamps.rs::choosing_and_placing_stamps", "crates/automation/tests/automation.rs::stamps_through_tools"]
-notes = "Accepted, Initial Here, Rejected, Sign Here, Witness as pointed tags"
+evidence = ["crates/annot/src/tests.rs::stamps_draw_their_label_and_by_line", "crates/ui-egui/tests/stamps.rs::choosing_and_placing_stamps", "crates/automation/tests/automation.rs::stamps_through_tools", "crates/engine/src/tests.rs::rubber_stamps_point_left_as_displayed_on_rotated_pages"]
+notes = "Accepted, Initial Here, Rejected, Sign Here, Witness as pointed tags. The point stays on the left as the page is displayed, including /Rotate 90, 180 and 270 (#1398)"
 
 [[feature]]
 id = "comment.stamps-dynamic"
@@ -4076,8 +4076,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["comment.stamp"]
 tools = ["comment_add"]
-evidence = ["crates/annot/src/tests.rs::stamps_draw_their_label_and_by_line", "crates/ui-egui/tests/stamps.rs::choosing_and_placing_stamps", "crates/automation/tests/automation.rs::stamps_through_tools"]
-notes = "Approved, Confidential, Received, Reviewed, Revised with a By author at time, date line (local time)"
+evidence = ["crates/annot/src/tests.rs::stamps_draw_their_label_and_by_line", "crates/ui-egui/tests/stamps.rs::choosing_and_placing_stamps", "crates/automation/tests/automation.rs::stamps_through_tools", "crates/engine/src/tests.rs::rubber_stamps_point_left_as_displayed_on_rotated_pages"]
+notes = "Approved, Confidential, Received, Reviewed, Revised with a By author at time, date line (local time). The label is turned with the page's /Rotate so it reads upright as displayed (#1398)"
 
 [[feature]]
 id = "comment.stamps-custom"
@@ -4088,8 +4088,8 @@ milestone = "M5"
 status = "shipped"
 commands = ["comment.stamp"]
 tools = ["stamp_custom"]
-evidence = ["crates/ui-egui/tests/stamps.rs::creating_placing_and_keeping_custom_stamps", "crates/automation/tests/automation.rs::stamps_through_tools"]
-notes = "Create custom stamp from a PDF page or an image (category and name), kept in the app's settings; placed at natural size (at most 200 pt) keeping its shape; resizable (appearance redrawn from /PCPicture); delete from the palette"
+evidence = ["crates/ui-egui/tests/stamps.rs::creating_placing_and_keeping_custom_stamps", "crates/automation/tests/automation.rs::stamps_through_tools", "crates/engine/src/tests.rs::explicit_image_stamps_keep_displayed_orientation_on_rotated_pages", "crates/engine/src/tests.rs::pdf_page_stamps_keep_displayed_orientation_on_rotated_pages"]
+notes = "Create custom stamp from a PDF page or an image (category and name), kept in the app's settings; placed at natural size (at most 200 pt) keeping its shape; resizable (appearance redrawn from /PCPicture); delete from the palette. Natural-size and explicit-rectangle images, and PDF-page stamps, read upright on a rotated page (#1398)"
 
 [[feature]]
 id = "comment.stamps-manage"
