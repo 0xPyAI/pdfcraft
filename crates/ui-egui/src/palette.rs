@@ -159,15 +159,17 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
                             .font(theme::regular(15.0))
                             .desired_width(f32::INFINITY),
                     );
-                    // Enter runs the top hit. The field keeps focus (requested every frame), so
-                    // check while it is focused as well as when focus is lost.
+                    // Enter runs the selected hit while the field is focused or relinquishing focus.
                     if (r.has_focus() || r.lost_focus())
                         && ui.input(|i| i.key_pressed(egui::Key::Enter))
                         && let Some((_, h)) = hits.get(selected)
                     {
                         chosen = Some((h.command, h.group));
                     }
-                    r.request_focus();
+                    // Re-requesting existing focus interrupts native IME composition.
+                    if !r.has_focus() {
+                        r.request_focus();
+                    }
                 });
                 ui.separator();
                 for (index, (_, h)) in hits.iter().enumerate() {
