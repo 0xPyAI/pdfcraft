@@ -458,6 +458,8 @@ fn fill_color(fill: &[Op]) -> [f64; 3] {
 struct Shown {
     op: usize,
     extra_ops: Vec<usize>,
+    /// Encoded glyphs, not bytes or Unicode characters (a ligature can represent several).
+    glyph_count: usize,
     /// Advance in text space, including spacing and TJ adjustments.
     advance: f64,
     /// The text matrix where it starts (text space), and the state there and at its `BT`.
@@ -553,6 +555,7 @@ fn interpret(
                     let mut items = tail.into_iter();
                     if let Some(mut first) = items.next() {
                         for shown in items {
+                            first.glyph_count = first.glyph_count.saturating_add(shown.glyph_count);
                             first.extra_ops.push(shown.op);
                             first.extra_ops.extend(shown.extra_ops);
                             first.rect = [
@@ -661,10 +664,12 @@ fn interpret(
                 let mut text = String::new();
                 let mut decodable = true;
                 let mut x_text = 0.0;
+                let mut glyph_count = 0_usize;
                 for p in &pieces {
                     match p {
                         Object::String(s) => {
                             for (code, len) in m.codes(&s.bytes) {
+                                glyph_count = glyph_count.saturating_add(1);
                                 match m.text_of(code) {
                                     Some(t) => text.push_str(&t),
                                     None => decodable = false,
@@ -706,6 +711,7 @@ fn interpret(
                 out.push(Shown {
                     op: i,
                     extra_ops: Vec::new(),
+                    glyph_count,
                     advance: x_text,
                     tm: Matrix([tm.0[0], tm.0[1], tm.0[2], tm.0[3], tm.0[4] - x_text * tm.0[0], tm.0[5] - x_text * tm.0[1]]),
                     state: ts.clone(),
@@ -754,7 +760,15 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
     let ops = pieces.parse().ops;
     let shown = interpret(doc, &ops, &fonts_res, &mut cache, &mut carry, None, true);
     let mut last: Option<(usize, usize, f64, f64, f64)> = None; // (piece, bt, baseline, end_x, size)
-    for s in shown {
+    for mut s in shown {
+        // A single RTL glyph's ActualText (e.g. lam-alef) is an inline ligature, not a
+        // separate logical line. Put its letters into visual order before joining the
+        // surrounding glyphs; the completed line is recovered to typing order below.
+        // Multi-glyph and mixed-direction replacements keep their authoritative order.
+        if s.logical_order && s.glyph_count == 1 && s.text.chars().all(crate::bidi::is_rtl) {
+            s.text = crate::bidi::to_visual(&s.text);
+            s.logical_order = false;
+        }
         // A line belongs to one stream piece. Within it, PDF producers often put every word
         // in its own BT/ET: geometry and text state, not object boundaries, define a line.
         let si = ops.get(s.op).map_or(0, |op| pieces.pieces_of(op).0);

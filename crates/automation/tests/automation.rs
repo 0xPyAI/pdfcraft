@@ -347,6 +347,43 @@ fn arabic_actual_text_stays_logical_through_editor_tools_and_save_reopen() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+#[test]
+fn arabic_ligature_actual_text_is_one_editable_word_through_save_reopen() {
+    use pdfcraft_cos::{Dict, Document, ObjRef, Object, SaveOptions, Stream, write_full};
+    use std::sync::Arc;
+
+    let dir = workdir("arabic-ligature-actual-text");
+    let mut doc = Document::open(Arc::new(fixture(1))).unwrap();
+    // Synthetic glyph codes: A س, B م, X lam-alef. No installed Arabic font is needed.
+    let cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapType 2 def \
+                1 begincodespacerange <00> <FF> endcodespacerange 3 beginbfchar \
+                <41> <0633> <42> <0645> <58> <FEFB> \
+                endbfchar endcmap CMapName currentdict /CMap defineresource pop end end";
+    let unicode = doc.add(Object::Stream(Stream::flate(Dict::new(), cmap.as_bytes())));
+    doc.update_dict(ObjRef::new(3, 0), |d| d.set(b"ToUnicode".to_vec(), Object::Ref(unicode))).unwrap();
+    let content = "BT /F1 24 Tf 20 150 Td (B) Tj /Span <</ActualText <FEFF06440627>>> BDC (X) Tj EMC (A) Tj ET";
+    doc.set(ObjRef::new(5, 0), Object::Stream(Stream::flate(Dict::new(), content.as_bytes())));
+    std::fs::write(dir.join("arabic.pdf"), write_full(&doc, &SaveOptions::default()).unwrap()).unwrap();
+
+    let mut a = auto(&dir);
+    let id = ok(&mut a, "doc_open", json!({"path":"arabic.pdf"}))["doc"].as_u64().unwrap();
+    let lines = ok(&mut a, "text_lines", json!({"doc":id,"page":1}));
+    assert_eq!(lines["lines"].as_array().unwrap().len(), 1);
+    assert_eq!(lines["lines"][0]["text"], "سلام");
+    assert_eq!(page_text(&mut a, id), ["سلام"]);
+    assert_eq!(ok(&mut a, "text_find", json!({"doc":id,"query":"سلام"}))["matches"].as_array().unwrap().len(), 1);
+    let render = a.call("page_render", &json!({"doc":id,"page":1,"dpi":72})).unwrap();
+    ok(&mut a, "doc_save", json!({"doc":id,"path":"saved.pdf"}));
+    let re = ok(&mut a, "doc_open", json!({"path":"saved.pdf"}))["doc"].as_u64().unwrap();
+    assert_eq!(ok(&mut a, "text_lines", json!({"doc":re,"page":1})), lines);
+    assert_eq!(a.call("page_render", &json!({"doc":re,"page":1,"dpi":72})).unwrap(), render);
+    ok(&mut a, "text_edit", json!({"doc":re,"page":1,"paragraph":1,"text":"Replacement"}));
+    ok(&mut a, "doc_save", json!({"doc":re,"path":"edited.pdf"}));
+    let edited = ok(&mut a, "doc_open", json!({"path":"edited.pdf"}))["doc"].as_u64().unwrap();
+    assert_eq!(page_text(&mut a, edited), ["Replacement"]);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// Each of these writes to its required `path` and replaces an existing file there, so the MCP
 /// annotations must not tell clients the call is read-only or harmless (#130).
 #[test]

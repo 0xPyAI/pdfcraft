@@ -2861,14 +2861,17 @@ fn group_move_budget_refusals_keep_the_original_page_selectable() {
 
 #[test]
 fn arabic_actual_text_keeps_typing_order_when_opened_for_editing() {
-    for logical in ["مرحبا بالعالم", "سَلَام 123 (PDF)", "English مرحبا ١٢٣", "שלום עולם", "Latin text"] {
+    for logical in ["مرحبا بالعالم", "سَلَام 123 (PDF)", "English مرحبا ١٢٣", "PDFمرحبا", "مرحبا", "שלום עולם", "Latin text"]
+    {
         let hex: String = logical.encode_utf16().map(|u| format!("{u:04X}")).collect();
-        let doc = text_page(&format!("/Span <</ActualText <FEFF{hex}>>> BDC BT /F1 12 Tf 72 700 Td (abcd) Tj (efgh) Tj ET EMC"));
-        for doc in [&doc, &reopen(&doc)] {
-            let lines = text::text_lines(doc, 0).unwrap();
-            assert_eq!(lines.len(), 1);
-            assert_eq!(lines[0].text, logical, "ActualText is already in typing order");
-            assert_eq!(text::text_blocks(doc, 0).unwrap()[0].editor_text, logical);
+        for drawing in ["(abcd) Tj (efgh) Tj", "(X) Tj"] {
+            let doc = text_page(&format!("/Span <</ActualText <FEFF{hex}>>> BDC BT /F1 12 Tf 72 700 Td {drawing} ET EMC"));
+            for doc in [&doc, &reopen(&doc)] {
+                let lines = text::text_lines(doc, 0).unwrap();
+                assert_eq!(lines.len(), 1);
+                assert_eq!(lines[0].text, logical, "ActualText is already in typing order");
+                assert_eq!(text::text_blocks(doc, 0).unwrap()[0].editor_text, logical);
+            }
         }
     }
 }
@@ -2893,6 +2896,78 @@ fn actual_text_and_visual_rtl_glyphs_keep_their_own_reading_order() {
         let lines = text::text_lines(doc, 0).unwrap();
         assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["בדיוק", "שלום", "בדיוק"]);
     }
+}
+
+/// Synthetic codes A س, B م and X a lam-alef glyph, drawn from left to right.
+fn arabic_ligature_page(content: &str, composite: bool) -> Document {
+    let prefix = if composite { "00" } else { "" };
+    let cmap = format!(
+        "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapType 2 def \
+         1 begincodespacerange <{prefix}00> <{prefix}FF> endcodespacerange 4 beginbfchar \
+         <{prefix}20> <0020> <{prefix}41> <0633> <{prefix}42> <0645> <{prefix}58> <FEFB> \
+         endbfchar endcmap CMapName currentdict /CMap defineresource pop end end"
+    );
+    let widths: Vec<_> = (32..=88).map(|c| if c == 32 { "250" } else { "500" }).collect();
+    let font = if composite {
+        "<< /Type /Font /Subtype /Type0 /BaseFont /FakeArabic /Encoding /Identity-H /DescendantFonts [7 0 R] /ToUnicode 6 0 R >>".into()
+    } else {
+        format!("<< /Type /Font /Subtype /Type1 /BaseFont /FakeArabic /FirstChar 32 /LastChar 88 /Widths [{}] /ToUnicode 6 0 R >>", widths.join(" "))
+    };
+    build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        &stream("", content),
+        &font,
+        &stream("", &cmap),
+        "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /FakeArabic /CIDSystemInfo << /Registry (Synthetic) /Ordering (Identity) /Supplement 0 >> /DW 500 /W [32 [250]] >>",
+    ])
+}
+
+#[test]
+fn arabic_ligature_actual_text_stays_on_its_line() {
+    for (ligature, composite) in [("لا", false), ("لأ", false), ("لإ", false), ("لآ", false), ("لَا", false), ("لا", true)] {
+        let hex: String = ligature.encode_utf16().map(|u| format!("{u:04X}")).collect();
+        let (left, glyph, right) = if composite { ("<0042>", "<0058>", "<0041>") } else { ("(B)", "(X)", "(A)") };
+        let doc = arabic_ligature_page(
+            &format!("BT /F1 12 Tf 72 700 Td {left} Tj /Span <</ActualText <FEFF{hex}>>> BDC [{glyph}] TJ EMC {right} Tj ET"),
+            composite,
+        );
+        let expected = format!("س{ligature}م");
+        for doc in [&doc, &reopen(&doc)] {
+            let lines = text::text_lines(doc, 0).unwrap();
+            assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), [expected.as_str()]);
+            assert_eq!(text::text_blocks(doc, 0).unwrap()[0].editor_text, expected);
+        }
+    }
+}
+
+#[test]
+fn multi_glyph_rtl_actual_text_keeps_its_own_reading_order() {
+    // Two encoded glyphs are a logical span, even if their replacement looks like a ligature.
+    for drawing in ["(XX) Tj", "(X) Tj (X) Tj", "[(X) (X)] TJ"] {
+        let doc =
+            arabic_ligature_page(&format!("BT /F1 12 Tf 72 700 Td (B) Tj /Span <</ActualText <FEFF06440627>>> BDC {drawing} EMC (A) Tj ET"), false);
+        let lines = text::text_lines(&doc, 0).unwrap();
+        assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["م", "لا", "س"]);
+    }
+}
+
+#[test]
+fn replacing_word_with_actual_text_ligature_removes_all_its_source_operators() {
+    let mut doc = arabic_ligature_page(
+        "BT /F1 12 Tf 72 700 Td (B) Tj /Span <</ActualText <FEFF06440627>>> BDC /Span BMC (X) Tj EMC EMC (A) Tj ET \
+         BT /F1 12 Tf 72 600 Td (AB) Tj ET",
+        false,
+    );
+    assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].editor_text, "سلام");
+    text::replace_block(&mut doc, 0, 0, "Replacement").unwrap();
+    let doc = reopen(&doc);
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["Replacement", "مس"]);
+    let bytes = page_content_bytes(&doc, 0);
+    let content = String::from_utf8_lossy(&bytes);
+    assert!(!content.contains("ActualText") && !content.contains("(X)") && !content.contains("(B)") && !content.contains("(A)"), "{content}");
 }
 
 #[test]
