@@ -374,7 +374,7 @@ impl PdfCraftApp {
             let incoming = files
                 .into_iter()
                 .zip(modified)
-                .map(|((name, bytes), modified)| crate::combine_ui::Incoming { name, bytes: Arc::new(bytes), modified, note: None })
+                .map(|((name, bytes), modified)| crate::combine_ui::Incoming { name, bytes: Arc::new(bytes), modified, note: None, open_doc: None })
                 .collect();
             self.stage_combine_with(incoming);
         } else {

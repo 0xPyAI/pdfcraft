@@ -380,6 +380,8 @@ pub(crate) struct Incoming {
     pub modified: Option<SystemTime>,
     /// Something to tell the user about where it came from.
     pub note: Option<String>,
+    /// The open document it is, when it came from a tab.
+    pub open_doc: Option<pdfcraft_engine::DocId>,
 }
 
 /// A new value for [`CombineFile::auth`]: counted for the whole run, outside the undo history.
@@ -420,6 +422,8 @@ pub struct CombineFile {
     pub notes: Vec<String>,
     /// Where it came from, shown among the warnings (e.g. an open document's unsaved changes).
     origin_note: Option<String>,
+    /// The open document it is, when it came from a tab: Add open documents leaves it out.
+    open_doc: Option<pdfcraft_engine::DocId>,
     /// The range last checked and the result: the number of pages it takes and the first of
     /// them (0-based), or why it is wrong.
     checked: Option<(String, RangeCheck)>,
@@ -2381,14 +2385,15 @@ impl PdfCraftApp {
 
     /// Add picked files to the Combine files list (and show it).
     pub(crate) fn stage_combine(&mut self, files: Vec<(String, Vec<u8>)>) {
-        let incoming = files.into_iter().map(|(name, bytes)| Incoming { name, bytes: Arc::new(bytes), modified: None, note: None }).collect();
+        let incoming =
+            files.into_iter().map(|(name, bytes)| Incoming { name, bytes: Arc::new(bytes), modified: None, note: None, open_doc: None }).collect();
         self.stage_combine_with(incoming);
     }
 
     /// Add files to the Combine files list, with what can be known about them up front.
     pub(crate) fn stage_combine_with(&mut self, files: Vec<Incoming>) {
         let mut added = Vec::new();
-        for Incoming { name, bytes, modified, note } in files {
+        for Incoming { name, bytes, modified, note, open_doc } in files {
             // Images and text files become PDFs as they join the list (#569): from then on they
             // are ordinary files, with pages, thumbnails and page ranges.
             // A file that can't be read joins the list all the same, with why (the Warnings
@@ -2438,6 +2443,7 @@ impl PdfCraftApp {
                 auth: 0,
                 notes: Vec::new(),
                 origin_note: note,
+                open_doc,
                 checked: None,
             };
             f.take(assessed, None);
@@ -2536,18 +2542,22 @@ impl PdfCraftApp {
         }
     }
 
-    /// Add documents open in tabs (by tab index), as they are now.
+    /// Add documents open in tabs (by tab index), as they are now; those already in the list
+    /// stay out (#1356). The same document, not the same name: two files called alike are two.
     pub(crate) fn add_open_documents(&mut self, tabs: &[usize]) {
         let mut incoming = Vec::new();
         for &i in tabs {
             let Some(doc) = self.views.get(i).and_then(|v| self.session.get(v.id)) else { continue };
+            if self.combine_draft.iter().any(|f| f.open_doc == Some(doc.id)) {
+                continue;
+            }
             #[cfg(not(target_arch = "wasm32"))]
             let modified = if doc.dirty { None } else { doc.path.as_ref().and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok()) };
             #[cfg(target_arch = "wasm32")]
             let modified = None;
             let note = doc.dirty.then(|| tl!("Includes unsaved changes").to_string());
             let name = if doc.name.to_ascii_lowercase().ends_with(".pdf") { doc.name.clone() } else { format!("{}.pdf", doc.name) };
-            incoming.push(Incoming { name, bytes: doc.bytes.clone(), modified, note });
+            incoming.push(Incoming { name, bytes: doc.bytes.clone(), modified, note, open_doc: Some(doc.id) });
         }
         self.stage_combine_with(incoming);
     }
