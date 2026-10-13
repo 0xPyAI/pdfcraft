@@ -1761,6 +1761,17 @@ impl DocView {
     }
 }
 
+/// The hover popup for an annotation. Replies and Fill & Sign marks (typed text, checks, signatures)
+/// show none: they are page content being edited, not comments.
+fn annotation_hover_text(a: &pdfcraft_render::Annotation) -> Option<String> {
+    if a.in_reply_to.is_some() || a.fill_sign {
+        return None;
+    }
+    let who = a.author.clone().unwrap_or_else(|| a.subtype.clone());
+    let body = a.contents.clone().unwrap_or_default();
+    Some(if body.is_empty() { who } else { format!("{who}\n{body}") })
+}
+
 /// The request tag for a raster at `scale`: equal tags mean the same scale (to 1/65536).
 fn scale_tag(scale: f32) -> u64 {
     (f64::from(scale) * 65536.0).round() as u64
@@ -2960,12 +2971,13 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 // freehand, where it would cover the next stroke (#429).
                 let freehand = matches!(tool, QuickTool::Comment(comments::CommentTool::Ink | comments::CommentTool::Eraser));
                 let gesturing = view.comments.gesture.is_some() || freehand;
-                for a in info.annotations.iter().filter(|a| a.page == i && a.in_reply_to.is_none() && !gesturing) {
+                for a in info.annotations.iter().filter(|a| a.page == i && !gesturing) {
                     let sr = xf.user_rect(info, i, a.rect);
-                    if sr.contains(p) && hover_text.is_none() {
-                        let who = a.author.clone().unwrap_or_else(|| a.subtype.clone());
-                        let body = a.contents.clone().unwrap_or_default();
-                        hover_text = Some((p, if body.is_empty() { who } else { format!("{who}\n{body}") }));
+                    if sr.contains(p)
+                        && hover_text.is_none()
+                        && let Some(text) = annotation_hover_text(a)
+                    {
+                        hover_text = Some((p, text));
                     }
                 }
             }
@@ -4532,6 +4544,32 @@ pub(crate) fn texture_image(size: [usize; 2], pixels: pdfcraft_render::Pixels) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn annotation(fill_sign: bool) -> pdfcraft_render::Annotation {
+        pdfcraft_render::Annotation {
+            page: 0,
+            subtype: "FreeText".into(),
+            author: None,
+            contents: Some("Hello".into()),
+            modified: None,
+            name: None,
+            in_reply_to: None,
+            rect: [0.0; 4],
+            color: None,
+            index: 0,
+            state: None,
+            quads: Vec::new(),
+            locked: false,
+            intent: None,
+            fill_sign,
+        }
+    }
+
+    #[test]
+    fn hover_popup_skips_fill_and_sign_marks() {
+        assert_eq!(annotation_hover_text(&annotation(false)).as_deref(), Some("FreeText\nHello"));
+        assert_eq!(annotation_hover_text(&annotation(true)), None);
+    }
 
     #[test]
     fn rendered_rasters_become_texture_images_without_a_copy() {
