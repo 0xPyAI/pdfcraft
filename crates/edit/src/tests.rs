@@ -234,6 +234,34 @@ fn flattening_keeps_a_note_whose_appearance_is_missing() {
     assert!(flat.contains("q 1 0 0 1 10 10 cm /PCFl0 Do Q"), "{flat}");
 }
 
+/// #1470: a form field whose widget is on no page (left behind by page extraction or combining)
+/// has nothing to draw, but flattening every form field still takes it out of `/AcroForm /Fields`,
+/// or other software keeps treating the flattened file as a form. A hidden widget on a page is
+/// left alone, as before.
+#[test]
+fn flattening_fields_drops_the_ones_on_no_page() {
+    let page = stream("", " ");
+    let mut doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R 6 0 R 7 0 R 8 0 R] >> >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 4 0 R /Annots [5 0 R 7 0 R] >>",
+        &page,
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (on_page) /Rect [10 10 150 40] /F 4 /AP << /N 10 0 R >> >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (orphan) /Rect [10 50 150 80] /F 4 /AP << /N 10 0 R >> >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (hidden) /Rect [10 90 150 120] /F 2 /AP << /N 10 0 R >> >>",
+        "<< /FT /Tx /T (parent) /Kids [9 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /Parent 8 0 R /Rect [10 130 150 160] /F 4 /AP << /N 10 0 R >> >>",
+        "<< /Type /XObject /Subtype /Form /BBox [0 0 140 30] /Length 0 >>\nstream\n\nendstream",
+    ]);
+    assert_eq!(flatten(&mut doc, &[0], false, true).unwrap(), 1, "only the field on the page is drawn");
+    let doc = reopen(&doc);
+    let root = doc.root().unwrap();
+    let af = doc.resolve(doc.get(root).as_dict().unwrap().get(b"AcroForm").unwrap());
+    let fields = doc.resolve(af.as_dict().unwrap().get(b"Fields").unwrap());
+    let left: Vec<pdfcraft_cos::ObjRef> = fields.as_array().unwrap().iter().filter_map(|f| f.as_ref()).collect();
+    assert_eq!(left, [pdfcraft_cos::ObjRef::new(7, 0)], "only the hidden field on the page stays");
+}
+
 /// Flattening never makes a `?` permanent: it refuses, changing nothing, a text box without an
 /// appearance whose text Helvetica can't draw (another program's), and a comment or form field
 /// whose appearance PdfCraft drew with `?` (marked `PCUndrawn`). A comment another program drew
