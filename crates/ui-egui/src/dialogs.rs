@@ -19,6 +19,7 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     password(app, ctx);
     save_prompt(app, ctx);
     link_prompt(app, ctx);
+    remote_link_prompt(app, ctx);
     crate::updates::dialog(app, ctx);
     let Some(dialog) = app.dialog else {
         app.props_draft = None;
@@ -1508,6 +1509,38 @@ fn link_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
     }
     if let Some(open) = choice {
         app.resolve_pending_link(open);
+    }
+}
+
+/// Absolute document-controlled local paths require consent before any filesystem access.
+fn remote_link_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
+    let Some(pending) = app.pending_remote_link.clone() else { return };
+    let mut choice = None;
+    let modal = widgets::show_modal(ctx, "remote_link_prompt", |ui| {
+        ui.set_width(460.0);
+        ui.label(egui::RichText::new(tl!("Open this local PDF?")).font(theme::semibold(16.0)));
+        ui.add_space(6.0);
+        ui.label(tl!("This document is trying to open a local file:"));
+        egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+            ui.add(egui::Label::new(egui::RichText::new(pending.path.to_string_lossy()).monospace()).wrap().selectable(true));
+        });
+        ui.add_space(8.0);
+        ui.label(tl!("Only allow this if you trust the source document."));
+        ui.add_space(14.0);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if widgets::pill_button(ui, tl!("Cancel"), true).clicked() {
+                choice = Some(false);
+            }
+            if widgets::pill_button(ui, tl!("Allow"), false).clicked() {
+                choice = Some(true);
+            }
+        });
+    });
+    if choice.is_none() && modal.should_close() {
+        choice = Some(false);
+    }
+    if let Some(open) = choice {
+        app.resolve_pending_remote_link(open);
     }
 }
 

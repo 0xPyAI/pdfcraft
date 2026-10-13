@@ -2338,5 +2338,11 @@ animation effects	Off	Désactivés
 	The linked PDF opened, but its named destination was not applied.	Le PDF lié s'est ouvert, mais sa destination nommée n'a pas été appliquée.
 	The linked PDF opened, but its page destination was out of range.	Le PDF lié s'est ouvert, mais sa page de destination est hors limites.
 	Local cross-PDF links require the desktop app	Les liens locaux entre PDF nécessitent l'application de bureau
+
+# Absolute local GoToR confirmation (#1364).
+	Allow	Autoriser
+	Only allow this if you trust the source document.	N'autorisez cette action que si vous faites confiance au document source.
+	Open this local PDF?	Ouvrir ce PDF local ?
+	This document is trying to open a local file:	Ce document tente d’ouvrir un fichier local :
 	Move tag earlier	Déplacer la balise plus tôt
 	Move tag later	Déplacer la balise plus tard

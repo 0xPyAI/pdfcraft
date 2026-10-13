@@ -2251,5 +2251,11 @@ animation effects	Off	Выкл
 	The linked PDF opened, but its named destination was not applied.	Связанный PDF открыт, но его именованное назначение не применено.
 	The linked PDF opened, but its page destination was out of range.	Связанный PDF открыт, но страница назначения вне допустимого диапазона.
 	Local cross-PDF links require the desktop app	Локальные ссылки между PDF работают только в настольном приложении
+
+# Absolute local GoToR confirmation (#1364).
+	Allow	Разрешить
+	Only allow this if you trust the source document.	Разрешите это действие, только если доверяете исходному документу.
+	Open this local PDF?	Открыть этот локальный PDF?
+	This document is trying to open a local file:	Этот документ пытается открыть локальный файл:
 	Move tag earlier	Переместить тег раньше
 	Move tag later	Переместить тег позже

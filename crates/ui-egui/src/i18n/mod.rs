@@ -920,6 +920,24 @@ mod tests {
         literals
     }
 
+    /// Partial catalogs also translate every label of the absolute local GoToR consent prompt.
+    #[test]
+    fn local_gotor_confirmation_is_translated_in_all_supported_languages() {
+        for language in LANGUAGES.iter().filter(|language| !language.source.is_empty()) {
+            let lang = Lang::from_code(language.code).expect("registered language");
+            for label in [
+                "Open this local PDF?",
+                "This document is trying to open a local file:",
+                "Only allow this if you trust the source document.",
+                "Allow",
+                "Cancel",
+            ] {
+                assert!(has(lang, label), "{} lacks GoToR confirmation label: {label}", language.code);
+                assert_ne!(tr(lang, label), label, "{} falls back to English for {label}", language.code);
+            }
+        }
+    }
+
     /// Japanese translates every `tl!("…")` literal in the UI source, so a new string can't ship in
     /// English by accident (the same check French, German, Russian and Simplified Chinese have).
     #[test]

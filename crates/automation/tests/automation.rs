@@ -3486,7 +3486,12 @@ fn local_gotor_link_open_applies_destinations_and_honors_root() {
     assert_eq!(a.session().get(pdfcraft_engine::DocId(target_id)).unwrap().info.pages.len(), 3);
 
     let absolute = ok(&mut a, "doc_open", json!({ "path": "absolute.pdf" }))["doc"].as_u64().unwrap();
-    let opened = ok(&mut a, "link_open", json!({ "doc": absolute, "page": 1, "index": 1 }));
+    let before = a.session().docs().len();
+    for args in [json!({ "doc": absolute, "page": 1, "index": 1 }), json!({ "doc": absolute, "page": 1, "index": 1, "allow_absolute": false })] {
+        assert!(matches!(err(&mut a, "link_open", args), ToolError::Failed(m) if m.contains("allow_absolute")));
+        assert_eq!(a.session().docs().len(), before);
+    }
+    let opened = ok(&mut a, "link_open", json!({ "doc": absolute, "page": 1, "index": 1, "allow_absolute": true }));
     assert_eq!(opened["path"], "target.pdf");
     assert_eq!(opened["destination"]["page"], 2);
 
@@ -5622,4 +5627,48 @@ fn private_crops_with_nested_state_resize_save_reopen_through_tools() {
         assert_eq!(a.call("page_render", &json!({"doc":doc,"page":1,"dpi":72})).unwrap(), pixels);
         assert_eq!(ok(&mut a, "page_images", json!({"doc":doc,"page":1})), original);
     }
+}
+
+#[test]
+fn absolute_gotor_consent_does_not_bypass_validation_or_passwords() {
+    let (base, root) = sandbox("gotor-absolute-consent");
+    std::fs::create_dir_all(root.join("folder.pdf")).unwrap();
+    std::fs::write(root.join("notes.txt"), fixture(1)).unwrap();
+    std::fs::write(root.join("encrypted.pdf"), protected_fixture("secret")).unwrap();
+    link_dir(&root, "outside-link", &base.join("outside"));
+    let mut a = auto(&root);
+    for (name, target, reason) in [
+        ("missing", root.join("missing.pdf"), "missing.pdf"),
+        ("folder", root.join("folder.pdf"), "not a regular file"),
+        ("text", root.join("notes.txt"), "not a .pdf file"),
+        ("outside", base.join("outside/secret.pdf"), "outside"),
+        ("symlink", root.join("outside-link/secret.pdf"), "outside"),
+    ] {
+        let path = format!("{name}-source.pdf");
+        std::fs::write(root.join(&path), remote_link_pdf(target.to_str().unwrap(), Some("[0 /Fit]"))).unwrap();
+        let doc = ok(&mut a, "doc_open", json!({ "path": path }))["doc"].as_u64().unwrap();
+        let before = a.session().docs().len();
+        // The absence of a target or a root escape must not be probed before consent.
+        assert!(
+            matches!(err(&mut a, "link_open", json!({ "doc": doc, "page": 1, "index": 1 })), ToolError::Failed(m) if m.contains("allow_absolute"))
+        );
+        assert!(
+            matches!(err(&mut a, "link_open", json!({ "doc": doc, "page": 1, "index": 1, "allow_absolute": true })), ToolError::Failed(m) if m.contains(reason)),
+            "{name}"
+        );
+        assert_eq!(a.session().docs().len(), before);
+    }
+    std::fs::write(root.join("password-source.pdf"), remote_link_pdf(root.join("encrypted.pdf").to_str().unwrap(), Some("[0 /Fit]"))).unwrap();
+    let doc = ok(&mut a, "doc_open", json!({ "path": "password-source.pdf" }))["doc"].as_u64().unwrap();
+    let before = a.session().docs().len();
+    for password in ["", "wrong"] {
+        assert!(matches!(
+            err(&mut a, "link_open", json!({ "doc": doc, "page": 1, "index": 1, "allow_absolute": true, "password": password })),
+            ToolError::Failed(_)
+        ));
+        assert_eq!(a.session().docs().len(), before);
+    }
+    let opened = ok(&mut a, "link_open", json!({ "doc": doc, "page": 1, "index": 1, "allow_absolute": true, "password": "secret" }));
+    assert_eq!(opened["document"]["encrypted"], true);
+    assert_eq!(opened["destination_applied"], true);
 }

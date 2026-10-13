@@ -164,6 +164,21 @@ undoable and survive saving/reopening. `image_hit` shares the UI's curve and hol
 The bounds, limits and font requirements are in [existing-text editing](../../docs/editing-existing-text.md)
 and [image editing](../../docs/editing-images.md).
 
+## Opening local GoToR links
+
+`link_open {doc, page, index, password?}` follows a local PDF link using `link_list`
+numbering. Relative file specifications open normally. An **absolute** file specification
+requires `allow_absolute: true`, after reviewing the target reported by `link_list`.
+Omitting the argument or passing false refuses the request before checking or reading the
+target file. This is an intentional compatibility change for callers that previously opened
+absolute GoToR targets without explicit consent. Opting in does not bypass `--root`, symlink
+confinement, regular-file, PDF-extension, size, or password validation. Consent applies only
+to that call, including each password retry; it is never remembered for other links.
+
+The desktop UI asks Allow/Cancel before following absolute GoToR targets and displays the
+complete path. Relative links retain their existing behavior. Named destinations remain
+unapplied with a warning.
+
 ## Folder batches
 
 `doc_batch` runs conversion, OCR and compression over files and optionally recursive

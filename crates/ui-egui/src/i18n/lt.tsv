@@ -2582,5 +2582,11 @@ key	Esc	Esc
 key	Home	Home
 key	End	End
 key	Space	Tarpas
+
+# Absolute local GoToR confirmation (#1364).
+	Allow	Leisti
+	Only allow this if you trust the source document.	Leiskite tai tik tuo atveju, jei pasitikite pirminiu dokumentu.
+	Open this local PDF?	Atverti šį vietinį PDF failą?
+	This document is trying to open a local file:	Šis dokumentas bando atverti vietinį failą:
 	Move tag earlier	Perkelti žymą anksčiau
 	Move tag later	Perkelti žymą vėliau

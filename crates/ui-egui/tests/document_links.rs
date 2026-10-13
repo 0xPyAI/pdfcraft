@@ -391,6 +391,154 @@ fn a_numeric_host_is_shown_as_the_address_it_goes_to() {
     assert!(h.query_by_label_contains("alphabet").is_none());
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_absolute_gotor_waits_for_consent_and_keeps_its_destination_across_tabs() {
+    let _gpu = gpu();
+    let dir = std::env::temp_dir().join(format!("pdfcraft-ui-gotor-consent-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("target with spaces.pdf");
+    let file = target.to_str().unwrap();
+    let mut h = remote_harness(None, file, "[1 /FitH 200]");
+    let source = h.state().views[0].id;
+    click_remote_link(&mut h);
+    let pending = h.state().pending_remote_link.as_ref().unwrap();
+    assert_eq!(pending.source, source);
+    assert_eq!(pending.path, target);
+    h.get_by_label(file);
+    h.get_by_label("Allow");
+    assert_eq!(h.state().views.len(), 1);
+    assert_eq!(h.state().session.docs().len(), 1);
+    assert!(h.state().toast.is_none(), "the nonexistent target is not accessed before consent");
+    assert!(h.state().password_prompt.is_none());
+    // The target only appears AFTER the confirmation is displayed.
+    std::fs::write(&target, linked_pages(2, None)).unwrap();
+    h.state_mut().open_bytes("other.pdf", None, fixture()).unwrap();
+    assert_eq!(h.state().active, Some(1));
+    h.run_steps(3);
+    h.get_by_label("Allow").click();
+    h.run_steps(3);
+    assert!(h.state().pending_remote_link.is_none());
+    assert_eq!(h.state().views.len(), 3);
+    assert_eq!(h.state().views[2].current, 1);
+    assert_eq!(h.state().views[2].fit, pdfcraft_ui_egui::canvas::Fit::Width);
+    assert_eq!(h.state().active, Some(2));
+    assert!(!h.state().session.get(source).unwrap().dirty);
+    assert_eq!(h.state().last_opened_url, None);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn cancelling_an_absolute_gotor_by_button_escape_or_dismissal_changes_nothing() {
+    let _gpu = gpu();
+    let target = std::env::temp_dir().join(format!("pdfcraft-ui-gotor-cancel-{}.pdf", std::process::id()));
+    for answer in ["button", "escape", "outside"] {
+        let mut h = remote_harness(None, target.to_str().unwrap(), "[1 /Fit]");
+        let source = h.state().views[0].id;
+        let before = h.state().session.get(source).unwrap().bytes.clone();
+        click_remote_link(&mut h);
+        assert!(h.state().pending_remote_link.is_some());
+        match answer {
+            "button" => h.get_by_label("Cancel").click(),
+            "escape" => h.key_press(egui::Key::Escape),
+            _ => click_at(&mut h, egui::pos2(5.0, 5.0)),
+        }
+        h.run_steps(3);
+        assert!(h.state().pending_remote_link.is_none(), "{answer}");
+        assert_eq!(h.state().views.len(), 1);
+        assert_eq!(h.state().session.docs().len(), 1);
+        assert_eq!(h.state().active, Some(0));
+        assert_eq!(h.state().views[0].current, 0);
+        let doc = h.state().session.get(source).unwrap();
+        assert_eq!(doc.bytes, before);
+        assert!(!doc.dirty);
+        assert!(doc.can_undo().is_none());
+        assert!(h.state().toast.is_none());
+        assert!(h.state().password_prompt.is_none());
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn consenting_to_absolute_gotor_still_validates_the_target() {
+    let _gpu = gpu();
+    let dir = std::env::temp_dir().join(format!("pdfcraft-ui-gotor-consent-invalid-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("folder.pdf")).unwrap();
+    std::fs::write(dir.join("notes.txt"), b"text").unwrap();
+    std::fs::write(dir.join("broken.pdf"), b"not a PDF").unwrap();
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut cases = vec!["missing.pdf", "folder.pdf", "notes.txt", "broken.pdf"];
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("/dev/zero", dir.join("zero.pdf")).unwrap();
+        cases.push("zero.pdf");
+        std::fs::File::create(dir.join("large.pdf")).unwrap().set_len(pdfcraft_engine::MAX_REMOTE_DOCUMENT_BYTES + 1).unwrap();
+        cases.push("large.pdf");
+    }
+    for name in cases {
+        let target = dir.join(name);
+        let mut h = remote_harness(None, target.to_str().unwrap(), "[0 /Fit]");
+        click_remote_link(&mut h);
+        assert!(h.state().pending_remote_link.is_some());
+        assert!(h.state().toast.is_none(), "{name} isn't checked before consent");
+        h.get_by_label("Allow").click();
+        h.run_steps(3);
+        assert!(h.state().pending_remote_link.is_none());
+        assert_eq!(h.state().views.len(), 1, "{name}");
+        assert!(h.state().toast.is_some(), "{name} is refused after consent");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_approved_absolute_gotor_preserves_password_retries_and_cancellation() {
+    let _gpu = gpu();
+    let dir = std::env::temp_dir().join(format!("pdfcraft-ui-gotor-consent-password-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("encrypted.pdf");
+    std::fs::write(&target, linked_pages(2, Some("test-password"))).unwrap();
+    for cancel in [false, true] {
+        let mut h = remote_harness(None, target.to_str().unwrap(), "[1 /FitH 200]");
+        click_remote_link(&mut h);
+        assert!(h.state().password_prompt.is_none());
+        h.get_by_label("Allow").click();
+        h.run_steps(3);
+        assert!(h.state().password_prompt.is_some());
+        h.state_mut().submit_password(Some("wrong-password".into()));
+        assert!(h.state().password_prompt.as_ref().unwrap().error.is_some());
+        assert_eq!(h.state().views.len(), 1);
+        if cancel {
+            h.state_mut().submit_password(None);
+            assert_eq!(h.state().views.len(), 1);
+        } else {
+            h.state_mut().submit_password(Some("test-password".into()));
+            assert_eq!(h.state().views.len(), 2);
+            assert_eq!(h.state().views[1].current, 1);
+        }
+        assert!(h.state().pending_remote_link.is_none());
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn closing_the_source_invalidates_pending_absolute_gotor_consent() {
+    let _gpu = gpu();
+    let target = std::env::temp_dir().join(format!("pdfcraft-ui-gotor-closed-source-{}.pdf", std::process::id()));
+    let mut h = remote_harness(None, target.to_str().unwrap(), "[0 /Fit]");
+    click_remote_link(&mut h);
+    h.state_mut().close_tab(0);
+    h.state_mut().resolve_pending_remote_link(true);
+    assert!(h.state().views.is_empty());
+    assert!(h.state().session.docs().is_empty());
+    assert!(h.state().pending_remote_link.is_none());
+    assert!(h.state().toast.is_none());
+}
+
 fn overlapping_annotation_fixture(subtype: &str, internal: bool) -> Vec<u8> {
     overlapping_annotation_fixture_with_form(subtype, internal, false)
 }
