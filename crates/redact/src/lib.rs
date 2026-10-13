@@ -14,6 +14,8 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+use std::collections::{HashMap, HashSet};
+
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, Stream};
 
 pub mod codes;
@@ -272,6 +274,97 @@ fn overlay_content(marks: &[&Mark]) -> Vec<u8> {
     c
 }
 
+/// The nearest ancestor of `page` that holds `/Resources` (where an inheriting page gets them):
+/// `Some(None)` when none does, `None` when the chain can't be followed (a cycle, a broken node or
+/// a tree deeper than any real one), so callers can stay conservative.
+fn resource_source(doc: &Document, page: ObjRef) -> Option<Option<ObjRef>> {
+    let mut seen = HashSet::new();
+    let mut parent = doc.get(page).as_dict().and_then(|d| d.get(b"Parent")).and_then(Object::as_ref);
+    while let Some(r) = parent {
+        if !seen.insert(r) || seen.len() > 4096 {
+            return None;
+        }
+        let node = doc.get(r);
+        let d = node.as_dict()?;
+        if d.contains(b"Resources") {
+            return Some(Some(r));
+        }
+        parent = d.get(b"Parent").and_then(Object::as_ref);
+    }
+    Some(None)
+}
+
+/// Before rewriting `selected` pages, pin the resources they inherit onto them, and retire the
+/// ancestor `/Resources` they came from once no other page still inherits it, so the parent can't
+/// keep a removed XObject reachable. Pages that aren't redacted are left untouched; an inherited
+/// dictionary that is direct becomes one shared indirect object, never a copy per page.
+fn localize_resources(doc: &mut Document, selected: &[usize]) -> Result<(), pdfcraft_cos::CosError> {
+    let pages = pdfcraft_model::pages(doc);
+    let inherits = |doc: &Document, p: &pdfcraft_model::Page| doc.get(p.obj).as_dict().is_some_and(|d| !d.contains(b"Resources"));
+    // Ancestor → the reference its resources are shared through, and whether that reference is new.
+    let mut shared: HashMap<ObjRef, (Object, bool)> = HashMap::new();
+    for page in selected.iter().filter_map(|&i| pages.get(i)) {
+        // What the page tree gives the page; nothing to pin if it gets nothing.
+        let Some(effective) = page.dict.get(b"Resources").cloned() else { continue };
+        if !inherits(doc, page) {
+            continue;
+        }
+        let source = resource_source(doc, page.obj).flatten();
+        let original = source.and_then(|s| doc.get(s).as_dict().and_then(|d| d.get(b"Resources").cloned()));
+        let value = match source.filter(|_| original.as_ref() == Some(&effective)) {
+            // `/Parent` agrees with the page tree: share one reference per ancestor.
+            Some(source) => match shared.get(&source) {
+                Some((v, _)) => v.clone(),
+                None => {
+                    // A direct dictionary is made indirect once, so every pinned page shares it.
+                    let (v, new) = match effective {
+                        Object::Ref(_) => (effective, false),
+                        direct => (Object::Ref(doc.add(direct)), true),
+                    };
+                    shared.insert(source, (v.clone(), new));
+                    v
+                }
+            },
+            // A malformed tree whose `/Parent` disagrees: pin this page alone and retire nothing.
+            None => match effective {
+                Object::Ref(_) => effective,
+                direct => Object::Ref(doc.add(direct)),
+            },
+        };
+        doc.update_dict(page.obj, |d| d.set(b"Resources".to_vec(), value))?;
+    }
+    if shared.is_empty() {
+        return Ok(());
+    }
+    // Ancestors some page still inherits from keep their resources (that page draws them), through
+    // the shared reference; the others are retired. A page that inherits resources through a chain
+    // that can't be followed might inherit from any of them, so then none is retired.
+    let mut still_used: HashSet<ObjRef> = HashSet::new();
+    for page in pages.iter().filter(|p| p.dict.contains(b"Resources") && inherits(doc, p)) {
+        match resource_source(doc, page.obj) {
+            Some(Some(source)) => {
+                if shared.contains_key(&source) {
+                    still_used.insert(source);
+                }
+            }
+            _ => still_used.extend(shared.keys().copied()),
+        }
+    }
+    for (source, (value, new)) in shared {
+        if still_used.contains(&source) {
+            if !new {
+                continue;
+            }
+            doc.update_dict(source, |d| d.set(b"Resources".to_vec(), value))?;
+        } else {
+            doc.update_dict(source, |d| {
+                d.remove(b"Resources");
+            })?;
+        }
+    }
+    Ok(())
+}
+
 /// Apply every redaction mark (or only those on `pages`, 0-based). Irreversible for the saved
 /// file; callers keep the previous document for undo.
 pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, RedactError> {
@@ -293,6 +386,7 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
     by_page.sort_unstable();
     by_page.dedup();
     report.pages = by_page.len();
+    localize_resources(doc, &by_page)?;
     let mut doomed_fields: Vec<String> = Vec::new();
     let widget_owner: Vec<(ObjRef, String)> =
         pdfcraft_forms::fields(doc).into_iter().flat_map(|f| f.widgets.iter().map(|w| (w.obj, f.name.clone())).collect::<Vec<_>>()).collect();

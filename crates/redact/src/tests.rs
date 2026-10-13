@@ -726,3 +726,99 @@ fn form_tags_are_cleaned_and_surviving_references_point_at_the_copy() {
     assert!(String::from_utf8(s.decoded().unwrap()).unwrap().contains("Public"));
     assert!(doc.get(ObjRef::new(11, 0)).as_dict().unwrap().contains(b"ActualText"));
 }
+
+#[test]
+fn inherited_resources_do_not_keep_the_original_form() {
+    let form = stream("/Type /XObject /Subtype /Form /BBox [0 0 300 300]", b"BT /F1 10 Tf 10 200 Td (LEAK_INHERITED) Tj ET");
+    let mut doc = one_page(b"/Fm Do", "/XObject << /Fm 7 0 R >>", vec![form]);
+    let resources = doc.get(ObjRef::new(3, 0)).as_dict().unwrap().get(b"Resources").unwrap().clone();
+    doc.update_dict(ObjRef::new(2, 0), |d| d.set(b"Resources".to_vec(), resources)).unwrap();
+    doc.update_dict(ObjRef::new(3, 0), |d| {
+        d.remove(b"Resources");
+    })
+    .unwrap();
+    mark(&mut doc, 0, &[[0.0, 190.0, 300.0, 220.0]], "");
+    apply(&mut doc, None).unwrap();
+    assert_no_secret(&doc, b"LEAK_");
+    assert!(!doc.get(ObjRef::new(2, 0)).as_dict().unwrap().contains(b"Resources"));
+}
+
+#[test]
+fn unselected_pages_keep_inherited_forms() {
+    let form = stream("/Type /XObject /Subtype /Form /BBox [0 0 300 300]", b"BT /F1 10 Tf 10 200 Td (SECRET) Tj ET");
+    let mut doc = one_page(b"/Fm Do", "/XObject << /Fm 7 0 R >>", vec![form]);
+    let mut page = doc.get(ObjRef::new(3, 0)).as_dict().unwrap().clone();
+    let resources = page.remove(b"Resources").unwrap();
+    let second = doc.add(Object::Dict(page));
+    doc.update_dict(ObjRef::new(2, 0), |d| {
+        d.set(b"Resources".to_vec(), resources);
+        d.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(3, 0)), Object::Ref(second)]));
+        d.set(b"Count".to_vec(), Object::Int(2));
+    })
+    .unwrap();
+    doc.update_dict(ObjRef::new(3, 0), |d| {
+        d.remove(b"Resources");
+    })
+    .unwrap();
+    mark(&mut doc, 0, &[[0.0, 190.0, 300.0, 220.0]], "");
+    apply(&mut doc, Some(&[0])).unwrap();
+    let mut saved = reopen(&doc);
+    assert_eq!(under(&mut saved, 0, &[[0.0, 190.0, 300.0, 220.0]]), 0);
+    assert_eq!(under(&mut saved, 1, &[[0.0, 190.0, 300.0, 220.0]]), 6);
+}
+
+/// A page tree of `n` pages that all draw form /Fm and inherit a direct `/Resources` from the root.
+fn inheriting_pages(n: usize) -> (Document, Vec<ObjRef>) {
+    let form = stream("/Type /XObject /Subtype /Form /BBox [0 0 300 300]", b"BT /F1 10 Tf 10 200 Td (SECRET) Tj ET");
+    let mut doc = one_page(b"/Fm Do", "/XObject << /Fm 7 0 R >>", vec![form]);
+    let mut page = doc.get(ObjRef::new(3, 0)).as_dict().unwrap().clone();
+    let resources = page.remove(b"Resources").unwrap();
+    doc.set(ObjRef::new(3, 0), Object::Dict(page.clone()));
+    let mut kids = vec![ObjRef::new(3, 0)];
+    kids.extend((1..n).map(|_| doc.add(Object::Dict(page.clone()))));
+    doc.update_dict(ObjRef::new(2, 0), |d| {
+        d.set(b"Resources".to_vec(), resources);
+        d.set(b"Kids".to_vec(), Object::Array(kids.iter().map(|r| Object::Ref(*r)).collect()));
+        d.set(b"Count".to_vec(), Object::Int(n as i64));
+    })
+    .unwrap();
+    let saved = reopen(&doc);
+    (saved, kids)
+}
+
+#[test]
+fn redacting_one_page_leaves_the_other_pages_untouched() {
+    let (mut doc, kids) = inheriting_pages(50);
+    mark(&mut doc, 0, &[[0.0, 190.0, 300.0, 220.0]], "");
+    let before = doc.modified_objects();
+    apply(&mut doc, Some(&[0])).unwrap();
+    let changed: Vec<u32> = doc.modified_objects().into_iter().filter(|n| !before.contains(n)).collect();
+    for kid in &kids[1..] {
+        assert!(!changed.contains(&kid.num), "unredacted page {kid:?} was rewritten");
+    }
+    // The page, its new content and resources, the cleaned form, the parent and one shared
+    // resources object: not one object per page.
+    assert!(changed.len() < 10, "{changed:?}");
+    // The parent keeps the resources the other pages draw with, through a single shared object.
+    let parent = doc.get(ObjRef::new(2, 0)).as_dict().unwrap().clone();
+    assert!(parent.get(b"Resources").and_then(Object::as_ref).is_some());
+    let mut saved = reopen(&doc);
+    assert_eq!(under(&mut saved, 0, &[[0.0, 190.0, 300.0, 220.0]]), 0);
+    assert_eq!(under(&mut saved, 49, &[[0.0, 190.0, 300.0, 220.0]]), 6);
+}
+
+#[test]
+fn redacting_every_inheriting_page_retires_the_parent_resources() {
+    let (mut doc, kids) = inheriting_pages(20);
+    for page in 0..kids.len() {
+        mark(&mut doc, page, &[[0.0, 190.0, 300.0, 220.0]], "");
+    }
+    apply(&mut doc, None).unwrap();
+    assert!(!doc.get(ObjRef::new(2, 0)).as_dict().unwrap().contains(b"Resources"));
+    assert_no_secret(&doc, b"SECRET");
+    let mut saved = reopen(&doc);
+    for page in 0..kids.len() {
+        assert!(pdfcraft_model::pages(&saved)[page].dict.contains(b"Resources"));
+        assert_eq!(under(&mut saved, page, &[[0.0, 190.0, 300.0, 220.0]]), 0);
+    }
+}
