@@ -338,10 +338,19 @@ fn text(args: &[String]) -> Result<(), CliError> {
     // no pages, and "extract every page" of nothing would print nothing and exit 0 (#132). Ask
     // `inspect` why instead, so a protected file fails the same way `info` does.
     if r.page_count() == 0 {
-        let info = inspect(bytes, password).map_err(|e| format!("text: {e}"))?;
+        let info = inspect(bytes.clone(), password).map_err(|e| format!("text: {e}"))?;
         if !info.pages.is_empty() {
             return Err("text: the document could not be parsed".into());
         }
+    }
+    // Printing the text is copying it, so ask what `text_extract` asks (#1645): without the
+    // permissions password, a document that doesn't allow copying gives no text.
+    let mut session = pdfcraft_engine::Session::new();
+    if let Some(doc) = session.open(path, None, bytes, password).ok().and_then(|id| session.get(id)) {
+        // The engine's hint is about editing in the app; on the command line the way in is
+        // `--password`.
+        doc.check_copying()
+            .map_err(|_| "text: the document's permissions don't allow copying its text; pass the owner password with --password to extract it")?;
     }
     let pages: Vec<usize> = match selected_page {
         Some(page) => vec![page],
