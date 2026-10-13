@@ -694,6 +694,57 @@ fn the_rail_zoom_field_sets_a_typed_zoom() {
 }
 
 #[test]
+fn always_use_my_default_zoom_and_page_layout_ignores_what_the_pdf_asks_for() {
+    use pdfcraft_ui_egui::canvas::{Fit, PageLayout};
+    // Opens on page 2 at fit page, two pages side by side.
+    let asks = String::from_utf8_lossy(PAGES).replace("/Pages 2 0 R >>", "/Pages 2 0 R /OpenAction [4 0 R /Fit] /PageLayout /TwoPageLeft >>");
+    let open = |always: Option<&str>| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        if let Some(on) = always {
+            app.set_option("always-default-view", on).unwrap();
+        }
+        app.open_bytes("asks.pdf", None, asks.clone().into_bytes()).expect("opens");
+        let v = &app.views[0];
+        (v.fit, v.layout, v.continuous, v.current)
+    };
+    // Off by default: the document's view wins.
+    assert_eq!(open(None), (Fit::Page, PageLayout::TwoUp, false, 1));
+    assert_eq!(open(Some("off")), (Fit::Page, PageLayout::TwoUp, false, 1));
+    // On: Default zoom and Default page display; the page it opens at is still the document's.
+    assert_eq!(open(Some("on")), (Fit::Width, PageLayout::Single, true, 1));
+    assert!(PdfCraftApp::new().set_option("always-default-view", "yes").is_err());
+}
+
+#[test]
+fn always_use_my_default_zoom_and_page_layout_survives_a_restart() {
+    let mut app = PdfCraftApp::new();
+    assert!(!app.always_default_view, "off by default");
+    app.always_default_view = true;
+    let mut restarted = PdfCraftApp::new();
+    restarted.restore(&app.persist());
+    assert!(restarted.always_default_view, "the choice is kept");
+    restarted.restore(r#"{"always_default_view":"bogus"}"#);
+    assert!(restarted.always_default_view, "garbage leaves it alone");
+    let mut legacy = PdfCraftApp::new();
+    legacy.restore("{}");
+    assert!(!legacy.always_default_view, "a legacy file without the key keeps it off");
+}
+
+#[test]
+fn preferences_turn_on_always_use_my_default_zoom_and_page_layout() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = harness(&[]);
+    assert!(h.state_mut().execute("app.preferences"));
+    h.run_steps(3);
+    h.get_by_label("Always use my default zoom and page layout").scroll_to_me();
+    h.run_steps(4);
+    h.get_by_label("Always use my default zoom and page layout").click();
+    h.run_steps(2);
+    assert!(h.state().always_default_view);
+}
+
+#[test]
 fn preferences_set_the_default_zoom() {
     use egui_kittest::kittest::Queryable;
     let mut h = harness(&[]);

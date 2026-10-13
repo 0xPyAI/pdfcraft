@@ -2243,6 +2243,7 @@ key	Space	Интервал
 	Printer paper and scaling may differ. Check driver settings.	Хартията и мащабът на принтера може да се различават. Проверете настройките на драйвера.
 	Drawing scale changes. Use Actual size for full-scale plans.	Мащабът на чертежа се променя. Използвайте Действителен размер за планове в оригинален мащаб.
 	Reload documents when their files change on disk	Презареждай документите, когато файловете им се променят на диска
+	Always use my default zoom and page layout	Винаги използвай моя мащаб и оформление на страниците по подразбиране
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Този файл беше променен на диска. „Презареждане“ показва новата версия и отхвърля незаписаните ви промени; „Запис“ я заменя с тази версия.
 	Reload	Презареди
 	Couldn't reload {name}: {e}	Неуспешно презареждане на {name}: {e}

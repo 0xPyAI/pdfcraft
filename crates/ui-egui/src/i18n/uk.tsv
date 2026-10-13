@@ -2302,6 +2302,7 @@ key	Space	Пробіл
 	Printer paper and scaling may differ. Check driver settings.	Папір і масштаб принтера можуть відрізнятися. Перевірте налаштування драйвера.
 	Drawing scale changes. Use Actual size for full-scale plans.	Масштаб креслення змінюється. Для друку в початковому масштабі виберіть Фактичний розмір.
 	Reload documents when their files change on disk	Перезавантажувати документи, коли їхні файли змінюються на диску
+	Always use my default zoom and page layout	Завжди використовувати мій типовий масштаб і макет сторінок
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Цей файл змінено на диску. «Перезавантажити» покаже нову версію й відкине незбережені зміни; «Зберегти» замінить її цією версією.
 	Reload	Перезавантажити
 	Couldn't reload {name}: {e}	Не вдалося перезавантажити {name}: {e}

@@ -368,6 +368,7 @@ pub(crate) fn preferences_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tok
             .small()
             .color(t.text_muted),
     );
+    ui.add(widgets::checkbox(&mut app.always_default_view, tl!("Always use my default zoom and page layout")));
     ui.horizontal(|ui| {
         ui.label(tl!("Units"));
         for u in crate::units::Unit::ALL {
