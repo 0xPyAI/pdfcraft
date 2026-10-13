@@ -484,6 +484,11 @@ fn write_control_file(path: &str, port: u16, token: &str) -> std::io::Result<()>
 ///   its window appeared. D3D12 is the native, best-supported backend there.
 fn configure_gpu(native: &mut eframe::NativeOptions) {
     let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut native.wgpu_options.wgpu_setup else { return };
+    // Nothing draws or dispatches indirectly, so wgpu's check of indirect arguments only costs a
+    // compute shader when the device is created, one that Metal can't compile on an Intel Iris
+    // Pro: the device is lost and the window falls back to OpenGL. `WGPU_VALIDATION_INDIRECT_CALL=1`
+    // turns the check back on.
+    setup.instance_descriptor.flags = setup.instance_descriptor.flags.difference(eframe::wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL).with_env();
     // egui-wgpu requests only 8192 pixels even when the adapter can render larger surfaces.
     // A restored 3440-point window at 250% DPI requests 8600 pixels and otherwise panics in
     // Surface::configure before the app starts. Keep the renderer's other device requirements,
@@ -780,6 +785,10 @@ mod tests {
         };
         if std::env::var_os("WGPU_POWER_PREF").is_none() {
             assert_eq!(setup.power_preference, eframe::wgpu::PowerPreference::LowPower);
+        }
+        if std::env::var_os("WGPU_VALIDATION_INDIRECT_CALL").is_none() {
+            let flags = setup.instance_descriptor.flags;
+            assert!(!flags.contains(eframe::wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL), "Intel Metal can't compile its shader: {flags:?}");
         }
         if cfg!(target_os = "windows") && std::env::var_os("WGPU_BACKEND").is_none() {
             let backends = setup.instance_descriptor.backends;
