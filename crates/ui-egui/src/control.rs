@@ -775,10 +775,11 @@ pub struct Endpoint {
 /// Listen on `127.0.0.1` (random port) and forward authenticated requests to `client`.
 ///
 /// Protocol: newline-delimited JSON-RPC 2.0. The first request on a connection must be
-/// `{"method": "auth", "params": {"token": …}}`; anything else closes the connection.
+/// `{"method": "auth", "params": {"token": …}}`; anything else closes the connection, and so does
+/// a line longer than [`MAX_AUTH_LINE`] before that.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn serve(client: ControlClient) -> std::io::Result<Endpoint> {
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufReader, Write};
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
     let port = listener.local_addr()?.port();
     let token = random_token()?;
@@ -791,12 +792,28 @@ pub fn serve(client: ControlClient) -> std::io::Result<Endpoint> {
                 let Ok(read) = stream.try_clone() else { return };
                 let mut write = stream;
                 let mut authed = false;
-                for line in BufReader::new(read).lines() {
-                    let Ok(line) = line else { break };
+                let mut reader = BufReader::new(read);
+                let mut buf = Vec::new();
+                loop {
+                    // Until `auth` succeeds, lines are capped at MAX_AUTH_LINE; afterwards they
+                    // are read whole, as before.
+                    let max = if authed { usize::MAX } else { MAX_AUTH_LINE };
+                    match read_line_limited(&mut reader, &mut buf, max) {
+                        Ok(LineRead::Line) => {}
+                        // End of stream or a failed read ends the connection, as before.
+                        Ok(LineRead::End) | Err(_) => break,
+                        Ok(LineRead::TooLong) => {
+                            let e = rpc_error(Value::Null, -32600, &format!("request line longer than {max} bytes before auth"));
+                            let _ = writeln!(write, "{e}").and_then(|_| write.flush());
+                            break;
+                        }
+                    }
+                    // Bytes that aren't UTF-8 end the connection, as `BufRead::lines` did.
+                    let Ok(line) = std::str::from_utf8(&buf) else { break };
                     if line.trim().is_empty() {
                         continue;
                     }
-                    let (reply, close) = match serde_json::from_str::<Value>(&line) {
+                    let (reply, close) = match serde_json::from_str::<Value>(line) {
                         // Before `auth`, like any other first request, this closes the connection.
                         Err(e) => (rpc_error(Value::Null, -32700, &format!("parse error: {e}")), !authed),
                         Ok(msg) => {
@@ -830,6 +847,44 @@ pub fn serve(client: ControlClient) -> std::io::Result<Endpoint> {
         }
     })?;
     Ok(Endpoint { port, token })
+}
+
+/// Longest line read before a connection has authenticated. The only acceptable request then is
+/// `auth`, about a hundred bytes; a longer line is refused without buffering the rest of it.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_AUTH_LINE: usize = 4 * 1024;
+
+/// What [`read_line_limited`] found.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, PartialEq, Eq)]
+enum LineRead {
+    /// A line, now in the buffer (newline and a trailing `\r` stripped).
+    Line,
+    /// End of stream.
+    End,
+    /// The line is longer than the limit; at most limit + 1 bytes of it were read.
+    TooLong,
+}
+
+/// Read one `\n`-terminated line of at most `max` bytes into `buf`.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_line_limited(reader: &mut impl std::io::BufRead, buf: &mut Vec<u8>, max: usize) -> std::io::Result<LineRead> {
+    use std::io::{BufRead, Read};
+    buf.clear();
+    // `take` bounds what is buffered for one line: never more than `max` + 1 bytes.
+    let limit = u64::try_from(max).unwrap_or(u64::MAX).saturating_add(1);
+    if reader.take(limit).read_until(b'\n', buf)? == 0 {
+        return Ok(LineRead::End);
+    }
+    if buf.last() == Some(&b'\n') {
+        buf.pop();
+        if buf.last() == Some(&b'\r') {
+            buf.pop();
+        }
+        return Ok(LineRead::Line);
+    }
+    // No newline: either the limit was passed, or this is a last line before end of stream.
+    Ok(if buf.len() > max { LineRead::TooLong } else { LineRead::Line })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -875,5 +930,76 @@ mod transport_tests {
             Err(e) => matches!(e.kind(), ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted),
         };
         assert!(closed, "the connection stayed open: {next:?}");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn lines_are_read_up_to_the_limit() {
+        use super::{LineRead, read_line_limited};
+        let mut buf = Vec::new();
+        let mut input: &[u8] = b"aaaaaaaaaa\nbb\r\ncc";
+        assert_eq!(read_line_limited(&mut input, &mut buf, 10).unwrap(), LineRead::Line);
+        assert_eq!(buf, b"aaaaaaaaaa", "a line exactly at the limit is accepted");
+        assert_eq!(read_line_limited(&mut input, &mut buf, 10).unwrap(), LineRead::Line);
+        assert_eq!(buf, b"bb", "CRLF is stripped");
+        assert_eq!(read_line_limited(&mut input, &mut buf, 10).unwrap(), LineRead::Line);
+        assert_eq!(buf, b"cc", "a last line without a newline is still read");
+        assert_eq!(read_line_limited(&mut input, &mut buf, 10).unwrap(), LineRead::End, "then end of stream");
+        let long = [b'x'; 100];
+        let mut input: &[u8] = &long;
+        assert_eq!(read_line_limited(&mut input, &mut buf, 10).unwrap(), LineRead::TooLong);
+        assert_eq!(input.len(), 100 - 11, "at most limit + 1 bytes are read; the rest is left");
+    }
+
+    /// Before authenticating, a line longer than [`super::MAX_AUTH_LINE`] is refused as soon as
+    /// the limit is passed (no newline needed) and the connection is closed.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn an_overlong_line_before_auth_is_refused() {
+        use std::io::{BufRead, BufReader, ErrorKind, Write};
+        let (_control, client) = super::attach(&egui::Context::default());
+        let ep = super::serve(client).unwrap();
+        let s = std::net::TcpStream::connect(("127.0.0.1", ep.port)).unwrap();
+        s.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        // Exactly one byte over the limit, without a newline: the server reads it all, so the
+        // close below is a clean end of stream.
+        s.try_clone().unwrap().write_all(&vec![b'x'; super::MAX_AUTH_LINE + 1]).unwrap();
+        let mut r = BufReader::new(s);
+        let mut first = String::new();
+        r.read_line(&mut first).unwrap();
+        let reply: serde_json::Value = serde_json::from_str(&first).unwrap();
+        assert_eq!(reply["error"]["code"], -32600, "{first}");
+        let mut next = String::new();
+        let closed = match r.read_line(&mut next) {
+            Ok(n) => n == 0,
+            Err(e) => matches!(e.kind(), ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted),
+        };
+        assert!(closed, "the connection stayed open: {next:?}");
+    }
+
+    /// After `auth` the limit no longer applies: a long line is read as before (here it isn't
+    /// JSON, so it gets a parse error and the connection stays open).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn long_lines_after_auth_are_still_read() {
+        use std::io::{BufRead, BufReader, Write};
+        let (_control, client) = super::attach(&egui::Context::default());
+        let ep = super::serve(client).unwrap();
+        let s = std::net::TcpStream::connect(("127.0.0.1", ep.port)).unwrap();
+        s.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let mut w = s.try_clone().unwrap();
+        let mut r = BufReader::new(s);
+        let reply = |r: &mut BufReader<std::net::TcpStream>| {
+            let mut line = String::new();
+            r.read_line(&mut line).unwrap();
+            serde_json::from_str::<serde_json::Value>(&line).unwrap()
+        };
+        let auth = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "auth", "params": { "token": ep.token } });
+        writeln!(w, "{auth}").unwrap();
+        assert_eq!(reply(&mut r)["result"]["ok"], true);
+        writeln!(w, "{}", "x".repeat(4 * super::MAX_AUTH_LINE)).unwrap();
+        assert_eq!(reply(&mut r)["error"]["code"], -32700, "a long line after auth is parsed, not refused");
+        writeln!(w, "y").unwrap();
+        assert_eq!(reply(&mut r)["error"]["code"], -32700, "and the connection is still open");
     }
 }
