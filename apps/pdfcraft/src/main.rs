@@ -126,6 +126,35 @@ fn path_from_arg(arg: String) -> String {
     String::from_utf8(out).unwrap_or(arg)
 }
 
+/// Some programs start the PDF reader with the path unquoted (`pdfcraft.exe P:\Docs\01 Contract.PDF`),
+/// so a path with spaces arrives split into several arguments (Acrobat accepts this). When an
+/// argument names no file but it and the ones after it, joined with one space, do, rejoin them
+/// (the longest such run). Anything else is kept as given. Runs of several spaces can't be recovered: the split has lost them.
+fn rejoin_split_paths(args: Vec<String>, exists: impl Fn(&str) -> bool) -> Vec<String> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while let Some(first) = args.get(i) {
+        if exists(first) {
+            out.push(first.clone());
+            i += 1;
+            continue;
+        }
+        // The longest run starting here that names a file; capped so a long list stays cheap.
+        let end = (i + 2..=args.len().min(i + 32)).rev().find(|&j| args.get(i..j).is_some_and(|run| exists(&run.join(" "))));
+        match end.and_then(|j| Some((j, args.get(i..j)?.join(" ")))) {
+            Some((j, joined)) => {
+                out.push(joined);
+                i = j;
+            }
+            None => {
+                out.push(first.clone());
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
 fn main() -> eframe::Result {
     // First, so the panic hook and every start-up warning are recorded (`logging`).
     let logger = logging::install();
@@ -168,6 +197,7 @@ fn main() -> eframe::Result {
             _ => files.push(path_from_arg(a)),
         }
     }
+    let files = rejoin_split_paths(files, |p| std::path::Path::new(p).is_file());
     let integrated = cfg!(target_os = "macos");
     migrate_legacy_folders();
     // The log file lives in the settings folder; opened after the arguments (so `--version` leaves
@@ -730,6 +760,24 @@ mod tests {
         assert_eq!(super::path_from_arg("file:///tmp/a%2".to_string()), "/tmp/a%2");
         assert_eq!(super::path_from_arg("file:///tmp/%zz%".to_string()), "/tmp/%zz%");
         assert_eq!(super::path_from_arg("file:///tmp/%FF.pdf".to_string()), "file:///tmp/%FF.pdf");
+    }
+
+    #[test]
+    fn unquoted_paths_with_spaces_are_rejoined() {
+        let have = ["P:\\Archive\\00042A26 Contract.PDF", "C:\\a b c.pdf", "C:\\a.pdf", "C:\\x y.pdf"];
+        let exists = |p: &str| have.contains(&p);
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // The case an office program produced: one path, split at its space.
+        assert_eq!(
+            super::rejoin_split_paths(args(&["P:\\Archive\\00042A26", "Contract.PDF"]), exists),
+            args(&["P:\\Archive\\00042A26 Contract.PDF"])
+        );
+        // The longest run wins; files that exist on their own are left alone.
+        assert_eq!(super::rejoin_split_paths(args(&["C:\\a", "b", "c.pdf", "C:\\a.pdf"]), exists), args(&["C:\\a b c.pdf", "C:\\a.pdf"]));
+        assert_eq!(super::rejoin_split_paths(args(&["C:\\a.pdf", "C:\\x", "y.pdf"]), exists), args(&["C:\\a.pdf", "C:\\x y.pdf"]));
+        // Nothing to join: kept as given, so the missing file is still reported by name.
+        assert_eq!(super::rejoin_split_paths(args(&["missing.pdf", "other"]), exists), args(&["missing.pdf", "other"]));
+        assert!(super::rejoin_split_paths(Vec::new(), exists).is_empty());
     }
 
     #[test]
