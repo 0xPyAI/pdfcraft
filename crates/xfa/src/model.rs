@@ -228,6 +228,36 @@ impl VAlign {
     }
 }
 
+/// Which point of a positioned object's box its `x` and `y` give (`anchorType`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Anchor {
+    /// Fraction of the width left of the point: 0 left, 0.5 centre, 1 right.
+    pub h: f64,
+    /// Fraction of the height above the point: 0 top, 0.5 middle, 1 bottom.
+    pub v: f64,
+}
+
+impl Anchor {
+    pub fn parse(s: Option<&str>) -> Anchor {
+        let s = s.map(str::trim).unwrap_or("");
+        let v = if s.starts_with("middle") {
+            0.5
+        } else if s.starts_with("bottom") {
+            1.0
+        } else {
+            0.0
+        };
+        let h = if s.ends_with("Center") {
+            0.5
+        } else if s.ends_with("Right") {
+            1.0
+        } else {
+            0.0
+        };
+        Anchor { h, v }
+    }
+}
+
 /// Paragraph properties as written on an element; `None` inherits.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ParaSpec {
@@ -276,6 +306,7 @@ pub struct Common {
     pub id: Option<String>,
     pub x: Option<f64>,
     pub y: Option<f64>,
+    pub anchor: Anchor,
     pub w: Option<f64>,
     pub h: Option<f64>,
     pub min_w: Option<f64>,
@@ -298,6 +329,13 @@ pub enum Node {
     Field(Box<Field>),
     Draw(Box<Draw>),
     ExclGroup(Box<ExclGroup>),
+}
+
+impl Common {
+    /// The top-left corner of a positioned box of `w` by `h`, from `x`, `y` and the anchor.
+    pub fn top_left(&self, w: f64, h: f64) -> (f64, f64) {
+        (self.x.unwrap_or(0.0) - w * self.anchor.h, self.y.unwrap_or(0.0) - h * self.anchor.v)
+    }
 }
 
 impl Node {
