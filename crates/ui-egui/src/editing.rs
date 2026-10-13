@@ -43,6 +43,7 @@ impl PdfCraftApp {
                 let info = &doc.info;
                 let view = &mut self.views[i];
                 view.signature_drag.committed(&edit, doc.edit_generation());
+                view.move_background.committed(&edit, doc.edit_generation());
                 if let Some(page) = comment_page(&edit).or_else(|| content_page(&edit)) {
                     // Comment and content edits change one page: keep every other raster.
                     view.page_changed(page);

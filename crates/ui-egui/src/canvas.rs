@@ -394,6 +394,7 @@ pub struct DocView {
     pub(crate) edit_lines: HashMap<usize, (u64, Vec<pdfcraft_engine::TextBlock>)>,
     pub line_editor: Option<crate::edit_text_ui::LineEditor>,
     pub(crate) text_background: crate::edit_text_ui::TextBackground,
+    pub(crate) move_background: crate::content_ui::MoveBackground,
     /// Edit text & images: the images per page (by document generation), and the selected one.
     pub(crate) edit_images: HashMap<usize, (u64, Vec<pdfcraft_engine::PageImage>)>,
     pub(crate) objects: crate::object_ui::ObjectSelection,
@@ -635,6 +636,7 @@ impl DocView {
             edit_lines: HashMap::new(),
             line_editor: None,
             text_background: Default::default(),
+            move_background: Default::default(),
             edit_images: HashMap::new(),
             objects: Default::default(),
             image_selection: None,
@@ -780,7 +782,7 @@ impl DocView {
     }
 
     pub fn render_pending(&self) -> bool {
-        !self.last_queue.is_empty() || self.text_background.pending()
+        !self.last_queue.is_empty() || self.text_background.pending() || self.move_background.pending()
     }
 
     /// Re-render every page and text layer (the document's appearance changed, e.g. a layer
@@ -1343,6 +1345,7 @@ impl DocView {
         // Signature previews own a separate renderer and image/background textures.
         self.signature_drag = Default::default();
         self.text_background = Default::default();
+        self.move_background = Default::default();
         if !self.last_queue.is_empty() {
             pool.set_queue(Vec::new());
             self.last_queue.clear();
@@ -1614,6 +1617,7 @@ impl DocView {
             let tex = ctx.load_texture(format!("page-{:?}-{page}", self.id), img, TextureOptions::LINEAR);
             self.pages.insert(page, PageTex { tag: r.request.tag, tex });
             self.signature_drag.page_received(page);
+            self.move_background.page_received(page);
             self.waiting_since.remove(&page);
             if !self.stale_tiles.iter().any(|k| k.0 == page) {
                 self.forms.unbaked.retain(|(_, p)| *p != page);
@@ -2347,6 +2351,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     } else {
         view.content.selected = None;
     }
+    view.move_background.prepare(ui.ctx(), doc, &view.content, scale);
 
     // A destination's position (bookmarks, links) refines `goto`: its point at the window's
     // top-left, or the centre of a /FitR rectangle at the window's centre.
@@ -2546,6 +2551,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 }
             }
             view.text_background.paint(painter, &xf, i, view.line_editor.as_ref());
+            if editing_content {
+                let page_tex = view.pages.get(&i).map(|p| p.tex.id());
+                view.move_background.paint(ui, painter, &xf, i, info, &view.content, page_tex);
+            }
             painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(0.5, t.border.gamma_multiply(0.8)), egui::StrokeKind::Outside);
 
             // Comments: tools, selection, moving and resizing come before text selection.
