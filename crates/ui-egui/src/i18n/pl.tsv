@@ -2319,6 +2319,11 @@ animation effects	Off	Wyłączone
 	Local cross-PDF links require the desktop app	Lokalne łącza między plikami PDF wymagają aplikacji komputerowej
 	The existing action will be preserved.	Istniejąca akcja zostanie zachowana.
 	This form's scripts are turned off because one ran too long. Reopen the document to run them again.	Skrypty tego formularza są wyłączone, ponieważ jeden z nich działał zbyt długo. Otwórz dokument ponownie, aby znów je uruchomić.
+	Minimize	Zminimalizuj
+	Maximize	Zmaksymalizuj
+	Restore	Przywróć
+	Use system title bar	Używaj systemowego paska tytułu
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Pokazuj prosty pasek tytułu z przyciskami okna zamiast paska kart. GNOME nie rysuje pasków tytułu dla aplikacji, więc ten nie pasuje do jego motywu.
 
 # Absolute local GoToR confirmation (#1364).
 	Allow	Zezwól

@@ -2339,6 +2339,11 @@ animation effects	Off	Désactivés
 	The linked PDF opened, but its named destination was not applied.	Le PDF lié s'est ouvert, mais sa destination nommée n'a pas été appliquée.
 	The linked PDF opened, but its page destination was out of range.	Le PDF lié s'est ouvert, mais sa page de destination est hors limites.
 	Local cross-PDF links require the desktop app	Les liens locaux entre PDF nécessitent l'application de bureau
+	Minimize	Réduire
+	Maximize	Agrandir
+	Restore	Restaurer
+	Use system title bar	Utiliser la barre de titre du système
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Afficher une barre de titre simple pour les boutons de la fenêtre au lieu de la barre d’onglets. GNOME ne dessine pas de barre de titre pour les applications : celle-ci ne suit donc pas son thème.
 
 # Absolute local GoToR confirmation (#1364).
 	Allow	Autoriser

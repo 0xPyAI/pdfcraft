@@ -2252,6 +2252,11 @@ animation effects	Off	Выкл
 	The linked PDF opened, but its named destination was not applied.	Связанный PDF открыт, но его именованное назначение не применено.
 	The linked PDF opened, but its page destination was out of range.	Связанный PDF открыт, но страница назначения вне допустимого диапазона.
 	Local cross-PDF links require the desktop app	Локальные ссылки между PDF работают только в настольном приложении
+	Minimize	Свернуть
+	Maximize	Развернуть
+	Restore	Восстановить
+	Use system title bar	Использовать системный заголовок окна
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Показывать простой заголовок окна с кнопками вместо полосы вкладок. GNOME не рисует заголовки для приложений, поэтому этот заголовок не следует его теме.
 
 # Absolute local GoToR confirmation (#1364).
 	Allow	Разрешить

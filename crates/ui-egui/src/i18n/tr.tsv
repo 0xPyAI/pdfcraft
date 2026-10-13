@@ -2335,6 +2335,11 @@ animation effects	Off	Kapalı
 	The linked PDF opened, but its named destination was not applied.	Bağlantılı PDF açıldı, ancak adlandırılmış hedefi uygulanmadı.
 	The linked PDF opened, but its page destination was out of range.	Bağlantılı PDF açıldı, ancak sayfa hedefi aralık dışında.
 	Local cross-PDF links require the desktop app	PDF'ler arası yerel bağlantılar masaüstü uygulamasını gerektirir
+	Minimize	Küçült
+	Maximize	Büyüt
+	Restore	Geri yükle
+	Use system title bar	Sistem başlık çubuğunu kullan
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Sekme çubuğu yerine pencere düğmeleri için basit bir başlık çubuğu göster. GNOME uygulamalar için başlık çubuğu çizmez, bu yüzden bu çubuk onun temasına uymaz.
 
 # Absolute local GoToR confirmation (#1364).
 	Allow	İzin ver

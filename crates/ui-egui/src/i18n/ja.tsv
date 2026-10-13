@@ -2339,6 +2339,11 @@ animation effects	Off	オフ
 	The linked PDF opened, but its named destination was not applied.	リンク先の PDF を開きましたが、名前付き移動先は適用されませんでした。
 	The linked PDF opened, but its page destination was out of range.	リンク先の PDF を開きましたが、移動先のページが範囲外です。
 	Local cross-PDF links require the desktop app	PDF 間のローカルリンクにはデスクトップアプリが必要です
+	Minimize	最小化
+	Maximize	最大化
+	Restore	元のサイズに戻す
+	Use system title bar	システムのタイトルバーを使う
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	タブバーの代わりに、ウィンドウボタン用のシンプルなタイトルバーを表示します。GNOME はアプリのタイトルバーを描画しないため、このタイトルバーは GNOME のテーマに従いません。
 
 # Absolute local GoToR confirmation (#1364).
 	Allow	許可

@@ -2303,6 +2303,11 @@ animation effects	Off	关
 	The linked PDF opened, but its named destination was not applied.	已打开链接的 PDF，但未应用其命名目标。
 	The linked PDF opened, but its page destination was out of range.	已打开链接的 PDF，但其页面目标超出范围。
 	Local cross-PDF links require the desktop app	PDF 之间的本地链接需要桌面应用
+	Minimize	最小化
+	Maximize	最大化
+	Restore	还原
+	Use system title bar	使用系统标题栏
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	用简单的标题栏显示窗口按钮，而不是在标签栏中。GNOME 不为应用绘制标题栏，因此此标题栏不会跟随其主题。
 
 # Absolute local GoToR confirmation (#1364).
 	Allow	允许

@@ -2338,6 +2338,11 @@ animation effects	Off	Ki
 	The linked PDF opened, but its named destination was not applied.	A hivatkozott PDF megnyílt, de a nevesített cél nem lett alkalmazva.
 	The linked PDF opened, but its page destination was out of range.	A hivatkozott PDF megnyílt, de a céloldal a tartományon kívül esik.
 	Local cross-PDF links require the desktop app	A PDF-ek közötti helyi hivatkozásokhoz az asztali alkalmazás szükséges
+	Minimize	Minimalizálás
+	Maximize	Maximalizálás
+	Restore	Visszaállítás
+	Use system title bar	Rendszer címsorának használata
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Egyszerű címsor megjelenítése az ablakgombokkal a lapsáv helyett. A GNOME nem rajzol címsort az alkalmazásoknak, ezért ez nem követi a témáját.
 
 # Absolute local GoToR confirmation (#1364).
 	Allow	Engedélyezés

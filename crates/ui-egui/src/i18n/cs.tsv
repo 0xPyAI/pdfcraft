@@ -2413,6 +2413,11 @@ animation effects	Off	Vypnuto
 	The linked PDF opened, but its named destination was not applied.	Odkazovaný PDF se otevřel, ale jeho pojmenovaný cíl nebyl použit.
 	The linked PDF opened, but its page destination was out of range.	Odkazovaný PDF se otevřel, ale cílová stránka je mimo rozsah.
 	Local cross-PDF links require the desktop app	Místní odkazy mezi soubory PDF vyžadují desktopovou aplikaci
+	Minimize	Minimalizovat
+	Maximize	Maximalizovat
+	Restore	Obnovit
+	Use system title bar	Použít systémové záhlaví okna
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Zobrazit jednoduché záhlaví s tlačítky okna místo pruhu karet. GNOME aplikacím záhlaví nekreslí, proto toto záhlaví nesleduje jeho motiv.
 
 # Absolute local GoToR confirmation (#1364).
 	Allow	Povolit

@@ -2349,6 +2349,11 @@ animation effects	Off	Ανενεργά
 	Local cross-PDF links require the desktop app	Οι τοπικοί σύνδεσμοι μεταξύ PDF απαιτούν την εφαρμογή υπολογιστή
 	The existing action will be preserved.	Η υπάρχουσα ενέργεια θα διατηρηθεί.
 	This form's scripts are turned off because one ran too long. Reopen the document to run them again.	Τα σενάρια αυτής της φόρμας είναι απενεργοποιημένα, επειδή ένα από αυτά εκτελούνταν για πολύ ώρα. Ανοίξτε ξανά το έγγραφο για να εκτελεστούν ξανά.
+	Minimize	Ελαχιστοποίηση
+	Maximize	Μεγιστοποίηση
+	Restore	Επαναφορά
+	Use system title bar	Χρήση γραμμής τίτλου συστήματος
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Εμφάνιση απλής γραμμής τίτλου για τα κουμπιά του παραθύρου αντί για τη γραμμή καρτελών. Το GNOME δεν σχεδιάζει γραμμές τίτλου για τις εφαρμογές, οπότε αυτή δεν ακολουθεί το θέμα του.
 
 # Absolute local GoToR confirmation (#1364).
 	Allow	Να επιτραπεί

@@ -2337,6 +2337,11 @@ animation effects	Off	Өшірулі
 	The linked PDF opened, but its named destination was not applied.	Байланысты PDF ашылды, бірақ оның аталған мақсаты қолданылмады.
 	The linked PDF opened, but its page destination was out of range.	Байланысты PDF ашылды, бірақ оның мақсатты беті ауқымнан тыс.
 	Local cross-PDF links require the desktop app	PDF файлдары арасындағы жергілікті сілтемелер үшін жұмыс үстелі қолданбасы қажет
+	Minimize	Жию
+	Maximize	Жаю
+	Restore	Қалпына келтіру
+	Use system title bar	Жүйелік тақырып жолағын пайдалану
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Терезе батырмалары үшін қойындылар жолағының орнына қарапайым тақырып жолағын көрсету. GNOME қолданбаларға тақырып жолағын салмайды, сондықтан бұл жолақ оның тақырыбына сәйкес келмейді.
 
 # Absolute local GoToR confirmation (#1364).
 	Allow	Рұқсат беру
