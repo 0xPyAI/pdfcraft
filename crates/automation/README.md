@@ -134,3 +134,9 @@ faces complete absent subset glyphs. `text_edit.ranges` accepts disjoint UTF-8 b
 undoable and survive saving/reopening. `image_hit` shares the UI's curve and hole hit testing.
 The bounds, limits and font requirements are in [existing-text editing](../../docs/editing-existing-text.md)
 and [image editing](../../docs/editing-images.md).
+
+## Folder batches
+
+`doc_batch` runs conversion, OCR and compression over files and optionally recursive
+folders. The CLI also exposes it as `pdfcraft-cli batch`. See the
+[batch guide](../../docs/cli-batch.md) for examples, output protection, errors and limits.

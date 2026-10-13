@@ -118,6 +118,17 @@ pub fn tools() -> Vec<ToolDef> {
     let save_out = json!({ "type": "string", "description": "File to write. Omit to open the result as a new unsaved document instead." });
     let open = json!({ "type": "boolean", "description": "Also open the result as a new document (default: only when out is omitted)." });
     vec![
+        t("doc_batch", "Process files and folders", "Run convert, ocr and/or optimize over files and folders, one file at a time. recursive defaults to false. Preserve paths relative to each selected folder inside out_dir; duplicate inputs run once. Skip unsupported files, links and the output subtree. Existing outputs receive numbered names and are never replaced. Continue after per-file errors unless stop_on_error is true. Return completed/failed/skipped counts and per-file results. Discovery is bounded to 10000 entries and 64 folder levels. Convert must be first; each step can appear once. OCR uses installed models. Optimize uses Reduce File Size settings, optionally overriding target ppi (threshold 1.5 times ppi) and JPEG quality; a larger candidate keeps the original bytes. Sources and open documents are unchanged.")
+            .with(schema(json!({
+                "paths": {"type":"array","items":{"type":"string"},"minItems":1,"maxItems":1000},
+                "out_dir": {"type":"string"},
+                "steps": {"type":"array","items":{"type":"string","enum":["convert","ocr","optimize"]},"minItems":1,"maxItems":3,"uniqueItems":true},
+                "recursive": {"type":"boolean"}, "stop_on_error": {"type":"boolean"},
+                "ppi": {"type":"number","minimum":9,"maximum":1600},
+                "quality": {"type":"integer","minimum":1,"maximum":100},
+                "dpi": {"type":"number","minimum":72,"maximum":600},
+                "language": {"type":"string"}, "skip_text_pages": {"type":"boolean"}
+            }), &["paths","out_dir","steps"])),
         t("doc_open", "Open a PDF", "Open a PDF file and return its document id, page count and whether it can be edited.")
             .cmd("file.open")
             .with(schema(json!({ "path": { "type": "string" }, "password": { "type": "string", "description": "User or owner password for encrypted files." } }), &["path"])),

@@ -9287,9 +9287,9 @@ tier = "P1"
 milestone = "M13"
 status = "partial"
 commands = ["actions.wizard", "ocr.recognize_batch"]
-tools = ["action_run", "ocr_recognize_files"]
-evidence = ["crates/automation/tests/automation.rs::actions_through_tools", "crates/ui-egui/tests/actions.rs::run_and_create_actions"]
-notes = "Actions and OCR run over chosen files; whole folders (with subfolders) not yet."
+tools = ["action_run", "ocr_recognize_files", "doc_batch"]
+evidence = ["crates/automation/tests/automation.rs::actions_through_tools", "crates/ui-egui/tests/actions.rs::run_and_create_actions", "crates/automation/tests/batch.rs::batch_recurses_preserves_paths_continues_errors_and_never_replaces_outputs", "apps/pdfcraft-cli/tests/batch.rs::cli_batch_reports_partial_failure_and_continues_into_subfolders"]
+notes = "Actions and OCR run over chosen files. CLI/MCP doc_batch adds bounded recursive folders for convert/ocr/optimize recipes, retained relative paths, collision-safe outputs and per-file reports. GUI folder selection, generic action recipes, scheduling and resume remain absent. See docs/cli-batch.md."
 
 [[feature]]
 id = "misc.action-prompt-steps"

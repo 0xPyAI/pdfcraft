@@ -12,6 +12,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod a11y;
+mod batch;
 mod comments;
 mod content;
 mod conventions;
@@ -165,6 +166,7 @@ impl Automation {
         let a = Args(args);
         let out = match name {
             "doc_open" => self.doc_open(&a)?,
+            "doc_batch" => self.doc_batch(&a)?,
             "doc_list" => json!({ "documents": self.session.docs().iter().map(summary).collect::<Vec<_>>() }),
             "doc_info" => {
                 let id = self.doc(&a)?.id;
