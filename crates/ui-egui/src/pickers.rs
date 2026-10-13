@@ -151,7 +151,9 @@ impl PdfCraftApp {
         };
         let ask = if multiple { Ask::Files(dialog) } else { Ask::File(dialog) };
         self.ask(ask, target, move |app, paths| match pick_for {
-            PickFor::Open => paths.iter().for_each(|p| app.open_path(&p.to_string_lossy())),
+            PickFor::Open => paths.iter().for_each(|p| {
+                app.open_path(&p.to_string_lossy());
+            }),
             PickFor::Files(purpose) => app.use_paths(purpose, &paths),
         });
     }

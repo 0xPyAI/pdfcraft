@@ -1427,3 +1427,38 @@ fn read_mode_retains_existing_rail_click_to_close_policy() {
     assert_eq!(h.state().right, None);
     assert_eq!(h.state().mode, pdfcraft_ui_egui::Mode::Read);
 }
+
+#[test]
+fn control_open_of_an_already_open_file_replies_ok_and_focuses_its_tab() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-ui-open-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let a = dir.join("a.pdf").to_string_lossy().into_owned();
+    let b = dir.join("b.pdf").to_string_lossy().into_owned();
+    std::fs::write(&a, fixture(2)).unwrap();
+    std::fs::write(&b, fixture(3)).unwrap();
+    let slot: Arc<Mutex<Option<ControlClient>>> = Arc::default();
+    let s = slot.clone();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        *s.lock().unwrap() = Some(app.attach_control(&cc.egui_ctx));
+        app
+    });
+    h.run_steps(4);
+    let c = slot.lock().unwrap().take().unwrap();
+
+    let first = ok(&mut h, &c, "ui.open", json!({ "path": a }));
+    assert_eq!(first["opened"], json!(a), "{first}");
+    ok(&mut h, &c, "ui.open", json!({ "path": b }));
+    // The file is already open: the tab focuses, and the reply must be Ok — an agent driving the
+    // app headlessly would otherwise read a focus as a read failure (#1620).
+    let again = ok(&mut h, &c, "ui.open", json!({ "path": a }));
+    assert_eq!(again["focused"], true, "{again}");
+
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    let docs = state["documents"].as_array().cloned().unwrap_or_default();
+    assert_eq!(docs.len(), 2, "opening an open file adds no tab: {state}");
+    let a_tab = docs.iter().find(|d| d["path"] == json!(a)).unwrap();
+    assert_eq!(a_tab["active"], true, "the already-open tab is in front: {state}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

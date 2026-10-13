@@ -734,6 +734,19 @@ fn rgb_triple(v: &serde_json::Value) -> Option<[f64; 3]> {
     Some(out)
 }
 
+/// What [`PdfCraftApp::open_path`] did: opened the file in a new tab, focused the tab already
+/// showing it, or failed. Failures tell the user through a toast; this is the programmatic
+/// contract for callers that must know (the control channel, tools that wait for a file) (#1620).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpenOutcome {
+    /// The file opened in a new tab (or raised its password prompt).
+    Opened,
+    /// A tab already showed the file; it was focused and no tab was added.
+    Focused,
+    /// The file could not be read or opened; the user was told.
+    Failed,
+}
+
 impl PdfCraftApp {
     pub fn new() -> Self {
         Self {
@@ -1208,6 +1221,8 @@ impl PdfCraftApp {
                 self.open_path(path);
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        let _ = path;
     }
 
     /// The tab already showing the file at `path`, if any: its position in `views`. Paths are
@@ -1222,20 +1237,25 @@ impl PdfCraftApp {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn open_path(&mut self, path: &str) {
+    pub fn open_path(&mut self, path: &str) -> OpenOutcome {
         if let Some(i) = self.view_showing(path) {
             self.startup_superseded = true;
             self.active = Some(i);
-            return;
+            return OpenOutcome::Focused;
         }
         let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
         match std::fs::read(path) {
-            Ok(bytes) => {
-                if let Err(e) = self.open_bytes(&name, Some(path.to_string()), bytes) {
+            Ok(bytes) => match self.open_bytes(&name, Some(path.to_string()), bytes) {
+                Ok(()) => OpenOutcome::Opened,
+                Err(e) => {
                     self.notify_fmt("Couldn't open {name}: {e}", &[("name", &name), ("e", &e.to_string())]);
+                    OpenOutcome::Failed
                 }
+            },
+            Err(e) => {
+                self.notify_fmt("Couldn't read {name}: {e}", &[("name", &name), ("e", &e.to_string())]);
+                OpenOutcome::Failed
             }
-            Err(e) => self.notify_fmt("Couldn't read {name}: {e}", &[("name", &name), ("e", &e.to_string())]),
         }
     }
 
@@ -1437,12 +1457,12 @@ impl PdfCraftApp {
         let command = spec.id;
         self.ask_one(pickers::Ask::File(dialog), None, move |app, path| {
             let path = path.to_string_lossy().into_owned();
-            let before = app.views.len();
-            app.open_path(&path);
+            let outcome = app.open_path(&path);
             if let Some(prompt) = app.password_prompt.as_mut().filter(|p| p.path.as_deref() == Some(path.as_str())) {
                 // Encrypted: the tool runs once the password is in.
                 prompt.then = Some(command);
-            } else if app.views.len() > before && app.active.is_some() {
+            } else if outcome != OpenOutcome::Failed {
+                // A new tab or an already-open one the pick focused: either way, run on it.
                 app.execute(command);
             }
         });
@@ -2225,7 +2245,9 @@ impl eframe::App for PdfCraftApp {
         for e in os_events {
             match e {
                 #[cfg(not(target_arch = "wasm32"))]
-                OsEvent::Open(paths) => paths.iter().for_each(|p| self.open_path(p)),
+                OsEvent::Open(paths) => paths.iter().for_each(|p| {
+                    self.open_path(p);
+                }),
                 #[cfg(target_arch = "wasm32")]
                 OsEvent::Open(_) => {}
                 // Like closing the window: `guard_quit` asks about unsaved changes.

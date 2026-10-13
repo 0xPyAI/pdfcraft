@@ -6,7 +6,7 @@ use egui::{Key, Modifiers};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use pdfcraft_render::{PageRenderer, RenderRequest, RequestKind};
-use pdfcraft_ui_egui::{CloseRequest, Dialog, PdfCraftApp};
+use pdfcraft_ui_egui::{CloseRequest, Dialog, OpenOutcome, PdfCraftApp};
 
 /// An `n`-page document with a proper xref table; page `i` shows "Page i+1".
 fn fixture(n: usize) -> Vec<u8> {
@@ -585,7 +585,11 @@ fn the_last_session_reopens_its_files_pages_and_active_tab() {
     let dir = TempPdfs::new("reopen");
     let files = [dir.file("a.pdf", 1), dir.file("b.pdf", 5), dir.file("c.pdf", 2)];
     let opened = files.clone();
-    let mut h = session_harness(move |app| opened.iter().for_each(|f| app.open_path(f)));
+    let mut h = session_harness(move |app| {
+        opened.iter().for_each(|f| {
+            app.open_path(f);
+        })
+    });
     h.state_mut().views[1].go_to_page(3);
     h.state_mut().active = Some(1);
     h.run_steps(4);
@@ -607,7 +611,11 @@ fn quitting_with_unsaved_changes_still_remembers_every_file() {
     let dir = TempPdfs::new("quit");
     let files = [dir.file("a.pdf", 1), dir.file("b.pdf", 1)];
     let opened = files.clone();
-    let mut h = session_harness(move |app| opened.iter().for_each(|f| app.open_path(f)));
+    let mut h = session_harness(move |app| {
+        opened.iter().for_each(|f| {
+            app.open_path(f);
+        })
+    });
     for tab in 0..2 {
         h.state_mut().active = Some(tab);
         h.state_mut().views[tab].select_pages(&[0]);
@@ -659,15 +667,25 @@ fn opening_the_same_path_again_focuses_its_tab() {
     let a = pdfs.file("a.pdf", 1);
     let b = pdfs.file("b.pdf", 1);
     let mut h = session_harness(|_| {});
-    h.state_mut().open_path(&a);
-    h.state_mut().open_path(&b);
+    assert_eq!(h.state_mut().open_path(&a), OpenOutcome::Opened);
+    assert_eq!(h.state_mut().open_path(&b), OpenOutcome::Opened);
     h.run_steps(2);
     assert_eq!(h.state().views.len(), 2, "two different files open two tabs");
-    h.state_mut().open_path(&a);
+    assert_eq!(h.state_mut().open_path(&a), OpenOutcome::Focused, "opening an open file focuses, it doesn't reopen");
     h.run_steps(2);
     assert_eq!(h.state().views.len(), 2, "opening an open file again adds no tab");
     assert_eq!(h.state().active, Some(0), "the existing tab comes to the front");
     assert_eq!(open_paths(h.state()), vec![a, b], "the tab order is untouched");
+}
+
+#[test]
+fn opening_a_missing_file_fails_and_tells_the_user() {
+    let mut app = PdfCraftApp::new();
+    app.set_option("language", "en").unwrap();
+    let missing = std::env::temp_dir().join(format!("pdfcraft-no-such-file-{}.pdf", std::process::id()));
+    assert_eq!(app.open_path(&missing.to_string_lossy()), OpenOutcome::Failed);
+    assert!(app.views.is_empty());
+    assert!(app.toast.is_some(), "the failure is still reported to the user");
 }
 
 #[test]
