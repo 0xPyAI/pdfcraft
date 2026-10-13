@@ -1847,6 +1847,215 @@ fn extract_keeps_images_type3_glyphs_may_draw() {
     assert!(names.iter().any(|n| n.as_slice() == b"ImB"), "pruning must not run through Type 3 resources");
 }
 
+/// The font has its own resources, but its XObject dictionary is also used by the page.
+/// Looking only at page `Do` operators must not discard the image painted by a glyph.
+fn doc_type3_shared_xobjects(font_resources: &str) -> Document {
+    let objects: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources 5 0 R >>".into(),
+        raw("q 30 0 0 30 10 10 cm /ImA Do Q BT /T3 50 Tf 50 80 Td (A) Tj ET"),
+        "<< /XObject 6 0 R /Font << /T3 7 0 R >> >>".into(),
+        "<< /ImA 9 0 R /ImB 10 0 R /Unused 11 0 R >>".into(),
+        format!(
+            "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1 1] /FontMatrix [1 0 0 1 0 0] /CharProcs << /A 8 0 R >> /Encoding << /Type /Encoding /Differences [65 /A] >> /FirstChar 65 /LastChar 65 /Widths [1] /Resources {font_resources} >>"
+        ),
+        raw("1 0 0 0 1 1 d1 /ImB Do"),
+        image(1, 1, 1),
+        image(1, 1, 1),
+        image(1, 1, 2000),
+    ];
+    open(build(&objects, "/Root 1 0 R"))
+}
+
+#[test]
+fn extract_keeps_shared_xobjects_used_by_type3_own_resources() {
+    for resources in ["<< /XObject 6 0 R >>", "5 0 R"] {
+        let src = doc_type3_shared_xobjects(resources);
+        let part = full_roundtrip(&extract_pages(&src, &[0]).unwrap());
+        let names = xobject_names(&part, 0);
+        assert!(names.iter().any(|n| n.as_slice() == b"ImB"), "the Type 3 glyph's image must survive extraction: {resources}");
+    }
+}
+
+#[test]
+fn extract_still_prunes_page_xobjects_when_type3_resources_are_separate() {
+    let src = doc_type3_shared_xobjects("<< /XObject << /ImB 10 0 R >> >>");
+    let part = full_roundtrip(&extract_pages(&src, &[0]).unwrap());
+    assert_eq!(xobject_names(&part, 0), [b"ImA".to_vec()], "only the page's unused entries are removed");
+    let resources = part.resolve(page_dict(&part, 0).get(b"Resources").unwrap());
+    let fonts = part.resolve(resources.as_dict().unwrap().get(b"Font").unwrap());
+    let font = part.resolve(fonts.as_dict().unwrap().get(b"T3").unwrap());
+    let resources = part.resolve(font.as_dict().unwrap().get(b"Resources").unwrap());
+    let xobjects = part.resolve(resources.as_dict().unwrap().get(b"XObject").unwrap());
+    assert!(xobjects.as_dict().unwrap().contains(b"ImB"), "the separate glyph resource survives the full rewrite");
+}
+
+fn doc_type3_glyph_form_with_shared_resources(cycle: bool) -> Document {
+    let mut doc = doc_type3_shared_xobjects("<< >>");
+    let mut resources = pdfcraft_cos::Dict::new();
+    resources.set(b"XObject".to_vec(), Object::Ref(ObjRef::new(6, 0)));
+    let mut form = pdfcraft_cos::Dict::new();
+    form.set(b"Type".to_vec(), Object::name("XObject"));
+    form.set(b"Subtype".to_vec(), Object::name("Form"));
+    form.set(b"BBox".to_vec(), Object::Array(vec![Object::Int(0), Object::Int(0), Object::Int(1), Object::Int(1)]));
+    form.set(b"Resources".to_vec(), Object::Dict(resources));
+    let form = doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(form, b"/ImB Do".to_vec())));
+    let mut xobjects = pdfcraft_cos::Dict::new();
+    xobjects.set(b"Fm".to_vec(), Object::Ref(form));
+    let mut resources = pdfcraft_cos::Dict::new();
+    resources.set(b"XObject".to_vec(), Object::Dict(xobjects));
+    doc.update_dict(ObjRef::new(7, 0), |font| font.set(b"Resources".to_vec(), Object::Dict(resources))).unwrap();
+    doc.set(ObjRef::new(8, 0), Object::Stream(pdfcraft_cos::Stream::from_raw(pdfcraft_cos::Dict::new(), b"1 0 0 0 1 1 d1 /Fm Do".to_vec())));
+    if cycle {
+        doc.update_dict(ObjRef::new(6, 0), |xobjects| xobjects.set(b"Again".to_vec(), Object::Ref(form))).unwrap();
+    }
+    full_roundtrip(&doc)
+}
+
+#[test]
+fn extract_keeps_shared_resources_reached_through_a_type3_glyph_form() {
+    for cycle in [false, true] {
+        let src = doc_type3_glyph_form_with_shared_resources(cycle);
+        let part = full_roundtrip(&extract_pages(&src, &[0]).unwrap());
+        assert!(xobject_names(&part, 0).iter().any(|n| n.as_slice() == b"ImB"), "a glyph's nested form draws ImB; resource cycle: {cycle}");
+    }
+}
+
+#[test]
+fn extract_keeps_an_indirect_resource_owner_shared_with_a_type3_font() {
+    let mut src = doc_type3_shared_xobjects("5 0 R");
+    let xobjects = src.get(ObjRef::new(6, 0)).as_dict().unwrap().clone();
+    src.update_dict(ObjRef::new(5, 0), |resources| resources.set(b"XObject".to_vec(), Object::Dict(xobjects))).unwrap();
+    let src = full_roundtrip(&src);
+    let part = full_roundtrip(&extract_pages(&src, &[0]).unwrap());
+    assert!(xobject_names(&part, 0).iter().any(|n| n.as_slice() == b"ImB"), "the resource owner itself is shared, with inline XObjects");
+}
+
+#[test]
+fn extract_skips_pruning_when_direct_glyph_resource_children_exceed_the_budget() {
+    let mut src = doc_type3_shared_xobjects("<< /XObject << /ImB 10 0 R >> >>");
+    let font = src.get(ObjRef::new(7, 0));
+    let mut resources = font.as_dict().unwrap().get(b"Resources").unwrap().as_dict().unwrap().clone();
+    let mut unknown = vec![Object::Null; 20_000];
+    unknown.push(Object::Ref(ObjRef::new(6, 0)));
+    resources.set(b"Unknown".to_vec(), Object::Array(unknown));
+    src.update_dict(ObjRef::new(7, 0), |font| font.set(b"Resources".to_vec(), Object::Dict(resources))).unwrap();
+    let src = full_roundtrip(&src);
+    let part = full_roundtrip(&extract_pages(&src, &[0]).unwrap());
+    assert_eq!(xobject_names(&part, 0), xobject_names(&src, 0), "an incomplete glyph resource walk cannot authorize pruning any owners");
+}
+
+fn doc_type3_resources_of_undecodable_content(form: bool) -> Document {
+    let mut doc = doc_type3_shared_xobjects("<< /XObject 6 0 R >>");
+    doc.update_dict(ObjRef::new(5, 0), |resources| {
+        resources.remove(b"Font");
+    })
+    .unwrap();
+    doc.set(ObjRef::new(4, 0), Object::Stream(pdfcraft_cos::Stream::from_raw(pdfcraft_cos::Dict::new(), b"/ImA Do".to_vec())));
+    let mut fonts = pdfcraft_cos::Dict::new();
+    fonts.set(b"T3".to_vec(), Object::Ref(ObjRef::new(7, 0)));
+    let mut glyph_resources = pdfcraft_cos::Dict::new();
+    glyph_resources.set(b"Font".to_vec(), Object::Dict(fonts));
+    let mut unreadable = pdfcraft_cos::Dict::new();
+    unreadable.set(b"Filter".to_vec(), Object::name("NoSuchFilter"));
+    if form {
+        unreadable.set(b"Type".to_vec(), Object::name("XObject"));
+        unreadable.set(b"Subtype".to_vec(), Object::name("Form"));
+        unreadable.set(b"BBox".to_vec(), Object::Array(vec![Object::Int(0), Object::Int(0), Object::Int(200), Object::Int(200)]));
+        unreadable.set(b"Resources".to_vec(), Object::Dict(glyph_resources.clone()));
+    }
+    let unreadable = doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(unreadable, b"BT /T3 50 Tf 50 80 Td (A) Tj ET".to_vec())));
+    let (contents, resources) = if form {
+        let contents = doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(pdfcraft_cos::Dict::new(), b"/Fm Do".to_vec())));
+        let mut xobjects = pdfcraft_cos::Dict::new();
+        xobjects.set(b"Fm".to_vec(), Object::Ref(unreadable));
+        let mut resources = pdfcraft_cos::Dict::new();
+        resources.set(b"XObject".to_vec(), Object::Dict(xobjects));
+        (contents, resources)
+    } else {
+        (unreadable, glyph_resources)
+    };
+    let mut page = pdfcraft_cos::Dict::new();
+    page.set(b"Type".to_vec(), Object::name("Page"));
+    page.set(b"Parent".to_vec(), Object::Ref(ObjRef::new(2, 0)));
+    page.set(b"Contents".to_vec(), Object::Ref(contents));
+    page.set(b"Resources".to_vec(), Object::Dict(resources));
+    let page = doc.add(page);
+    doc.update_dict(ObjRef::new(2, 0), |pages| {
+        pages.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(3, 0)), Object::Ref(page)]));
+        pages.set(b"Count".to_vec(), Object::Int(2));
+    })
+    .unwrap();
+    full_roundtrip(&doc)
+}
+
+#[test]
+fn extract_keeps_type3_glyph_resources_of_an_undecodable_page() {
+    let part = full_roundtrip(&extract_pages(&doc_type3_resources_of_undecodable_content(false), &[0, 1]).unwrap());
+    assert!(xobject_names(&part, 0).iter().any(|n| n.as_slice() == b"ImB"), "an unreadable page's font shares a different page's XObject dictionary");
+    let contents = part.resolve(page_dict(&part, 1).get(b"Contents").unwrap());
+    let Object::Stream(contents) = &*contents else { panic!("content stream") };
+    assert_eq!(contents.dict.name(b"Filter"), Some(b"NoSuchFilter".as_slice()));
+    assert_eq!(contents.raw.as_ref(), b"BT /T3 50 Tf 50 80 Td (A) Tj ET");
+}
+
+#[test]
+fn extract_keeps_type3_glyph_resources_of_an_undecodable_form() {
+    let part = full_roundtrip(&extract_pages(&doc_type3_resources_of_undecodable_content(true), &[0, 1]).unwrap());
+    assert!(xobject_names(&part, 0).iter().any(|n| n.as_slice() == b"ImB"), "an unreadable form's font shares a different page's XObject dictionary");
+}
+
+#[test]
+fn extract_still_prunes_separate_resources_when_many_pages_share_a_type3_font() {
+    let mut src = doc_type3_shared_xobjects("<< /XObject << /ImB 10 0 R >> >>");
+    src.set(ObjRef::new(4, 0), Object::Stream(pdfcraft_cos::Stream::from_raw(pdfcraft_cos::Dict::new(), b"/ImA Do".to_vec())));
+    let page = src.get(ObjRef::new(3, 0)).as_dict().unwrap().clone();
+    let mut kids = vec![Object::Ref(ObjRef::new(3, 0))];
+    for _ in 1..4_000 {
+        kids.push(Object::Ref(src.add(page.clone())));
+    }
+    src.update_dict(ObjRef::new(2, 0), |pages| {
+        pages.set(b"Kids".to_vec(), Object::Array(kids));
+        pages.set(b"Count".to_vec(), Object::Int(4_000));
+    })
+    .unwrap();
+    let src = full_roundtrip(&src);
+    let part = full_roundtrip(&extract_pages(&src, &(0..4_000).collect::<Vec<_>>()).unwrap());
+    assert_eq!(xobject_names(&part, 0), [b"ImA".to_vec()], "one shared font's direct resource graph is protected once");
+}
+
+#[test]
+#[ignore = "requires the external Poppler pdftoppm oracle"]
+fn extract_type3_shared_xobjects_matches_poppler_pixels() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-type3-extract-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let fixtures = [
+        doc_type3_shared_xobjects("<< /XObject 6 0 R >>"),
+        doc_type3_shared_xobjects("5 0 R"),
+        doc_type3_shared_xobjects("<< /XObject << /ImB 10 0 R >> >>"),
+        doc_type3_glyph_form_with_shared_resources(false),
+        doc_type3_glyph_form_with_shared_resources(true),
+    ];
+    for (i, src) in fixtures.into_iter().enumerate() {
+        let part = full_roundtrip(&extract_pages(&src, &[0]).unwrap());
+        let render = |doc: &Document, name: &str| {
+            let path = dir.join(format!("{i}-{name}.pdf"));
+            std::fs::write(&path, write_full(doc, &SaveOptions::default()).unwrap()).unwrap();
+            let output = std::process::Command::new("pdftoppm").args(["-singlefile", "-r", "72", "-gray"]).arg(path).output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+            output.stdout
+        };
+        let before = render(&src, "source");
+        let after = render(&part, "extracted");
+        assert!(before.starts_with(b"P5\n200 200\n255\n"));
+        assert!(before.iter().filter(|&&v| v < 200).count() > 2500, "the source contains a drawn glyph");
+        assert_eq!(after, before, "extraction must keep every rendered pixel in fixture {i}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// A page listed twice whose widget's field keeps `/Kids` as an array object of its own: the
 /// second widget joins that array, and the field keeps every widget it had.
 #[test]
