@@ -782,6 +782,14 @@ impl Automation {
             "print_readiness" => self.print_readiness(&a)?,
             "doc_export_office" => self.doc_export_office(&a)?,
             "pdfa_convert" => self.pdfa_convert(&a)?,
+            "standards_remove_id" => {
+                let standard = match a.str("standard")? {
+                    "pdfa" => pdfcraft_engine::Standard::PdfA,
+                    "pdfx" => pdfcraft_engine::Standard::PdfX,
+                    other => return Err(ToolError::InvalidArgs(format!("standard must be pdfa or pdfx, not {other}"))),
+                };
+                self.apply(&a, Edit::RemoveStandardId { standard })?
+            }
             "action_run" => self.action_run(&a)?,
             "doc_compare_report" => self.doc_compare_report(&a)?,
             "doc_compare_mark" => self.doc_compare_mark(&a)?,

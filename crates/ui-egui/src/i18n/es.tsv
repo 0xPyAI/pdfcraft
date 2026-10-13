@@ -2362,6 +2362,7 @@ action wizard	Start	Iniciar
 	Change Subject	Cambiar el asunto
 	Change Keywords	Cambiar las palabras clave
 	Save as {level}	Guardar como {level}
+	Remove {standard} identification	Quitar la identificación {standard}
 	Create links	Crear enlaces
 
 # Multi-object selection and movement (#844)

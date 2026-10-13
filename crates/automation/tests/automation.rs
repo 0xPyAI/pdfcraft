@@ -5038,6 +5038,10 @@ fn pdfa_through_tools() {
     assert_eq!(r["declared"]["pdfa"], "PDF/A-3b", "{r}");
     assert!(r["issues"].as_array().unwrap().iter().all(|i| i["fixable"] == false), "{r}");
     assert!(a.call("pdfa_verify", &json!({ "doc": doc, "level": "9z" })).is_err());
+    ok(&mut a, "standards_remove_id", json!({ "doc": doc, "standard": "pdfa" }));
+    let r = ok(&mut a, "pdfa_verify", json!({ "doc": doc }));
+    assert!(r["declared"]["pdfa"].is_null() && !r["declared"]["output_intents"].as_array().unwrap().is_empty(), "{r}");
+    assert!(matches!(a.call("standards_remove_id", &json!({ "doc": doc, "standard": "pdfa" })), Err(ToolError::Failed(_))), "nothing left");
 }
 
 #[test]

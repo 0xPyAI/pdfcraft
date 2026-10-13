@@ -2658,6 +2658,7 @@ key	Space	Space
 	Redaction mark appearance	Hình thức dấu xóa nội dung nhạy cảm
 	Remove Crop	Bỏ xén
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Xóa thẻ lá này khỏi thứ tự đọc và đánh dấu nội dung trực tiếp của nó là thành phần trang trí
+	Remove {standard} identification	Gỡ thông tin nhận dạng {standard}
 	Resolution:	Độ phân giải:
 	Save anyway	Vẫn lưu
 	Save over the changed file?	Lưu đè lên tệp đã thay đổi?

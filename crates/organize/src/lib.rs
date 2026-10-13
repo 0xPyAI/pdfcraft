@@ -579,5 +579,40 @@ fn set_info_entry(doc: &mut Document, key: &[u8], entry: Option<Object>) -> Resu
     Ok(())
 }
 
+/// A standard a document can declare it meets, for [`remove_standard_id`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Standard {
+    PdfA,
+    PdfX,
+}
+
+impl Standard {
+    pub fn label(self) -> &'static str {
+        match self {
+            Standard::PdfA => "PDF/A",
+            Standard::PdfX => "PDF/X",
+        }
+    }
+}
+
+/// Remove what identifies the document as meeting `standard`: the `pdfaid:` XMP properties of
+/// ISO 19005, or ISO 15930's `GTS_PDFXVersion` and `GTS_PDFXConformance` in the document
+/// information and as `pdfxid:` XMP properties. Output intents and other metadata stay. Refused
+/// when the document declares nothing of the kind.
+pub fn remove_standard_id(doc: &mut Document, standard: Standard) -> Result<(), OrganizeError> {
+    let (props, info_keys): (&[&str], &[&str]) = match standard {
+        Standard::PdfA => (&["pdfaid:part", "pdfaid:conformance", "pdfaid:amd", "pdfaid:rev"], &[]),
+        Standard::PdfX => (&["pdfxid:GTS_PDFXVersion", "pdfxid:GTS_PDFXConformance"], &["GTS_PDFXVersion", "GTS_PDFXConformance"]),
+    };
+    let mut removed = xmp::remove_properties(doc, props)?;
+    for key in info_keys {
+        if info(doc, key).is_some() {
+            set_info_entry(doc, key.as_bytes(), None)?;
+            removed = true;
+        }
+    }
+    if removed { Ok(()) } else { Err(OrganizeError::Invalid(format!("the document doesn't declare {}", standard.label()))) }
+}
+
 #[cfg(test)]
 mod tests;

@@ -929,6 +929,37 @@ fn malformed_output_intents_and_identification_do_not_fail() {
 }
 
 #[test]
+fn removing_the_pdfx_identification_keeps_the_output_intent_and_other_claims() {
+    let mut x4 = doc_x4("FOGRA51", "icc");
+    assert!(matches!(remove_standard_id(&mut x4, Standard::PdfA), Err(OrganizeError::Invalid(_))));
+    assert!(!x4.is_modified(), "a refused removal changes nothing");
+    remove_standard_id(&mut x4, Standard::PdfX).unwrap();
+    let x = pdfx_of(&full_roundtrip(&x4));
+    assert_eq!((x.version, x.intents), (None, vec![("FOGRA51".to_string(), b"icc".to_vec())]));
+    assert!(x.xmp.is_some_and(|x| !x.contains("pdfxid:GTS") && x.contains("pdfuaid:part=\"1\"")), "PDF/UA's claim stays");
+    assert!(matches!(remove_standard_id(&mut x4, Standard::PdfX), Err(OrganizeError::Invalid(_))), "nothing left to remove");
+
+    let mut x1a = doc_print("CGATS TR 001", "icc", "/GTS_PDFXVersion (PDF/X-1:2001) /GTS_PDFXConformance (PDF/X-1a:2001)", None);
+    remove_standard_id(&mut x1a, Standard::PdfX).unwrap();
+    assert_eq!((info(&x1a, "GTS_PDFXVersion"), info(&x1a, "GTS_PDFXConformance")), (None, None));
+}
+
+#[test]
+fn removing_the_pdfa_identification_removes_its_xmp_properties_in_either_form() {
+    let xmp = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"><rdf:Description \
+               rdf:about=\"\" xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" pdfaid:conformance='B'>\
+               <pdfaid:part>2</pdfaid:part><dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">Report</rdf:li></rdf:Alt></dc:title>\
+               </rdf:Description></rdf:RDF></x:xmpmeta>";
+    let mut doc = doc_print("sRGB IEC61966-2.1", "icc", "/Title (Report)", Some(xmp));
+    remove_standard_id(&mut doc, Standard::PdfA).unwrap();
+    let x = pdfx_of(&full_roundtrip(&doc));
+    let packet = x.xmp.unwrap();
+    assert!(!packet.contains("pdfaid:part") && !packet.contains("pdfaid:conformance"), "{packet}");
+    assert!(packet.contains(">Report</rdf:li>"), "the rest of the packet stays: {packet}");
+    assert_eq!(x.intents.len(), 1, "the output intent stays");
+}
+
+#[test]
 fn duplicate_pages_become_independent_copies() {
     let out = full_roundtrip(&extract_pages(&doc_b(), &[0, 0]).unwrap());
     assert_eq!(labels(&out), ["B1", "B1"]);
