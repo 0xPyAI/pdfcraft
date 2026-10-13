@@ -1044,3 +1044,177 @@ fn a_picture_inside_form_artwork_under_text_is_selected_and_copied() {
     let png = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png).unwrap().into_rgba8();
     assert_eq!(png.into_raw(), vec![255, 0, 0, 255, 0, 0, 255, 255]);
 }
+#[test]
+fn mouse_wheel_scrolls_while_selecting_text() {
+    let mut h = harness();
+    h.state_mut().set_option("zoom", "200").unwrap();
+    h.state_mut().set_option("left", "closed").unwrap();
+    h.state_mut().set_option("panel", "none").unwrap();
+    h.run_steps(8);
+    let view = h.state().active.unwrap();
+    let page = h.state().views[view].page_screen_rect(0).unwrap();
+    let start = egui::pos2(page.left() + page.width() * 0.11, page.top() + page.height() * 0.48);
+    let end = start + egui::vec2(100.0, 0.0);
+    h.hover_at(start);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: start, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.run_steps(1);
+    h.hover_at(end);
+    h.run_steps(2);
+    assert!(h.state().views[view].selected_text().is_some_and(|s| !s.is_empty()), "a text selection is active");
+    assert!(h.ctx.dragged_id().is_some(), "the primary drag is still held");
+    let before = h.state().views[view].page_screen_rect(0).unwrap().top();
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, -3.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(20);
+    let after = h.state().views[view].page_screen_rect(0).unwrap().top();
+    assert!(after < before - 1.0, "wheel should move the page during selection: {before} -> {after}");
+    assert!(h.state().views[view].selected_text().is_some_and(|s| !s.is_empty()));
+    h.event(egui::Event::PointerButton { pos: end, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    h.run_steps(2);
+}
+fn selection_wheel_harness() -> (Harness<'static, PdfCraftApp>, usize, egui::Pos2) {
+    let mut h = harness();
+    h.state_mut().set_option("zoom", "200").unwrap();
+    h.state_mut().set_option("left", "closed").unwrap();
+    h.state_mut().set_option("panel", "none").unwrap();
+    h.run_steps(8);
+    let view = h.state().active.unwrap();
+    let page = h.state().views[view].page_screen_rect(0).unwrap();
+    let start = egui::pos2(page.left() + page.width() * 0.11, page.top() + page.height() * 0.48);
+    let end = start + egui::vec2(100.0, 0.0);
+    h.hover_at(start);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: start, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.run_steps(1);
+    h.hover_at(end);
+    h.run_steps(2);
+    assert!(h.state().views[view].selected_text().is_some_and(|s| !s.is_empty()), "a text selection is active");
+    assert!(h.ctx.dragged_id().is_some(), "the primary drag is still held");
+
+    (h, view, end)
+}
+
+fn selection_wheel_delta(unit: egui::MouseWheelUnit, amount: f32, held: bool, animated: bool) -> f32 {
+    let (mut h, view, end) = selection_wheel_harness();
+    h.state_mut().animation_effects =
+        if animated { pdfcraft_ui_egui::motion::AnimationEffects::On } else { pdfcraft_ui_egui::motion::AnimationEffects::Off };
+    if !held {
+        h.event(egui::Event::PointerButton { pos: end, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    }
+    h.run_steps(2);
+    let before = h.state().views[view].page_screen_rect(0).unwrap().top();
+    h.event(egui::Event::MouseWheel { unit, delta: egui::vec2(0.0, -amount), phase: egui::TouchPhase::Move, modifiers: egui::Modifiers::NONE });
+    h.run_steps(40);
+    before - h.state().views[view].page_screen_rect(0).unwrap().top()
+}
+
+#[test]
+fn selection_wheel_preserves_normal_distance_and_reduced_motion() {
+    for animated in [true, false] {
+        let normal = selection_wheel_delta(egui::MouseWheelUnit::Line, 1.0, false, animated);
+        let held = selection_wheel_delta(egui::MouseWheelUnit::Line, 1.0, true, animated);
+        assert!(normal > 1.0);
+        assert!((normal - held).abs() < 1.0, "animated={animated}: released={normal}, held={held}");
+    }
+    let on = selection_wheel_delta(egui::MouseWheelUnit::Line, 1.0, true, true);
+    let off = selection_wheel_delta(egui::MouseWheelUnit::Line, 1.0, true, false);
+    assert!((on - off).abs() < 1.0, "on={on}, off={off}");
+}
+
+#[test]
+fn selection_point_scroll_is_not_applied_twice() {
+    for animated in [true, false] {
+        let normal = selection_wheel_delta(egui::MouseWheelUnit::Point, 30.0, false, animated);
+        let held = selection_wheel_delta(egui::MouseWheelUnit::Point, 30.0, true, animated);
+        eprintln!("Point animated={animated}: released={normal}, held={held}");
+        assert!(normal > 1.0, "point wheel must scroll: {normal}");
+        assert!((held - 30.0).abs() < 1.0, "animated={animated}: held precision motion={held}, normal={normal}");
+    }
+}
+
+#[test]
+fn selection_control_wheel_still_zooms() {
+    for modifiers in [egui::Modifiers::CTRL, egui::Modifiers::COMMAND] {
+        let (mut h, view, _) = selection_wheel_harness();
+        let before = h.state().views[view].page_screen_rect(0).unwrap().width();
+        h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: egui::vec2(0.0, 1.0), phase: egui::TouchPhase::Move, modifiers });
+        h.run_steps(40);
+        let after = h.state().views[view].page_screen_rect(0).unwrap().width();
+        assert!(after > before + 1.0, "control wheel should zoom: {before} -> {after}");
+    }
+}
+
+#[test]
+fn selection_wheel_outside_document_does_not_scroll() {
+    let (mut h, view, _) = selection_wheel_harness();
+    h.hover_at(egui::pos2(1398.0, 2.0));
+    h.run_steps(2);
+    let before = h.state().views[view].page_screen_rect(0).unwrap().top();
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, -1.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(40);
+    let after = h.state().views[view].page_screen_rect(0).unwrap().top();
+    assert!((after - before).abs() < 1.0, "outside wheel moved document: {before} -> {after}");
+}
+
+#[test]
+fn selection_page_wheel_preserves_normal_distance() {
+    for animated in [true, false] {
+        let normal = selection_wheel_delta(egui::MouseWheelUnit::Page, 0.1, false, animated);
+        let held = selection_wheel_delta(egui::MouseWheelUnit::Page, 0.1, true, animated);
+        assert!(normal > 1.0);
+        assert!((normal - held).abs() < 1.0, "animated={animated}: released={normal}, held={held}");
+    }
+}
+
+#[test]
+fn selection_wheel_does_not_scroll_behind_preferences() {
+    let (mut h, view, _) = selection_wheel_harness();
+    h.state_mut().set_option("dialog", "preferences").unwrap();
+    h.run_steps(3);
+    let before = h.state().views[view].page_screen_rect(0).unwrap().top();
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, -1.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(40);
+    let after = h.state().views[view].page_screen_rect(0).unwrap().top();
+    assert!((after - before).abs() < 1.0, "modal wheel moved document: {before} -> {after}");
+}
+
+#[test]
+fn selection_mouse_wheel_resumes_after_point_scrolling() {
+    for delay in [1, 16, 40] {
+        let (mut h, view, _) = selection_wheel_harness();
+        let start = h.state().views[view].page_screen_rect(0).unwrap().top();
+        h.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -30.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(delay);
+        let before = h.state().views[view].page_screen_rect(0).unwrap().top();
+        h.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, -1.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(40);
+        let after = h.state().views[view].page_screen_rect(0).unwrap().top();
+        eprintln!("Point-to-Line delay={delay}: point={}, line={}", start - before, before - after);
+        assert!(before - after > 50.0, "Line input must resume after Point: {before} -> {after}");
+    }
+}
