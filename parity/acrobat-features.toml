@@ -3424,8 +3424,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["file.properties"]
 tools = ["doc_set_info"]
-evidence = ["crates/organize/src/tests.rs::document_info_edits_round_trip_with_unicode", "crates/ui-egui/tests/editing.rs::document_properties_edit_is_one_undoable_step"]
-notes = ""
+evidence = ["crates/organize/src/tests.rs::document_info_edits_round_trip_with_unicode", "crates/organize/src/tests.rs::document_info_edits_update_the_xmp_packet", "crates/ui-egui/tests/editing.rs::document_properties_edit_is_one_undoable_step"]
+notes = "When the file has an XMP packet, the matching property (dc:title, dc:creator, dc:description, pdf:Keywords, xmp:CreatorTool, pdf:Producer) is changed or removed with the /Info entry; a packet that isn't UTF-8 is left as it was. Not yet: xmp:ModifyDate and xmp:MetadataDate on save, other languages of a title kept apart (the new value replaces them)."
 
 [[feature]]
 id = "organize.fonts-list"

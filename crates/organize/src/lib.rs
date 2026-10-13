@@ -21,6 +21,7 @@ mod outline;
 mod pdfx;
 mod prune;
 pub mod view;
+mod xmp;
 
 pub use boxes::{BoxSpec, PageBox, page_boxes, set_page_box};
 pub use dedupe::dedupe_resources;
@@ -504,12 +505,14 @@ pub fn info(doc: &Document, key: &str) -> Option<String> {
 
 /// Set (or clear, with an empty value) a document-information entry.
 ///
-/// Note: documents with XMP metadata also carry these values in the XMP packet; synchronising
-/// XMP arrives with the `model` crate (M2) — viewers that prefer XMP may still show old values.
+/// Documents with XMP metadata also carry Title, Author, Subject, Keywords, Creator and Producer
+/// in the XMP packet, and viewers that read XMP first show its value: the packet's property is
+/// changed (or removed) to match (see `xmp`).
 pub fn set_info(doc: &mut Document, key: &str, value: &str) -> Result<(), OrganizeError> {
     let value = value.trim();
     let entry = (!value.is_empty()).then(|| Object::String(PdfString::text(value)));
-    set_info_entry(doc, key.as_bytes(), entry)
+    set_info_entry(doc, key.as_bytes(), entry)?;
+    xmp::sync_info(doc, key, value)
 }
 
 /// Set (or remove, with `None`) a document-information entry of any type.

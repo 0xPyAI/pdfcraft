@@ -267,6 +267,101 @@ fn document_info_edits_round_trip_with_unicode() {
     assert_eq!(info(&doc, "Producer"), None);
 }
 
+/// A one-page document whose catalog has `xmp` as its (Flate-compressed) XMP packet, and the
+/// same title and author in `/Info`, as LibreOffice writes them.
+fn doc_with_xmp(xmp: &[u8]) -> Document {
+    let b = build(
+        &[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>".into(),
+            body("X"),
+            "<< /Title (Untitled 1) /Author (Old Author) >>".into(),
+        ],
+        "/Root 1 0 R /Info 5 0 R",
+    );
+    let mut doc = open(b);
+    let mut dict = Dict::new();
+    dict.set(b"Type".to_vec(), Object::name("Metadata"));
+    dict.set(b"Subtype".to_vec(), Object::name("XML"));
+    let m = doc.add(Object::Stream(pdfcraft_cos::Stream::flate(dict, xmp)));
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |c| c.set(b"Metadata".to_vec(), Object::Ref(m))).unwrap();
+    full_roundtrip(&doc)
+}
+
+/// The catalog's metadata stream.
+fn xmp_stream(doc: &Document) -> Option<pdfcraft_cos::Stream> {
+    match &*doc.get(catalog(doc).reference(b"Metadata")?) {
+        Object::Stream(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn xmp_text(doc: &Document) -> Option<String> {
+    xmp_stream(doc).map(|s| String::from_utf8(s.decoded().unwrap()).unwrap())
+}
+
+/// The values the XMP packet gives a property: the items of its rdf:Alt or rdf:Seq, else its text.
+fn xmp_values(xmp: &str, name: &str) -> Vec<String> {
+    let Some(start) = xmp.find(&format!("<{name}>")) else { return Vec::new() };
+    let end = xmp[start..].find(&format!("</{name}>")).unwrap() + start;
+    let inner = &xmp[start + name.len() + 2..end];
+    if !inner.contains("<rdf:li") {
+        return vec![inner.to_string()];
+    }
+    inner.split("<rdf:li").skip(1).map(|li| li[li.find('>').unwrap() + 1..li.find("</rdf:li>").unwrap()].to_string()).collect()
+}
+
+const LIBREOFFICE_XMP: &str = "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n\
+<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n\
+  <rdf:Description rdf:about=\"\" xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\"><pdf:Producer>Writer 1.0</pdf:Producer></rdf:Description>\n\
+  <rdf:Description rdf:about=\"\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n\
+   <dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">Untitled 1</rdf:li></rdf:Alt></dc:title>\n\
+   <dc:creator><rdf:Seq><rdf:li>Old Author</rdf:li></rdf:Seq></dc:creator>\n\
+   <dc:description><rdf:Alt><rdf:li xml:lang=\"x-default\">Old subject</rdf:li></rdf:Alt></dc:description>\n\
+  </rdf:Description>\n </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end=\"w\"?>";
+
+#[test]
+fn document_info_edits_update_the_xmp_packet() {
+    // Viewers that read XMP first (pdf.js takes dc:title) showed the old title after a change.
+    let mut doc = doc_with_xmp(LIBREOFFICE_XMP.as_bytes());
+    assert_eq!(xmp_values(&xmp_text(&doc).unwrap(), "dc:title"), ["Untitled 1"]);
+    set_info(&mut doc, "Title", "Sales Guide v1.0 & <draft>").unwrap();
+    set_info(&mut doc, "Author", "Demo Consulting").unwrap();
+    set_info(&mut doc, "Subject", "").unwrap();
+    set_info(&mut doc, "Keywords", "alpha, beta").unwrap();
+    set_info(&mut doc, "Rating", "5").unwrap(); // no XMP counterpart: /Info only
+    let doc = save_and_reopen(&doc);
+    assert_eq!(info(&doc, "Title").as_deref(), Some("Sales Guide v1.0 & <draft>"));
+    let xmp = xmp_text(&doc).unwrap();
+    assert_eq!(xmp_values(&xmp, "dc:title"), ["Sales Guide v1.0 &amp; &lt;draft&gt;"]);
+    assert_eq!(xmp_values(&xmp, "dc:creator"), ["Demo Consulting"]);
+    assert!(xmp_values(&xmp, "dc:description").is_empty(), "{xmp}");
+    assert_eq!(xmp_values(&xmp, "pdf:Keywords"), ["alpha, beta"]);
+    assert_eq!(xmp_values(&xmp, "pdf:Producer"), ["Writer 1.0"]);
+    assert!(xmp.starts_with("<?xpacket begin=") && xmp.ends_with("<?xpacket end=\"w\"?>"), "{xmp}");
+    // Stored unfiltered, still typed as metadata.
+    let dict = xmp_stream(&doc).unwrap().dict;
+    assert_eq!((dict.name(b"Type"), dict.name(b"Subtype"), dict.get(b"Filter")), (Some(&b"Metadata"[..]), Some(&b"XML"[..]), None));
+}
+
+#[test]
+fn document_info_edits_leave_files_without_usable_xmp_alone() {
+    // No packet: none is added.
+    let mut doc = open(fixture());
+    set_info(&mut doc, "Title", "New").unwrap();
+    assert_eq!(xmp_text(&save_and_reopen(&doc)), None);
+    // A packet that isn't UTF-8 is not rewritten.
+    let mut latin1 = LIBREOFFICE_XMP.as_bytes().to_vec();
+    latin1.extend_from_slice(b"<!-- \xE9 -->");
+    let mut doc = doc_with_xmp(&latin1);
+    set_info(&mut doc, "Title", "New").unwrap();
+    let doc = save_and_reopen(&doc);
+    assert_eq!(info(&doc, "Title").as_deref(), Some("New"));
+    assert_eq!(xmp_stream(&doc).unwrap().decoded().unwrap(), latin1);
+}
+
 #[test]
 fn successive_incremental_saves_stack_revisions() {
     let mut doc = open(fixture());
