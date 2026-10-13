@@ -496,6 +496,9 @@ pub struct PdfCraftApp {
     /// The user closed the Comments panel, so picking a comment tool leaves it closed until they
     /// open it again (#225). Remembered across restarts.
     pub comments_panel_closed: bool,
+    /// The user closed the right panel, so opening a document leaves it closed instead of
+    /// showing its comments or bookmarks (#1590). Remembered across restarts.
+    pub right_panel_closed: bool,
     pub quick_tool: QuickTool,
     /// The tool to go back to when Space, held for a temporary Hand, is released.
     space_hand: Option<QuickTool>,
@@ -852,6 +855,7 @@ impl PdfCraftApp {
             right: None,
             right_before_read: None,
             comments_panel_closed: false,
+            right_panel_closed: false,
             quick_tool: QuickTool::Select,
             space_hand: None,
             comment_prefs: Default::default(),
@@ -1246,9 +1250,10 @@ impl PdfCraftApp {
         let doc = self.session.get(id).ok_or("the document could not be opened")?;
         let pages = doc.info.pages.len();
         // Acrobat opens straight to the Comments panel when a document has comments.
-        // Read mode opens with the panes closed; the rail still opens them (#932).
+        // Read mode opens with the panes closed; the rail still opens them (#932). A right panel
+        // the user closed stays closed (#1590).
         let opening_mode = self.mode_override.unwrap_or(self.default_mode);
-        if activate && self.right.is_none() && opening_mode != Mode::Read {
+        if activate && self.right.is_none() && !self.right_panel_closed && opening_mode != Mode::Read {
             self.right = if !doc.info.annotations.is_empty() {
                 Some(RightPanel::Comments)
             } else if !doc.info.outline.is_empty() {
@@ -1977,6 +1982,11 @@ impl PdfCraftApp {
         } else if panel.is_none() && self.right == Some(RightPanel::Comments) {
             self.comments_panel_closed = true;
         }
+        if panel.is_some() {
+            self.right_panel_closed = false;
+        } else if self.right.is_some() {
+            self.right_panel_closed = true;
+        }
         self.right = panel;
         if panel.is_some() {
             self.pending_panel_reveals.push(docking::Panel::Inspector);
@@ -2043,6 +2053,7 @@ impl PdfCraftApp {
             "combine_view": self.combine_view.as_str(),
             "combine_zoom": self.combine_zoom,
             "comments_panel_closed": self.comments_panel_closed,
+            "right_panel_closed": self.right_panel_closed,
         })
         .to_string()
     }
@@ -2103,6 +2114,9 @@ impl PdfCraftApp {
         }
         if let Some(closed) = v["comments_panel_closed"].as_bool() {
             self.comments_panel_closed = closed;
+        }
+        if let Some(closed) = v["right_panel_closed"].as_bool() {
+            self.right_panel_closed = closed;
         }
         if let Some(defaults) = v["default_zoom"].as_str().and_then(|zoom| self.view_defaults.with_zoom(zoom)) {
             self.view_defaults = defaults;
