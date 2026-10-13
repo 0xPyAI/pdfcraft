@@ -2790,6 +2790,16 @@ fn dragging_the_rotate_knob_turns_a_page_image() {
     });
     h.run_steps(4);
     let id = h.state().views[0].id;
+    // A smaller picture in the middle of the page: the knob is over the page, not beside it.
+    let full = h.state().session.get(id).unwrap().page_images(0)[0].rect;
+    let (qw, qh) = ((full[2] - full[0]) / 4.0, (full[3] - full[1]) / 4.0);
+    let (mx, my) = ((full[0] + full[2]) / 2.0, (full[1] + full[3]) / 2.0);
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::EditPageImage {
+        page: 0,
+        index: 0,
+        change: pdfcraft_engine::ImageEdit::Move([mx - qw, my - qh, mx + qw, my + qh]),
+    });
+    h.run_steps(4);
     let before = h.state().session.get(id).unwrap().page_images(0)[0].rect;
     assert!(h.state_mut().execute("edit.edit_text"));
     h.run_steps(2);
@@ -2804,7 +2814,7 @@ fn dragging_the_rotate_knob_turns_a_page_image() {
     h.run_steps(2);
     assert!(h.state().views[0].image_selection.is_some(), "selected");
     // Grab the knob above the top edge and swing it a quarter turn clockwise (to the right).
-    let knob = egui::pos2(c.x, r.top() - 22.0);
+    let knob = egui::pos2(c.x, c.y - r.height() / 4.0 - 22.0);
     let to = egui::pos2(c.x + 100.0, c.y);
     h.hover_at(knob);
     h.run_steps(1);

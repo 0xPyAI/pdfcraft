@@ -535,7 +535,7 @@ impl ImageSelection {
     }
 }
 
-/// Once a selected corner is grabbed, text under it cannot take over the gesture. The same
+/// Once a selected corner or the rotate knob is grabbed, text under it cannot take over the gesture. The same
 /// applies after the pointer leaves the image/page while dragging.
 pub(crate) fn image_owns_pointer(ui: &egui::Ui, xf: &PageXform, page: usize, info: &DocInfo, view: &DocView) -> bool {
     let Some(selection) = view.image_selection.as_ref().filter(|s| s.page == page) else { return false };
@@ -546,7 +546,8 @@ pub(crate) fn image_owns_pointer(ui: &egui::Ui, xf: &PageXform, page: usize, inf
     let Some(rect) = image.visible_rect else { return false };
     let b = xf.user_rect(info, page, rect.map(|v| v as f32));
     let p = ui.input(|i| if i.pointer.primary_down() { i.pointer.press_origin() } else { i.pointer.hover_pos() });
-    p.is_some_and(|p| [b.left_top(), b.right_top(), b.left_bottom(), b.right_bottom()].iter().any(|c| c.distance(p) < 8.0))
+    let knob = rotate_knob(b, ui.clip_rect()).0;
+    p.is_some_and(|p| [b.left_top(), b.right_top(), b.left_bottom(), b.right_bottom(), knob].iter().any(|c| c.distance(p) < 8.0))
 }
 
 /// What a drag on a paragraph box takes hold of.
@@ -622,9 +623,11 @@ pub(crate) enum ImageAction {
     Recognize(usize),
 }
 
-/// Where the rotate knob sits: above the middle of the top edge.
-fn rotate_knob(b: Rect) -> Pos2 {
-    b.center_top() - egui::vec2(0.0, 22.0)
+/// Where the rotate knob sits, and the edge point its stem starts from: above the middle of the
+/// top edge, or below the bottom edge when the area on screen (`view`) has no room above.
+fn rotate_knob(b: Rect, view: Rect) -> (Pos2, Pos2) {
+    let above = b.center_top() - egui::vec2(0.0, 22.0);
+    if above.y - 6.0 >= view.top() { (above, b.center_top()) } else { (b.center_bottom() + egui::vec2(0.0, 22.0), b.center_bottom()) }
 }
 
 /// Degrees clockwise (-180..=180) that turn "straight up" from `centre` onto the pointer; `snap`
@@ -724,9 +727,9 @@ pub(crate) fn image_input(
             ui.ctx().set_cursor_icon(if matches!(corner, 0 | 3) { egui::CursorIcon::ResizeNwSe } else { egui::CursorIcon::ResizeNeSw });
         }
         // The rotate handle: a knob above the top edge, joined to it by a short stem.
-        let knob = rotate_knob(b);
+        let (knob, stem) = rotate_knob(b, ui.clip_rect());
         if view.image_selection.as_ref().is_some_and(|s| s.drag.is_none()) {
-            painter.line_segment([b.center_top(), knob], Stroke::new(1.0, ACCENT));
+            painter.line_segment([stem, knob], Stroke::new(1.0, ACCENT));
             painter.circle(knob, 5.0, Color32::WHITE, Stroke::new(1.0, ACCENT));
             if allow_interaction && hover_pos.is_some_and(|p| p.distance(knob) < 8.0) {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -766,7 +769,10 @@ pub(crate) fn image_input(
             };
             let outline = [b.left_top(), b.right_top(), b.right_bottom(), b.left_bottom()].map(turn).to_vec();
             painter.add(egui::Shape::closed_line(outline, Stroke::new(1.5, ACCENT)));
-            painter.text(turn(knob), egui::Align2::CENTER_BOTTOM, format!("{degrees:.0}\u{b0}"), egui::FontId::proportional(12.0), ACCENT);
+            let galley = painter.layout_no_wrap(format!("{degrees:.0}\u{b0}"), egui::FontId::proportional(12.0), ACCENT);
+            let label = Rect::from_center_size(turn(knob) - egui::vec2(0.0, 14.0), galley.size() + egui::vec2(8.0, 4.0));
+            painter.rect(label, CornerRadius::same(3), Color32::WHITE, Stroke::new(1.0, ACCENT), egui::StrokeKind::Middle);
+            painter.galley(label.center() - galley.size() / 2.0, galley, ACCENT);
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             if resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
                 if let Some(s) = view.image_selection.as_mut() {
@@ -1506,6 +1512,16 @@ pub(crate) fn caret_color_on(fill: Color32) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_rotate_knob_moves_below_when_there_is_no_room_above() {
+        let view = Rect::from_min_max(Pos2::new(0.0, 100.0), Pos2::new(500.0, 500.0));
+        let roomy = Rect::from_min_max(Pos2::new(100.0, 200.0), Pos2::new(200.0, 250.0));
+        assert_eq!(rotate_knob(roomy, view).0, Pos2::new(150.0, 178.0));
+        let at_top = Rect::from_min_max(Pos2::new(100.0, 100.0), Pos2::new(200.0, 150.0));
+        let (knob, stem) = rotate_knob(at_top, view);
+        assert_eq!((knob, stem), (Pos2::new(150.0, 172.0), Pos2::new(150.0, 150.0)));
+    }
 
     #[test]
     fn the_rotate_knob_measures_clockwise_degrees_from_straight_up() {
