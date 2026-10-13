@@ -390,3 +390,189 @@ fn a_numeric_host_is_shown_as_the_address_it_goes_to() {
     h.get_by_label("192.168.1.1");
     assert!(h.query_by_label_contains("alphabet").is_none());
 }
+
+fn overlapping_annotation_fixture(subtype: &str, internal: bool) -> Vec<u8> {
+    overlapping_annotation_fixture_with_form(subtype, internal, false)
+}
+
+fn overlapping_annotation_fixture_with_form(subtype: &str, internal: bool, with_form: bool) -> Vec<u8> {
+    let target = if internal { "/Dest [6 0 R /Fit]".to_owned() } else { format!("/A << /S /URI /URI ({LINK_URL}) >>") };
+    let mut objs = vec![
+        if with_form {
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [7 0 R] /DA (/Helv 0 Tf 0 g) >> >>".to_owned()
+        } else {
+            "<< /Type /Catalog /Pages 2 0 R >>".to_owned()
+        },
+        "<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 /MediaBox [0 0 300 400] >>".to_owned(),
+        if with_form {
+            "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R 7 0 R] >>".to_owned()
+        } else {
+            "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R] >>".to_owned()
+        },
+        format!("<< /Type /Annot /Subtype /Link /Rect [100 300 250 350] /Border [0 0 0] {target} >>"),
+        format!(
+            "<< /Type /Annot /Subtype /{subtype} /Rect [30 300 200 350] /QuadPoints [30 350 200 350 30 300 200 300] /C [1 1 0] /Contents (Review this text) /F 4 >>"
+        ),
+        "<< /Type /Page /Parent 2 0 R >>".to_owned(),
+    ];
+    if with_form {
+        objs.push(format!("<< /Type /Annot /Subtype /Widget /FT /Btn /Ff 65536 /T (overlap-button) /Rect [100 300 200 350] /P 3 0 R /A << /S /URI /URI ({BUTTON_URL}) >> >>"));
+    }
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, object) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for offset in offsets {
+        out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+fn overlapping_annotation_harness(bytes: Vec<u8>) -> Harness<'static, PdfCraftApp> {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("highlighted-link.pdf", None, bytes).unwrap();
+        app.set_option("left", "closed").unwrap();
+        app.set_option("panel", "none").unwrap();
+        app.set_option("zoom", "150").unwrap();
+        app
+    });
+    h.run_steps(8);
+    h
+}
+
+#[test]
+fn highlighted_link_still_requires_confirmation() {
+    let _gpu = gpu();
+    let mut h = overlapping_annotation_harness(overlapping_annotation_fixture("Highlight", false));
+    click_link(&mut h);
+    assert_eq!(h.state().pending_link, pending(LINK_URL, LinkOrigin::Link));
+    assert_eq!(h.state().last_opened_url, None);
+    assert_eq!(h.state().views[0].comments.selected, None);
+    h.get_by_label("Open link").click();
+    h.run_steps(3);
+    assert_eq!(h.state().last_opened_url.as_deref(), Some(LINK_URL));
+    assert_eq!(h.state().pending_link, None);
+    h.run_steps(3);
+    assert_eq!(h.state().pending_link, None, "approval must not create another prompt");
+}
+
+#[test]
+fn highlighted_link_cancel_and_escape_do_not_open_url() {
+    let _gpu = gpu();
+    for escape in [false, true] {
+        let mut h = overlapping_annotation_harness(overlapping_annotation_fixture("Highlight", false));
+        click_link(&mut h);
+        assert_eq!(h.state().pending_link, pending(LINK_URL, LinkOrigin::Link));
+        if escape {
+            h.key_press(egui::Key::Escape);
+        } else {
+            h.get_by_label("Cancel").click();
+        }
+        h.run_steps(3);
+        assert_eq!(h.state().pending_link, None);
+        assert_eq!(h.state().last_opened_url, None);
+    }
+}
+
+#[test]
+fn highlighted_internal_link_navigates_after_save_and_reopen() {
+    let _gpu = gpu();
+    let bytes = overlapping_annotation_fixture("Highlight", true);
+    let mut session = pdfcraft_engine::Session::new();
+    let id = session.open("highlighted-link.pdf", None, std::sync::Arc::new(bytes), None).unwrap();
+    let saved = session.save_bytes(id).unwrap().as_ref().clone();
+    let mut h = overlapping_annotation_harness(saved);
+    assert_eq!(h.state().views[0].current, 0);
+    click_link(&mut h);
+    assert_eq!(h.state().views[0].current, 1);
+    assert_eq!(h.state().pending_link, None);
+    assert_eq!(h.state().last_opened_url, None);
+}
+
+#[test]
+fn highlight_outside_link_remains_selectable() {
+    let _gpu = gpu();
+    let mut h = overlapping_annotation_harness(overlapping_annotation_fixture("Highlight", false));
+    let rect = h.state().views[0].page_screen_rect(0).unwrap();
+    let at = egui::pos2(rect.min.x + rect.width() * (60.0 / 300.0), rect.min.y + rect.height() * (1.0 - 325.0 / 400.0));
+    click_at(&mut h, at);
+    assert_eq!(h.state().views[0].comments.selected, Some((0, 1)));
+    assert_eq!(h.state().pending_link, None);
+    assert_eq!(h.state().last_opened_url, None);
+}
+
+#[test]
+fn other_annotations_over_links_keep_select_click() {
+    let _gpu = gpu();
+    for subtype in ["Text", "Square"] {
+        let mut h = overlapping_annotation_harness(overlapping_annotation_fixture(subtype, false));
+        click_link(&mut h);
+        assert_eq!(h.state().views[0].comments.selected, Some((0, 1)), "{subtype}");
+        assert_eq!(h.state().pending_link, None, "{subtype}");
+        assert_eq!(h.state().last_opened_url, None, "{subtype}");
+    }
+}
+
+#[test]
+fn form_widget_keeps_priority_over_highlighted_link() {
+    let _gpu = gpu();
+    let mut h = overlapping_annotation_harness(overlapping_annotation_fixture_with_form("Highlight", false, true));
+    click_link(&mut h);
+    assert_eq!(h.state().pending_link, pending(BUTTON_URL, LinkOrigin::Button));
+    assert_eq!(h.state().last_opened_url, None);
+    h.get_by_label("Cancel").click();
+    h.run_steps(3);
+    assert_eq!(h.state().pending_link, None);
+    assert_eq!(h.state().last_opened_url, None);
+}
+
+#[test]
+fn active_comment_gesture_keeps_highlighted_link_click() {
+    let _gpu = gpu();
+    let mut h = overlapping_annotation_harness(overlapping_annotation_fixture("Highlight", false));
+    let r = h.state().views[0].page_screen_rect(0).unwrap();
+    let at = egui::pos2(r.min.x + r.width() * 0.5, r.min.y + r.height() * (1.0 - 325.0 / 400.0));
+    h.state_mut().views[0].comments.gesture = Some(pdfcraft_ui_egui::comments::Gesture::Move { page: 0, index: 1, from: at });
+    click_at(&mut h, at);
+    assert_eq!(h.state().pending_link, None);
+    assert_eq!(h.state().last_opened_url, None);
+}
+
+#[test]
+fn highlighted_link_context_click_selects_comment_without_opening_url() {
+    let _gpu = gpu();
+    let mut h = overlapping_annotation_harness(overlapping_annotation_fixture("Highlight", false));
+    let r = h.state().views[0].page_screen_rect(0).unwrap();
+    let at = egui::pos2(r.min.x + r.width() * 0.5, r.min.y + r.height() * (1.0 - 325.0 / 400.0));
+    h.hover_at(at);
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed, modifiers: Default::default() });
+    }
+    h.run_steps(3);
+    assert_eq!(h.state().views[0].comments.selected, Some((0, 1)));
+    assert_eq!(h.state().pending_link, None);
+    assert_eq!(h.state().last_opened_url, None);
+}
+
+#[test]
+fn highlighted_link_can_be_requested_again_after_cancel() {
+    let _gpu = gpu();
+    let mut h = overlapping_annotation_harness(overlapping_annotation_fixture("Highlight", false));
+    for _ in 0..2 {
+        click_link(&mut h);
+        assert_eq!(h.state().pending_link, pending(LINK_URL, LinkOrigin::Link));
+        assert_eq!(h.state().last_opened_url, None);
+        h.get_by_label("Cancel").click();
+        h.run_steps(120);
+        assert_eq!(h.state().pending_link, None);
+        assert_eq!(h.state().last_opened_url, None);
+    }
+}

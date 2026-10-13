@@ -931,7 +931,18 @@ fn select_input(
     // (egui clears the press origin on release, so clicks are located by the pointer.)
     let on_page = pointer.is_some_and(|p| cx.xf.rect.contains(p));
     if resp.clicked() && on_page {
+        let follow_link = cx.tool == QuickTool::Select
+            && !consumed
+            && cv.gesture.is_none()
+            && !resp.double_clicked()
+            && pointer
+                .is_some_and(|p| cx.info.links.iter().any(|link| link.page == cx.page && cx.xf.user_rect(cx.info, cx.page, link.rect).contains(p)));
         match pointer.and_then(|p| cx.hit(p)) {
+            Some(a) if a.subtype == "Highlight" && follow_link => {
+                // A plain click follows the link beneath text highlighting. Keep other
+                // annotations and active gestures in control of their own input.
+                cv.selected = None;
+            }
             Some(a) => {
                 cv.selected = Some((cx.page, a.index));
                 cv.reveal = true;
