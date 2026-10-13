@@ -4523,3 +4523,24 @@ fn copy_image_finds_a_picture_inside_form_artwork_under_text() {
     assert_eq!(d.page_image_copy_file(0, 0).unwrap(), ("jpg", jpeg));
     assert!(d.page_image_copy_file(0, 1).is_err());
 }
+
+#[test]
+fn exporting_office_keeps_dotted_leader_entries_as_paragraphs() {
+    let mut content = String::new();
+    for (title, page, y) in [("Art.1. Scope", "3", 200), ("Art.2. Eligibility", "7", 180), ("Art.3. Application", "12", 160)] {
+        content.push_str(&format!(
+            "BT /F1 12 Tf 72 {y} Td ({title}) Tj ET \
+             BT /F1 12 Tf 250 {y} Td (....................) Tj ET \
+             BT /F1 12 Tf 500 {y} Td ({page}) Tj ET\n"
+        ));
+    }
+    let pdf = one_line_page("/Font << /F1 4 0 R >>", &content);
+    let mut session = Session::new();
+    let id = session.open("contents.pdf", None, Arc::new(pdf), None).unwrap();
+    let doc = session.get(id).unwrap();
+    let html = String::from_utf8(doc.export_office(compare::OfficeFormat::Html)).unwrap();
+    assert!(!html.contains("<table>"), "contents entries are paragraphs: {html}");
+    let entries = ["Art.1. Scope .................... 3", "Art.2. Eligibility .................... 7", "Art.3. Application .................... 12"];
+    let positions: Vec<_> = entries.iter().map(|entry| html.find(&format!("<p>{entry}</p>")).expect("one paragraph per entry")).collect();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "reading order: {html}");
+}

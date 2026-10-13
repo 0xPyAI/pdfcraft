@@ -148,6 +148,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-13 (M10, #1757):** Office export keeps each dotted-leader contents entry in one paragraph, with its page number, instead of inferring table cells from its separate text objects.
+
 - **2026-10-12 (M13, CLI robustness scans):** `pdfcraft-cli check` visits a directory once even when input roots overlap or directory symlinks lead back into the tree. PDFs reached through file symlinks remain accepted. Three real CLI regressions cover overlapping roots, a directory cycle and directory/file aliases. Estimates unchanged.
 - **2026-10-12 (M4, Type 3 extraction fidelity):** Extract and Split preserve shared image/resource dictionaries reached through Type 3 glyphs, including nested forms, patterns and soft masks. A bounded object-graph walk protects unknown glyph content; unreadable pages/forms retain their glyph resources, and shared explicit fonts are visited once. Separate page dictionaries still prune unused images. Synthetic save/reopen regressions and an opt-in Poppler pixel oracle cover resource ownership, nested forms, cycles, limits and repeated fonts. Estimates unchanged.
 - **2026-10-12 (M2, TIFF predictor rows):** Packed RGB images using TIFF horizontal differencing keep every row when samples do not fill the last byte. The renderer aligns each decoded row before moving to the next. Synthetic decoding tests cover 1/2/4-bit samples, horizontal differencing and an 8-bit control; a red/green page-render regression verifies visible output. Estimates unchanged.
