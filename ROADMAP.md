@@ -2,6 +2,7 @@
 
 **Stage: alpha** · next: beta, ~26% (ready for real work 49% → 75%) and ~400–700 h away
 
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (M6: preserve XML/XFDF attribute whitespace; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (M13: CLI check visits each directory once through aliases and cycles; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (M4: Extract and Split preserve shared Type 3 glyph resources; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (M2: packed TIFF-predictor RGB rows retain their byte boundaries; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
@@ -148,6 +149,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-13 (M6, data exchange fidelity):** XML and XFDF exports preserve tabs and line breaks in field names and comment metadata using character references. Saved-PDF regressions cover distinct names that XML would normalize to the same attribute value, restored field values and replacement of the original comment identities. Estimates unchanged.
 - **2026-10-12 (M13, CLI robustness scans):** `pdfcraft-cli check` visits a directory once even when input roots overlap or directory symlinks lead back into the tree. PDFs reached through file symlinks remain accepted. Three real CLI regressions cover overlapping roots, a directory cycle and directory/file aliases. Estimates unchanged.
 - **2026-10-12 (M4, Type 3 extraction fidelity):** Extract and Split preserve shared image/resource dictionaries reached through Type 3 glyphs, including nested forms, patterns and soft masks. A bounded object-graph walk protects unknown glyph content; unreadable pages/forms retain their glyph resources, and shared explicit fonts are visited once. Separate page dictionaries still prune unused images. Synthetic save/reopen regressions and an opt-in Poppler pixel oracle cover resource ownership, nested forms, cycles, limits and repeated fonts. Estimates unchanged.
 - **2026-10-12 (M2, TIFF predictor rows):** Packed RGB images using TIFF horizontal differencing keep every row when samples do not fill the last byte. The renderer aligns each decoded row before moving to the next. Synthetic decoding tests cover 1/2/4-bit samples, horizontal differencing and an 8-bit control; a red/green page-render regression verifies visible output. Estimates unchanged.
@@ -424,6 +426,7 @@ Newest first: the date, what moved, and the new overall estimate.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | M6: XML/XFDF attribute whitespace survives form and comment export/import; estimates unchanged |
 | 2026-10-12 | minor | M3/#1364 candidate: absolute local GoToR links require desktop consent or headless allow_absolute; existing relative navigation and validation retained. Estimates unchanged. |
 | 2026-10-12 | minor | M8: redaction retires inherited `/Resources` so a parent `/Pages` can't keep a removed XObject reachable; only redacted pages that inherit are pinned (one shared reference), unredacted pages are untouched; estimates unchanged |
 | 2026-10-12 | minor | M7/#1200 candidate: bounded local GoToR opening, root-confined automation, and action-preserving appearance edits; named destinations and window behavior remain partial; estimates unchanged. |
