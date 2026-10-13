@@ -3978,6 +3978,7 @@ dependencies = [
  "png 0.18.1",
  "pollster 1.0.1",
  "rfd",
+ "rustix 1.1.5",
  "serde",
  "serde_json",
  "skrifa 0.44.0",
