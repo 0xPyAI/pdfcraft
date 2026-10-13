@@ -684,6 +684,51 @@ fn opening_the_same_file_with_a_dot_component_focuses_its_tab() {
 }
 
 #[test]
+fn opening_a_file_whose_copy_vanished_from_disk_focuses_its_tab() {
+    let pdfs = TempPdfs::new("dedup-vanished");
+    let a = pdfs.file("a.pdf", 1);
+    let mut h = session_harness(|_| {});
+    h.state_mut().open_path(&a);
+    h.run_steps(2);
+    std::fs::remove_file(&a).unwrap();
+    h.state_mut().open_path(&a);
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 1, "no second tab");
+    assert_eq!(h.state().active, Some(0), "the open tab is focused");
+    assert!(h.state().toast.is_none(), "no read error: the file is never read again");
+}
+
+#[test]
+fn opening_an_encrypted_document_twice_keeps_one_prompt_and_one_tab() {
+    let pdfs = TempPdfs::new("dedup-encrypted");
+    let secret = pdfs.0.join("secret.pdf");
+    std::fs::write(&secret, protected("pw", "owner", -1)).unwrap();
+    let s = secret.to_string_lossy().into_owned();
+    let mut h = session_harness(|_| {});
+    h.state_mut().open_path(&s);
+    h.state_mut().open_path(&s);
+    h.run_steps(2);
+    assert!(h.state().views.is_empty(), "still locked");
+    let field = h.get_by_role(Role::PasswordInput);
+    field.focus();
+    field.type_text("pw");
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(4);
+    assert_eq!(h.state().views.len(), 1, "unlocking opens one tab, not two");
+}
+
+#[test]
+fn opening_documents_without_a_path_still_open_twice() {
+    let bytes = fixture(1);
+    let mut h = session_harness(|_| {});
+    h.state_mut().open_bytes("copy.pdf", None, bytes.clone()).unwrap();
+    h.state_mut().open_bytes("copy.pdf", None, bytes).unwrap();
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 2, "bytes have no path to compare (attachments, conversions)");
+}
+
+#[test]
 fn save_prompt_stays_inside_the_screen_for_a_long_filename() {
     // Issue #161: an unwrapped title carrying a long filename widened the centered modal past
     // the viewport, clipping the message and pushing the Save/Cancel buttons off-screen.
