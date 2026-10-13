@@ -408,6 +408,28 @@ fn source_kind_tells_pdfs_images_and_text_apart() {
     assert_eq!(source_kind("b.bmp", b"BM"), None);
     assert_eq!(source_kind("a.docx", b"PK\x03\x04"), None);
     assert_eq!(source_kind("", b""), None);
+    // Only the GIF versions Create decodes count as images, so detection never promises a
+    // conversion that then fails.
+    assert_eq!(source_kind("a.gif", b"GIF8x not a gif"), None);
+    assert_eq!(source_kind("notes.txt", b"GIF8 is a word here"), Some(SourceKind::Text));
+}
+
+/// BigTIFF (version 43, used for large scans) is detected and converted like a classic TIFF.
+#[test]
+fn bigtiff_images_become_pages() {
+    let mut tif = std::io::Cursor::new(Vec::new());
+    {
+        let mut enc = tiff::encoder::TiffEncoder::new_big(&mut tif).unwrap();
+        let mut im = enc.new_image::<tiff::encoder::colortype::Gray8>(4, 2).unwrap();
+        im.resolution(tiff::tags::ResolutionUnit::Inch, tiff::encoder::Rational { n: 144, d: 1 });
+        im.write_data(&[128; 8]).unwrap();
+    }
+    let tif = tif.into_inner();
+    assert!(tif.starts_with(b"II+\0"), "the encoder wrote a BigTIFF");
+    assert_eq!(source_kind("scan.tif", &tif), Some(SourceKind::Image));
+    let doc = reopen(&from_images(&[("scan.tif".into(), tif)]).unwrap());
+    assert_eq!(pages(&doc).len(), 1);
+    assert_eq!(media(&pages(&doc)[0]), [0.0, 0.0, 2.0, 1.0], "4×2 px at 144 dpi");
 }
 
 /// A synthetic ICC profile: a 128-byte header (size, device class, colour space, `acsp`) and

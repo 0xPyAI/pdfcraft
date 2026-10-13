@@ -6784,8 +6784,8 @@ milestone = "M10"
 status = "shipped"
 commands = ["create.images", "create.file"]
 tools = ["doc_create"]
-evidence = ["crates/create/src/tests.rs::bmp_gif_and_multi_page_tiff_images"]
-notes = "every page; 1-bit scans stay 1-bit; resolution from the TIFF"
+evidence = ["crates/create/src/tests.rs::bmp_gif_and_multi_page_tiff_images", "crates/create/src/tests.rs::bigtiff_images_become_pages"]
+notes = "every page; 1-bit scans stay 1-bit; resolution from the TIFF; classic TIFF and BigTIFF"
 
 [[feature]]
 id = "create.from-text"
