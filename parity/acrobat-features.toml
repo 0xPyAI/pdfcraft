@@ -8909,11 +8909,11 @@ title = "Order panel"
 area = "M"
 tier = "P1"
 milestone = "M12"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["a11y.tags"]
+tools = ["accessibility_move_tag"]
+evidence = ["crates/ui-egui/tests/accessibility.rs::tags_panel_moves_a_tag_within_its_siblings", "crates/a11y/src/tests.rs::sibling_tags_move_in_reading_order_without_changing_content", "crates/automation/tests/automation.rs::accessibility_check_report_and_fixes_through_tools"]
+notes = "The Tags panel moves a selected reachable indirect tag earlier or later among direct siblings, preserving page appearance and making one undoable reading-order edit. It does not yet show page-content order visually, edit direct tag dictionaries, move across parents, or reorder arbitrary content."
 
 [[feature]]
 id = "a11y.content-panel"

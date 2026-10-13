@@ -224,6 +224,27 @@ fn tags_panel_edits_a_tag_property_and_undoes_it() {
 }
 
 #[test]
+fn tags_panel_moves_a_tag_within_its_siblings() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("figures.pdf", None, FIGURES.to_vec()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("a11y.tags"));
+    h.run_steps(2);
+    h.get_by_label("Photo · 8").click();
+    h.run_steps(1);
+    h.get_by_label("Move tag earlier").click();
+    h.run_steps(3);
+    let s = h.state();
+    let doc = s.session.get(s.views[0].id).unwrap();
+    assert_eq!(doc.tags().into_iter().map(|tag| tag.object.num).collect::<Vec<_>>(), [6, 8, 7]);
+    assert_eq!(doc.can_undo(), Some("Move object"));
+}
+
+#[test]
 fn checker_finding_opens_its_structure_tag() {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
