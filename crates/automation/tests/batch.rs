@@ -121,7 +121,31 @@ fn non_utf8_discovered_names_are_reported_without_panicking() {
     use std::os::unix::ffi::OsStrExt;
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("input")).unwrap();
-    std::fs::write(dir.path().join("input").join(std::ffi::OsStr::from_bytes(b"bad-\xff.pdf")), pdf()).unwrap();
+    let invalid = dir.path().join("input").join(std::ffi::OsStr::from_bytes(b"bad-\xff.pdf"));
+    if let Err(error) = std::fs::write(&invalid, pdf()) {
+        // APFS rejects this filename before batch discovery can see it. Keep the
+        // discovery assertions on filesystems that allow it; no other I/O error
+        // is an unsupported fixture.
+        #[cfg(target_os = "macos")]
+        if error.raw_os_error() == Some(92) {
+            assert!(!invalid.exists());
+            assert_eq!(std::fs::read_dir(dir.path().join("input")).unwrap().count(), 0);
+            assert!(!dir.path().join("out").exists());
+            let valid = dir.path().join("input/valid-λ.pdf");
+            std::fs::write(&valid, pdf()).unwrap();
+            assert_eq!(std::fs::read(&valid).unwrap(), pdf());
+            let mut auto = Automation::new().with_root(dir.path()).unwrap();
+            let report = result(&mut auto, json!({"paths":["input"],"steps":["convert"],"out_dir":"out"}));
+            assert_eq!(report["completed"], 1, "{report}");
+            assert_eq!(report["failed"], 0, "{report}");
+            assert_eq!(std::fs::read(dir.path().join("out/valid-λ.pdf")).unwrap(), pdf());
+            eprintln!(
+                "non-UTF-8 fixture capability unavailable: macOS filesystem rejected creation with EILSEQ92; valid-Unicode batch companion passed; invalid-name discovery still requires Linux/FreeBSD or a supporting filesystem"
+            );
+            return;
+        }
+        panic!("could not create the non-UTF-8 fixture: {error}");
+    }
     let mut auto = Automation::new().with_root(dir.path()).unwrap();
     let report = result(&mut auto, json!({"paths":["input"],"steps":["convert"],"out_dir":"out"}));
     assert_eq!(report["failed"], 1);

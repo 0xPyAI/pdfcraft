@@ -1,6 +1,8 @@
 //! The command registry drives menus, shortcuts and the palette: every registered command must
 //! be implemented, disabled commands must say why, and every surface must reach the same action.
 
+mod support;
+
 use egui::os::OperatingSystem;
 use egui::{Key, Modifiers};
 use egui_kittest::Harness;
@@ -184,9 +186,13 @@ fn a_tool_chosen_with_no_document_asks_for_one_and_runs_on_it() {
     h.run_steps(2);
     h.state_mut().run_command("export.text");
     assert!(h.state().toast.as_ref().is_none_or(|t| t.0 != "Open a document first"));
-    h.run_steps(3);
+    support::wait_until(&mut h, "picked document and chosen tool", |app| app.active.is_some() && matches!(app.dialog, Some(Dialog::Export(_))));
     assert!(h.state().active.is_some(), "the picked file is open");
     assert!(matches!(h.state().dialog, Some(Dialog::Export(_))), "and the tool runs on it: {:?}", h.state().dialog);
+    let (_, id) = h.state().active_ids().unwrap();
+    let doc = h.state().session.get(id).unwrap();
+    assert_eq!(doc.name, "picked.pdf");
+    assert_eq!(doc.bytes.as_slice(), fixture(2).as_slice());
     // Cancelled: nothing opens and nothing runs.
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
         let mut app = PdfCraftApp::new();
@@ -286,12 +292,16 @@ fn the_open_recent_menu_lists_files_and_opens_one() {
     h.run_steps(3);
     h.get_by_label("Open Recent ⏵").hover();
     h.run_steps(3);
+    let original = h.state().views[0].id;
     h.get_by_label_contains("recent.pdf").click();
-    h.run_steps(4);
+    support::wait_until(&mut h, "recent document", |app| app.views.len() == 2 && app.password_prompt.is_none());
     let app = h.state();
     assert_eq!(app.views.len(), 2, "the recent file opened in a new tab");
     let active = app.active.unwrap();
     assert_eq!(app.session.get(app.views[active].id).and_then(|d| d.path.as_deref()), Some(path.as_str()), "the active tab is the recent file");
+    assert_eq!(app.session.get(app.views[active].id).unwrap().bytes.as_slice(), fixture(2).as_slice());
+    assert!(app.views.iter().any(|view| view.id == original));
+    assert_eq!(app.session.get(original).unwrap().bytes.as_slice(), fixture(3).as_slice());
 }
 
 #[test]
