@@ -357,7 +357,11 @@ impl PdfCraftApp {
         let Some((_, id)) = self.active_ids() else { return };
         let Some(doc) = self.session.get(id) else { return };
         let o = &self.a11y_options;
-        let options = Options { rules: o.rules.clone(), pages: (!o.all_pages).then(|| (o.from.max(1) - 1..o.to.max(o.from)).collect()) };
+        // The range was picked on whatever document had the options dialog last; with the dialog
+        // turned off it reaches here unchecked, and a page past the end would select nothing.
+        let to = o.to.clamp(1, doc.info.pages.len().max(1));
+        let from = o.from.clamp(1, to);
+        let options = Options { rules: o.rules.clone(), pages: (!o.all_pages).then(|| (from - 1..to).collect()) };
         let Some(report) = doc.accessibility_check(&options) else {
             self.notify_tr("This document can't be checked: it couldn't be read for editing");
             return;
