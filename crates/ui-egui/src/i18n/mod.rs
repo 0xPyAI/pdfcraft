@@ -2558,6 +2558,36 @@ mod tests {
         }
     }
 
+    /// Redaction first marks a region; applying it irreversibly removes marked content.
+    /// Korean must not present either stage as censorship ("검열") or imply that
+    /// clearing un-applied marks deletes PDF content.
+    #[test]
+    fn korean_redaction_labels_distinguish_marks_and_permanent_removal() {
+        let ko = Lang::from_code("ko").expect("ko registered");
+        for english in [
+            "Redact",
+            "Redact a PDF",
+            "Redact text and images",
+            "Redact pages…",
+            "Mark for redaction",
+            "Apply redactions",
+            "Apply redactions…",
+            "Clear redaction marks",
+            "Redact all",
+        ] {
+            assert!(!tr(ko, english).contains("검열"), "Korean label misstates redaction: {english}");
+        }
+        assert_eq!(tr(ko, "Mark for redaction"), "제거할 영역 표시");
+        assert_eq!(tr(ko, "Apply redactions"), "표시된 정보 영구 제거");
+        assert_eq!(tr(ko, "Clear redaction marks"), "제거 대상 표시 지우기");
+        let warning = concat!(
+            "You are about to apply 1 redaction mark. ",
+            "Text, images and drawings under the marks, and comments ",
+            "and form fields that overlap them, are removed permanently."
+        );
+        assert!(tr(ko, warning).contains("영구적으로 제거됩니다"));
+    }
+
     /// Hindi and Korean translate every registered command and every All tools group, section
     /// and item.
     #[test]

@@ -197,7 +197,7 @@
 	Compare files…	파일 비교…
 	Detect form fields	양식 필드 감지
 	Merge data files into spreadsheet…	데이터 파일을 스프레드시트로 병합…
-	Flatten form fields	양식 필드 병합
+	Flatten form fields	양식 필드 평탄화
 	Prepare a form	양식 준비
 	Tab order: by rows	탭 순서: 행 기준
 	Tab order: by columns	탭 순서: 열 기준
@@ -212,14 +212,14 @@
 	Removed {n} links	링크 {n}개를 제거했습니다
 	Add Bates numbering…	Bates 번호 매기기 추가…
 	Add image…	이미지 추가…
-	Redact text and images	텍스트 및 이미지 검열
-	Redact pages…	페이지 검열…
-	Find text and redact…	텍스트 찾아 검열…
-	Redaction properties…	검열 속성…
-	Apply redactions…	검열 적용…
-	Clear redaction marks	검열 표시 지우기
+	Redact text and images	텍스트·이미지 제거 대상 표시
+	Redact pages…	페이지 내용 제거 대상 표시…
+	Find text and redact…	텍스트를 찾아 제거 대상으로 표시…
+	Redaction properties…	민감 정보 제거 속성…
+	Apply redactions…	표시된 정보 영구 제거…
+	Clear redaction marks	제거 대상 표시 지우기
 	Remove hidden information…	숨겨진 정보 제거…
-	Sanitize document…	문서 정리…
+	Sanitize document…	문서에서 숨겨진 정보 제거…
 	Field properties…	필드 속성…
 	Add a text field	텍스트 필드 추가
 	Add a checkbox	확인란 추가
@@ -380,10 +380,10 @@
 	Advanced options	고급 옵션
 	Encrypt with certificate	인증서로 암호화
 	Security properties	보안 속성
-	Redact a PDF	PDF 검열
-	Redact	검열
-	Redact pages	페이지 검열
-	Find text and redact	텍스트 찾아 검열
+	Redact a PDF	PDF 민감 정보 제거
+	Redact	민감 정보 제거
+	Redact pages	페이지 내용 제거 대상 표시
+	Find text and redact	텍스트를 찾아 제거 대상으로 표시
 	Set properties	속성 설정
 	Sanitize document	문서 정리
 	Compress a PDF	PDF 압축
@@ -417,7 +417,7 @@
 	Output preview	출력 미리 보기
 	Preflight	프리플라이트
 	Convert colors	색상 변환
-	Add printer marks	프린터 표시 추가
+	Add printer marks	인쇄용 표시 추가
 	Fix hairlines	헤어라인 수정
 	Measure objects	개체 측정
 	Measure	측정
@@ -467,7 +467,7 @@
 	Preview	미리 보기
 	Edit fields	필드 편집
 	Try the form as people filling it in will see it	양식을 작성하는 사용자에게 보이는 그대로 양식을 사용해 보세요
-	Redact all	모두 검열
+	Redact all	표시된 정보 모두 영구 제거
 	Clear all	모두 지우기
 	Rotate page	페이지 회전
 	Delete page	페이지 삭제
@@ -1109,27 +1109,27 @@
 	Text in images isn't found; recognise text (OCR) first.	이미지 속 텍스트는 찾을 수 없습니다. 먼저 텍스트 인식(OCR)을 실행하세요.
 	No matches.	일치하는 항목이 없습니다.
 	Some bookmarks are not shown here: the panel lists a limited number, nested a limited depth.	일부 책갈피는 여기에 표시되지 않습니다. 패널에 나열되는 개수와 중첩 깊이가 제한되어 있습니다.
-	{n} match(es) marked for redaction.	검열하도록 표시된 일치 항목 {n}개입니다.
+	{n} match(es) marked for redaction.	검색 결과 {n}건을 제거 대상으로 표시했습니다.
 	Multiple words or phrases	여러 단어 또는 구문
 	One word or phrase per line	한 줄에 단어 또는 구문 하나
 	Import list…	목록 가져오기…
 	{n} word(s) or phrase(s)	단어 또는 구문 {n}개
 	{name} is too large for a word list (at most 1 MB).	{name}은(는) 단어 목록으로 사용하기에 너무 큽니다(최대 1 MB).
-	Redaction Tool Properties	검열 도구 속성
-	Redacted area fill colour:	검열 영역 채우기 색:
+	Redaction Tool Properties	민감 정보 제거 도구 속성
+	Redacted area fill colour:	제거 영역 채우기 색:
 	Use overlay text	오버레이 텍스트 사용
 	Custom text:	사용자 지정 텍스트:
-	Redaction code:	검열 코드:
+	Redaction code:	제거 사유 코드:
 	Font:	글꼴:
 	Font size:	글꼴 크기:
-	Auto-size text to fit redaction region	검열 영역에 맞게 텍스트 크기 자동 조정
+	Auto-size text to fit redaction region	제거 영역에 맞춰 표시 문구 크기 자동 조정
 	Font colour:	글꼴 색:
 	Repeat overlay text	오버레이 텍스트 반복
 	Text alignment:	텍스트 정렬:
 	Center	가운데
-	Apply redactions	검열 적용
-	You are about to apply 1 redaction mark. Text, images and drawings under the marks, and comments and form fields that overlap them, are removed permanently.	검열 표시 1개를 적용하려고 합니다. 표시 아래의 텍스트, 이미지, 그림과 표시와 겹치는 주석 및 양식 필드가 영구적으로 제거됩니다.
-	You are about to apply {n} redaction marks. Text, images and drawings under the marks, and comments and form fields that overlap them, are removed permanently.	검열 표시 {n}개를 적용하려고 합니다. 표시 아래의 텍스트, 이미지, 그림과 표시와 겹치는 주석 및 양식 필드가 영구적으로 제거됩니다.
+	Apply redactions	표시된 정보 영구 제거
+	You are about to apply 1 redaction mark. Text, images and drawings under the marks, and comments and form fields that overlap them, are removed permanently.	제거 대상 표시 1개를 적용하려고 합니다. 표시된 영역의 텍스트, 이미지, 그림과 겹치는 주석 및 양식 필드가 영구적으로 제거됩니다.
+	You are about to apply {n} redaction marks. Text, images and drawings under the marks, and comments and form fields that overlap them, are removed permanently.	제거 대상 표시 {n}개를 적용하려고 합니다. 표시된 영역의 텍스트, 이미지, 그림과 겹치는 주석 및 양식 필드가 영구적으로 제거됩니다.
 	Save the document afterwards: saving rewrites the whole file so no trace of the removed content stays in it.	그 후 문서를 저장하세요. 저장하면 파일 전체가 다시 쓰여져 제거된 콘텐츠의 흔적이 남지 않습니다.
 	Select the items to remove from this document.	이 문서에서 제거할 항목을 선택하세요.
 	Metadata	메타데이터
@@ -1799,7 +1799,7 @@
 	a bookmark cannot be moved inside itself	책갈피를 자기 자신 안으로 이동할 수 없음
 	the title must not be empty	제목은 비워 둘 수 없음
 	the document has no form fields	문서에 양식 필드가 없음
-	there are no redaction marks to apply	적용할 검열 표시가 없음
+	there are no redaction marks to apply	적용할 제거 대상 표시가 없음
 	there are no pages to print	인쇄할 페이지가 없음
 	the document has no tags	문서에 태그가 없음
 	{0}: {1}	{0}: {1}
@@ -1905,7 +1905,7 @@
 	Add image	이미지 추가
 	Edit content	콘텐츠 편집
 	Delete content	콘텐츠 삭제
-	Remove redaction marks	검열 표시 제거
+	Remove redaction marks	제거 대상 표시 삭제
 	Add link	링크 추가
 	Change link properties	링크 속성 변경
 	Delete link	링크 삭제
@@ -1926,7 +1926,7 @@
 	Add cross	X 표시 추가
 	Add dot	점 추가
 	Add signature	서명 추가
-	Add redaction mark	검열 표시 추가
+	Add redaction mark	제거 대상 표시 추가
 	Add cloud	구름 추가
 	Add polygon	다각형 추가
 	Add connected lines	연결선 추가
@@ -2135,8 +2135,8 @@ calendar date	December	12월
 	Align fields	필드 정렬
 	Distribute fields	필드 분배
 	Match field sizes	필드 크기 맞춤
-	Mark for redaction	검열 표시
-	Mark pages for redaction	페이지 검열 표시
+	Mark for redaction	제거할 영역 표시
+	Mark pages for redaction	페이지 내용 제거 대상으로 표시
 	Change document properties	문서 속성 변경
 	Mark differences	차이점 표시
 	Run form script	양식 스크립트 실행
@@ -2165,7 +2165,7 @@ calendar date	December	12월
 	Larger pages	더 큰 페이지
 	Smaller pages	더 작은 페이지
 	Reset page size	페이지 크기 재설정
-	Flatten Fill & Sign when saving	저장할 때 채우기 및 서명 병합
+	Flatten Fill & Sign when saving	저장 시 입력 내용과 서명을 페이지에 고정
 	Text, marks and signatures become part of the page. Other comments stay editable.	텍스트, 표시 및 서명이 페이지의 일부가 됩니다. 다른 주석은 계속 편집할 수 있습니다.
 	Date format	날짜 형식
 	Fill & Sign dates	채우기 및 서명 날짜
