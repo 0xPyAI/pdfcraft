@@ -3472,6 +3472,78 @@ trailer << /Root 1 0 R >>
         page(&format!("q 20 0 0 20 5 5 cm /Im1 Do Q {red}"), fax);
     }
 
+    #[test]
+    fn tiff_predictor_packed_rgb_rows_keep_their_byte_boundaries() {
+        use hayro_syntax::object::{FromBytes, Object};
+        use std::io::Write;
+
+        // Red then green, with only the real sample bits compared: row padding may change.
+        // The three-column case also checks horizontal differencing: red/green/blue and
+        // green/red/blue, whose one-bit component differences wrap modulo two.
+        struct RowCase {
+            bpc: u8,
+            columns: u32,
+            encoded: &'static [u8],
+            expected: &'static [u8],
+            masks: &'static [u8],
+        }
+        let cases = [
+            RowCase { bpc: 1, columns: 1, encoded: &[0x80, 0x40], expected: &[0x80, 0x40], masks: &[0xe0] },
+            RowCase { bpc: 2, columns: 1, encoded: &[0xc0, 0x30], expected: &[0xc0, 0x30], masks: &[0xfc] },
+            RowCase { bpc: 4, columns: 1, encoded: &[0xf0, 0, 0x0f, 0], expected: &[0xf0, 0, 0x0f, 0], masks: &[0xff, 0xf0] },
+            RowCase { bpc: 1, columns: 3, encoded: &[0x99, 0x80, 0x5a, 0x80], expected: &[0x88, 0x80, 0x50, 0x80], masks: &[0xff, 0x80] },
+            RowCase { bpc: 8, columns: 1, encoded: &[255, 0, 0, 0, 255, 0], expected: &[255, 0, 0, 0, 255, 0], masks: &[0xff, 0xff, 0xff] },
+        ];
+        for RowCase { bpc, columns, encoded, expected, masks } in cases {
+            let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+            encoder.write_all(encoded).unwrap();
+            let compressed = encoder.finish().unwrap();
+            let mut bytes = format!(
+                "<< /Filter /FlateDecode /DecodeParms << /Predictor 2 /Colors 3 /BitsPerComponent {bpc} /Columns {columns} >> /Length {} >> stream\n",
+                compressed.len()
+            )
+            .into_bytes();
+            bytes.extend_from_slice(&compressed);
+            bytes.extend_from_slice(b"\nendstream");
+            let Object::Stream(stream) = Object::from_bytes(&bytes).unwrap() else { panic!("stream expected") };
+            let decoded = stream.decoded().unwrap();
+            assert_eq!(decoded.len(), expected.len());
+            for ((actual, expected), mask) in decoded.iter().zip(expected).zip(masks.iter().cycle()) {
+                assert_eq!(actual & mask, *expected, "{bpc}-bit RGB, {columns} columns");
+            }
+        }
+    }
+
+    #[test]
+    fn tiff_predictor_packed_rgb_image_renders_every_row() {
+        use std::io::Write;
+
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&[0x80, 0x40]).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let content = "q 40 0 0 40 0 0 cm /Im1 Do Q";
+        let mut pdf = format!(
+            "%PDF-1.7\n\
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 40 40] /Contents 4 0 R /Resources << /XObject << /Im1 5 0 R >> >> >> endobj\n\
+4 0 obj << /Length {} >> stream\n{content}\nendstream endobj\n\
+5 0 obj << /Type /XObject /Subtype /Image /Width 1 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 1 /Filter /FlateDecode /DecodeParms << /Predictor 2 /Colors 3 /BitsPerComponent 1 /Columns 1 >> /Length {} >> stream\n",
+            content.len(),
+            compressed.len()
+        )
+        .into_bytes();
+        pdf.extend_from_slice(&compressed);
+        pdf.extend_from_slice(b"\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n");
+        let mut renderer = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+        let page = renderer.render(RenderRequest { page: 0, kind: RequestKind::Pixels, scale: 1.0, ..Default::default() });
+        assert!(page.error.is_none(), "{:?}", page.error);
+        assert_eq!((page.width, page.height), (40, 40));
+        let pixel = |y: usize| &page.rgba[((y * 40 + 20) * 4)..][..4];
+        assert_eq!(pixel(10), &[255, 0, 0, 255]);
+        assert_eq!(pixel(30), &[0, 255, 0, 255]);
+    }
+
     /// From the nightly `cargo xtask fuzz`: a FlateDecode predictor with `/Columns
     /// 9223372036854775807` wrapped to a 2^61-byte row allocation (an abort on any machine), and
     /// a line width of 9223372036854775807 made stroke expansion allocate 10 GB. Vendored hayro

@@ -32,6 +32,13 @@ Later rendering errors, device loss, and non-winit renderer construction are unc
 
 Temporary: hayro is the bootstrap renderer and lopdf the bootstrap inspector (ADR-0004); M2.6 replaces them with our own devices and `cos`/`model`.
 
+TIFF predictor decoding: hayro-syntax aligns the output writer to a byte boundary after each
+row before splitting off its buffer. Packed RGB samples at 1, 2 or 4 bits per component can
+leave padding bits; without alignment later rows overwrite the preceding row or decode empty.
+Covered by `raster::tests::tiff_predictor_packed_rgb_rows_keep_their_byte_boundaries` (including
+horizontal differencing and an 8-bit control) and
+`raster::tests::tiff_predictor_packed_rgb_image_renders_every_row`.
+
 Text extraction: hayro-interpret exposes `OutlineGlyph::is_vertical` from a Type0 font’s CMap writing mode. PdfCraft follows negative glyph-space y for WMode 1 so upright vertical columns can be searched (#126).
 
 Lab Bradford follow-up to #1237: Lab adapts XYZ to D65 with white-point ratios

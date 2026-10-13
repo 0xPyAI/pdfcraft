@@ -2,6 +2,7 @@
 
 **Stage: alpha** · next: beta, ~26% (ready for real work 49% → 75%) and ~400–700 h away
 
+> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (M2: packed TIFF-predictor RGB rows retain their byte boundaries; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (M3 #1364 candidate: consent before absolute local GoToR access; estimates unchanged); earlier: minor (M1 #1339: an unchanged incremental save of a classic cross-reference table writes a zero-length subsection; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (M5 #1398: stamps read upright on rotated pages; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (gap 6: cloudy comments stay when flatten cannot draw them, a refused text-box edit keeps its properties, arrow defaults stay off lines, a custom match stops at a separator, and the vertical-text redaction error no longer claims an overlap; #1317, #1327, #1302, #1315, #1340; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
@@ -145,6 +146,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-12 (M2, TIFF predictor rows):** Packed RGB images using TIFF horizontal differencing keep every row when samples do not fill the last byte. The renderer aligns each decoded row before moving to the next. Synthetic decoding tests cover 1/2/4-bit samples, horizontal differencing and an 8-bit control; a red/green page-render regression verifies visible output. Estimates unchanged.
 - **2026-10-12 (M3, #1364 candidate):** Absolute local GoToR links wait for Allow/Cancel before target-file access. Pending requests preserve their source and page/view destination; relative links retain their existing behavior. Headless `link_open` requires explicit `allow_absolute: true`, preserving existing root, symlink, file and password validation. Estimates unchanged.
 
 - **2026-10-12 (community, M7, inline Arabic ActualText):** A single-glyph lam-alef `/ActualText` span joins its surrounding word in Edit text instead of splitting it into separate lines. Pure RTL ligature text is put in visual order before line assembly and recovered to typing order with its neighbours. Multi-glyph and mixed-direction replacements retain their authoritative order. Synthetic regressions cover lam-alef variants, marks, two-byte glyph codes, nested spans, replacement and save/reopen. Estimates unchanged.
