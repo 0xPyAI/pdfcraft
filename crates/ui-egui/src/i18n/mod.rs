@@ -147,7 +147,7 @@ fn plural_sl(n: u64) -> usize {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 24] = [
+pub static LANGUAGES: [LangInfo; 26] = [
     LangInfo { code: "en", name: "English", source: "", plural: plural_one_other, rtl: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Simplified Chinese; `zh`, `zh-CN`, `zh-SG` and `zh-Hans-*` locales resolve here (see `candidates`).
@@ -213,6 +213,13 @@ pub static LANGUAGES: [LangInfo; 24] = [
     // Vietnamese; every `vi-*` locale (`vi-VN`, `vi_VN.UTF-8`) resolves here. CLDR `vi` counts have
     // one form ("other"), so `@plural` entries list a single form.
     LangInfo { code: "vi", name: "Tiếng Việt", source: include_str!("vi.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
+    // Hindi; every `hi-*` locale (`hi-IN`, `hi_IN.UTF-8`) resolves here. CLDR `hi` has "one"
+    // (0 and 1) and "other", but the catalog's nouns are the same in both ("{n} पृष्ठ"), so
+    // `@plural` entries list a single form.
+    LangInfo { code: "hi", name: "हिन्दी", source: include_str!("hi.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
+    // Korean; every `ko-*` locale (`ko-KR`, `ko_KR.UTF-8`) resolves here. CLDR `ko` counts have
+    // one form ("other"), so `@plural` entries list a single form.
+    LangInfo { code: "ko", name: "한국어", source: include_str!("ko.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
@@ -2498,6 +2505,122 @@ mod tests {
         }
         assert!(literals.len() > 900, "source scan found only {} literals", literals.len());
         for lang in [Lang::from_code("id").expect("id registered"), Lang::from_code("vi").expect("vi registered")] {
+            let missing: Vec<_> = literals.iter().filter(|label| !has(lang, label)).collect();
+            assert!(missing.is_empty(), "untranslated {} UI literals: {missing:#?}", lang.code());
+        }
+    }
+
+    #[test]
+    fn hindi_and_korean_are_registered_and_persist() {
+        let hi = Lang::from_code("hi").expect("hi registered");
+        let ko = Lang::from_code("ko").expect("ko registered");
+        assert_eq!(hi.name(), "हिन्दी");
+        assert_eq!(ko.name(), "한국어");
+        assert_eq!(normalize_pref("HI"), Some("hi"));
+        assert_eq!(normalize_pref("Ko"), Some("ko"));
+        for tag in ["hi", "hi-IN", "hi_IN.UTF-8", "HI-in"] {
+            assert_eq!(lang_from_tag(tag), Some(hi), "{tag}");
+        }
+        for tag in ["ko", "ko-KR", "ko_KR.UTF-8", "KO-kr"] {
+            assert_eq!(lang_from_tag(tag), Some(ko), "{tag}");
+        }
+        assert_eq!(first_supported("hi-IN\r\nen-US"), Some(hi));
+        assert_eq!(first_supported("ko-KR\r\nen-US"), Some(ko));
+        assert_eq!(tr(hi, "Save"), "सहेजें");
+        assert_eq!(tr(hi, "Save as…"), "इस रूप में सहेजें…");
+        assert_eq!(tr(hi, "Bookmarks"), "बुकमार्क");
+        assert_eq!(tr(hi, "Home"), "होम");
+        assert_eq!(tr(hi, "Interface language"), "इंटरफ़ेस भाषा");
+        assert_eq!(tr(ko, "Save"), "저장");
+        assert_eq!(tr(ko, "Save as…"), "다른 이름으로 저장…");
+        assert_eq!(tr(ko, "Bookmarks"), "책갈피");
+        assert_eq!(tr(ko, "Home"), "홈");
+        assert_eq!(tr(ko, "Interface language"), "인터페이스 언어");
+        // One plural form per catalog: the message reads the same for every count.
+        assert_eq!((0..=3).map(|n| (hi.0.plural)(n)).collect::<Vec<_>>(), [0, 0, 0, 0]);
+        assert_eq!((0..=3).map(|n| (ko.0.plural)(n)).collect::<Vec<_>>(), [0, 0, 0, 0]);
+        for n in [0, 1, 2, 5] {
+            assert_eq!(trn(hi, n, "{n} page", "{n} pages"), format!("{n} पृष्ठ"));
+            assert_eq!(trn(ko, n, "{n} page", "{n} pages"), format!("{n}페이지"));
+            assert_eq!(trn(ko, n, "{n} field", "{n} fields"), format!("필드 {n}개"));
+        }
+        // The broken-line regression: a `\n` escape stays one catalog line.
+        assert_eq!(tr(ko, "This page couldn't be displayed.\n{e}"), "이 페이지를 표시할 수 없습니다.\n{e}");
+        for code in ["hi", "ko"] {
+            let mut app = crate::PdfCraftApp::default();
+            app.set_option("language", &code.to_uppercase()).unwrap();
+            assert_eq!(app.language, code);
+            let mut restored = crate::PdfCraftApp::default();
+            restored.restore(&app.persist());
+            assert_eq!(restored.language, code);
+            assert!(restored.set_option("language", "xx").is_err());
+            assert_eq!(restored.language, code);
+        }
+    }
+
+    /// Hindi and Korean translate every registered command and every All tools group, section
+    /// and item.
+    #[test]
+    fn hindi_and_korean_cover_commands_and_catalogue() {
+        for lang in [Lang::from_code("hi").expect("hi registered"), Lang::from_code("ko").expect("ko registered")] {
+            for command in pdfcraft_engine::commands::COMMANDS {
+                assert!(has(lang, command.label), "{} missing command: {}", lang.code(), command.label);
+                if let Some(menu) = command.menu {
+                    assert!(has(lang, menu), "{} missing menu: {menu}", lang.code());
+                }
+            }
+            for group in pdfcraft_engine::catalog::TOOL_GROUPS {
+                assert!(has(lang, group.label), "{} missing group: {}", lang.code(), group.label);
+                for section in group.sections {
+                    assert!(has(lang, section.title), "{} missing section: {}", lang.code(), section.title);
+                    for item in section.items {
+                        assert!(has(lang, item.label), "{} missing item: {}", lang.code(), item.label);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Every `tl!("…")` literal in the UI source is translated in Hindi and Korean, so a new
+    /// label cannot silently fall back to English in either.
+    #[test]
+    fn hindi_and_korean_cover_ui_literals() {
+        let mut stack = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+        let mut literals = std::collections::BTreeSet::new();
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(dir).expect("UI source directory") {
+                let path = entry.expect("UI source entry").path();
+                if path.is_dir() {
+                    if path.file_name().is_some_and(|name| name != "i18n") {
+                        stack.push(path);
+                    }
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    let source = std::fs::read_to_string(path).expect("UI source file").replace("\r\n", "\n");
+                    let mut rest = source.split("#[cfg(test)]\nmod ").next().unwrap_or_default();
+                    while let Some((_, after)) = rest.split_once("tl!(\"") {
+                        let mut escaped = false;
+                        let end = after
+                            .char_indices()
+                            .find_map(|(i, c)| {
+                                if c == '"' && !escaped {
+                                    return Some(i);
+                                }
+                                escaped = c == '\\' && !escaped;
+                                None
+                            })
+                            .expect("closed tl! literal");
+                        let (raw, tail) = after.split_at(end);
+                        if tail.starts_with("\")") {
+                            let label: String = serde_json::from_str(&format!("\"{raw}\"")).expect("UI literal escapes");
+                            literals.insert(label);
+                        }
+                        rest = tail.strip_prefix('"').expect("closing quote");
+                    }
+                }
+            }
+        }
+        assert!(literals.len() > 900, "source scan found only {} literals", literals.len());
+        for lang in [Lang::from_code("hi").expect("hi registered"), Lang::from_code("ko").expect("ko registered")] {
             let missing: Vec<_> = literals.iter().filter(|label| !has(lang, label)).collect();
             assert!(missing.is_empty(), "untranslated {} UI literals: {missing:#?}", lang.code());
         }

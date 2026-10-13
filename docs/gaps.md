@@ -38,7 +38,7 @@ update the numbers.
 | 11 | Accessibility: checker only, no tagging tools | feature | 40–70 | [target-app-parity.md](target-app-parity.md) |
 | 12 | No measured fidelity harness against Acrobat | quality | (in 2) | [target-app-parity.md](target-app-parity.md) |
 | 13 | Performance budgets and lazy loading of very large files | performance | 25–45 | this file |
-| 14 | Arabic not mirrored; no Hindi, Korean | localization | 30–50 | [localization-parity.md](localization-parity.md) |
+| 14 | Arabic not mirrored; Korean has no craft-fonts face | localization | 25–45 | [localization-parity.md](localization-parity.md) |
 | 15 | Forms: JavaScript object model, actions, submit, XFA depth | feature | 40–75 | [pdf-spec-parity.md](pdf-spec-parity.md) |
 | 16 | UI precision gaps (multi-select move, rulers, accelerators, windows) | UI/UX | 30–60 | [ui-parity.md](ui-parity.md) |
 | 17 | Certificate security and other protect gaps | feature, spec | 15–30 | [pdf-spec-parity.md](pdf-spec-parity.md) |
@@ -236,14 +236,15 @@ update the numbers.
   to edit.
 - **Estimate:** 25–45 h. **Doc:** this file.
 
-### 14. Arabic not mirrored; no Hindi, Korean
+### 14. Arabic not mirrored; Korean has no craft-fonts face
 
 - **Missing:** a right-to-left layout (panels, menus, alignment), bidirectional text in the text
-  layout itself (wrapping, typed text); catalogs for Hindi and Korean, each with the script face it
-  needs (Acrobat ships Korean; it ships Arabic in its Middle East edition; it ships neither Hindi
-  nor Indonesian nor Vietnamese). Indonesian and Vietnamese ship as of 2026-10-13.
+  layout itself (wrapping, typed text); a Hangul face in craft-fonts (Korean now draws with one
+  installed system face, so the web build and machines without one show boxes). Acrobat ships
+  Korean; it ships Arabic in its Middle East edition; it ships neither Hindi nor Indonesian nor
+  Vietnamese. Indonesian, Vietnamese, Hindi and Korean catalogs ship as of 2026-10-13.
 - **Evidence:** [localization.md](localization.md) §Arabic; `misc.rtl-ui` planned.
-- **Estimate:** 30–50 h (Arabic RTL 20–35, two catalogs 10–15 plus review). **Doc:**
+- **Estimate:** 25–45 h (Arabic RTL 20–35, a Hangul face and native review 5–10). **Doc:**
   [localization-parity.md](localization-parity.md).
 
 ### 15. Forms: JavaScript object model, actions, submit, XFA depth

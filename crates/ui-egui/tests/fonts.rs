@@ -170,6 +170,28 @@ fn system_fallback_covers_devanagari() {
     assert!(layout_widths(&mut fonts, DEVANAGARI).iter().all(|w| w.is_finite() && *w > 0.0));
 }
 
+/// On a machine with a suitable installed Korean font, the installed definitions include it and
+/// Korean text has glyphs; the embedded-only definitions never name it.
+#[test]
+fn system_fallback_covers_hangul() {
+    const HANGUL: &str = "한국어 파일 편집";
+    assert!(!theme::font_definitions().font_data.contains_key(theme::SYSTEM_HANGUL_FALLBACK));
+    let defs = theme::installed_font_definitions(theme::CjkPreference::Default);
+    if !defs.font_data.contains_key(theme::SYSTEM_HANGUL_FALLBACK) {
+        eprintln!("skipping system_fallback_covers_hangul: no installed Hangul fallback font (or PDFCRAFT_SYSTEM_FONTS=0)");
+        assert!(defs.families.values().all(|stack| !stack.iter().any(|n| n == theme::SYSTEM_HANGUL_FALLBACK)));
+        return;
+    }
+    for (family, stack) in &defs.families {
+        assert_eq!(stack.iter().filter(|n| *n == theme::SYSTEM_HANGUL_FALLBACK).count(), 1, "{family:?}: {stack:?}");
+    }
+    let mut fonts = Fonts::new(TextOptions::default(), defs);
+    for id in families() {
+        assert!(fonts.has_glyphs(&id, HANGUL), "{id:?} lacks {HANGUL}");
+    }
+    assert!(layout_widths(&mut fonts, HANGUL).iter().all(|w| w.is_finite() && *w > 0.0));
+}
+
 /// Built with craft-fonts, Hindi text renders with real glyphs (no tofu) in every family: a
 /// `Deva` face is a fallback after the app's own fonts. Without craft-fonts it is the installed
 /// Devanagari fallback's job (see `system_fallback_covers_devanagari`), and the web build has
@@ -183,7 +205,8 @@ fn devanagari_ui_text_uses_craft_fonts() {
     let defs = theme::font_definitions();
     for family in [FontFamily::Proportional, FontFamily::Monospace] {
         let stack = &defs.families[&family];
-        let first = stack.iter().position(|n| pdfcraft_fonts::ui_devanagari_fonts().iter().any(|f| f.name() == *n)).expect("a Deva face is a fallback");
+        let first =
+            stack.iter().position(|n| pdfcraft_fonts::ui_devanagari_fonts().iter().any(|f| f.name() == *n)).expect("a Deva face is a fallback");
         let own = stack.iter().position(|n| n == "Inter" || n == "JetBrainsMono").expect("the app's own font");
         assert!(own < first, "{family:?}: {stack:?}");
     }

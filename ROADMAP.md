@@ -119,14 +119,14 @@ Measured from `crates/ui-egui/src/i18n/*.tsv` (2,578 keys). Detail and script no
 | English | `en` | 100% | full |
 | Simplified Chinese | `zh-hans` | 97.4% | partial (no Hans UI face in releases, #826) |
 | Spanish | `es` | 95.5% | partial |
-| Hindi | `hi` | 0% | none |
+| Hindi | `hi` | 100% | partial |
 | Arabic | `ar` | 100% | partial (layout not mirrored) |
 | French | `fr` | 99.3% | partial |
 | Portuguese (Brazil) | `pt-br` | 99.4% | partial |
 | Indonesian | `id` | 100% | partial |
 | Japanese | `ja` | 99.1% | partial |
 | German | `de` | 99.3% | partial |
-| Korean | `ko` | 0% | none |
+| Korean | `ko` | 100% | partial (installed Hangul face; none in craft-fonts yet) |
 | Vietnamese | `vi` | 100% | partial |
 
 Also shipped: Traditional Chinese, Russian, Bulgarian, Telugu, Hungarian, Ukrainian, Italian
