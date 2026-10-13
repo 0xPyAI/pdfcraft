@@ -28,6 +28,20 @@ fn rotate_rejects_angles_that_are_not_multiples_of_90() {
     assert_eq!(page_rotation(&doc, 0).unwrap(), 0);
 }
 
+#[test]
+fn rotate_handles_large_quarter_turns() {
+    let large = i64::MAX - i64::MAX % 90;
+    for (current, degrees, expected) in [(90, large, 90), (-90, -large, 270), (large, 90, 90), (-large, -90, 270), (180, large - 90, 90)] {
+        for inherited in [false, true] {
+            let mut doc = open(fixture());
+            let target = if inherited { pages_root(&doc).unwrap() } else { pages(&doc).unwrap()[0].obj };
+            doc.update_dict(target, |d| d.set(b"Rotate".to_vec(), Object::Int(current))).unwrap();
+            rotate_pages(&mut doc, &[0], degrees).unwrap();
+            assert_eq!(page_rotation(&doc, 0).unwrap(), expected);
+        }
+    }
+}
+
 /// A 3-page document with a nested page tree. MediaBox and Rotate are inherited from the root,
 /// Resources from an intermediate node; each page's content says which page it is.
 fn fixture() -> Vec<u8> {
