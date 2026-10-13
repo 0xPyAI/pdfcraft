@@ -3261,6 +3261,68 @@ fn xfa_rows_in_areas_are_laid_out_read_calculated_and_written_where_adobe_binds_
 }
 
 #[test]
+fn a_value_a_script_sets_reaches_every_field_bound_to_the_same_data_node() {
+    // `carried` inside the area and a second `carried` outside it bind to one data node (areas
+    // are not data scopes). In document order: `setter` writes the inner one, `echo` reads the
+    // outer one in the same event, and the saved data holds the one value.
+    let tpl = pdfcraft_xfa::fixtures::leave_template("<form><page><carried>5</carried></page></form>")
+        .replace(
+            r#"    <field name="rest" y="2.5in" w="2in" h="0.3in" access="readOnly">"#,
+            r#"    <field name="setter" y="3in" w="2in" h="0.3in"><ui><numericEdit/></ui><calculate><script>carried = 9
+9</script></calculate></field>
+    <field name="rest" y="2.5in" w="2in" h="0.3in" access="readOnly">"#,
+        )
+        .replace(
+            "  </subform>\n </subform>\n</subform>",
+            r#"  </subform>
+  <field name="carried" y="8.2in" w="2in" h="0.3in"><ui><numericEdit/></ui></field>
+  <field name="echo" y="8.5in" w="2in" h="0.3in"><ui><numericEdit/></ui><calculate><script>carried + 0</script></calculate></field>
+ </subform>
+</subform>"#,
+        );
+    assert!(tpl.contains("name=\"echo\"") && tpl.contains("name=\"setter\""), "the fixture was reshaped");
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&tpl));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("shared.pdf", None, bytes, None).expect("opens");
+    let out = s.take_js_output(id);
+    assert!(out.errors.is_empty(), "{out:?}");
+    let values = |s: &Session, id: DocId, n: &str| {
+        s.get(id).unwrap().form.iter().filter(|f| f.name.starts_with(n)).map(|f| f.value.join("")).collect::<Vec<_>>()
+    };
+    assert_eq!(values(&s, id, "carried"), vec!["9".to_string(), "9".to_string()], "both fields show the node's value");
+    assert_eq!(values(&s, id, "echo"), vec!["9".to_string()], "read in the same event the setter ran in");
+    let cos = pdfcraft_cos::Document::open(s.get(id).unwrap().bytes.clone()).unwrap();
+    let d = pdfcraft_xfa::data_of(&cos).unwrap();
+    assert_eq!(d.text_at(&pdfcraft_xfa::som_to_path("form[0].page[0].carried[0]")), Some("9"));
+    assert_eq!(d.count(&pdfcraft_xfa::som_to_path("form[0].page[0]"), "carried"), 1, "one data node");
+    // The inner field hidden (no widget): the outer widget still takes the node's value, and
+    // an unrelated edit does not write the old value back over it.
+    let hidden = Arc::new(pdfcraft_xfa::fixtures::shell(
+        &tpl.replace(r#"<field name="carried" y="1.5in""#, r#"<field name="carried" presence="hidden" y="1.5in""#),
+    ));
+    let id = s.open("hidden.pdf", None, hidden, None).expect("opens");
+    assert_eq!(values(&s, id, "carried"), vec!["9".to_string()]);
+    assert_eq!(values(&s, id, "echo"), vec!["9".to_string()]);
+    s.apply(id, Edit::SetFieldValue { name: "allowance".into(), value: FieldValue::Text("31".into()) }).unwrap();
+    assert_eq!(values(&s, id, "carried"), vec!["9".to_string()]);
+    let cos = pdfcraft_cos::Document::open(s.get(id).unwrap().bytes.clone()).unwrap();
+    assert_eq!(pdfcraft_xfa::data_of(&cos).unwrap().text_at(&pdfcraft_xfa::som_to_path("form[0].page[0].carried[0]")), Some("9"));
+    // A check box bound to the node a text field sets: checked by its own on state.
+    let checkbox = Arc::new(pdfcraft_xfa::fixtures::shell(&tpl.replace(
+        r#"<field name="carried" y="1.5in" w="2in" h="0.3in"><ui><numericEdit/></ui></field>"#,
+        r#"<field name="carried" y="1.5in" w="2in" h="0.3in"><ui><checkButton/></ui><items><integer>9</integer><integer>0</integer></items></field>"#,
+    )));
+    let id = s.open("check.pdf", None, checkbox, None).expect("opens");
+    let carried: Vec<(pdfcraft_forms::FieldKind, Vec<String>)> =
+        s.get(id).unwrap().form.iter().filter(|f| f.name.starts_with("carried")).map(|f| (f.kind, f.value.clone())).collect();
+    assert_eq!(
+        carried,
+        vec![(pdfcraft_forms::FieldKind::CheckBox, vec!["9".to_string()]), (pdfcraft_forms::FieldKind::Text, vec!["9".to_string()])],
+        "{carried:?}"
+    );
+}
+
+#[test]
 fn dynamic_xfa_forms_run_formcalc_scripts() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::formcalc_template()));
     let mut s = Session::new().with_clock(|| 1_700_000_000);
