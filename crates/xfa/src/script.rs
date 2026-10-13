@@ -632,28 +632,70 @@ fn named_in<'a>(nodes: &'a [Node], name: &str, depth: usize) -> Option<&'a Node>
     })
 }
 
-/// Give the field at `som` in `live` the value [`form_tree`] would give it from `data` now,
-/// so a value change needs no rebuild of the tree. `None`: not a plain field the tree can
-/// refresh alone (a radio button, an object the template doesn't have): rebuild the tree.
+/// Give the field at `som` in `live`, and every other field bound to the same data node (a
+/// field inside an area shares its node with one outside, since areas are left out of data
+/// paths), the value [`form_tree`] would give it from `data` now, so a value change needs no
+/// rebuild of the tree. The walk follows the data path only (through areas and unnamed
+/// containers, which have no data segment), so it costs the depth, not the form. `None`: a
+/// node bound there is not a plain field the tree can refresh alone (a radio button, an
+/// exclusion group, an object the template doesn't have): rebuild the tree.
 pub fn refresh_value(live: &mut FormNode, tpl: &Template, data: Option<&DataNode>, som: &str) -> Option<bool> {
-    let f = template_field(tpl, som)?;
-    let value = Walker::plain_field_value(tpl, data, f, som);
-    fn set(n: &mut FormNode, som: &str, value: &str, depth: usize) -> Option<bool> {
+    template_field(tpl, som)?;
+    let path = data_path(tpl, som);
+    if path.is_empty() {
+        return None;
+    }
+    fn walk(
+        n: &mut FormNode,
+        tpl: &Template,
+        data: Option<&DataNode>,
+        path: &[(String, usize)],
+        pos: usize,
+        changed: &mut bool,
+        depth: usize,
+    ) -> Option<()> {
         if depth > MAX_DEPTH {
-            return None;
+            return Some(());
         }
-        if n.som == som {
-            if n.kind != Some(NodeKind::Field) {
+        for c in n.children.iter_mut() {
+            // No data segment of their own: looked through.
+            let transparent = matches!(c.kind, Some(NodeKind::Area)) || (matches!(c.kind, Some(NodeKind::Subform)) && c.name.starts_with('#'));
+            if transparent {
+                walk(c, tpl, data, path, pos, changed, depth + 1)?;
+                continue;
+            }
+            let Some((name, index)) = path.get(pos) else { continue };
+            if c.name != *name || c.index != *index {
+                continue;
+            }
+            if pos + 1 < path.len() {
+                walk(c, tpl, data, path, pos + 1, changed, depth + 1)?;
+                continue;
+            }
+            // Bound to the node.
+            if c.kind != Some(NodeKind::Field) {
                 return None;
             }
-            let changed = n.value != value;
-            n.value = value.to_string();
-            return Some(changed);
+            let f = template_field(tpl, &c.som)?;
+            let value = Walker::plain_field_value(tpl, data, f, &c.som);
+            if c.value != value {
+                c.value = value;
+                *changed = true;
+            }
         }
-        n.children.iter_mut().find_map(|c| set(c, som, value, depth + 1))
+        Some(())
     }
-    // Not in the live tree (hidden, or past the node budget): nothing to refresh.
-    Some(set(live, som, &value, 0).unwrap_or(false))
+    let mut changed = false;
+    // The root subform is the path's first segment.
+    let (first, rest) = path.split_first()?;
+    if live.name != first.0 || live.index != first.1 {
+        return Some(false);
+    }
+    if rest.is_empty() {
+        return None;
+    }
+    walk(live, tpl, data, &path, 1, &mut changed, 0)?;
+    Some(changed)
 }
 
 /// The data tree of a document's datasets packet.

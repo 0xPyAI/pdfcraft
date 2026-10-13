@@ -357,14 +357,18 @@ impl PdfCraftApp {
         let Some((_, id)) = self.active_ids() else { return };
         let Some(doc) = self.session.get(id) else { return };
         let o = &self.a11y_options;
-        let options = Options { rules: o.rules.clone(), pages: (!o.all_pages).then(|| (o.from.max(1) - 1..o.to.max(o.from)).collect()) };
+        // The range was picked on whatever document had the options dialog last; with the dialog
+        // turned off it reaches here unchecked, and a page past the end would select nothing.
+        let to = o.to.clamp(1, doc.info.pages.len().max(1));
+        let from = o.from.clamp(1, to);
+        let options = Options { rules: o.rules.clone(), pages: (!o.all_pages).then(|| (from - 1..to).collect()) };
         let Some(report) = doc.accessibility_check(&options) else {
             self.notify_tr("This document can't be checked: it couldn't be read for editing");
             return;
         };
         // Rules skipped by hand stay skipped when checking again.
         let mut report = report;
-        for r in report.results.iter_mut().filter(|r| self.a11y_skipped.contains(&r.rule)) {
+        for r in report.results.iter_mut().filter(|r| self.a11y_skipped.contains(&(id, r.rule))) {
             r.status = Status::Skipped;
             r.findings.clear();
         }
@@ -448,12 +452,12 @@ impl PdfCraftApp {
                 }
             }
             PanelAction::Skip(rule) => {
-                self.a11y_skipped.insert(rule);
-                if let Some((_, r)) = self.a11y.report.as_mut()
-                    && let Some(x) = r.results.iter_mut().find(|x| x.rule == rule)
-                {
-                    x.status = Status::Skipped;
-                    x.findings.clear();
+                if let Some((id, r)) = self.a11y.report.as_mut() {
+                    self.a11y_skipped.insert((*id, rule));
+                    if let Some(x) = r.results.iter_mut().find(|x| x.rule == rule) {
+                        x.status = Status::Skipped;
+                        x.findings.clear();
+                    }
                 }
             }
             PanelAction::Fix(rule) => {

@@ -1788,3 +1788,51 @@ fn imported_data_is_written_with_the_packets_own_prefix_and_never_leaves_it_unre
     let form = layout_xml(&many).unwrap();
     assert!(form.warnings.iter().any(|w| w.contains("60 rows") && w.contains("first 50")), "{:?}", form.warnings);
 }
+
+#[test]
+fn an_anchor_type_places_the_named_point_of_the_box_at_its_x_and_y() {
+    // The page label of IRCC IMM 5532E: x is the centre of the box, so its right edge sits
+    // 10.795mm right of x, inside the page, not 21.59mm.
+    let xml = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="page"><contentArea x="0.5in" y="1.5in" w="7.5in" h="8in"/><medium short="8.5in" long="11in"/>
+  <draw anchorType="topCenter" name="PageOf" x="197.485mm" y="13.97mm" w="21.59mm" h="3.81mm"><value><text>PAGE 1 OF 8</text></value><font size="7pt" typeface="Arial"/><para hAlign="right"/></draw>
+  <draw anchorType="bottomRight" name="foot" x="8in" y="10.5in" w="1in" h="0.25in"><value><text>Footer</text></value><font size="8pt" typeface="Arial"/></draw>
+  <field anchorType="topRight" name="ref" x="8in" y="1in" w="2in" h="0.3in"><ui><textEdit/></ui></field>
+ </pageArea></pageSet>
+ <draw name="body" w="7.5in" h="0.3in"><value><text>Body</text></value></draw>
+</subform>
+</template>
+</xdp:xdp>
+"##;
+    let form = layout_xml(xml).unwrap();
+    let page = &form.pages[0];
+    let span = |t: &str| {
+        page.items
+            .iter()
+            .find_map(|i| {
+                if let Item::Text(s) = i
+                    && s.text == t
+                {
+                    Some(s.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap()
+    };
+    let label = span("PAGE 1 OF 8");
+    let right = (197.485 + 21.59 / 2.0) * 72.0 / 25.4;
+    assert!(
+        (label.x + label.face.width(&label.text) - right).abs() < 0.5,
+        "label ends at {}, box at {right}",
+        label.x + label.face.width(&label.text)
+    );
+    let foot = span("Footer");
+    assert!((foot.x - 7.0 * 72.0).abs() < 0.01, "footer at x {}", foot.x);
+    assert!(foot.baseline > 10.25 * 72.0 && foot.baseline < 10.5 * 72.0, "footer baseline {}", foot.baseline);
+    let field = widgets(page).into_iter().find(|w| w.name == "ref").unwrap();
+    assert!((field.rect.x - 6.0 * 72.0).abs() < 0.01 && (field.rect.y - 72.0).abs() < 0.01, "{:?}", field.rect);
+}

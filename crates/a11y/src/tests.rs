@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pdfcraft_cos::Document;
+use pdfcraft_cos::{Document, Object};
 
 use super::*;
 
@@ -34,6 +34,67 @@ fn failed(r: &Report) -> Vec<Rule> {
 }
 
 const FONT: &str = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+
+#[test]
+fn autotag_text_writes_marked_content_and_parent_tree_across_pages() {
+    let mut doc = pdf(
+        &[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".into(),
+            stream("BT /F1 18 Tf 20 160 Td (Heading) Tj ET BT /F1 12 Tf 20 120 Td (Body) Tj ET"),
+            FONT.into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 7 0 R /Resources << /Font << /F1 5 0 R >> >> >>".into(),
+            stream("BT /F1 12 Tf 20 120 Td (Second page) Tj ET"),
+        ],
+        "",
+    );
+    let result = autotag_text(&mut doc).unwrap();
+    assert_eq!(result, AutoTagResult { pages: 2, paragraphs: 3 });
+    let catalog = doc.get(doc.root().unwrap());
+    let root = catalog.as_dict().unwrap().reference(b"StructTreeRoot").unwrap();
+    let tree = doc.get(root);
+    let parent_tree = tree.as_dict().unwrap().reference(b"ParentTree").unwrap();
+    let numbers = doc.get(parent_tree);
+    let entries = numbers.as_dict().unwrap().get(b"Nums").unwrap().as_array().unwrap();
+    assert_eq!(entries.len(), 4);
+    assert_eq!(entries[0].as_int(), Some(0));
+    assert_eq!(entries[2].as_int(), Some(1));
+    assert_eq!(entries[1].as_array().unwrap().len(), 2);
+    assert_eq!(entries[3].as_array().unwrap().len(), 1);
+    for page in pdfcraft_model::pages(&doc) {
+        let content = page.dict.get(b"Contents").unwrap();
+        let stream = doc.resolve(content);
+        let Object::Stream(stream) = &*stream else { panic!("marked page content") };
+        let text = String::from_utf8(stream.decoded_strict().unwrap()).unwrap();
+        assert!(text.contains("/P <</MCID 0>> BDC"), "{text}");
+        assert!(text.contains("EMC"), "{text}");
+    }
+    let report = check(&doc, &Options::default());
+    assert_eq!(status(&report, Rule::TaggedPdf), Status::Passed);
+    assert_eq!(status(&report, Rule::TaggedContent), Status::Passed);
+    let bytes = pdfcraft_cos::write_incremental(&doc, &pdfcraft_cos::SaveOptions::default()).unwrap();
+    let reopened = Document::open(Arc::new(bytes)).unwrap();
+    assert_eq!(tags(&reopened).len(), 4);
+    assert_eq!(status(&check(&reopened, &Options::default()), Rule::TaggedContent), Status::Passed);
+}
+
+#[test]
+fn autotag_text_refuses_paint_and_does_not_modify_the_document() {
+    let mut doc = pdf(
+        &[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".into(),
+            stream("BT /F1 12 Tf 20 100 Td (Hello) Tj ET 0 0 50 50 re f"),
+            FONT.into(),
+        ],
+        "",
+    );
+    assert!(matches!(autotag_text(&mut doc), Err(AutoTagError::Unsupported { .. })));
+    assert!(!doc.get(doc.root().unwrap()).as_dict().unwrap().contains(b"StructTreeRoot"));
+    assert_eq!(autotag_text(&mut pdf(&good(), "")), Err(AutoTagError::AlreadyTagged));
+}
 
 #[test]
 fn an_untagged_document_fails_the_document_rules() {

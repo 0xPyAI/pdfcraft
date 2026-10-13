@@ -696,8 +696,7 @@ pub(super) fn rewrite_styled_block(
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
     let members: Vec<_> = block.lines.iter().filter_map(|i| lines.get(*i)).collect();
-    let rects: Vec<_> = members.iter().map(|l| l.rect).collect();
-    let mut drop = coincident_ops(lines, &rects);
+    let mut drop = coincident_ops(lines, &members);
     drop.extend(members.iter().flat_map(|l| l.ops.iter().copied()));
     let o = &first.origin;
     let start = first.ops.first().copied().unwrap_or(o.bt_op);

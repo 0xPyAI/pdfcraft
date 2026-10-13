@@ -799,6 +799,48 @@ fn make_current_properties_default() {
     assert_eq!(last.color, Some([0.0, 0.47, 0.84]));
 }
 
+/// #1302: making an arrow's properties the default updates the Arrow tool, not later plain lines.
+#[test]
+fn an_arrows_default_does_not_restyle_lines() {
+    use pdfcraft_ui_egui::comments::CommentTool;
+
+    let mut h = harness(|app| {
+        app.set_option("panel", "comments").unwrap();
+        app.set_option("quick", "arrow").unwrap();
+    });
+    drag_pt(&mut h, (20.0, 40.0), (140.0, 80.0));
+    h.state_mut().set_option("quick", "select").unwrap();
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::StyleAnnotation {
+        page: 0,
+        index: 0,
+        color: Some([0.0, 0.47, 0.84]),
+        opacity: Some(0.5),
+        width: Some(6.0),
+        endings: None,
+    });
+    h.run_steps(2);
+    h.get_by_label("More").click();
+    h.run_steps(2);
+    h.get_by_label("Make Current Properties Default").click();
+    h.run_steps(3);
+    let arrow = h.state().comment_prefs.style(CommentTool::Arrow);
+    let line = h.state().comment_prefs.style(CommentTool::Line);
+    assert_eq!((arrow.color, arrow.opacity, arrow.width), ([0.0, 0.47, 0.84], 0.5, 6.0));
+    assert_eq!((line.color, line.opacity, line.width), ([0.89, 0.13, 0.13], 1.0, 2.0), "plain lines keep their own default");
+
+    h.state_mut().set_option("quick", "arrow").unwrap();
+    drag_pt(&mut h, (20.0, 100.0), (140.0, 140.0));
+    h.state_mut().set_option("quick", "line").unwrap();
+    drag_pt(&mut h, (160.0, 40.0), (260.0, 80.0));
+    let c = comments(&h);
+    let arrows = c.iter().filter(|a| a.subtype == "Line").collect::<Vec<_>>();
+    assert!(arrows.len() >= 3, "{c:?}");
+    let next_arrow = &arrows[1];
+    let plain = arrows.last().unwrap();
+    assert_eq!(next_arrow.color, Some([0.0, 0.47, 0.84]));
+    assert_eq!(plain.color, Some([0.89, 0.13, 0.13]));
+}
+
 #[test]
 fn highlighting_an_area_off_the_text() {
     let mut h = harness(|app| app.set_option("quick", "highlight").unwrap());

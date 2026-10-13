@@ -1,5 +1,8 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (gap 6: #1398 stamps read upright on rotated pages; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (gap 6: #1317, #1327, #1302, #1315 and #1340; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (#1316: replacing a line keeps a neighbouring line whose glyph box overlaps; gap 3 remains) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** gap 4 closed: the web build prints through the browser's print dialog; exclusive image-crop resize follow-up; minor (Word invoice regression coverage, #773; Office fidelity still partial; gap 2: hayro patch counts after the native-gradient backport) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (gap 13: large-file memory measured, edits keep two copies instead of three, file-backed input blocked on gap 2) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (gap 1 closed by #836; fixed issues removed from gaps 3, 6 and 16) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
@@ -87,7 +90,9 @@ update the numbers.
   and single-face OpenType shaping/bidi have regression coverage. Actual Chinese keyboard
   insertion/deletion and save/reopen renders are checked on all four private pages.
   Legacy non-SFNT previews, mixed-font/style contextual runs, structure-tree fidelity and reliable
-  semantic grouping on every untagged PDF remain open. Estimates are unchanged.
+  semantic grouping on every untagged PDF remain open. Replacing one line or paragraph no longer
+  removes a distinct neighbour whose glyph box overlaps (#1316); a second drawing on the same
+  baseline is still replaced. Estimates are unchanged.
 
 - **Missing:** robust in-place editing of text PdfCraft didn't write: subset fonts without the
   needed glyphs, CJK and right-to-left text, rotated text, lists, superscript/subscript, keeping
@@ -123,8 +128,14 @@ update the numbers.
 - **Missing:** fixes for the ≈ 13 of ≈ 25 filed reports of features marked `shipped` that give wrong results still open,
   plus triage of ≈ 220 other open issues.
 - **Evidence:** 245 open issues on 2026-10-10. The first batch of `fix(...)` reports was fixed by
-  2026-10-10 (#799, #800, #807, #809, #810, #811, #815, #816, #817, #818, #819, #821); the rest of
-  the backlog is untriaged.
+  2026-10-10 (#799, #800, #807, #809, #810, #811, #815, #816, #817, #818, #819, #821). Stamps placed
+  on a rotated page read upright: rubber stamps, natural-size and explicit-rectangle images, and
+  PDF-page stamps (#1398). The rest of the backlog is untriaged.
+  2026-10-10 (#799, #800, #807, #809, #810, #811, #815, #816, #817, #818, #819, #821). A later
+  batch keeps a cloudy comment flatten cannot draw (#1317), leaves a refused text-box restyle or
+  resize unchanged (#1327), keeps arrow defaults off plain lines (#1302), stops a custom text
+  match on the separator instead of the next glyph (#1315), and states the vertical-text
+  redaction refusal without claiming an overlap (#1340). The rest of the backlog is untriaged.
 - **Impact:** every one is a user who lost trust. Crash reports outrank feature work
   (`AGENTS.md` §4).
 - **Estimate:** 45–80 h (≈ 0.2–0.4 h per issue). **Doc:** this file.
@@ -182,15 +193,16 @@ update the numbers.
 - **Impact:** government and legal users sign with tokens and need B-LT/B-LTA.
 - **Estimate:** 40–70 h; tokens need hardware to test. **Doc:** [pdf-spec-parity.md](pdf-spec-parity.md).
 
-### 11. Accessibility: no automatic structure creation
+### 11. Accessibility: only text-only automatic structure creation
 
-- **Missing:** apply auto-tag proposals to marked content and a valid parent tree, autotag fields,
-  visual Tags, Order and Content panels, Reading Order tool, table editor, Make Accessible action,
+- **Missing:** auto-tag mixed text, images, tables, lists, links and fields; connect preview heading
+  proposals to Apply; visual Order and Content panels, Reading Order tool, table editor, Make Accessible action,
   Read Out Loud; full keyboard operation of PdfCraft itself and a screen-reader audit.
 - **Evidence:** all 32 checker rules, figure alt text, tag property and sibling order edits, and
-  a bounded text-only auto-tag preview exist. The preview does not write PDF structure;
+  a bounded auto-tag preview exist. Apply writes valid structure and parent-tree links for
+  text-only files; it refuses mixed content and existing tags;
   `a11y.keyboard-only` (P0) planned, `a11y.app-screen-reader` partial.
-- **Impact:** untagged files still need another editor to build their structure; PdfCraft itself is
+- **Impact:** most untagged files still need another editor to build their structure; PdfCraft itself is
   not yet usable without a mouse.
 - **Estimate:** 40–70 h. **Doc:** [target-app-parity.md](target-app-parity.md).
 
@@ -246,7 +258,7 @@ update the numbers.
 
 ### 16. UI precision gaps
 
-- **Missing:** moving several selected objects across pages (same-page moves shipped, #844), nudging with arrow keys, single-key tool accelerators,
+- **Missing:** moving several selected objects across pages (same-page moves shipped, #844), single-key tool accelerators,
   rulers, grids and guides, loupe and dynamic zoom, multiple windows and split view, comment
   pop-ups that can be moved, connector lines, customisable quick tools; shortcut display and tool-mode bugs (#746, #721), macOS window controls
   (#789).
@@ -312,6 +324,8 @@ update the numbers.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | minor | Gap 6: rubber stamps, explicit image rectangles and PDF-page stamps read upright on rotated pages (#1398). Estimates unchanged. |
+| 2026-10-12 | minor | #1316: replacing a line or paragraph keeps a neighbouring line whose glyph box overlaps. Gap 3 remains. Estimates unchanged. |
 | 2026-10-12 | minor | Exclusive image crops resize with their pixels across nested states, intervening operators and content streams; shared clips remain fixed. Synthetic engine/tool regressions and private image save/reopen checks; estimates unchanged. |
 | 2026-10-12 | minor | Gap 13: measured large-file memory; edits no longer keep the previous working file while writing the next (peak 3 → 2 copies); file-backed input recorded as blocked on gap 2 |
 | 2026-10-11 | minor | Closed gap 4: the web build prints through the browser's print dialog (sheets drawn by PdfCraft at 150–300 dpi, one per printed page); number kept |

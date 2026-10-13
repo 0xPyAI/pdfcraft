@@ -484,6 +484,7 @@
 	, Expires: 	, Expira em: 
 	No digital IDs yet.	Nenhuma ID digital ainda.
 	Configure New Digital ID	Configurar nova ID digital
+	Remove "{name}" from this list? The file itself is not deleted.	Remover "{name}" desta lista? O arquivo em si não é excluído.
 	Continue	Continuar
 	Configure a Digital ID for Signing	Configurar uma ID digital para assinatura
 	Use a Digital ID from a file	Usar uma ID digital de um arquivo
@@ -2352,3 +2353,16 @@ animation effects	Off	Desativados
 	The linked PDF opened, but its named destination was not applied.	O PDF vinculado foi aberto, mas seu destino nomeado não foi aplicado.
 	The linked PDF opened, but its page destination was out of range.	O PDF vinculado foi aberto, mas sua página de destino está fora do intervalo.
 	Local cross-PDF links require the desktop app	Links locais entre PDFs exigem o aplicativo para desktop
+	Minimize	Minimizar
+	Maximize	Maximizar
+	Restore	Restaurar
+	Use system title bar	Usar a barra de título do sistema
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Mostrar uma barra de título simples para os botões da janela em vez da barra de abas. O GNOME não desenha barras de título para os aplicativos, então esta não segue o tema dele.
+
+# Absolute local GoToR confirmation (#1364).
+	Allow	Permitir
+	Only allow this if you trust the source document.	Permita esta ação somente se confiar no documento de origem.
+	Open this local PDF?	Abrir este PDF local?
+	This document is trying to open a local file:	Este documento está tentando abrir um arquivo local:
+	Move tag earlier	Mover tag para antes
+	Move tag later	Mover tag para depois

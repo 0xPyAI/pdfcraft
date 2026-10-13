@@ -810,6 +810,7 @@
 	, Expires: 	, Son kullanma tarihi: 
 	No digital IDs yet.	Henüz dijital kimlik yok.
 	Configure New Digital ID	Yeni Dijital Kimlik Yapılandır
+	Remove "{name}" from this list? The file itself is not deleted.	"{name}" bu listeden kaldırılsın mı? Dosyanın kendisi silinmez.
 	Continue	Devam Et
 	Configure a Digital ID for Signing	İmzalama için Dijital Kimlik Yapılandır
 	Use a Digital ID from a file	Dosyadan Dijital Kimlik Kullan
@@ -2334,3 +2335,16 @@ animation effects	Off	Kapalı
 	The linked PDF opened, but its named destination was not applied.	Bağlantılı PDF açıldı, ancak adlandırılmış hedefi uygulanmadı.
 	The linked PDF opened, but its page destination was out of range.	Bağlantılı PDF açıldı, ancak sayfa hedefi aralık dışında.
 	Local cross-PDF links require the desktop app	PDF'ler arası yerel bağlantılar masaüstü uygulamasını gerektirir
+	Minimize	Küçült
+	Maximize	Büyüt
+	Restore	Geri yükle
+	Use system title bar	Sistem başlık çubuğunu kullan
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Sekme çubuğu yerine pencere düğmeleri için basit bir başlık çubuğu göster. GNOME uygulamalar için başlık çubuğu çizmez, bu yüzden bu çubuk onun temasına uymaz.
+
+# Absolute local GoToR confirmation (#1364).
+	Allow	İzin ver
+	Only allow this if you trust the source document.	Buna yalnızca kaynak belgeye güveniyorsanız izin verin.
+	Open this local PDF?	Bu yerel PDF açılsın mı?
+	This document is trying to open a local file:	Bu belge yerel bir dosya açmaya çalışıyor:
+	Move tag earlier	Etiketi daha erken taşı
+	Move tag later	Etiketi daha geç taşı

@@ -489,6 +489,7 @@
 	, Expires: 	，有效期至：
 	No digital IDs yet.	尚無數位 ID。
 	Configure New Digital ID	配置新數位 ID
+	Remove "{name}" from this list? The file itself is not deleted.	從此清單中移除「{name}」？檔案本身不會被刪除。
 	Continue	繼續
 	Configure a Digital ID for Signing	設定簽署用的數位 ID
 	Use a Digital ID from a file	使用檔案中的數位 ID
@@ -2212,3 +2213,16 @@ animation effects	Off	關
 	The linked PDF opened, but its page destination was out of range.	已開啟連結的 PDF，但其頁面目的地超出範圍。
 	Local cross-PDF links require the desktop app	PDF 之間的本機連結需要桌面應用程式
 	The existing action will be preserved.	將保留現有動作。
+	Minimize	最小化
+	Maximize	最大化
+	Restore	還原
+	Use system title bar	使用系統標題列
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	以簡單的標題列顯示視窗按鈕，而不是在分頁列中。GNOME 不為應用程式繪製標題列，因此此標題列不會跟隨其佈景主題。
+
+# Absolute local GoToR confirmation (#1364).
+	Allow	允許
+	Only allow this if you trust the source document.	只有在您信任來源文件時，才允許此操作。
+	Open this local PDF?	要開啟此本機 PDF 嗎？
+	This document is trying to open a local file:	此文件正嘗試開啟本機檔案：
+	Move tag earlier	將標記前移
+	Move tag later	將標記後移

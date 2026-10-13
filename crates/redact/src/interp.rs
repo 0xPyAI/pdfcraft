@@ -23,7 +23,7 @@ use std::rc::Rc;
 use pdfcraft_content::{Matrix, Op, Pieces, contains, num, overlaps, serialize_ops, string};
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, Stream};
 
-use crate::{Report, image, tags};
+use crate::{RedactError, Report, image, page_streams, tags};
 use pdfcraft_fonts::pdf::Metrics;
 
 const MAX_DEPTH: usize = 12;
@@ -62,6 +62,10 @@ pub(crate) struct Output {
     /// can unlink the original from the resource dictionary (a full save keeps whatever is still
     /// referenced, which would otherwise retain the removed image or form bytes).
     pub replaced: Vec<Vec<u8>>,
+    /// The original objects behind `replaced`, nested scopes included. Other resource
+    /// dictionaries may name them too (an inherited or shared /Resources, or the caller's when a
+    /// form has none of its own): [`unlink_doomed`] removes those entries.
+    pub doomed: Vec<ObjRef>,
     /// Glyphs / inline images still overlapping a region (verify mode).
     pub residue: usize,
     /// Apply mode met vertical-writing text (which it cannot remove) while a redaction region was
@@ -201,6 +205,117 @@ pub(crate) fn prune(xo: &mut Dict, replaced: &[Vec<u8>], content: &[Vec<u8>]) {
             xo.remove(n);
         }
     }
+}
+
+/// Whether `content` draws the XObject `name` of the resource dictionary `xo`: directly, or
+/// through a form that has no /Resources of its own (such a form draws through its caller's).
+/// `None` when that cannot be told (a form that will not decode, or nesting past the limit).
+fn content_draws(doc: &Document, content: &[Vec<u8>], xo: &Dict, name: &[u8], depth: usize, seen: &mut HashSet<ObjRef>) -> Option<bool> {
+    let joined = Pieces::join(content);
+    let ops = joined.parse().ops;
+    for op in ops.iter().filter(|op| op.is("Do")) {
+        let Some(n) = op.name(0) else { continue };
+        if n == name {
+            return Some(true);
+        }
+        let Some(r) = xo.get(n).and_then(Object::as_ref) else { continue };
+        let obj = doc.get(r);
+        let Object::Stream(s) = &*obj else { continue };
+        if s.dict.name(b"Subtype") != Some(b"Form") || s.dict.contains(b"Resources") || !seen.insert(r) {
+            continue;
+        }
+        if depth >= MAX_DEPTH {
+            return None;
+        }
+        let Ok(data) = s.decoded() else { return None };
+        match content_draws(doc, std::slice::from_ref(&data), xo, name, depth + 1, seen) {
+            Some(false) => {}
+            other => return other,
+        }
+    }
+    Some(false)
+}
+
+/// Unlink the XObjects a rewrite dropped or replaced (`doomed`) from every page-tree resource
+/// dictionary that still names them. The rewritten page has its own pruned /Resources, but the
+/// originals stay reachable, and so stay in a full-rewrite save, when:
+/// - the page inherited its /Resources from a /Pages node, which still lists them;
+/// - several pages share one resource dictionary, and another page still refers to it;
+/// - a form without /Resources drew them through the page's dictionary.
+///
+/// An entry goes unless a page that draws through that dictionary still draws the name (the same
+/// image shown on another page, or again outside a mark). A dictionary that loses an entry is
+/// replaced by a private copy on its node, so a dictionary object shared with other nodes is
+/// left as it is for them. Fails closed when a page's use of a name cannot be told.
+pub(crate) fn unlink_doomed(doc: &mut Document, doomed: &[ObjRef]) -> Result<(), RedactError> {
+    if doomed.is_empty() {
+        return Ok(());
+    }
+    let doomed: HashSet<ObjRef> = doomed.iter().copied().collect();
+    let Some(top) = doc.root().and_then(|root| doc.get(root).as_dict().and_then(|d| d.reference(b"Pages"))) else { return Ok(()) };
+    // Every page-tree node with a /Resources of its own, and the pages that draw through it
+    // (the nearest such node above a page, or the page itself). Cycles are cut as in
+    // `pdfcraft_model::pages`.
+    let mut holders: Vec<(ObjRef, Vec<ObjRef>)> = Vec::new();
+    let mut seen = HashSet::new();
+    let mut stack: Vec<(ObjRef, Option<usize>)> = vec![(top, None)];
+    while let Some((node, mut holder)) = stack.pop() {
+        if !seen.insert(node) || seen.len() > 1_000_000 {
+            continue;
+        }
+        let obj = doc.get(node);
+        let Some(d) = obj.as_dict() else { continue };
+        if d.contains(b"Resources") {
+            holders.push((node, Vec::new()));
+            holder = Some(holders.len() - 1);
+        }
+        let is_pages = d.name(b"Type") == Some(b"Pages") || (d.contains(b"Kids") && d.name(b"Type") != Some(b"Page"));
+        if is_pages {
+            let kids = d.get(b"Kids").map(|k| doc.resolve(k)).and_then(|k| k.as_array().cloned()).unwrap_or_default();
+            stack.extend(kids.iter().filter_map(Object::as_ref).map(|k| (k, holder)));
+        } else if let Some(h) = holder.and_then(|i| holders.get_mut(i)) {
+            h.1.push(node);
+        }
+    }
+    let index: HashMap<ObjRef, usize> = pdfcraft_model::pages(doc).iter().enumerate().map(|(i, p)| (p.obj, i)).collect();
+    for (node, users) in holders {
+        let Some(res) = doc.get(node).as_dict().and_then(|d| d.get(b"Resources")).and_then(|r| doc.resolve(r).as_dict().cloned()) else { continue };
+        let mut xo = res_dict(doc, &res, b"XObject");
+        let names: Vec<Vec<u8>> = xo.iter().filter(|(_, v)| v.as_ref().is_some_and(|r| doomed.contains(&r))).map(|(n, _)| n.to_vec()).collect();
+        if names.is_empty() {
+            continue;
+        }
+        let mut contents = Vec::with_capacity(users.len());
+        for user in &users {
+            let page = doc.get(*user).as_dict().cloned().unwrap_or_default();
+            // A page whose content cannot be read may still draw the name: fail closed.
+            contents.push(page_streams(doc, &page, index.get(user).copied().unwrap_or(0))?.1);
+        }
+        let mut pruned = false;
+        for n in names {
+            let mut drawn = Some(false);
+            for content in &contents {
+                drawn = content_draws(doc, content, &xo, &n, 0, &mut HashSet::new());
+                if drawn != Some(false) {
+                    break;
+                }
+            }
+            match drawn {
+                Some(true) => {}
+                Some(false) => {
+                    xo.remove(&n);
+                    pruned = true;
+                }
+                None => return Err(RedactError::Residue(1)),
+            }
+        }
+        if pruned {
+            let mut res = res;
+            res.set(b"XObject".to_vec(), Object::Dict(xo));
+            doc.update_dict(node, |d| d.set(b"Resources".to_vec(), Object::Dict(res)))?;
+        }
+    }
+    Ok(())
 }
 
 /// The clip that hides everything inside each region: one even-odd clip per region (a big
@@ -607,6 +722,7 @@ fn xobject(
             }
             scope.layer_blocks += 1;
             out.replaced.push(name);
+            out.doomed.push(r);
             Some(None)
         }
         Some(b"Image") => {
@@ -617,6 +733,7 @@ fn xobject(
             if scope.covered(b) {
                 scope.report.images_removed += 1;
                 out.replaced.push(name);
+                out.doomed.push(r);
                 return Some(None);
             }
             match image::clear(doc, s, &gs.ctm, scope.rects) {
@@ -627,12 +744,14 @@ fn xobject(
                     xobjects.set(n.clone(), Object::Ref(nr));
                     out.xobjects.push((n.clone(), nr));
                     out.replaced.push(name);
+                    out.doomed.push(r);
                     scope.report.images_cleared += 1;
                     Some(Some(Op::new("Do", vec![Object::Name(n)])))
                 }
                 Err(()) => {
                     scope.report.images_removed += 1;
                     out.replaced.push(name);
+                    out.doomed.push(r);
                     Some(None)
                 }
             }
@@ -656,6 +775,7 @@ fn xobject(
                 }
                 scope.report.forms_removed += 1;
                 out.replaced.push(name);
+                out.doomed.push(r);
                 return Some(None);
             }
             let data = match s.decoded() {
@@ -663,6 +783,7 @@ fn xobject(
                 Err(_) if scope.mode == Mode::Apply => {
                     scope.report.forms_removed += 1;
                     out.replaced.push(name);
+                    out.doomed.push(r);
                     return Some(None);
                 }
                 Err(_) => return None,
@@ -676,6 +797,7 @@ fn xobject(
             scope.fonts = saved_fonts;
             out.residue += inner.residue;
             out.vertical |= inner.vertical;
+            out.doomed.extend_from_slice(&inner.doomed);
             out.tag_changes.extend(inner.tag_changes);
             if scope.mode == Mode::Verify {
                 return None;
@@ -711,6 +833,7 @@ fn xobject(
             xobjects.set(n.clone(), Object::Ref(nr));
             out.xobjects.push((n.clone(), nr));
             out.replaced.push(name);
+            out.doomed.push(r);
             scope.report.forms_rewritten += 1;
             Some(Some(Op::new("Do", vec![Object::Name(n)])))
         }

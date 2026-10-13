@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pdfcraft_cos::{Document, SaveOptions, write_incremental};
+use pdfcraft_cos::{Document, SaveOptions, write_full, write_incremental};
 
 use super::*;
 
@@ -179,6 +179,7 @@ fn invalid_requests_change_nothing() {
         add_background(&mut doc, &[9], &Background { color: [1.0; 3], opacity: 1.0, ..Background::default() }, false),
         Err(EditError::NoSuchPage(9))
     );
+    assert_eq!(EditError::NoSuchPage(9).to_string(), "page 10 does not exist", "the message counts pages from 1 (#1550)");
     assert!(!doc.is_modified());
 }
 
@@ -214,6 +215,37 @@ fn flattening_draws_appearances_into_the_page_and_removes_the_comments() {
     assert!(marks_present(&doc).is_empty(), "flattened content is not a removable mark");
 }
 
+/// #1317: a cloudy square this builder cannot draw stays on the page. A solid square, a hidden
+/// cloudy square and a cloudy square that already has an appearance keep their previous results.
+#[test]
+fn flattening_keeps_a_cloudy_square_it_cannot_draw() {
+    let page = stream("", " ");
+    let form = "<< /Type /XObject /Subtype /Form /BBox [100 600 200 650] /Length 28 >>\nstream\n1 0 0 RG 100 600 100 50 re S\nendstream";
+    let case = |extra: &str, drawn: usize, left: bool| {
+        let annot = format!("<< /Type /Annot /Subtype /Square /Rect [100 600 200 650] /C [1 0 0] /Contents (Synthetic comment) {extra} >>");
+        let mut doc = build(&[
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << >> /Contents 5 0 R /Annots [4 0 R] >>",
+            &annot,
+            &page,
+            form,
+        ]);
+        let before = streams(&doc, 0);
+        assert_eq!(flatten(&mut doc, &[0], true, false).unwrap(), drawn);
+        let doc = reopen(&doc);
+        let p = &pdfcraft_model::pages(&doc)[0];
+        assert_eq!(p.dict.contains(b"Annots"), left);
+        if drawn == 0 {
+            assert_eq!(streams(&doc, 0), before, "nothing was drawn in place of the comment");
+        }
+    };
+    case("/BE << /S /C /I 2 >>", 0, true);
+    case("/BE << /S /S >>", 1, false);
+    case("/BE << /S /C /I 2 >> /F 2", 0, true);
+    case("/BE << /S /C /I 2 >> /AP << /N 6 0 R >>", 1, false);
+}
+
 /// #805: a supported note with no stored appearance is still drawn by viewers. Flattening must
 /// generate that appearance and bake it into the page, not delete a comment that shows an icon.
 #[test]
@@ -232,6 +264,34 @@ fn flattening_keeps_a_note_whose_appearance_is_missing() {
     assert!(!p.dict.contains(b"Annots"), "the note is gone once its icon is baked in");
     let flat = streams(&doc, 0).pop().unwrap();
     assert!(flat.contains("q 1 0 0 1 10 10 cm /PCFl0 Do Q"), "{flat}");
+}
+
+/// #1470: a form field whose widget is on no page (left behind by page extraction or combining)
+/// has nothing to draw, but flattening every form field still takes it out of `/AcroForm /Fields`,
+/// or other software keeps treating the flattened file as a form. A hidden widget on a page is
+/// left alone, as before.
+#[test]
+fn flattening_fields_drops_the_ones_on_no_page() {
+    let page = stream("", " ");
+    let mut doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R 6 0 R 7 0 R 8 0 R] >> >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 4 0 R /Annots [5 0 R 7 0 R] >>",
+        &page,
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (on_page) /Rect [10 10 150 40] /F 4 /AP << /N 10 0 R >> >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (orphan) /Rect [10 50 150 80] /F 4 /AP << /N 10 0 R >> >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (hidden) /Rect [10 90 150 120] /F 2 /AP << /N 10 0 R >> >>",
+        "<< /FT /Tx /T (parent) /Kids [9 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /Parent 8 0 R /Rect [10 130 150 160] /F 4 /AP << /N 10 0 R >> >>",
+        "<< /Type /XObject /Subtype /Form /BBox [0 0 140 30] /Length 0 >>\nstream\n\nendstream",
+    ]);
+    assert_eq!(flatten(&mut doc, &[0], false, true).unwrap(), 1, "only the field on the page is drawn");
+    let doc = reopen(&doc);
+    let root = doc.root().unwrap();
+    let af = doc.resolve(doc.get(root).as_dict().unwrap().get(b"AcroForm").unwrap());
+    let fields = doc.resolve(af.as_dict().unwrap().get(b"Fields").unwrap());
+    let left: Vec<pdfcraft_cos::ObjRef> = fields.as_array().unwrap().iter().filter_map(|f| f.as_ref()).collect();
+    assert_eq!(left, [pdfcraft_cos::ObjRef::new(7, 0)], "only the hidden field on the page stays");
 }
 
 /// Flattening never makes a `?` permanent: it refuses, changing nothing, a text box without an
@@ -1825,6 +1885,52 @@ fn a_line_drawn_twice_is_replaced_everywhere() {
 }
 
 #[test]
+fn replacing_a_line_keeps_a_distinct_nearby_line() {
+    // 12 pt lines 6 pt apart: the glyph boxes overlap by more than half the smaller box,
+    // but the baselines are different lines (#1316).
+    let src = "BT /F1 12 Tf 1 0 0 1 72 700 Tm (Alpha) Tj 0 -6 Td (Beta) Tj ET";
+    let listed = |doc: &Document| text::text_lines(doc, 0).unwrap().into_iter().map(|l| l.text).collect::<Vec<_>>();
+    for paragraph in [false, true] {
+        let mut doc = text_page(src);
+        assert_eq!(listed(&doc), ["Alpha", "Beta"]);
+        assert_eq!(text::text_blocks(&doc, 0).unwrap().len(), 2);
+        if paragraph {
+            text::rewrite_block(&mut doc, 0, 0, Some("ALPHA"), &text::BlockStyle::default()).unwrap();
+        } else {
+            text::replace_line(&mut doc, 0, 0, "ALPHA").unwrap();
+        }
+        assert_eq!(listed(&doc), ["ALPHA", "Beta"]);
+        assert!(String::from_utf8_lossy(&page_content_bytes(&doc, 0)).contains("(Beta)"));
+        for bytes in [write_incremental(&doc, &SaveOptions::default()).unwrap(), write_full(&doc, &SaveOptions::default()).unwrap()] {
+            let back = Document::open(Arc::new(bytes)).unwrap();
+            assert!(back.repair_log().is_empty());
+            assert_eq!(listed(&back), ["ALPHA", "Beta"]);
+        }
+    }
+    // The same word on the next line is still a different line.
+    let mut same = text_page("BT /F1 12 Tf 1 0 0 1 72 700 Tm (Alpha) Tj 0 -6 Td (Alpha) Tj ET");
+    text::replace_line(&mut same, 0, 0, "ALPHA").unwrap();
+    assert_eq!(listed(&same), ["ALPHA", "Alpha"]);
+    // Ordinary leading, and a paragraph far enough to group apart, keep the neighbour.
+    let mut spaced = text_page("BT /F1 12 Tf 1 0 0 1 72 700 Tm (Alpha) Tj 0 -14.4 Td (Beta) Tj ET");
+    text::replace_line(&mut spaced, 0, 0, "ALPHA").unwrap();
+    assert_eq!(listed(&spaced), ["ALPHA", "Beta"]);
+    let mut apart = text_page("BT /F1 12 Tf 1 0 0 1 72 700 Tm (Alpha) Tj 0 -40 Td (Beta) Tj ET");
+    text::rewrite_block(&mut apart, 0, 0, Some("ALPHA"), &text::BlockStyle::default()).unwrap();
+    assert_eq!(listed(&apart), ["ALPHA", "Beta"]);
+    // A second copy at the same position is still one replacement.
+    for paragraph in [false, true] {
+        let mut duplicate = text_page("BT /F1 12 Tf 1 0 0 1 72 700 Tm (Alpha) Tj ET BT /F1 12 Tf 1 0 0 1 72 700 Tm (Alpha) Tj ET");
+        if paragraph {
+            text::rewrite_block(&mut duplicate, 0, 0, Some("ALPHA"), &text::BlockStyle::default()).unwrap();
+        } else {
+            text::replace_line(&mut duplicate, 0, 0, "ALPHA").unwrap();
+        }
+        assert_eq!(listed(&duplicate), ["ALPHA"]);
+    }
+}
+
+#[test]
 fn paragraphs_move_and_rewrap_to_a_new_width() {
     let para = "BT /F1 10 Tf 12 TL 100 700 Td (One two three four five six seven) Tj T* (eight nine ten eleven twelve) Tj ET";
     let close = |a: f64, b: f64| (a - b).abs() < 0.5;
@@ -2755,14 +2861,17 @@ fn group_move_budget_refusals_keep_the_original_page_selectable() {
 
 #[test]
 fn arabic_actual_text_keeps_typing_order_when_opened_for_editing() {
-    for logical in ["مرحبا بالعالم", "سَلَام 123 (PDF)", "English مرحبا ١٢٣", "שלום עולם", "Latin text"] {
+    for logical in ["مرحبا بالعالم", "سَلَام 123 (PDF)", "English مرحبا ١٢٣", "PDFمرحبا", "مرحبا", "שלום עולם", "Latin text"]
+    {
         let hex: String = logical.encode_utf16().map(|u| format!("{u:04X}")).collect();
-        let doc = text_page(&format!("/Span <</ActualText <FEFF{hex}>>> BDC BT /F1 12 Tf 72 700 Td (abcd) Tj (efgh) Tj ET EMC"));
-        for doc in [&doc, &reopen(&doc)] {
-            let lines = text::text_lines(doc, 0).unwrap();
-            assert_eq!(lines.len(), 1);
-            assert_eq!(lines[0].text, logical, "ActualText is already in typing order");
-            assert_eq!(text::text_blocks(doc, 0).unwrap()[0].editor_text, logical);
+        for drawing in ["(abcd) Tj (efgh) Tj", "(X) Tj"] {
+            let doc = text_page(&format!("/Span <</ActualText <FEFF{hex}>>> BDC BT /F1 12 Tf 72 700 Td {drawing} ET EMC"));
+            for doc in [&doc, &reopen(&doc)] {
+                let lines = text::text_lines(doc, 0).unwrap();
+                assert_eq!(lines.len(), 1);
+                assert_eq!(lines[0].text, logical, "ActualText is already in typing order");
+                assert_eq!(text::text_blocks(doc, 0).unwrap()[0].editor_text, logical);
+            }
         }
     }
 }
@@ -2787,6 +2896,78 @@ fn actual_text_and_visual_rtl_glyphs_keep_their_own_reading_order() {
         let lines = text::text_lines(doc, 0).unwrap();
         assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["בדיוק", "שלום", "בדיוק"]);
     }
+}
+
+/// Synthetic codes A س, B م and X a lam-alef glyph, drawn from left to right.
+fn arabic_ligature_page(content: &str, composite: bool) -> Document {
+    let prefix = if composite { "00" } else { "" };
+    let cmap = format!(
+        "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapType 2 def \
+         1 begincodespacerange <{prefix}00> <{prefix}FF> endcodespacerange 4 beginbfchar \
+         <{prefix}20> <0020> <{prefix}41> <0633> <{prefix}42> <0645> <{prefix}58> <FEFB> \
+         endbfchar endcmap CMapName currentdict /CMap defineresource pop end end"
+    );
+    let widths: Vec<_> = (32..=88).map(|c| if c == 32 { "250" } else { "500" }).collect();
+    let font = if composite {
+        "<< /Type /Font /Subtype /Type0 /BaseFont /FakeArabic /Encoding /Identity-H /DescendantFonts [7 0 R] /ToUnicode 6 0 R >>".into()
+    } else {
+        format!("<< /Type /Font /Subtype /Type1 /BaseFont /FakeArabic /FirstChar 32 /LastChar 88 /Widths [{}] /ToUnicode 6 0 R >>", widths.join(" "))
+    };
+    build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        &stream("", content),
+        &font,
+        &stream("", &cmap),
+        "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /FakeArabic /CIDSystemInfo << /Registry (Synthetic) /Ordering (Identity) /Supplement 0 >> /DW 500 /W [32 [250]] >>",
+    ])
+}
+
+#[test]
+fn arabic_ligature_actual_text_stays_on_its_line() {
+    for (ligature, composite) in [("لا", false), ("لأ", false), ("لإ", false), ("لآ", false), ("لَا", false), ("لا", true)] {
+        let hex: String = ligature.encode_utf16().map(|u| format!("{u:04X}")).collect();
+        let (left, glyph, right) = if composite { ("<0042>", "<0058>", "<0041>") } else { ("(B)", "(X)", "(A)") };
+        let doc = arabic_ligature_page(
+            &format!("BT /F1 12 Tf 72 700 Td {left} Tj /Span <</ActualText <FEFF{hex}>>> BDC [{glyph}] TJ EMC {right} Tj ET"),
+            composite,
+        );
+        let expected = format!("س{ligature}م");
+        for doc in [&doc, &reopen(&doc)] {
+            let lines = text::text_lines(doc, 0).unwrap();
+            assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), [expected.as_str()]);
+            assert_eq!(text::text_blocks(doc, 0).unwrap()[0].editor_text, expected);
+        }
+    }
+}
+
+#[test]
+fn multi_glyph_rtl_actual_text_keeps_its_own_reading_order() {
+    // Two encoded glyphs are a logical span, even if their replacement looks like a ligature.
+    for drawing in ["(XX) Tj", "(X) Tj (X) Tj", "[(X) (X)] TJ"] {
+        let doc =
+            arabic_ligature_page(&format!("BT /F1 12 Tf 72 700 Td (B) Tj /Span <</ActualText <FEFF06440627>>> BDC {drawing} EMC (A) Tj ET"), false);
+        let lines = text::text_lines(&doc, 0).unwrap();
+        assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["م", "لا", "س"]);
+    }
+}
+
+#[test]
+fn replacing_word_with_actual_text_ligature_removes_all_its_source_operators() {
+    let mut doc = arabic_ligature_page(
+        "BT /F1 12 Tf 72 700 Td (B) Tj /Span <</ActualText <FEFF06440627>>> BDC /Span BMC (X) Tj EMC EMC (A) Tj ET \
+         BT /F1 12 Tf 72 600 Td (AB) Tj ET",
+        false,
+    );
+    assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].editor_text, "سلام");
+    text::replace_block(&mut doc, 0, 0, "Replacement").unwrap();
+    let doc = reopen(&doc);
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["Replacement", "مس"]);
+    let bytes = page_content_bytes(&doc, 0);
+    let content = String::from_utf8_lossy(&bytes);
+    assert!(!content.contains("ActualText") && !content.contains("(X)") && !content.contains("(B)") && !content.contains("(A)"), "{content}");
 }
 
 #[test]

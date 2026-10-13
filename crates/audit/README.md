@@ -18,8 +18,9 @@ shading and highlights don't either: they're painted before the text, or light a
 
 Limits, by design and documented rather than hidden:
 
-- only `re` rectangles closed by a fill count as covers (not arbitrary paths, shadings or
-  patterns), and a translucent one (`/ca` below 1) is not flagged;
+- only filled rectangles count as covers, drawn with `re` or as a single `m`/`l` subpath whose
+  corners form an axis-aligned rectangle (not other paths, shadings or patterns), and a
+  translucent one (`/ca` below 1) is not flagged;
 - covers inside form XObjects are found, but only text drawn directly in the page content is
   checked under them;
 - annotation rectangles are compared in unrotated user space, so `/Rotate` pages may misalign.

@@ -28,6 +28,35 @@ mcp::McpServer::new(a).serve(stdin, stdout)?             // newline-delimited JS
 - `doc_close` refuses to drop unsaved changes unless `discard_changes: true`. `doc_save` writes atomically, incrementally in place, and in full for a new path.
 - With a root set, every read and write path must resolve inside it (symlinks and `..` included). Relative paths resolve inside the root, and `..` is resolved by name before the check. Every path outside the root gets the same refusal (`<path> is outside the allowed directory <root>`), whether or not it exists, so a confined agent can't probe the rest of the disk; on Windows another network share or device path (`\\host\share`, `\\?\UNC\…`, `\\.\…`) is refused without being contacted. "Not found" and other filesystem errors are reported only for paths inside the root. Tools that write several files into a folder name them after the document or input file, with separators, colons and control characters replaced by `_`, so a name can't lead them out of the folder. The root itself must be a folder.
 
+## Text search and cache limits
+
+Extracted page text is reused in a session-wide LRU cache: at most **64 MiB** of estimated owned
+text storage and **4,096 pages**, shared by all open documents. Accounting includes glyph-vector
+capacity, each glyph string's capacity, line indexes and word-break flags. Cache hits share the
+renderer result instead of copying glyphs. Oversized pages remain usable by the current call but
+are not cached; evicted pages can be extracted again. A changed document version invalidates its
+cached text on the next text request, and closing a document removes its entries. Cache entries
+do not keep an old PDF byte buffer alive.
+
+This bounds retained text-cache data, not total process memory: active extraction batches,
+renderers, document buffers and the requested output have separate lifetimes. Search still reads
+growing batches (8 to 128 pages), with one lookahead match to determine continuation.
+
+`text_find` keeps matches from readable pages when another reached page fails extraction. It
+returns `warnings` with 1-based `page`, `error` and `error_truncated`, plus `warning_count` and
+`warnings_truncated`. At most 100 warnings and 1,024 UTF-8 bytes per error are returned. Failures
+are retried on later calls; they are not cached as empty pages. Warnings describe pages visited in
+search order, up to the continuation point, not failures in unvisited later pages.
+
+`complete: true` means the requested search was exhausted with no page failures and no further
+matches. `next: {start_page, skip}` exists only when another match would exceed `limit`. A search
+that reaches the end with warnings therefore has `complete: false` **without** `next`. Callers
+should follow `next` when present and separately inspect warnings. A capped search can return
+both. The existing `query`, `count`, `matches` and rectangle semantics are unchanged.
+
+`text_extract`, comment placement and redaction keep strict all-requested-pages-must-succeed
+semantics; they never silently act on partial text.
+
 ## Shared field properties
 
 `form_set_props` accepts either `field` (one name) or `fields` (1–1000 unique names):
@@ -134,3 +163,24 @@ faces complete absent subset glyphs. `text_edit.ranges` accepts disjoint UTF-8 b
 undoable and survive saving/reopening. `image_hit` shares the UI's curve and hole hit testing.
 The bounds, limits and font requirements are in [existing-text editing](../../docs/editing-existing-text.md)
 and [image editing](../../docs/editing-images.md).
+
+## Opening local GoToR links
+
+`link_open {doc, page, index, password?}` follows a local PDF link using `link_list`
+numbering. Relative file specifications open normally. An **absolute** file specification
+requires `allow_absolute: true`, after reviewing the target reported by `link_list`.
+Omitting the argument or passing false refuses the request before checking or reading the
+target file. This is an intentional compatibility change for callers that previously opened
+absolute GoToR targets without explicit consent. Opting in does not bypass `--root`, symlink
+confinement, regular-file, PDF-extension, size, or password validation. Consent applies only
+to that call, including each password retry; it is never remembered for other links.
+
+The desktop UI asks Allow/Cancel before following absolute GoToR targets and displays the
+complete path. Relative links retain their existing behavior. Named destinations remain
+unapplied with a warning.
+
+## Folder batches
+
+`doc_batch` runs conversion, OCR and compression over files and optionally recursive
+folders. The CLI also exposes it as `pdfcraft-cli batch`. See the
+[batch guide](../../docs/cli-batch.md) for examples, output protection, errors and limits.

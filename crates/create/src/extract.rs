@@ -1,6 +1,6 @@
 //! Export a PDF ▸ Image ▸ Export all images, and Edit ▸ Save image as: the images that pages
 //! use, as files. JPEG images are written unchanged; other images, and JPEG images with
-//! transparency, are decoded and written as PNG with their soft mask, stencil mask or colour
+//! transparency or with CMYK samples a viewer would read inverted, are decoded and written as PNG with their soft mask, stencil mask or colour
 //! key as alpha. Images PdfCraft can't decode yet (JPEG 2000, JBIG2, CCITT, separations) are
 //! reported, never silently left out.
 
@@ -126,13 +126,24 @@ fn image(doc: &Document, s: &Stream) -> Result<(&'static str, Vec<u8>), String> 
     // A stencil mask (`ImageMask true`) has no /SMask or /Mask of its own (8.9.6.2).
     let mut alpha = if mask { None } else { soft_mask(doc, s, w, h).or_else(|| stencil_mask(doc, s, w, h)) };
     let key = if mask { None } else { colour_key(doc, s) };
-    if jpeg && alpha.is_none() && key.is_none() {
+    // Decode arrays: only inversion ([1 0] per component) is honoured, the common case.
+    let inverted = s
+        .dict
+        .get(b"Decode")
+        .map(|d| doc.resolve(d))
+        .and_then(|d| d.as_array().map(|a| a.first().and_then(Object::as_f64) > a.get(1).and_then(Object::as_f64)))
+        .unwrap_or(false);
+    // In a PDF a CMYK JPEG's samples are ink amounts unless /Decode inverts them, while image
+    // viewers read a CMYK JPEG file as inverted (Adobe's convention): as is, it would show as
+    // a negative.
+    let as_is_negative = jpeg && !inverted && matches!(space(doc, s.dict.get(b"ColorSpace")), Ok(Space::Cmyk));
+    if jpeg && alpha.is_none() && key.is_none() && !as_is_negative {
         return as_is();
     }
     let mut space = if mask { Space::Gray } else { space(doc, s.dict.get(b"ColorSpace"))? };
     let (samples, bpc) = if jpeg {
-        // A JPEG decoder gives grey or RGB (CMYK and YCCK are converted); a JPEG that doesn't
-        // decode, or an indexed one (not valid), is written as is, without its transparency.
+        // Grey, RGB or CMYK samples (YCCK is converted); a JPEG that doesn't decode, or an
+        // indexed one (not valid), is written as is, without its transparency.
         let Some((samples, decoded)) = jpeg_samples(&s.raw, &space, w, h) else { return as_is() };
         space = decoded;
         (samples, 8)
@@ -153,17 +164,10 @@ fn image(doc: &Document, s: &Stream) -> Result<(&'static str, Vec<u8>), String> 
     if alpha.is_none() {
         alpha = key.and_then(|k| keyed_alpha(&samples, n, bpc, &k));
     }
-    if jpeg && alpha.is_none() {
+    if jpeg && alpha.is_none() && !as_is_negative {
         return as_is();
     }
-    // Decode arrays: only inversion ([1 0] per component) is honoured, the common case. A JPEG
-    // decoder has already applied an Adobe JPEG's own inversion.
-    let invert = s
-        .dict
-        .get(b"Decode")
-        .map(|d| doc.resolve(d))
-        .and_then(|d| d.as_array().map(|a| a.first().and_then(Object::as_f64) > a.get(1).and_then(Object::as_f64)));
-    let invert = (invert.unwrap_or(false) && !jpeg) ^ mask; // a stencil mask paints its 0 samples
+    let invert = inverted ^ mask; // a stencil mask paints its 0 samples
     let max = (1u32 << bpc.min(8)) - 1;
     let mut rgb = Vec::with_capacity(w * h * 3);
     for px in samples.chunks_exact(n) {
@@ -200,10 +204,13 @@ fn size(w: i64, h: i64) -> Option<(usize, usize)> {
     (w > 0 && h > 0 && pixels <= MAX_PIXELS).then_some((w, h))
 }
 
-/// A JPEG's samples (8 bits): grey for a grey image, else RGB, with the space they are in.
+/// A JPEG's samples (8 bits): grey for a grey image, CMYK as stored for a CMYK one, else RGB,
+/// with the space they are in.
 fn jpeg_samples(data: &[u8], space: &Space, w: usize, h: usize) -> Option<(Vec<u8>, Space)> {
-    if matches!(space, Space::Indexed(..)) {
-        return None;
+    match space {
+        Space::Indexed(..) => return None,
+        Space::Cmyk => return cmyk_jpeg_samples(data, w, h).map(|px| (px, Space::Cmyk)),
+        _ => {}
     }
     let img = image::load_from_memory_with_format(data, image::ImageFormat::Jpeg).ok()?;
     if img.width() as usize != w || img.height() as usize != h {
@@ -213,6 +220,34 @@ fn jpeg_samples(data: &[u8], space: &Space, w: usize, h: usize) -> Option<(Vec<u
         Space::Gray => (img.into_luma8().into_raw(), Space::Gray),
         _ => (img.into_rgb8().into_raw(), Space::Rgb),
     })
+}
+
+/// A four-component JPEG's CMYK samples as the page reads them: as stored, not inverted the way
+/// a decoder converting to RGB inverts them, with YCCK converted to CMYK.
+fn cmyk_jpeg_samples(data: &[u8], w: usize, h: usize) -> Option<Vec<u8>> {
+    use zune_jpeg::zune_core::{bytestream::ZCursor, colorspace::ColorSpace, options::DecoderOptions};
+    let options = DecoderOptions::default().set_strict_mode(false).set_max_width(usize::from(u16::MAX)).set_max_height(usize::from(u16::MAX));
+    let mut dec = zune_jpeg::JpegDecoder::new_with_options(ZCursor::new(data), options);
+    dec.decode_headers().ok()?;
+    let input = dec.input_colorspace()?;
+    if !matches!(input, ColorSpace::CMYK | ColorSpace::YCCK) || dec.dimensions()? != (w, h) {
+        return None;
+    }
+    dec.set_options(options.jpeg_set_out_colorspace(input));
+    let mut px = dec.decode().ok()?;
+    if px.len() != w.checked_mul(h)?.checked_mul(4)? {
+        return None;
+    }
+    if input == ColorSpace::YCCK {
+        for p in px.as_chunks_mut::<4>().0 {
+            let (y, cb, cr) = (f32::from(p[0]), f32::from(p[1]) - 128.0, f32::from(p[2]) - 128.0);
+            let ink = |rgb: f32| (255.0 - rgb).round().clamp(0.0, 255.0) as u8;
+            p[0] = ink(y + 1.402 * cr);
+            p[1] = ink(y - 0.344_136 * cb - 0.714_136 * cr);
+            p[2] = ink(y + 1.772 * cb);
+        }
+    }
+    Some(px)
 }
 
 /// The colour-key `/Mask` (8.9.6.4): a [min max] pair per colour component, in sample values.

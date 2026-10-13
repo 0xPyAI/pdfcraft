@@ -929,6 +929,7 @@ key	Space	Mezerník
 	, Expires: 	, platnost do: 
 	No digital IDs yet.	Zatím žádná digitální ID.
 	Configure New Digital ID	Nastavit nové digitální ID
+	Remove "{name}" from this list? The file itself is not deleted.	Odebrat „{name}“ z tohoto seznamu? Samotný soubor se nesmaže.
 	Continue	Pokračovat
 	Configure a Digital ID for Signing	Nastavení digitálního ID pro podepisování
 	Use a Digital ID from a file	Použít digitální ID ze souboru
@@ -2412,3 +2413,16 @@ animation effects	Off	Vypnuto
 	The linked PDF opened, but its named destination was not applied.	Odkazovaný PDF se otevřel, ale jeho pojmenovaný cíl nebyl použit.
 	The linked PDF opened, but its page destination was out of range.	Odkazovaný PDF se otevřel, ale cílová stránka je mimo rozsah.
 	Local cross-PDF links require the desktop app	Místní odkazy mezi soubory PDF vyžadují desktopovou aplikaci
+	Minimize	Minimalizovat
+	Maximize	Maximalizovat
+	Restore	Obnovit
+	Use system title bar	Použít systémové záhlaví okna
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Zobrazit jednoduché záhlaví s tlačítky okna místo pruhu karet. GNOME aplikacím záhlaví nekreslí, proto toto záhlaví nesleduje jeho motiv.
+
+# Absolute local GoToR confirmation (#1364).
+	Allow	Povolit
+	Only allow this if you trust the source document.	Povolte tuto akci pouze v případě, že důvěřujete zdrojovému dokumentu.
+	Open this local PDF?	Otevřít tento místní soubor PDF?
+	This document is trying to open a local file:	Tento dokument se pokouší otevřít místní soubor:
+	Move tag earlier	Přesunout značku dříve
+	Move tag later	Přesunout značku později

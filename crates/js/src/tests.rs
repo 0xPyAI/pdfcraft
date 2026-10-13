@@ -1038,6 +1038,26 @@ mod session {
     }
 
     #[test]
+    fn a_scripts_time_starts_when_its_context_is_ready() {
+        // The engine made slow to be ready (300 ms) under a 50 ms script limit: the script is
+        // not abandoned, its time starting only when the engine says it is ready.
+        use crate::xfa_session::START_DELAY_MS;
+        use std::sync::atomic::Ordering::Relaxed;
+        let mut s = XfaSession::new(XfaDoc::default());
+        START_DELAY_MS.store(300, Relaxed);
+        let mut quick = script("1", false, "form1[0].page1[0].go[0]", "click");
+        quick.timeout = std::time::Duration::from_millis(50);
+        let js = s.run(quick);
+        let mut quick = script("1", true, "form1[0].page1[0].go[0]", "click");
+        quick.timeout = std::time::Duration::from_millis(50);
+        let fc = s.run(quick);
+        START_DELAY_MS.store(0, Relaxed);
+        assert!(!js.abandoned && js.result.as_deref() == Some("1"), "{js:?}");
+        assert!(!fc.abandoned && fc.result.as_deref() == Some("1"), "{fc:?}");
+        assert_eq!(s.dead(), None);
+    }
+
+    #[test]
     fn a_script_past_its_time_is_abandoned_and_the_session_is_dead_after_it() {
         let mut s = XfaSession::new(XfaDoc::default());
         let mut slow = script("while (true) {}", false, "form1[0].page1[0].go[0]", "click");

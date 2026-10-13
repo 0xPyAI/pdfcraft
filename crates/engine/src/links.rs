@@ -165,6 +165,13 @@ impl std::fmt::Display for RemoteDocumentPathError {
     }
 }
 
+/// Whether the original GoToR file specification is absolute on this platform.
+/// Check this before resolving relative paths against the source document. This does no I/O;
+/// the resolver must still reject URL/network paths and malformed file specifications.
+pub fn remote_document_path_is_absolute(raw: &str) -> bool {
+    Path::new(raw).is_absolute()
+}
+
 /// Resolve a PDF remote-Go-To file specification to a local path without opening it.
 /// Relative paths are based on the source document; an in-memory source has no fallback to CWD.
 pub fn resolve_remote_document_path(source: Option<&Path>, raw: &str) -> Result<PathBuf, RemoteDocumentPathError> {
@@ -181,7 +188,7 @@ pub fn resolve_remote_document_path(source: Option<&Path>, raw: &str) -> Result<
         return Err(RemoteDocumentPathError::UrlOrNetwork);
     }
     let path = Path::new(raw);
-    let drive_absolute = path.is_absolute();
+    let drive_absolute = remote_document_path_is_absolute(raw);
     if let Some((scheme, _)) = raw.split_once(':') {
         let valid_scheme = scheme.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
             && scheme.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
@@ -450,6 +457,13 @@ mod tests {
         assert_eq!(read(&dir.join("folder.pdf")), Err(E::NotAFile), "a directory is refused");
         assert_eq!(read(&dir.join("notes.txt")), Err(E::NotPdf));
         assert_eq!(read(&dir), Err(E::NotPdf));
+        #[cfg(unix)]
+        {
+            // Sparse: the size guard must reject this without allocating or reading a GiB.
+            let large = dir.join("large.pdf");
+            std::fs::File::create(&large).unwrap().set_len(super::MAX_REMOTE_DOCUMENT_BYTES + 1).unwrap();
+            assert_eq!(read(&large), Err(E::TooLarge));
+        }
         assert!(matches!(read(&dir.join("missing.pdf")), Err(E::Read(_))));
         #[cfg(unix)]
         {
@@ -462,6 +476,26 @@ mod tests {
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remote_document_absolute_classification_uses_the_original_platform_path() {
+        use super::remote_document_path_is_absolute as absolute;
+        for relative in ["target.pdf", "../appendix/target.pdf", "folder/target.pdf"] {
+            assert!(!absolute(relative), "{relative}");
+        }
+        #[cfg(unix)]
+        {
+            assert!(absolute("/manual/target.pdf"));
+            assert!(!absolute(r"C:\manual\target.pdf"));
+        }
+        #[cfg(windows)]
+        {
+            assert!(absolute(r"C:\manual\target.pdf"));
+            assert!(absolute("C:/manual/target.pdf"));
+            assert!(!absolute(r"C:target.pdf"), "drive-relative is not absolute");
+            assert!(!absolute(r"\manual\target.pdf"), "rooted without a drive is not absolute");
+        }
     }
 
     #[test]

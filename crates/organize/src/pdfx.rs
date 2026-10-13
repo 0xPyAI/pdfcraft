@@ -191,7 +191,7 @@ fn unescape(s: &str) -> String {
 }
 
 /// `s` as XML text: markup escaped, and characters XML 1.0 does not allow left out.
-fn esc(s: &str) -> String {
+pub(crate) fn esc(s: &str) -> String {
     s.chars()
         .filter(|c| (!c.is_control() || matches!(c, '\t' | '\n' | '\r')) && !matches!(c, '\u{FFFE}' | '\u{FFFF}'))
         .collect::<String>()

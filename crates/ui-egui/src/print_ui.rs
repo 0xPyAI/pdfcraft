@@ -148,8 +148,8 @@ impl PrintDraft {
                 m => m,
             }),
             Handling::Multiple => match Layout::multiple(self.per_sheet) {
-                Layout::Multiple { cols, rows, .. } => {
-                    Layout::Multiple { cols, rows, order: self.order, border: self.border, auto_rotate: self.auto_rotate }
+                Layout::Multiple { cols, rows, per_sheet, .. } => {
+                    Layout::Multiple { cols, rows, per_sheet, order: self.order, border: self.border, auto_rotate: self.auto_rotate }
                 }
                 other => other,
             },

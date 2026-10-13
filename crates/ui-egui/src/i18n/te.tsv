@@ -828,6 +828,7 @@ comment menu	Edit	సవరించు
 	, Expires: 	, గడువు: 
 	No digital IDs yet.	ఇంకా డిజిటల్ ఐడీలు ఏవీ లేవు.
 	Configure New Digital ID	కొత్త డిజిటల్ ఐడీని కాన్ఫిగర్ చేయి
+	Remove "{name}" from this list? The file itself is not deleted.	ఈ జాబితా నుండి "{name}"ని తీసివేయాలా? ఫైల్ తొలగించబడదు.
 	Continue	కొనసాగించు
 	Configure a Digital ID for Signing	సంతకం కోసం డిజిటల్ ఐడీని కాన్ఫిగర్ చేయి
 	Use a Digital ID from a file	ఫైల్‌లోని డిజిటల్ ఐడీని ఉపయోగించు
@@ -2251,3 +2252,16 @@ animation effects	Off	ఆఫ్
 	Local cross-PDF links require the desktop app	PDFల మధ్య స్థానిక లింక్‌లకు డెస్క్‌టాప్ యాప్ అవసరం
 	The existing action will be preserved.	ఉన్న చర్య అలాగే ఉంచబడుతుంది.
 	This form's scripts are turned off because one ran too long. Reopen the document to run them again.	ఒక స్క్రిప్ట్ చాలా సేపు నడిచినందున ఈ ఫారమ్ స్క్రిప్ట్‌లు ఆపివేయబడ్డాయి. వాటిని మళ్లీ నడపడానికి పత్రాన్ని మళ్లీ తెరవండి.
+	Minimize	కనిష్ఠీకరించు
+	Maximize	గరిష్ఠీకరించు
+	Restore	పునరుద్ధరించు
+	Use system title bar	సిస్టమ్ శీర్షిక పట్టీని ఉపయోగించు
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	ట్యాబ్ పట్టీకి బదులుగా విండో బటన్‌ల కోసం సాధారణ శీర్షిక పట్టీని చూపించు. GNOME యాప్‌లకు శీర్షిక పట్టీలను గీయదు, కాబట్టి ఇది దాని థీమ్‌ను అనుసరించదు.
+
+# Absolute local GoToR confirmation (#1364).
+	Allow	అనుమతించు
+	Only allow this if you trust the source document.	మూల పత్రాన్ని విశ్వసిస్తే మాత్రమే దీన్ని అనుమతించండి.
+	Open this local PDF?	ఈ స్థానిక PDF ఫైల్‌ను తెరవాలా?
+	This document is trying to open a local file:	ఈ పత్రం ఒక స్థానిక ఫైల్‌ను తెరవడానికి ప్రయత్నిస్తోంది:
+	Move tag earlier	ట్యాగ్‌ను ముందుకు తరలించు
+	Move tag later	ట్యాగ్‌ను వెనుకకు తరలించు

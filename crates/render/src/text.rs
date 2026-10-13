@@ -149,18 +149,32 @@ impl PageText {
     /// separated by one space, original case). Used for pattern search (Search & Redact).
     pub fn find_with(&self, matcher: impl Fn(&[char]) -> Vec<std::ops::Range<usize>>) -> Vec<std::ops::Range<usize>> {
         let mut chars: Vec<char> = Vec::new();
-        let mut owner: Vec<usize> = Vec::new();
+        // `None` is a word or line separator inserted between glyphs. It is not part of either
+        // glyph, so a match that starts or ends on it must not take the neighbouring glyph.
+        let mut owner: Vec<Option<usize>> = Vec::new();
         for (i, g) in self.glyphs.iter().enumerate() {
-            if i > 0 && (self.space_before[i] || self.line_of[i] != self.line_of[i - 1]) && chars.last().is_some_and(|c| *c != ' ') {
+            let gap = self.space_before.get(i).copied().unwrap_or(false) || self.line_of.get(i) != self.line_of.get(i.saturating_sub(1));
+            if i > 0 && gap && chars.last().is_some_and(|c| *c != ' ') {
                 chars.push(' ');
-                owner.push(i);
+                owner.push(None);
             }
             for c in g.text.chars() {
                 chars.push(if c.is_whitespace() { ' ' } else { c });
-                owner.push(i);
+                owner.push(Some(i));
             }
         }
-        matcher(&chars).into_iter().filter(|r| r.start < r.end && r.end <= chars.len()).map(|r| owner[r.start]..owner[r.end - 1] + 1).collect()
+        matcher(&chars)
+            .into_iter()
+            .filter_map(|r| {
+                if r.start >= r.end || r.end > chars.len() {
+                    return None;
+                }
+                let glyphs = owner.get(r.start..r.end)?;
+                let start = glyphs.iter().find_map(|g| *g)?;
+                let end = glyphs.iter().rev().find_map(|g| *g)?.checked_add(1)?;
+                (start < end).then_some(start..end)
+            })
+            .collect()
     }
 
     /// Index of the glyph nearest to a view-space point (for selection anchors).
@@ -1276,14 +1290,18 @@ pub fn layout(glyphs: Vec<TextGlyph>) -> PageText {
 
 /// [`layout`] as the reading order of indices into `glyphs`, with each one's line and word gap.
 fn arrange(glyphs: &[TextGlyph]) -> (Vec<usize>, Vec<u32>, Vec<bool>) {
-    // Drop "fake bold" duplicates: the same character redrawn at (almost) the same place.
+    // Drop "fake bold" duplicates: the same character redrawn at (almost) the same place. A redraw
+    // also overlaps most of its own width: a narrow letter in condensed text (80 Tz and below) sits
+    // closer than a fifth of its height to its double, as the second "l" of "Alle" (#1467).
     let mut keep = vec![true; glyphs.len()];
     for i in 1..glyphs.len() {
         let g = &glyphs[i];
         let h = (g.rect[3] - g.rect[1]).max(0.1);
+        let w = g.rect[2] - g.rect[0];
+        let dx = if w > 0.05 * h { (h * 0.2).min(w * 0.5) } else { h * 0.2 };
         for j in (i.saturating_sub(4)..i).rev() {
             let p = &glyphs[j];
-            if keep[j] && p.text == g.text && (p.rect[0] - g.rect[0]).abs() < h * 0.2 && (p.rect[1] - g.rect[1]).abs() < h * 0.2 {
+            if keep[j] && p.text == g.text && (p.rect[0] - g.rect[0]).abs() < dx && (p.rect[1] - g.rect[1]).abs() < h * 0.2 {
                 keep[i] = false;
                 break;
             }
@@ -1853,6 +1871,36 @@ mod tests {
         assert_eq!(t.nearest(52.0, 14.0), Some(5));
     }
 
+    /// #1315: a custom match that ends on a reconstructed word or line separator does not take
+    /// the following glyph.
+    #[test]
+    fn a_match_ending_on_a_separator_stops_before_the_next_glyph() {
+        let glyphs: Vec<TextGlyph> = "quickbrown"
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                let x = i as f32 * 6.0;
+                g(&c.to_string(), x, 0.0, x + 6.0)
+            })
+            .collect();
+        for line_break in [false, true] {
+            let mut space_before = vec![false; 10];
+            space_before[5] = !line_break;
+            let line_of = (0..10).map(|i| u32::from(line_break && i >= 5)).collect();
+            let page = PageText { glyphs: glyphs.clone(), line_of, space_before };
+            let plain = if line_break { "quick\nbrown" } else { "quick brown" };
+            assert_eq!(page.plain_text(), plain);
+            assert_eq!(page.find("quick "), vec![0..5]);
+            let span = |r: std::ops::Range<usize>| Vec::from([r]);
+            assert_eq!(page.find_with(|_| span(0..5)), vec![0..5]);
+            assert_eq!(page.find_with(|_| span(5..11)), vec![5..10]);
+            assert_eq!(page.find_with(|_| span(6..11)), vec![5..10]);
+            let hits = page.find_with(|_| span(0..6));
+            assert_eq!(page.text_of(hits[0].clone()), "quick");
+            assert_eq!(hits, vec![0..5]);
+        }
+    }
+
     #[test]
     fn phrase_search_ignores_repeated_spaces() {
         // "quick  brown" drawn with two space glyphs in a row. Text extraction keeps both spaces,
@@ -1900,6 +1948,29 @@ mod tests {
             v.push(g(&c.to_string(), x + 0.3, 10.0, x + 6.3));
         }
         assert_eq!(layout(v).plain_text(), "Bold");
+        // A zero-width combining mark redrawn on itself is dropped too.
+        let v = vec![g("e", 10.0, 10.0, 16.0), g("\u{301}", 13.0, 10.0, 13.0), g("e", 10.0, 10.0, 16.0), g("\u{301}", 13.0, 10.0, 13.0)];
+        assert_eq!(layout(v).plain_text(), "e\u{301}");
+    }
+
+    /// #1467: condensed text (80 Tz and below, OCR layers fitted to the scan) sets narrow letters
+    /// closer than a fifth of their height apart; a doubled letter there is two letters, not a redraw.
+    #[test]
+    fn condensed_double_letters_are_kept() {
+        for scale in [0.8, 0.65, 0.5] {
+            let mut v = Vec::new();
+            let mut x = 10.0;
+            // Helvetica advances at 10 pt, in thousandths of an em.
+            for (c, adv) in [('A', 667.0), ('l', 222.0), ('l', 222.0), ('e', 556.0)] {
+                let w = adv / 100.0 * scale;
+                v.push(g(&c.to_string(), x, 10.0, x + w));
+                x += w;
+            }
+            assert_eq!(layout(v.clone()).plain_text(), "Alle", "at {scale} horizontal scaling");
+            // Each letter redrawn a fifth of a point to the right is still one letter.
+            let bold: Vec<TextGlyph> = v.iter().flat_map(|c| [c.clone(), g(&c.text, c.rect[0] + 0.2, 10.0, c.rect[2] + 0.2)]).collect();
+            assert_eq!(layout(bold).plain_text(), "Alle", "fake bold at {scale} horizontal scaling");
+        }
     }
 
     #[test]
@@ -2462,5 +2533,44 @@ mod tests {
         };
         let all = t.glyphs_in([0.0, 0.0, 60.0, 40.0]);
         assert_eq!(t.column_text(&all), "日本\n語文");
+    }
+
+    /// An embedded TrueType font with no `/Encoding`, flagged `flags`, its `/ToUnicode` (if
+    /// any) mapping only printable ASCII, as OCR engines write the text layer of a scan.
+    fn ocr_layer_text(flags: i64, ascii_to_unicode: bool) -> String {
+        use lopdf::{Document, Object, Stream, dictionary};
+        let mut doc = Document::with_version("1.7");
+        let program = doc.add_object(Stream::new(dictionary! {}, include_bytes!("../../../assets/fonts/Inter-Regular.ttf").to_vec()));
+        let descriptor =
+            doc.add_object(dictionary! { "Type" => "FontDescriptor", "FontName" => "Inter-Regular", "Flags" => flags, "FontFile2" => program });
+        let mut font = dictionary! { "Type" => "Font", "Subtype" => "TrueType", "BaseFont" => "Inter-Regular", "FontDescriptor" => descriptor };
+        if ascii_to_unicode {
+            let cmap = b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /Ascii def /CMapType 2 def 1 begincodespacerange <00> <FF> endcodespacerange 1 beginbfrange <20> <7E> <0020> endbfrange endcmap CMapName currentdict /CMap defineresource pop end end";
+            font.set("ToUnicode", doc.add_object(Stream::new(dictionary! {}, cmap.to_vec())));
+        }
+        let font = doc.add_object(font);
+        // WinAnsi bytes: "Rückfragen für Überhitzungsschutz: können, weiß, Café".
+        let mut ops = b"BT /F1 14 Tf 1 0 0 1 20 200 Tm (".to_vec();
+        ops.extend_from_slice(b"R\xfcckfragen f\xfcr \xdcberhitzungsschutz: k\xf6nnen, wei\xdf, Caf\xe9");
+        ops.extend_from_slice(b") Tj ET");
+        let content = doc.add_object(Stream::new(dictionary! {}, ops));
+        let pages = doc.new_object_id();
+        let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages, "MediaBox" => vec![Object::Integer(0), Object::Integer(0), Object::Integer(400), Object::Integer(400)], "Resources" => dictionary! {"Font" => dictionary! {"F1" => font}}, "Contents" => content });
+        doc.objects.insert(pages, dictionary! {"Type" => "Pages", "Kids" => vec![Object::Reference(page)], "Count" => 1}.into());
+        let catalog = doc.add_object(dictionary! {"Type" => "Catalog", "Pages" => pages});
+        doc.trailer.set("Root", catalog);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let pdf = Pdf::new(std::sync::Arc::new(bytes)).unwrap();
+        extract_page(&pdf, 0, &InterpreterSettings::default()).unwrap().plain_text()
+    }
+
+    #[test]
+    fn truetype_without_an_encoding_reads_its_codes_as_win_ansi() {
+        // Café: 0xE9 is /Oslash in StandardEncoding, so reading the codes as Standard first and
+        // WinAnsi only for the gaps would still give "CafØ".
+        let expected = "Rückfragen für Überhitzungsschutz: können, weiß, Café";
+        assert_eq!(ocr_layer_text(4, false), expected, "symbolic, no /ToUnicode");
+        assert_eq!(ocr_layer_text(32, true), expected, "nonsymbolic, /ToUnicode for ASCII only");
     }
 }

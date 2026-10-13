@@ -121,7 +121,10 @@ neither the MSI nor the portable zip needs the Visual C++ redistributable.
   dialogs. Full UI confirms success with Finish; failures and cancellations have distinct messages.
   The welcome dialog has a "Create a desktop shortcut" checkbox and an "Edit with PdfCraft"
   right-click menu checkbox, both ticked by default. `/qn` and `/qb` stay unattended and create
-  both unless `INSTALLDESKTOPSHORTCUT=0` or `INSTALLPDFCONTEXTMENU=0` is passed.
+  both unless `INSTALLDESKTOPSHORTCUT=0` or `INSTALLPDFCONTEXTMENU=0` is passed. An update (the
+  launcher runs `msiexec /passive` with no properties) keeps the desktop shortcut only if
+  `PdfCraft.lnk` is still on the all-users desktop, so deleting it once keeps it away (#1058); a
+  value given on the command line wins.
 - The PDF right-click entry (#682) is a classic verb under
   `HKLM\Software\Classes\SystemFileAssociations\.pdf\shell\PdfCraft.Edit`, so it shows whichever app
   is the default for `.pdf` and never changes that default. Several selected PDFs (up to 15, the
@@ -129,7 +132,8 @@ neither the MSI nor the portable zip needs the Visual C++ redistributable.
   hand-off opens them as tabs. On Windows 11 it is under "Show more options"; a first-level entry
   needs an `IExplorerCommand` handler and package identity (a sparse MSIX package), which the MSI
   doesn't have.
-- `test-msi.ps1 <file.msi>` checks the compiled shortcut, context-menu and dialog tables. Packaging
+- `test-msi.ps1 <file.msi>` checks the compiled shortcut, context-menu and dialog tables, and
+  evaluates the desktop shortcut's first-install and update conditions. Packaging
   runs it in a child process before signing, so the MSI isn't held open when signtool runs. The ARM64 install
   smoke test checks that both all-users shortcuts point at the installed `pdfcraft.exe` and are
   removed on uninstall, and that `INSTALLDESKTOPSHORTCUT=0` skips the desktop one.

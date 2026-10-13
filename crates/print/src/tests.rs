@@ -155,9 +155,11 @@ fn multiple_pages_per_sheet() {
     assert_eq!(two[0].size, (792.0, 612.0));
     assert!(two[0].placed[1].matrix.0[4] > two[0].placed[0].matrix.0[4]);
     // Vertical order and borders.
-    let v =
-        layout(&sizes, &settings(vec![0, 1, 2], Layout::Multiple { cols: 2, rows: 2, order: PageOrder::Vertical, border: true, auto_rotate: false }))
-            .unwrap();
+    let v = layout(
+        &sizes,
+        &settings(vec![0, 1, 2], Layout::Multiple { cols: 2, rows: 2, per_sheet: 4, order: PageOrder::Vertical, border: true, auto_rotate: false }),
+    )
+    .unwrap();
     assert!(close(v[0].placed[1].matrix.0[4], v[0].placed[0].matrix.0[4]) && v[0].placed[1].matrix.0[5] < v[0].placed[0].matrix.0[5]);
     assert_eq!(v[0].borders.len(), 3);
     // Auto-rotate turns a landscape page in a portrait cell.
@@ -166,6 +168,28 @@ fn multiple_pages_per_sheet() {
     assert_eq!(r[0].size, (792.0, 612.0));
     assert!(r[0].placed[0].matrix.0[0] > 0.0);
     assert_eq!(r[0].placed[1].matrix.0[0], 0.0, "rotated");
+}
+
+#[test]
+fn custom_pages_per_sheet_never_overfill_the_grid() {
+    // Three per sheet draws on a 2 × 2 grid, five on 3 × 2: the spare cells stay blank (#1336).
+    let sizes = vec![(200.0, 300.0); 7];
+    let pages = |per: usize| sheet_pages(&layout(&sizes, &settings((0..7).collect(), Layout::multiple(per))).unwrap());
+    assert_eq!(pages(3), [vec![0, 1, 2], vec![3, 4, 5], vec![6]]);
+    assert_eq!(pages(5), [vec![0, 1, 2, 3, 4], vec![5, 6]]);
+    assert_eq!(pages(7), [vec![0, 1, 2, 3, 4, 5, 6]]);
+    assert_eq!(pages(4), [vec![0, 1, 2, 3], vec![4, 5, 6]]);
+    assert_eq!(pages(2), [vec![0, 1], vec![2, 3], vec![4, 5], vec![6]]);
+    // Cut-stack piles take the requested count too.
+    let stacked = Layout::Multiple { cols: 2, rows: 2, per_sheet: 3, order: PageOrder::CutStack, border: false, auto_rotate: false };
+    assert_eq!(sheet_pages(&layout(&sizes, &settings((0..7).collect(), stacked)).unwrap()), [vec![0, 3, 6], vec![1, 4], vec![2, 5]]);
+    // A count larger than the grid is capped by the grid; no pages per sheet is refused.
+    let grid = |per_sheet| Layout::Multiple { cols: 2, rows: 1, per_sheet, order: PageOrder::Horizontal, border: false, auto_rotate: false };
+    assert_eq!(sheet_pages(&layout(&sizes[..3], &settings(vec![0, 1, 2], grid(9))).unwrap()), [vec![0, 1], vec![2]]);
+    assert!(matches!(layout(&sizes, &settings(vec![0], grid(0))), Err(PrintError::Invalid(_))));
+    // The imposed PDF has one page per sheet.
+    let out = impose(&fixture(7), &settings((0..7).collect(), Layout::multiple(3))).unwrap();
+    assert_eq!(pdfcraft_model::pages(&Document::open(Arc::new(out)).unwrap()).len(), 3);
 }
 
 #[test]
@@ -309,7 +333,7 @@ fn driverless_printers_join_the_list_without_a_queue() {
 }
 
 fn cut_stack(cols: usize, rows: usize) -> Layout {
-    Layout::Multiple { cols, rows, order: PageOrder::CutStack, border: false, auto_rotate: false }
+    Layout::Multiple { cols, rows, per_sheet: cols.saturating_mul(rows), order: PageOrder::CutStack, border: false, auto_rotate: false }
 }
 
 #[test]
@@ -362,7 +386,7 @@ fn cutting_and_stacking_recovers_every_selected_page() {
 fn multiple_rejects_hostile_grids_without_panicking() {
     let sizes = [(200.0, 300.0)];
     for (cols, rows) in [(usize::MAX, 2), (2, usize::MAX), (0, 2), (1, 0), (257, 1)] {
-        let mode = Layout::Multiple { cols, rows, order: PageOrder::Horizontal, border: false, auto_rotate: false };
+        let mode = Layout::Multiple { cols, rows, per_sheet: 1, order: PageOrder::Horizontal, border: false, auto_rotate: false };
         assert!(matches!(layout(&sizes, &settings(vec![0], mode)), Err(PrintError::Invalid(_))));
     }
     let tiny = Settings { paper: (72.0, 72.0), ..settings(vec![0], cut_stack(16, 16)) };

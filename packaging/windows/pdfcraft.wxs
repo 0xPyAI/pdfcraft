@@ -5,7 +5,7 @@
     wix build pdfcraft.wxs installer-ui.wxs -arch x64 -d Version=1.2.3 -d BinDir=... -d ModelsDir=... -d IconPath=... -o out.msi
 
   Per-machine install into Program Files, a Start Menu shortcut, a desktop shortcut (on by default,
-  optional), an App Paths entry, PdfCraft registered as a PDF handler (offered under "Open with"
+  optional, and an update keeps it only if it is still there), an App Paths entry, PdfCraft registered as a PDF handler (offered under "Open with"
   and in Default apps, never forced as the default), and "Edit with PdfCraft" on PDF files'
   right-click menu (on by default, optional). Files opened with PdfCraft arrive on its command
   line.
@@ -37,10 +37,20 @@
     <Property Id="ARPURLINFOABOUT" Value="https://getartcraft.com/apps/pdfcraft" />
     <Property Id="ARPURLUPDATEINFO" Value="https://getartcraft.com/apps/pdfcraft" />
     <Property Id="ARPHELPLINK" Value="https://discord.gg/artcraft" />
-    <!-- Desktop shortcut (#143): on by default, a checkbox in the full-UI welcome dialog, and
-         INSTALLDESKTOPSHORTCUT=0 on the msiexec command line for unattended installs. Secure, so the
-         choice made in the (unelevated) UI reaches the elevated install. -->
-    <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" Secure="yes" />
+    <!-- Desktop shortcut (#143): on by default for a first install, a checkbox in the full-UI
+         welcome dialog, and INSTALLDESKTOPSHORTCUT=0 on the msiexec command line for unattended
+         installs. Secure, so the choice made in the (unelevated) UI reaches the elevated install.
+         An update keeps the shortcut only if it is still on the desktop (#1058): the launcher
+         updates with /passive and no properties, so deleting the shortcut is the only way its
+         users can say no. A value given on the command line wins. -->
+    <Property Id="INSTALLDESKTOPSHORTCUT" Secure="yes" />
+    <Property Id="EXISTINGDESKTOPSHORTCUT">
+      <DirectorySearch Id="DesktopSearch" Path="[DesktopFolder]" Depth="0">
+        <FileSearch Name="PdfCraft.lnk" />
+      </DirectorySearch>
+    </Property>
+    <SetProperty Id="INSTALLDESKTOPSHORTCUT" Value="1" After="AppSearch" Sequence="first"
+        Condition="NOT INSTALLDESKTOPSHORTCUT AND (NOT WIX_UPGRADE_DETECTED OR EXISTINGDESKTOPSHORTCUT)" />
     <!-- "Edit with PdfCraft" on the right-click menu of PDF files in File Explorer (#682): on by
          default, the same way, and INSTALLPDFCONTEXTMENU=0 for unattended installs without it. -->
     <Property Id="INSTALLPDFCONTEXTMENU" Value="1" Secure="yes" />

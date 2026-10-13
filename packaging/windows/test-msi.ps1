@@ -74,7 +74,7 @@ Assert-Equal $status[0] 'Please wait while setup completes.' 'Persistent progres
 Assert-NoRow 'SELECT `Event` FROM `EventMapping` WHERE `Dialog_` = ''InstallProgress'' AND `Control_` = ''Status''' 'progress text subscription'
 
 # Plain (non-advertised) shortcuts to pdfcraft.exe, each in its own component; the desktop one is
-# gated by INSTALLDESKTOPSHORTCUT, which defaults to 1 and is secure so the UI choice reaches the
+# gated by INSTALLDESKTOPSHORTCUT, which is secure so the UI choice reaches the
 # elevated install.
 foreach ($entry in @(@('StartMenuShortcut', 'ProgramMenuFolder', 'PdfcraftStartMenuShortcut', ''),
                      @('DesktopShortcut', 'DesktopFolder', 'PdfcraftDesktopShortcut', 'INSTALLDESKTOPSHORTCUT = 1'))) {
@@ -88,8 +88,33 @@ foreach ($entry in @(@('StartMenuShortcut', 'ProgramMenuFolder', 'PdfcraftStartM
   Assert-Equal $component[0] $entry[1] "$($entry[2]) directory"
   Assert-Equal $component[1] $entry[3] "$($entry[2]) condition"
 }
-$default = Read-Row 'SELECT `Value` FROM `Property` WHERE `Property` = ''INSTALLDESKTOPSHORTCUT''' 1
-Assert-Equal $default[0] '1' 'Desktop shortcut default'
+# No static default (#1058): a SetProperty after AppSearch turns it on for a first install, and for an
+# update only while the old shortcut is still on the desktop; a command-line value is left alone.
+Assert-NoRow 'SELECT `Value` FROM `Property` WHERE `Property` = ''INSTALLDESKTOPSHORTCUT''' 'desktop shortcut static default'
+$setDesktop = Read-Row 'SELECT `Action`, `Target` FROM `CustomAction` WHERE `Source` = ''INSTALLDESKTOPSHORTCUT''' 2
+Assert-Equal $setDesktop[1] '1' 'Desktop shortcut default value'
+foreach ($sequence in @('InstallUISequence', 'InstallExecuteSequence')) {
+  $search = Read-Row ('SELECT `Sequence` FROM `' + $sequence + '` WHERE `Action` = ''AppSearch''') 1
+  $set = Read-Row ('SELECT `Sequence`, `Condition` FROM `' + $sequence + '` WHERE `Action` = ''' + $setDesktop[0] + '''') 2
+  if ([int] $set[0] -le [int] $search[0]) { throw "$sequence must set the desktop shortcut default after AppSearch" }
+}
+$session = $null
+try {
+  $session = $Installer.OpenPackage((Resolve-Path -LiteralPath $Path).Path, 1)
+  foreach ($case in @(
+      @('first install', '', '', '', 1),
+      @('first install, INSTALLDESKTOPSHORTCUT=0', '0', '', '', 0),
+      @('update, shortcut still there', '', '{00000000-0000-0000-0000-000000000000}', 'C:\Users\Public\Desktop\PdfCraft.lnk', 1),
+      @('update, shortcut deleted', '', '{00000000-0000-0000-0000-000000000000}', '', 0),
+      @('update, INSTALLDESKTOPSHORTCUT=0', '0', '{00000000-0000-0000-0000-000000000000}', 'C:\Users\Public\Desktop\PdfCraft.lnk', 0))) {
+    $session.Property('INSTALLDESKTOPSHORTCUT') = $case[1]
+    $session.Property('WIX_UPGRADE_DETECTED') = $case[2]
+    $session.Property('EXISTINGDESKTOPSHORTCUT') = $case[3]
+    Assert-Equal ($session.EvaluateCondition($set[1])) $case[4] "Desktop shortcut default: $($case[0])"
+  }
+} finally {
+  if ($session) { [void] [Runtime.InteropServices.Marshal]::FinalReleaseComObject($session) }
+}
 $secure = Read-Row 'SELECT `Value` FROM `Property` WHERE `Property` = ''SecureCustomProperties''' 1
 if (($secure[0] -split ';') -notcontains 'INSTALLDESKTOPSHORTCUT') { throw "INSTALLDESKTOPSHORTCUT is not secure: '$($secure[0])'" }
 $checkbox = Read-Row 'SELECT `Type`, `Property`, `Text` FROM `Control` WHERE `Dialog_` = ''InstallWelcome'' AND `Control` = ''DesktopShortcut''' 3
@@ -179,4 +204,4 @@ $rm = Read-Row 'SELECT `Dialog` FROM `Dialog` WHERE `Dialog` = ''MsiRMFilesInUse
 Assert-Equal $rm[0] 'MsiRMFilesInUse' 'Files-in-use dialog'
 [void] [Runtime.InteropServices.Marshal]::FinalReleaseComObject($Database)
 [void] [Runtime.InteropServices.Marshal]::FinalReleaseComObject($Installer)
-Write-Output 'ok MSI: per-machine scope guard, publisher, persistent progress text, Start Menu shortcut, optional desktop shortcut (default on, checkbox), optional PDF context menu (default on, checkbox), icon/key path, full-UI success/cancel/error and Finish controls, files-in-use dialog, OCR models'
+Write-Output 'ok MSI: per-machine scope guard, publisher, persistent progress text, Start Menu shortcut, optional desktop shortcut (on for a first install, kept on update only while present, checkbox), optional PDF context menu (default on, checkbox), icon/key path, full-UI success/cancel/error and Finish controls, files-in-use dialog, OCR models'

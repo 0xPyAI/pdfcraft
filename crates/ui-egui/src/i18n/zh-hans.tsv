@@ -537,6 +537,7 @@
 	, Expires: 	，有效期至：
 	No digital IDs yet.	尚无数字 ID。
 	Configure New Digital ID	配置新数字 ID
+	Remove "{name}" from this list? The file itself is not deleted.	从此列表中移除“{name}”？文件本身不会被删除。
 	Continue	继续
 	Configure a Digital ID for Signing	配置用于签名的数字 ID
 	Use a Digital ID from a file	使用文件中的数字 ID
@@ -2302,3 +2303,16 @@ animation effects	Off	关
 	The linked PDF opened, but its named destination was not applied.	已打开链接的 PDF，但未应用其命名目标。
 	The linked PDF opened, but its page destination was out of range.	已打开链接的 PDF，但其页面目标超出范围。
 	Local cross-PDF links require the desktop app	PDF 之间的本地链接需要桌面应用
+	Minimize	最小化
+	Maximize	最大化
+	Restore	还原
+	Use system title bar	使用系统标题栏
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	用简单的标题栏显示窗口按钮，而不是在标签栏中。GNOME 不为应用绘制标题栏，因此此标题栏不会跟随其主题。
+
+# Absolute local GoToR confirmation (#1364).
+	Allow	允许
+	Only allow this if you trust the source document.	仅在您信任源文档时才允许此操作。
+	Open this local PDF?	是否打开此本地 PDF？
+	This document is trying to open a local file:	此文档正尝试打开本地文件：
+	Move tag earlier	将标签前移
+	Move tag later	将标签后移

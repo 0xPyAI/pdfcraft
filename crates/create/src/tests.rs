@@ -408,6 +408,28 @@ fn source_kind_tells_pdfs_images_and_text_apart() {
     assert_eq!(source_kind("b.bmp", b"BM"), None);
     assert_eq!(source_kind("a.docx", b"PK\x03\x04"), None);
     assert_eq!(source_kind("", b""), None);
+    // Only the GIF versions Create decodes count as images, so detection never promises a
+    // conversion that then fails.
+    assert_eq!(source_kind("a.gif", b"GIF8x not a gif"), None);
+    assert_eq!(source_kind("notes.txt", b"GIF8 is a word here"), Some(SourceKind::Text));
+}
+
+/// BigTIFF (version 43, used for large scans) is detected and converted like a classic TIFF.
+#[test]
+fn bigtiff_images_become_pages() {
+    let mut tif = std::io::Cursor::new(Vec::new());
+    {
+        let mut enc = tiff::encoder::TiffEncoder::new_big(&mut tif).unwrap();
+        let mut im = enc.new_image::<tiff::encoder::colortype::Gray8>(4, 2).unwrap();
+        im.resolution(tiff::tags::ResolutionUnit::Inch, tiff::encoder::Rational { n: 144, d: 1 });
+        im.write_data(&[128; 8]).unwrap();
+    }
+    let tif = tif.into_inner();
+    assert!(tif.starts_with(b"II+\0"), "the encoder wrote a BigTIFF");
+    assert_eq!(source_kind("scan.tif", &tif), Some(SourceKind::Image));
+    let doc = reopen(&from_images(&[("scan.tif".into(), tif)]).unwrap());
+    assert_eq!(pages(&doc).len(), 1);
+    assert_eq!(media(&pages(&doc)[0]), [0.0, 0.0, 2.0, 1.0], "4×2 px at 144 dpi");
 }
 
 /// A synthetic ICC profile: a 128-byte header (size, device class, colour space, `acsp`) and
@@ -719,5 +741,80 @@ fn damaged_masks_and_sizes_never_panic() {
         let r = xo.iter().next().map(|(_, v)| v.as_ref().unwrap()).unwrap();
         let _ = extract_images(&doc, &[0], 0);
         let _ = image_file(&doc, r);
+    }
+}
+
+/// An 8×8 baseline JPEG of one flat colour with four components, stored as `samples`, and an
+/// Adobe APP14 segment with `transform` (0: CMYK, 2: YCCK).
+fn flat_four_component_jpeg(samples: [u8; 4], transform: u8) -> Vec<u8> {
+    fn put(bits: &mut Vec<bool>, value: u32, n: u32) {
+        bits.extend((0..n).rev().map(|i| value >> i & 1 == 1));
+    }
+    let mut v = vec![0xFF, 0xD8];
+    v.extend_from_slice(&[0xFF, 0xEE, 0, 14, b'A', b'd', b'o', b'b', b'e', 0, 100, 0, 0, 0, 0, transform]);
+    v.extend_from_slice(&[0xFF, 0xDB, 0, 67, 0]);
+    v.extend_from_slice(&[1; 64]);
+    v.extend_from_slice(&[0xFF, 0xC0, 0, 20, 8, 0, 8, 0, 8, 4]);
+    for id in 1..=4 {
+        v.extend_from_slice(&[id, 0x11, 0]);
+    }
+    // DC table: categories 0 to 11 with four-bit codes equal to the category. AC table: EOB, "0".
+    v.extend_from_slice(&[0xFF, 0xC4, 0, 31, 0x00, 0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    v.extend(0..12u8);
+    v.extend_from_slice(&[0xFF, 0xC4, 0, 20, 0x10, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    v.extend_from_slice(&[0xFF, 0xDA, 0, 14, 4, 1, 0, 2, 0, 3, 0, 4, 0, 0, 63, 0]);
+    let mut bits = Vec::new();
+    for s in samples {
+        // With every quantiser 1, a flat block's DC coefficient is 8 × (sample − 128).
+        let dc = (i32::from(s) - 128) * 8;
+        let category = 32 - dc.unsigned_abs().leading_zeros();
+        put(&mut bits, category, 4);
+        put(&mut bits, if dc < 0 { (dc + (1 << category) - 1) as u32 } else { dc as u32 }, category);
+        put(&mut bits, 0, 1);
+    }
+    bits.resize(bits.len().div_ceil(8) * 8, true);
+    for byte in bits.chunks(8).map(|b| b.iter().fold(0u8, |a, &x| a << 1 | u8::from(x))) {
+        v.push(byte);
+        if byte == 0xFF {
+            v.push(0);
+        }
+    }
+    v.extend_from_slice(&[0xFF, 0xD9]);
+    v
+}
+
+#[test]
+fn cmyk_and_ycck_jpegs_export_in_the_colours_the_page_shows() {
+    // Issue #1640: in a PDF a CMYK JPEG's samples are ink amounts, inverted only by its /Decode,
+    // while JPEG decoders and image viewers read them inverted (Adobe's convention for files).
+    // Exported cyan came out red. YCCK samples (Y 179, Cb 171, Cr 1) are cyan ink too.
+    let inverting = Object::Array([1, 0, 1, 0, 1, 0, 1, 0].map(Object::Int).to_vec());
+    for (what, samples, transform, decode, masked) in [
+        ("CMYK", [255, 0, 0, 0], 0, None, true),
+        ("YCCK", [179, 171, 1, 0], 2, None, true),
+        ("inverted CMYK with an inverting /Decode", [0, 255, 255, 255], 0, Some(&inverting), true),
+        ("CMYK without a mask", [255, 0, 0, 0], 0, None, false),
+        ("inverted CMYK with an inverting /Decode, without a mask", [0, 255, 255, 255], 0, Some(&inverting), false),
+    ] {
+        let jpeg = flat_four_component_jpeg(samples, transform);
+        let mut doc = from_images(&[("flat.png".into(), png_bytes(false))]).unwrap();
+        with_image(&mut doc, |doc| {
+            let mut d = image_dict(8, 8, "DeviceCMYK", 8);
+            d.set(b"Filter".to_vec(), Object::name("DCTDecode"));
+            if let Some(decode) = decode {
+                d.set(b"Decode".to_vec(), decode.clone());
+            }
+            if masked {
+                let m = doc.add(Object::Stream(Stream::from_raw(image_dict(8, 8, "DeviceGray", 8), vec![255; 64])));
+                d.set(b"SMask".to_vec(), Object::Ref(m));
+            }
+            Stream::from_raw(d, jpeg.clone())
+        });
+        let (ext, rgba) = exported_rgba(&doc);
+        assert!(rgba.as_chunks::<4>().0.iter().all(|p| p[0] <= 6 && p[1] >= 249 && p[2] >= 249), "{what}: {:?}", &rgba[..4]);
+        if decode.is_some() && !masked {
+            // Inverted like an image file expects: still written as is.
+            assert_eq!((ext, &extract_images(&doc, &[0], 0).images[0].data), ("jpg", &jpeg), "{what}");
+        }
     }
 }

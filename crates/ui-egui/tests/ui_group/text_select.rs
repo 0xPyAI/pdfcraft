@@ -1,7 +1,7 @@
 //! Issue #295: quick clicks on text widen the selection, as in Acrobat: two clicks select a
 //! word, three the line, four all the text on the page.
 
-use egui::{Event, Modifiers, PointerButton, Pos2};
+use egui::{Event, Modifiers, MouseWheelUnit, PointerButton, Pos2, TouchPhase};
 use egui_kittest::Harness;
 use pdfcraft_ui_egui::PdfCraftApp;
 
@@ -27,10 +27,15 @@ trailer << /Root 1 0 R >>
 /// The page on screen and the pointer over the "u" of "quick". Frames are 1/60 s: a click takes
 /// two frames (press, release), and egui counts a double-click only within 0.3 s.
 fn harness(setup: impl FnOnce(&mut PdfCraftApp) + 'static) -> (Harness<'static, PdfCraftApp>, Pos2) {
+    harness_with(two_lines(), setup)
+}
+
+/// `harness` with another document; the pointer ends over glyph 5 of its first page.
+fn harness_with(pdf: Vec<u8>, setup: impl FnOnce(&mut PdfCraftApp) + 'static) -> (Harness<'static, PdfCraftApp>, Pos2) {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_step_dt(1.0 / 60.0).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
         app.set_option("language", "en").unwrap();
-        app.open_bytes("lines.pdf", None, two_lines()).expect("opens");
+        app.open_bytes("lines.pdf", None, pdf).expect("opens");
         app.set_option("left", "closed").unwrap();
         app.set_option("author", "Tester").unwrap();
         setup(&mut app);
@@ -183,4 +188,82 @@ fn multiclick_selects_on_pointer_press_before_release() {
     h.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
     h.run_steps(1);
     assert_eq!(h.state().views[0].selected_text().as_deref(), Some("The quick brown fox"), "line stays selected on release");
+}
+
+/// `n` pages of 300×200, each ending with one line of Helvetica text near its bottom edge.
+fn bottom_lines(n: usize) -> Vec<u8> {
+    let mut objects = String::new();
+    let mut kids = Vec::new();
+    for k in 0..n {
+        let (page, contents) = (4 + 2 * k, 5 + 2 * k);
+        kids.push(format!("{page} 0 R"));
+        let content = format!("BT /F1 14 Tf 20 20 Td (Page {} ends with this line) Tj ET", k + 1);
+        objects.push_str(&format!(
+            "{page} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents {contents} 0 R /Resources << /Font << /F1 3 0 R >> >> >> endobj\n\
+             {contents} 0 obj << /Length {} >> stream\n{content}\nendstream endobj\n",
+            content.len()
+        ));
+    }
+    format!(
+        "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [{}] /Count {n} >> endobj\n\
+         3 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n{objects}trailer << /Root 1 0 R >>\n%%EOF",
+        kids.join(" ")
+    )
+    .into_bytes()
+}
+
+/// Press at `from` and move to `to`, keeping the button down.
+fn press_and_move(h: &mut Harness<'static, PdfCraftApp>, from: Pos2, to: Pos2) {
+    h.event(Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.run_steps(1);
+    for k in 1..=4 {
+        h.hover_at(from + (to - from) * (k as f32 / 4.0));
+        h.run_steps(1);
+    }
+}
+
+/// One wheel event, with time to scroll (egui spreads a wheel line over a few frames).
+fn wheel(h: &mut Harness<'static, PdfCraftApp>, unit: MouseWheelUnit, dy: f32) {
+    h.event(Event::MouseWheel { unit, delta: egui::vec2(0.0, dy), phase: TouchPhase::Move, modifiers: Modifiers::NONE });
+    h.run_steps(10);
+}
+
+/// The top edge of `page` on screen.
+fn page_top(h: &Harness<'static, PdfCraftApp>, page: usize) -> f32 {
+    h.state().views[0].page_screen_rect(page).expect("page on screen").min.y
+}
+
+/// Issue #721: selecting near the bottom of a page with the button held, the wheel keeps
+/// scrolling while the pointer crosses the gap onto the next page. The selection stays on its
+/// own page (a selection can't span pages yet).
+#[test]
+fn a_selection_drag_keeps_scrolling_over_the_gap_and_the_next_page() {
+    let (mut h, _) = harness_with(bottom_lines(3), |app| {
+        app.set_option("layout", "continuous").unwrap();
+        app.set_option("zoom", "200").unwrap();
+    });
+    let glyph = |h: &Harness<'static, PdfCraftApp>, g: usize| h.state().views[0].glyph_screen_pos(0, g).expect("glyph on screen");
+    // "ends" (glyphs 7..=10) in "Page 1 ends with this line".
+    let (from, to) = (glyph(&h, 7), glyph(&h, 10));
+    press_and_move(&mut h, from, to);
+    assert_eq!(h.state().views[0].selected_text().as_deref(), Some("ends"));
+    let (mut over_gap, mut over_next) = (false, false);
+    for _ in 0..100 {
+        let before = page_top(&h, 0);
+        wheel(&mut h, MouseWheelUnit::Line, -0.1);
+        assert!(page_top(&h, 0) < before - 0.5, "the wheel scrolls during the drag (over the gap yet: {over_gap})");
+        let view = &h.state().views[0];
+        let on = |page| view.page_screen_rect(page).is_some_and(|r| r.contains(to));
+        over_gap |= !on(0) && !on(1);
+        over_next = on(1);
+        if over_next {
+            break;
+        }
+    }
+    assert!(over_gap && over_next, "the pointer crossed the gap ({over_gap}) onto the next page ({over_next})");
+    let held = h.state().views[0].selected_text().expect("still selected");
+    assert!(held.starts_with("ends") && "Page 1 ends with this line".contains(held.as_str()), "the selection stays on page 1: {held:?}");
+    h.event(Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].selected_text(), Some(held), "releasing keeps the selection");
 }

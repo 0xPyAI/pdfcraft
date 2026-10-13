@@ -315,6 +315,21 @@ pub(crate) fn made_by(a: &Annotation, tool: CommentTool) -> bool {
     }
 }
 
+/// The tool whose defaults "Make Current Properties Default" should update.
+///
+/// Arrows are stored as Line annotations. An arrow ending belongs to the Arrow tool, so its
+/// defaults stay separate from a plain line.
+pub(crate) fn tool_for_default(a: &Annotation, endings: Option<&[LineEnding]>) -> Option<CommentTool> {
+    match tool_for(a) {
+        Some(CommentTool::Line) if endings.is_some_and(|ends| ends.iter().copied().any(arrow_ending)) => Some(CommentTool::Arrow),
+        other => other,
+    }
+}
+
+fn arrow_ending(ending: LineEnding) -> bool {
+    matches!(ending, LineEnding::OpenArrow | LineEnding::ClosedArrow | LineEnding::ROpenArrow | LineEnding::RClosedArrow)
+}
+
 /// The tool that makes comments like `a` (for Make Current Properties Default).
 pub fn tool_for(a: &Annotation) -> Option<CommentTool> {
     Some(match (a.subtype.as_str(), a.intent.as_deref()) {
@@ -659,6 +674,18 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, cx: &PageCx<'_>, 
                     view.pending_edit = Some(new_comment(cx, tool, shape, String::new()));
                 }
             }
+            // A quick press/release does not start an egui drag, but Acrobat's Draw tool treats
+            // it as a one-point ink stroke (a dot). The appearance uses round line caps, so a
+            // single PDF point is visible and remains editable like any other drawing.
+            if tool == CommentTool::Ink
+                && resp.clicked()
+                && over_page
+                && let Some(p) = pointer
+                && let Some(shape) = drawn_shape(tool, &[cx.to_user(p)])
+            {
+                cv.selected = None;
+                view.pending_edit = Some(new_comment(cx, tool, shape, String::new()));
+            }
             true
         }
         QuickTool::Comment(tool) if tool.clicks_points() => {
@@ -931,7 +958,18 @@ fn select_input(
     // (egui clears the press origin on release, so clicks are located by the pointer.)
     let on_page = pointer.is_some_and(|p| cx.xf.rect.contains(p));
     if resp.clicked() && on_page {
+        let follow_link = cx.tool == QuickTool::Select
+            && !consumed
+            && cv.gesture.is_none()
+            && !resp.double_clicked()
+            && pointer
+                .is_some_and(|p| cx.info.links.iter().any(|link| link.page == cx.page && cx.xf.user_rect(cx.info, cx.page, link.rect).contains(p)));
         match pointer.and_then(|p| cx.hit(p)) {
+            Some(a) if a.subtype == "Highlight" && follow_link => {
+                // A plain click follows the link beneath text highlighting. Keep other
+                // annotations and active gestures in control of their own input.
+                cv.selected = None;
+            }
             Some(a) => {
                 cv.selected = Some((cx.page, a.index));
                 cv.reveal = true;
@@ -1083,7 +1121,7 @@ fn drawn_shape(tool: CommentTool, points: &[[f64; 2]]) -> Option<Shape> {
     let rect = [first[0].min(last[0]), first[1].min(last[1]), first[0].max(last[0]), first[1].max(last[1])];
     let big = rect[2] - rect[0] >= 2.0 && rect[3] - rect[1] >= 2.0;
     match tool {
-        CommentTool::Ink if points.len() >= 2 => Some(Shape::Ink { strokes: vec![points.to_vec()] }),
+        CommentTool::Ink if !points.is_empty() => Some(Shape::Ink { strokes: vec![points.to_vec()] }),
         CommentTool::Line | CommentTool::Arrow if far => Some(Shape::Line {
             from: first,
             to: last,
@@ -1852,7 +1890,7 @@ mod tests {
     fn drawn_shapes_ignore_slips() {
         assert_eq!(drawn_shape(CommentTool::Rectangle, &[[0.0, 0.0], [1.0, 1.0]]), None);
         assert_eq!(drawn_shape(CommentTool::Rectangle, &[[10.0, 0.0], [0.0, 10.0]]), Some(Shape::Rectangle { rect: [0.0, 0.0, 10.0, 10.0] }));
-        assert_eq!(drawn_shape(CommentTool::Ink, &[[0.0, 0.0]]), None);
+        assert_eq!(drawn_shape(CommentTool::Ink, &[[0.0, 0.0]]), Some(Shape::Ink { strokes: vec![vec![[0.0, 0.0]]] }));
         assert!(matches!(
             drawn_shape(CommentTool::Arrow, &[[0.0, 0.0], [5.0, 0.0]]),
             Some(Shape::Line { start: LineEnding::None, end: LineEnding::OpenArrow, .. })

@@ -203,6 +203,16 @@ fn review_html(record: &Value) -> Result<String> {
 }
 
 impl Automation {
+    pub(crate) fn accessibility_autotag_apply(&mut self, a: &Args) -> Result<Value> {
+        let id = self.doc(a)?.id;
+        self.session.apply(id, pdfcraft_engine::Edit::AutoTagText).map_err(failed)?;
+        let tags = self.accessibility_tags(a)?;
+        Ok(json!({
+            "tags": tags["tags"], "count": tags["count"],
+            "note": "Text objects were tagged as paragraphs. Review heading roles, reading order and remaining accessibility findings manually.",
+        }))
+    }
+
     pub(crate) fn accessibility_autotag_preview(&self, a: &Args) -> Result<Value> {
         let page = self.page(a)?;
         let preview = self.doc(a)?.autotag_preview(page).map_err(failed)?;
@@ -490,7 +500,7 @@ impl Automation {
 }
 
 impl Automation {
-    fn ocr_settings(&self, a: &Args) -> Result<pdfcraft_engine::ocr::OcrSettings> {
+    pub(crate) fn ocr_settings(&self, a: &Args) -> Result<pdfcraft_engine::ocr::OcrSettings> {
         let mut settings = pdfcraft_engine::ocr::OcrSettings::default();
         if let Some(d) = a.opt_num("dpi")? {
             settings.dpi = d.clamp(72.0, 600.0) as f32;

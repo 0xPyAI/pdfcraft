@@ -1900,3 +1900,81 @@ fn details_say_themselves() {
         assert_eq!(holes, wanted, "{:?} has {holes} holes", d.pattern);
     }
 }
+
+/// `signed` with one more revision appended by hand: a new definition of object 4 (the page's
+/// content stream) that draws `text`, then a cross-reference table section whose subsections are
+/// what `xref` returns for the offset of that definition. The section continues the signed chain.
+fn append_content_revision(signed: &[u8], text: &str, xref: impl Fn(usize) -> String) -> Vec<u8> {
+    let at = signed.windows(9).rposition(|w| w == b"startxref").unwrap() + 9;
+    let prev: String = signed[at..].iter().skip_while(|b| b.is_ascii_whitespace()).take_while(|b| b.is_ascii_digit()).map(|b| *b as char).collect();
+    let mut out = signed.to_vec();
+    let content = format!("BT /F1 14 Tf 20 250 Td ({text}) Tj ET");
+    let object = out.len();
+    out.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n{content}\nendstream\nendobj\n", content.len()).as_bytes());
+    let section = out.len();
+    out.extend_from_slice(
+        format!("xref\n{}trailer\n<< /Size 60 /Root 1 0 R /Prev {prev} >>\nstartxref\n{section}\n%%EOF\n", xref(object)).as_bytes(),
+    );
+    out
+}
+
+fn xref_entry(offset: usize) -> String {
+    format!("{offset:010} 00000 n \n")
+}
+
+/// The reader that judges changes and the renderer that draws the page resolve some
+/// cross-reference entries differently. A revision appended after signing can redefine the page's
+/// content and give the object an entry the reader sets aside (an in-use entry at offset 0, or
+/// a second entry after one that still names the signed object): the reader then keeps comparing
+/// the signed object with itself while the page shows the new one. Such an entry is never a
+/// permitted change.
+#[test]
+fn a_cross_reference_entry_the_reader_sets_aside_does_not_hide_new_page_content() {
+    let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    let trust = TrustStore { certs: vec![id.certificate.clone()] };
+    for certify in LEVELS {
+        let signed = pdfcraft_sign::sign(&open(&fixture()), &id, &SignOptions { certify, ..opts() }).unwrap();
+        // Where the signed revision keeps the page's content stream.
+        let signed_at = signed.windows(8).position(|w| w == b"\n4 0 obj").unwrap() + 1;
+        // Each writes the section's subsections, given where the new object 4 was put.
+        type Subsections = Box<dyn Fn(usize) -> String>;
+        let attacks: [(&str, Subsections); 3] = [
+            ("an in-use entry at offset 0", Box::new(|_| format!("4 1\n{}", xref_entry(0)))),
+            ("a second entry for the object", Box::new(move |new| format!("4 1\n{}4 1\n{}", xref_entry(signed_at), xref_entry(new)))),
+            // The plain case, which was always caught: one entry naming the new object.
+            ("an ordinary entry", Box::new(|new| format!("4 1\n{}", xref_entry(new)))),
+        ];
+        for (name, xref) in attacks {
+            let edited = append_content_revision(&signed, "Forged text", xref);
+            let s = signatures(&open(&edited), &edited, &trust).into_iter().find(|s| s.signed).unwrap();
+            assert_eq!(s.status, Status::Invalid, "{certify:?}, {name}: {:?}", s.details);
+            assert!(
+                matches!(&s.modification, Modification::Disallowed(k) if k.contains(&"page content")),
+                "{certify:?}, {name}: {:?}",
+                s.modification
+            );
+        }
+    }
+}
+
+/// An entry that does not point at the object it names leaves the reader to find the object by
+/// searching the file. What it finds may equal the signed object, yet another reader may search
+/// differently: the object cannot be called unchanged.
+#[test]
+fn a_cross_reference_entry_that_misses_its_object_is_not_an_unchanged_object() {
+    let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    let trust = TrustStore { certs: vec![id.certificate.clone()] };
+    let signed = pdfcraft_sign::sign(&open(&fixture()), &id, &opts()).unwrap();
+    // A copy of the signed content, named by an entry two bytes into its `4 0 obj` header.
+    let edited = append_content_revision(&signed, "Contract text", |new| format!("4 1\n{}", xref_entry(new + 2)));
+    let doc = open(&edited);
+    assert!(!doc.xref_entry_is_exact(4) && doc.xref_entry_is_exact(3));
+    let s = signatures(&doc, &edited, &trust).into_iter().find(|s| s.signed).unwrap();
+    assert_eq!(s.status, Status::Invalid, "{:?}", s.details);
+    assert!(matches!(&s.modification, Modification::Disallowed(k) if k.contains(&"other changes")), "{:?}", s.modification);
+
+    // The same copy under an entry that does point at it is the unchanged object it looks like.
+    let honest = append_content_revision(&signed, "Contract text", |new| format!("4 1\n{}", xref_entry(new)));
+    let s = signatures(&open(&honest), &honest, &trust).into_iter().find(|s| s.signed).unwrap();
+    assert_eq!(s.status, Status::Valid, "{:?}", s.details);
+}

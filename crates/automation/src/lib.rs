@@ -12,6 +12,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod a11y;
+mod batch;
 mod comments;
 mod content;
 mod conventions;
@@ -24,6 +25,7 @@ mod printing;
 mod reading;
 mod redact;
 mod signing;
+mod text_cache;
 mod tools;
 
 use std::collections::HashMap;
@@ -95,8 +97,11 @@ const MAX_BOOKMARK_PAGE: usize = 1000;
 const FIND_FIRST_BATCH: usize = 8;
 const FIND_MAX_BATCH: usize = 128;
 
-/// Page texts of one document version: (the working bytes, one slot per page).
-type TextCache = (Arc<Vec<u8>>, Vec<Option<Arc<PageText>>>);
+use text_cache::TextCache;
+
+type PageTexts = Vec<(usize, std::result::Result<Arc<PageText>, String>)>;
+const FIND_MAX_WARNINGS: usize = 100;
+const FIND_MAX_WARNING_BYTES: usize = 1024;
 
 /// A headless PdfCraft session driven by tool calls.
 pub struct Automation {
@@ -104,8 +109,8 @@ pub struct Automation {
     root: Option<PathBuf>,
     /// Synchronous renderers, rebuilt when a document's working bytes change.
     renderers: HashMap<DocId, (Arc<Vec<u8>>, PageRenderer)>,
-    /// Extracted page text per document version (the working bytes it was taken from).
-    texts: HashMap<DocId, TextCache>,
+    /// Extracted page text, under one memory budget across all open documents.
+    texts: TextCache,
 }
 
 impl Default for Automation {
@@ -116,7 +121,7 @@ impl Default for Automation {
 
 impl Automation {
     pub fn new() -> Self {
-        Self { session: Session::new(), root: None, renderers: HashMap::new(), texts: HashMap::new() }
+        Self { session: Session::new(), root: None, renderers: HashMap::new(), texts: TextCache::default() }
     }
 
     /// Confine every path the tools read or write to `root` (relative paths resolve inside it).
@@ -165,6 +170,7 @@ impl Automation {
         let a = Args(args);
         let out = match name {
             "doc_open" => self.doc_open(&a)?,
+            "doc_batch" => self.doc_batch(&a)?,
             "doc_list" => json!({ "documents": self.session.docs().iter().map(summary).collect::<Vec<_>>() }),
             "doc_info" => {
                 let id = self.doc(&a)?.id;
@@ -717,6 +723,7 @@ impl Automation {
             "sign_list" => self.sign_list(&a)?,
             "accessibility_check" => self.a11y_check(&a)?,
             "accessibility_autotag_preview" => self.accessibility_autotag_preview(&a)?,
+            "accessibility_autotag_apply" => self.accessibility_autotag_apply(&a)?,
             "ocr_recognize" => self.ocr_recognize(&a)?,
             "js_run" => self.js_run(&a)?,
             "js_document_scripts" => self.js_document_scripts(&a)?,
@@ -1702,23 +1709,47 @@ impl Automation {
 
     /// The text of `pages` (0-based), from the cache or extracted in parallel.
     fn page_texts(&mut self, id: DocId, pages: &[usize]) -> Result<Vec<Arc<PageText>>> {
+        self.page_text_results(id, pages, &mut extract_parallel)?
+            .into_iter()
+            .map(|(p, text)| text.map_err(|e| failed(format!("page {}: {e}", p + 1))))
+            .collect()
+    }
+
+    /// Keep per-page failures until the caller chooses strict or partial-result semantics.
+    fn page_text_results(
+        &mut self,
+        id: DocId,
+        pages: &[usize],
+        extract: &mut impl FnMut(&Arc<Vec<u8>>, Option<Arc<str>>, &[usize]) -> PageTexts,
+    ) -> Result<PageTexts> {
         let doc = self.session.get(id).ok_or_else(|| failed("no such document"))?;
         let (bytes, n) = (doc.bytes.clone(), doc.info.pages.len());
         let password: Option<Arc<str>> = doc.password.as_deref().map(Arc::from);
-        let entry = self.texts.entry(id).or_insert_with(|| (bytes.clone(), Vec::new()));
-        if !Arc::ptr_eq(&entry.0, &bytes) || entry.1.len() != n {
-            *entry = (bytes.clone(), vec![None; n]);
-        }
-        let mut missing: Vec<usize> = pages.iter().copied().filter(|p| entry.1.get(*p).is_some_and(Option::is_none)).collect();
-        missing.sort_unstable();
-        missing.dedup();
-        for (p, text) in extract_parallel(&bytes, password, &missing) {
-            let text = Arc::new(text.map_err(|e| failed(format!("page {}: {e}", p + 1)))?);
-            if let Some(slot) = entry.1.get_mut(p) {
-                *slot = Some(text);
+        self.texts.prepare(id, &bytes);
+        let mut results = HashMap::new();
+        let mut missing = Vec::new();
+        for &p in pages {
+            if p >= n {
+                results.insert(p, Err("page is out of range".to_owned()));
+            } else if let Some(text) = self.texts.get(id, p) {
+                results.insert(p, Ok(text));
+            } else {
+                missing.push(p);
             }
         }
-        pages.iter().map(|p| entry.1.get(*p).cloned().flatten().ok_or_else(|| failed(format!("page {} has no text", p + 1)))).collect()
+        missing.sort_unstable();
+        missing.dedup();
+        if !missing.is_empty() {
+            for (p, text) in extract(&bytes, password, &missing) {
+                if let Ok(text) = &text {
+                    self.texts.insert(id, p, &bytes, text.clone());
+                }
+                results.insert(p, text);
+            }
+        }
+        // The batch owns its Arcs: evicting a cache entry cannot lose a requested result. A
+        // worker that fails to return a page is an explicit failure, never an empty success.
+        Ok(pages.iter().map(|p| (*p, results.get(p).cloned().unwrap_or_else(|| Err("text extraction returned no result".into())))).collect())
     }
 
     fn text_extract(&mut self, a: &Args) -> Result<Value> {
@@ -1741,9 +1772,13 @@ impl Automation {
 
     /// Matches in document order, extracting page text in growing batches and stopping as soon as
     /// `limit` is reached, so a bounded search doesn't extract (and cache) the whole document
-    /// (#971). One match past the limit is looked for, so `complete` is true only when no more
-    /// exist; otherwise `next` holds the arguments that continue the search.
+    /// (#971). One match past the limit supplies `next`. Reached extraction failures are reported
+    /// as bounded warnings; `complete` requires both no continuation and no failed pages.
     fn text_find(&mut self, a: &Args) -> Result<Value> {
+        self.text_find_with(a, &mut extract_parallel)
+    }
+
+    fn text_find_with(&mut self, a: &Args, extract: &mut impl FnMut(&Arc<Vec<u8>>, Option<Arc<str>>, &[usize]) -> PageTexts) -> Result<Value> {
         let doc = self.doc(a)?;
         let (id, n) = (doc.id, doc.info.pages.len());
         let query = a.str("query")?;
@@ -1756,13 +1791,28 @@ impl Automation {
         let skip = usize::try_from(a.opt_int("skip")?.unwrap_or(0).max(0)).unwrap_or(usize::MAX);
         let mut matches = Vec::new();
         let mut next = None;
+        let mut warnings = Vec::new();
+        let mut warning_count = 0usize;
         let (mut first, mut batch) = (start, FIND_FIRST_BATCH);
         'search: while first < n {
             let end = first.saturating_add(batch).min(n);
             let pages: Vec<usize> = (first..end).collect();
-            let texts = self.page_texts(id, &pages)?;
-            for (p, text) in pages.iter().zip(&texts) {
-                let skip_here = if *p == start { skip } else { 0 };
+            let texts = self.page_text_results(id, &pages, extract)?;
+            for (p, text) in texts {
+                let text = match text {
+                    Ok(text) => text,
+                    Err(mut error) => {
+                        warning_count += 1;
+                        if warnings.len() < FIND_MAX_WARNINGS {
+                            let end = error.floor_char_boundary(FIND_MAX_WARNING_BYTES.min(error.len()));
+                            let truncated = end < error.len();
+                            error.truncate(end);
+                            warnings.push(json!({ "page": p + 1, "error": error, "error_truncated": truncated }));
+                        }
+                        continue;
+                    }
+                };
+                let skip_here = if p == start { skip } else { 0 };
                 // One extra match proves that the caller needs a continuation. Include skipped
                 // matches on the starting page when bounding the temporary per-page result.
                 let needed = limit.saturating_sub(matches.len()).saturating_add(skip_here).saturating_add(1);
@@ -1777,7 +1827,8 @@ impl Automation {
             first = end;
             batch = batch.saturating_mul(2).min(FIND_MAX_BATCH);
         }
-        let mut out = json!({ "query": query, "count": matches.len(), "complete": next.is_none(), "matches": matches });
+        let mut out = json!({ "query": query, "count": matches.len(), "complete": next.is_none() && warning_count == 0, "matches": matches,
+            "warnings_truncated": warning_count > warnings.len(), "warning_count": warning_count, "warnings": warnings });
         if let (Some(next), Some(o)) = (next, out.as_object_mut()) {
             o.insert("next".into(), next);
         }
@@ -2193,12 +2244,12 @@ fn encode_png(width: u32, height: u32, premultiplied: &[u8]) -> Result<Vec<u8>> 
 }
 
 /// Extract the text of `pages` (0-based) with one renderer per worker thread.
-fn extract_parallel(bytes: &Arc<Vec<u8>>, password: Option<Arc<str>>, pages: &[usize]) -> Vec<(usize, std::result::Result<PageText, String>)> {
+fn extract_parallel(bytes: &Arc<Vec<u8>>, password: Option<Arc<str>>, pages: &[usize]) -> PageTexts {
     let extract = |r: &mut PageRenderer, p: usize| {
         let out = r.render(RenderRequest { page: p, kind: RequestKind::Text, tile: None, scale: 1.0, tag: 0, preview: false });
         match out.error {
             Some(e) => Err(e),
-            None => Ok(out.text.map(|t| (*t).clone()).unwrap_or_default()),
+            None => Ok(out.text.unwrap_or_default()),
         }
     };
     let config = RenderConfig { password, ..Default::default() };
@@ -2209,7 +2260,7 @@ fn extract_parallel(bytes: &Arc<Vec<u8>>, password: Option<Arc<str>>, pages: &[u
         return pages.iter().map(|p| (*p, extract(&mut r, *p))).collect();
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let mut out: Vec<(usize, std::result::Result<PageText, String>)> = std::thread::scope(|s| {
+    let mut out: PageTexts = std::thread::scope(|s| {
         let handles: Vec<_> = (0..workers)
             .map(|_| {
                 s.spawn(|| {
@@ -2321,6 +2372,118 @@ mod tests {
         }
     }
 
+    fn search_document(a: &mut Automation, pages: usize) -> DocId {
+        a.session.open("synthetic.pdf", None, Arc::new(numbered_pages(pages)), None).unwrap()
+    }
+
+    #[test]
+    fn search_cache_stays_bounded_reextracts_and_follows_edits_and_close() {
+        let mut a = Automation::new();
+        a.texts = TextCache::new(16 * 1024);
+        let first = search_document(&mut a, 200);
+        let second = search_document(&mut a, 200);
+        for id in [first, second] {
+            let result = json(&mut a, "text_find", json!({ "doc": id.0, "query": "absent" }));
+            assert_eq!(result["complete"], true);
+            assert!(a.texts.bytes() <= 16 * 1024);
+            assert!(a.texts.len() < 200, "an exhaustive search must not retain every page");
+            let found = json(&mut a, "text_find", json!({ "doc": id.0, "query": "Page", "limit": 1000 }));
+            assert_eq!(found["count"], 200, "eviction inside a batch must not discard its matches");
+            eprintln!("200 pages searched: {} resident pages, {} estimated bytes (budget 16384)", a.texts.len(), a.texts.bytes());
+        }
+        assert!(a.texts.get(first, 0).is_none());
+        let text = a.page_texts(first, &[0]).unwrap().remove(0);
+        assert_eq!(text.plain_text(), "Page 1");
+        let again = a.page_texts(first, &[0]).unwrap().remove(0);
+        assert!(Arc::ptr_eq(&text, &again), "cache hits reuse glyph storage");
+        assert!(a.texts.bytes() <= 16 * 1024);
+        json(&mut a, "page_delete", json!({ "doc": first.0, "pages": [1] }));
+        let edited = a.page_texts(first, &[0]).unwrap().remove(0);
+        assert_eq!(edited.plain_text(), "Page 2");
+        assert!(!Arc::ptr_eq(&text, &edited));
+        json(&mut a, "doc_close", json!({ "doc": first.0, "discard_changes": true }));
+        json(&mut a, "doc_close", json!({ "doc": second.0 }));
+        assert_eq!((a.texts.bytes(), a.texts.len()), (0, 0));
+    }
+
+    #[test]
+    fn strict_text_collection_refuses_partial_results_but_keeps_successful_pages() {
+        let mut a = Automation::new();
+        let id = search_document(&mut a, 3);
+        let error = a.page_texts(id, &[0, 3, 1]).unwrap_err();
+        assert!(error.to_string().contains("page 4: page is out of range"));
+        assert!(a.texts.get(id, 0).is_some());
+        assert!(a.texts.get(id, 1).is_some(), "successful extraction after the failed entry is retained");
+        let results = a.page_text_results(id, &[2], &mut |_, _, _| vec![]).unwrap();
+        assert!(results[0].1.is_err(), "a missing worker result must not become an empty page");
+    }
+
+    #[test]
+    fn search_keeps_matches_around_failed_pages_and_continuations() {
+        let mut a = Automation::new();
+        let id = search_document(&mut a, 16);
+        let mut extract = |bytes: &Arc<Vec<u8>>, password, pages: &[usize]| {
+            extract_parallel(bytes, password, pages)
+                .into_iter()
+                .map(|(p, result)| (p, if [2, 6].contains(&p) { Err(format!("synthetic page {} failure", p + 1)) } else { result }))
+                .collect()
+        };
+        let all = a.text_find_with(&Args(&json!({ "doc": id.0, "query": "Page" })), &mut extract).unwrap();
+        assert_eq!(all["count"], 14);
+        assert_eq!(all["complete"], false);
+        assert_eq!(all["warning_count"], 2);
+        assert_eq!(all["warnings"][0]["page"], 3);
+        assert_eq!(all["warnings"][1]["page"], 7);
+        assert!(all.get("next").is_none());
+        assert_eq!(all["matches"][13]["page"], 16);
+        assert!(a.texts.get(id, 7).is_some(), "success after a failure in the same batch is cached");
+        let mut args = json!({ "doc": id.0, "query": "Page", "limit": 4 });
+        let mut matches = Vec::new();
+        let mut warned = Vec::new();
+        loop {
+            let part = a.text_find_with(&Args(&args), &mut extract).unwrap();
+            matches.extend(part["matches"].as_array().unwrap().iter().cloned());
+            warned.extend(part["warnings"].as_array().unwrap().iter().map(|w| w["page"].clone()));
+            if !part["warnings"].as_array().unwrap().is_empty() {
+                assert_eq!(part["complete"], false);
+            }
+            let Some(next) = part.get("next") else { break };
+            args["start_page"] = next["start_page"].clone();
+            args["skip"] = next["skip"].clone();
+        }
+        assert_eq!(matches, *all["matches"].as_array().unwrap(), "no readable match is lost or repeated");
+        assert_eq!(warned, vec![json!(3), json!(7)]);
+    }
+
+    #[test]
+    fn search_bounds_warning_volume_and_does_not_reach_distant_failures() {
+        let mut a = Automation::new();
+        let id = search_document(&mut a, 200);
+        let first = a
+            .text_find_with(&Args(&json!({ "doc": id.0, "query": "Page", "limit": 1 })), &mut |bytes, password, pages| {
+                assert!(pages.iter().all(|p| *p < FIND_FIRST_BATCH), "a bounded search must not reach the bad page at the end");
+                extract_parallel(bytes, password, pages)
+            })
+            .unwrap();
+        assert_eq!(first["count"], 1);
+        assert_eq!(first["warning_count"], 0);
+        assert_eq!(first["next"], json!({ "start_page": 2, "skip": 0 }));
+        a.texts.remove(&id);
+        let failures = a
+            .text_find_with(&Args(&json!({ "doc": id.0, "query": "Page" })), &mut |_, _, pages| {
+                pages.iter().map(|p| (*p, Err("界".repeat(2000)))).collect()
+            })
+            .unwrap();
+        assert_eq!(failures["count"], 0);
+        assert_eq!(failures["complete"], false);
+        assert!(failures.get("next").is_none());
+        assert_eq!(failures["warning_count"], 200);
+        assert_eq!(failures["warnings_truncated"], true);
+        let warnings = failures["warnings"].as_array().unwrap();
+        assert_eq!(warnings.len(), FIND_MAX_WARNINGS);
+        assert!(warnings.iter().all(|w| w["error"].as_str().unwrap().len() <= FIND_MAX_WARNING_BYTES && w["error_truncated"] == true));
+    }
+
     #[test]
     fn a_bounded_text_find_reads_only_the_pages_it_needs_and_says_it_stopped() {
         let dir = std::env::temp_dir().join(format!("pdfcraft-automation-find-{}", std::process::id()));
@@ -2329,7 +2492,7 @@ mod tests {
         std::fs::write(dir.join("long.pdf"), numbered_pages(200)).unwrap();
         let mut a = Automation::new().with_root(&dir).unwrap();
         let doc = json(&mut a, "doc_open", json!({ "path": "long.pdf" }))["doc"].clone();
-        let extracted = |a: &Automation| a.texts.values().map(|(_, pages)| pages.iter().filter(|t| t.is_some()).count()).sum::<usize>();
+        let extracted = |a: &Automation| a.texts.len();
 
         // #971: the first match is on page 1 and the next on page 10, so the rest of the 200 pages
         // aren't extracted or cached.

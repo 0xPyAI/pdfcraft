@@ -227,3 +227,48 @@ fn self_drawing_form_fails_the_audit() {
     let result = audit_redactions(&open(b.build()));
     assert!(matches!(result, Err(crate::AuditError::TooDeep)), "{result:?}");
 }
+
+#[test]
+fn rectangle_drawn_as_a_path_covers_text_like_re() {
+    // The same cover as `re`, built from `m`/`l` (closed with `h`, a repeated start point, or
+    // only by the fill itself), or in a scaled user space: all are faux redactions (#1510).
+    let covers: [&[u8]; 5] = [
+        b"0 g\n100 688 220 32 re f\n",
+        b"0 g\n100 688 m 320 688 l 320 720 l 100 720 l h f\n",
+        b"0 g\n100 688 m 320 688 l 320 720 l 100 720 l 100 688 l h f\n",
+        b"0 g\n100 688 m 100 720 l 320 720 l 320 688 l f\n",
+        b"0 g\nq 2 0 0 2 0 0 cm 50 344 m 160 344 l 160 360 l 50 360 l h f Q\n",
+    ];
+    for cover in covers {
+        let mut content = b"BT /F1 24 Tf 100 700 Td (SECRET DATA 123) Tj ET\n".to_vec();
+        content.extend_from_slice(cover);
+        let findings = audit_redactions(&open(one_page(&content, ""))).expect("audit must run");
+        assert_eq!(findings.len(), 1, "{:?}: {findings:?}", String::from_utf8_lossy(cover));
+        assert_eq!(findings[0].kind, FindingKind::CoveredText);
+        assert_eq!(findings[0].rect, [100.0, 688.0, 320.0, 720.0]);
+        assert_eq!(findings[0].covered_text, "SECRET DATA 123");
+    }
+}
+
+#[test]
+fn non_rectangular_path_is_not_a_cover() {
+    // Each path's bounding box covers the text, but the shape itself does not hide it all.
+    let covers: [&[u8]; 5] = [
+        // A triangle.
+        b"0 g\n100 688 m 320 688 l 320 720 l h f\n",
+        // A triangle, then a line from its start point after `h`: not a fourth corner.
+        b"0 g\n100 688 m 320 688 l 320 720 l h 100 720 l f\n",
+        // A trapezoid: four corners, one slanted side.
+        b"0 g\n100 688 m 320 688 l 320 720 l 140 720 l h f\n",
+        // A rectangle rotated 5 degrees about the text by the CTM.
+        b"0 g\nq 0.9962 0.0872 -0.0872 0.9962 62.15 -15.63 cm 100 688 m 320 688 l 320 720 l 100 720 l h f Q\n",
+        // Two subpaths filled together: even-odd leaves the inner one as a hole.
+        b"0 g\n90 680 m 330 680 l 330 730 l 90 730 l h 100 688 m 320 688 l 320 720 l 100 720 l h f*\n",
+    ];
+    for cover in covers {
+        let mut content = b"BT /F1 24 Tf 100 700 Td (SECRET DATA 123) Tj ET\n".to_vec();
+        content.extend_from_slice(cover);
+        let findings = audit_redactions(&open(one_page(&content, ""))).expect("audit must run");
+        assert!(findings.is_empty(), "{:?}: {findings:?}", String::from_utf8_lossy(cover));
+    }
+}

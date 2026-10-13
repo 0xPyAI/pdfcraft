@@ -28,6 +28,20 @@ fn rotate_rejects_angles_that_are_not_multiples_of_90() {
     assert_eq!(page_rotation(&doc, 0).unwrap(), 0);
 }
 
+#[test]
+fn rotate_handles_large_quarter_turns() {
+    let large = i64::MAX - i64::MAX % 90;
+    for (current, degrees, expected) in [(90, large, 90), (-90, -large, 270), (large, 90, 90), (-large, -90, 270), (180, large - 90, 90)] {
+        for inherited in [false, true] {
+            let mut doc = open(fixture());
+            let target = if inherited { pages_root(&doc).unwrap() } else { pages(&doc).unwrap()[0].obj };
+            doc.update_dict(target, |d| d.set(b"Rotate".to_vec(), Object::Int(current))).unwrap();
+            rotate_pages(&mut doc, &[0], degrees).unwrap();
+            assert_eq!(page_rotation(&doc, 0).unwrap(), expected);
+        }
+    }
+}
+
 /// A 3-page document with a nested page tree. MediaBox and Rotate are inherited from the root,
 /// Resources from an intermediate node; each page's content says which page it is.
 fn fixture() -> Vec<u8> {
@@ -215,6 +229,7 @@ fn cannot_delete_every_page_or_missing_pages() {
     assert_eq!(delete_pages(&mut doc, &[0, 1, 2]), Err(OrganizeError::WouldRemoveAllPages));
     assert_eq!(delete_pages(&mut doc, &[7]), Err(OrganizeError::NoSuchPage(7)));
     assert_eq!(rotate_pages(&mut doc, &[3], 90), Err(OrganizeError::NoSuchPage(3)));
+    assert_eq!(OrganizeError::NoSuchPage(3).to_string(), "page 4 does not exist", "the message counts pages from 1 (#1550)");
     assert!(!doc.is_modified(), "failed operations leave the document untouched");
 }
 
@@ -250,6 +265,101 @@ fn document_info_edits_round_trip_with_unicode() {
     assert_eq!(info(&doc, "Title").as_deref(), Some("Résumé — 履歴書"));
     assert_eq!(info(&doc, "Author").as_deref(), Some("PdfCraft"));
     assert_eq!(info(&doc, "Producer"), None);
+}
+
+/// A one-page document whose catalog has `xmp` as its (Flate-compressed) XMP packet, and the
+/// same title and author in `/Info`, as LibreOffice writes them.
+fn doc_with_xmp(xmp: &[u8]) -> Document {
+    let b = build(
+        &[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>".into(),
+            body("X"),
+            "<< /Title (Untitled 1) /Author (Old Author) >>".into(),
+        ],
+        "/Root 1 0 R /Info 5 0 R",
+    );
+    let mut doc = open(b);
+    let mut dict = Dict::new();
+    dict.set(b"Type".to_vec(), Object::name("Metadata"));
+    dict.set(b"Subtype".to_vec(), Object::name("XML"));
+    let m = doc.add(Object::Stream(pdfcraft_cos::Stream::flate(dict, xmp)));
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |c| c.set(b"Metadata".to_vec(), Object::Ref(m))).unwrap();
+    full_roundtrip(&doc)
+}
+
+/// The catalog's metadata stream.
+fn xmp_stream(doc: &Document) -> Option<pdfcraft_cos::Stream> {
+    match &*doc.get(catalog(doc).reference(b"Metadata")?) {
+        Object::Stream(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn xmp_text(doc: &Document) -> Option<String> {
+    xmp_stream(doc).map(|s| String::from_utf8(s.decoded().unwrap()).unwrap())
+}
+
+/// The values the XMP packet gives a property: the items of its rdf:Alt or rdf:Seq, else its text.
+fn xmp_values(xmp: &str, name: &str) -> Vec<String> {
+    let Some(start) = xmp.find(&format!("<{name}>")) else { return Vec::new() };
+    let end = xmp[start..].find(&format!("</{name}>")).unwrap() + start;
+    let inner = &xmp[start + name.len() + 2..end];
+    if !inner.contains("<rdf:li") {
+        return vec![inner.to_string()];
+    }
+    inner.split("<rdf:li").skip(1).map(|li| li[li.find('>').unwrap() + 1..li.find("</rdf:li>").unwrap()].to_string()).collect()
+}
+
+const LIBREOFFICE_XMP: &str = "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n\
+<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n\
+  <rdf:Description rdf:about=\"\" xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\"><pdf:Producer>Writer 1.0</pdf:Producer></rdf:Description>\n\
+  <rdf:Description rdf:about=\"\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n\
+   <dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">Untitled 1</rdf:li></rdf:Alt></dc:title>\n\
+   <dc:creator><rdf:Seq><rdf:li>Old Author</rdf:li></rdf:Seq></dc:creator>\n\
+   <dc:description><rdf:Alt><rdf:li xml:lang=\"x-default\">Old subject</rdf:li></rdf:Alt></dc:description>\n\
+  </rdf:Description>\n </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end=\"w\"?>";
+
+#[test]
+fn document_info_edits_update_the_xmp_packet() {
+    // Viewers that read XMP first (pdf.js takes dc:title) showed the old title after a change.
+    let mut doc = doc_with_xmp(LIBREOFFICE_XMP.as_bytes());
+    assert_eq!(xmp_values(&xmp_text(&doc).unwrap(), "dc:title"), ["Untitled 1"]);
+    set_info(&mut doc, "Title", "Sales Guide v1.0 & <draft>").unwrap();
+    set_info(&mut doc, "Author", "Demo Consulting").unwrap();
+    set_info(&mut doc, "Subject", "").unwrap();
+    set_info(&mut doc, "Keywords", "alpha, beta").unwrap();
+    set_info(&mut doc, "Rating", "5").unwrap(); // no XMP counterpart: /Info only
+    let doc = save_and_reopen(&doc);
+    assert_eq!(info(&doc, "Title").as_deref(), Some("Sales Guide v1.0 & <draft>"));
+    let xmp = xmp_text(&doc).unwrap();
+    assert_eq!(xmp_values(&xmp, "dc:title"), ["Sales Guide v1.0 &amp; &lt;draft&gt;"]);
+    assert_eq!(xmp_values(&xmp, "dc:creator"), ["Demo Consulting"]);
+    assert!(xmp_values(&xmp, "dc:description").is_empty(), "{xmp}");
+    assert_eq!(xmp_values(&xmp, "pdf:Keywords"), ["alpha, beta"]);
+    assert_eq!(xmp_values(&xmp, "pdf:Producer"), ["Writer 1.0"]);
+    assert!(xmp.starts_with("<?xpacket begin=") && xmp.ends_with("<?xpacket end=\"w\"?>"), "{xmp}");
+    // Stored unfiltered, still typed as metadata.
+    let dict = xmp_stream(&doc).unwrap().dict;
+    assert_eq!((dict.name(b"Type"), dict.name(b"Subtype"), dict.get(b"Filter")), (Some(&b"Metadata"[..]), Some(&b"XML"[..]), None));
+}
+
+#[test]
+fn document_info_edits_leave_files_without_usable_xmp_alone() {
+    // No packet: none is added.
+    let mut doc = open(fixture());
+    set_info(&mut doc, "Title", "New").unwrap();
+    assert_eq!(xmp_text(&save_and_reopen(&doc)), None);
+    // A packet that isn't UTF-8 is not rewritten.
+    let mut latin1 = LIBREOFFICE_XMP.as_bytes().to_vec();
+    latin1.extend_from_slice(b"<!-- \xE9 -->");
+    let mut doc = doc_with_xmp(&latin1);
+    set_info(&mut doc, "Title", "New").unwrap();
+    let doc = save_and_reopen(&doc);
+    assert_eq!(info(&doc, "Title").as_deref(), Some("New"));
+    assert_eq!(xmp_stream(&doc).unwrap().decoded().unwrap(), latin1);
 }
 
 #[test]
@@ -459,6 +569,40 @@ fn inherited_attributes_travel_with_copied_pages() {
     assert!(p.contains(b"MediaBox") && p.contains(b"Resources"));
     let hay = hayro_syntax::Pdf::new(write_full(&out, &SaveOptions::default()).unwrap()).unwrap();
     assert_eq!(hay.pages().first().unwrap().render_dimensions(), (250.0, 500.0), "rotated 90°");
+}
+
+#[test]
+fn resources_split_between_page_and_tree_travel_together() {
+    // The page names its own font but draws a form that only the page-tree node lists. Readers
+    // (ours included) look a name up the whole chain, so the page shows; a copy that kept only
+    // the page's own dictionary drew nothing (#1628).
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] /Resources << /XObject << /X0 5 0 R >> /Font << /F1 6 0 R /F2 6 0 R >> >> >>"
+            .into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F2 7 0 R >> >> >>".into(),
+        {
+            let s = "q 100 0 0 100 50 50 cm /X0 Do Q BT /F2 12 Tf (x) Tj ET";
+            format!("<< /Length {} >>\nstream\n{s}\nendstream", s.len())
+        },
+        {
+            let s = "0 0 1 rg 0 0 1 1 re f";
+            format!("<< /Type /XObject /Subtype /Form /BBox [0 0 1 1] /Length {} >>\nstream\n{s}\nendstream", s.len())
+        },
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>".into(),
+    ];
+    let src = open(build(&b, "/Root 1 0 R"));
+    let out = full_roundtrip(&combine(&[("S", &src), ("S again", &src)]).unwrap());
+    for i in 0..2 {
+        let res = out.dict(page_dict(&out, i).get(b"Resources").unwrap()).unwrap();
+        let entry = |cat: &[u8], name: &[u8]| res.get(cat).and_then(|c| out.dict(c)).and_then(|d| d.get(name).map(|v| out.resolve(v)));
+        let form = entry(b"XObject", b"X0").expect("the tree's form comes along");
+        assert_eq!(form.as_dict().and_then(|d| d.name(b"Subtype")), Some(&b"Form"[..]));
+        let font = |name: &[u8]| entry(b"Font", name).and_then(|f| f.as_dict().and_then(|d| d.name(b"BaseFont").map(<[u8]>::to_vec)));
+        assert_eq!(font(b"F1").as_deref(), Some(&b"Helvetica"[..]), "a name only the tree has is added");
+        assert_eq!(font(b"F2").as_deref(), Some(&b"Courier"[..]), "the page's own entry wins over the tree's");
+    }
 }
 
 #[test]
@@ -1701,6 +1845,215 @@ fn extract_keeps_images_type3_glyphs_may_draw() {
     let part = full_roundtrip(&extract_pages(&doc_images_with(&raw("/ImB Do"), font), &[0]).unwrap());
     let names = xobject_names(&part, 0);
     assert!(names.iter().any(|n| n.as_slice() == b"ImB"), "pruning must not run through Type 3 resources");
+}
+
+/// The font has its own resources, but its XObject dictionary is also used by the page.
+/// Looking only at page `Do` operators must not discard the image painted by a glyph.
+fn doc_type3_shared_xobjects(font_resources: &str) -> Document {
+    let objects: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources 5 0 R >>".into(),
+        raw("q 30 0 0 30 10 10 cm /ImA Do Q BT /T3 50 Tf 50 80 Td (A) Tj ET"),
+        "<< /XObject 6 0 R /Font << /T3 7 0 R >> >>".into(),
+        "<< /ImA 9 0 R /ImB 10 0 R /Unused 11 0 R >>".into(),
+        format!(
+            "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1 1] /FontMatrix [1 0 0 1 0 0] /CharProcs << /A 8 0 R >> /Encoding << /Type /Encoding /Differences [65 /A] >> /FirstChar 65 /LastChar 65 /Widths [1] /Resources {font_resources} >>"
+        ),
+        raw("1 0 0 0 1 1 d1 /ImB Do"),
+        image(1, 1, 1),
+        image(1, 1, 1),
+        image(1, 1, 2000),
+    ];
+    open(build(&objects, "/Root 1 0 R"))
+}
+
+#[test]
+fn extract_keeps_shared_xobjects_used_by_type3_own_resources() {
+    for resources in ["<< /XObject 6 0 R >>", "5 0 R"] {
+        let src = doc_type3_shared_xobjects(resources);
+        let part = full_roundtrip(&extract_pages(&src, &[0]).unwrap());
+        let names = xobject_names(&part, 0);
+        assert!(names.iter().any(|n| n.as_slice() == b"ImB"), "the Type 3 glyph's image must survive extraction: {resources}");
+    }
+}
+
+#[test]
+fn extract_still_prunes_page_xobjects_when_type3_resources_are_separate() {
+    let src = doc_type3_shared_xobjects("<< /XObject << /ImB 10 0 R >> >>");
+    let part = full_roundtrip(&extract_pages(&src, &[0]).unwrap());
+    assert_eq!(xobject_names(&part, 0), [b"ImA".to_vec()], "only the page's unused entries are removed");
+    let resources = part.resolve(page_dict(&part, 0).get(b"Resources").unwrap());
+    let fonts = part.resolve(resources.as_dict().unwrap().get(b"Font").unwrap());
+    let font = part.resolve(fonts.as_dict().unwrap().get(b"T3").unwrap());
+    let resources = part.resolve(font.as_dict().unwrap().get(b"Resources").unwrap());
+    let xobjects = part.resolve(resources.as_dict().unwrap().get(b"XObject").unwrap());
+    assert!(xobjects.as_dict().unwrap().contains(b"ImB"), "the separate glyph resource survives the full rewrite");
+}
+
+fn doc_type3_glyph_form_with_shared_resources(cycle: bool) -> Document {
+    let mut doc = doc_type3_shared_xobjects("<< >>");
+    let mut resources = pdfcraft_cos::Dict::new();
+    resources.set(b"XObject".to_vec(), Object::Ref(ObjRef::new(6, 0)));
+    let mut form = pdfcraft_cos::Dict::new();
+    form.set(b"Type".to_vec(), Object::name("XObject"));
+    form.set(b"Subtype".to_vec(), Object::name("Form"));
+    form.set(b"BBox".to_vec(), Object::Array(vec![Object::Int(0), Object::Int(0), Object::Int(1), Object::Int(1)]));
+    form.set(b"Resources".to_vec(), Object::Dict(resources));
+    let form = doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(form, b"/ImB Do".to_vec())));
+    let mut xobjects = pdfcraft_cos::Dict::new();
+    xobjects.set(b"Fm".to_vec(), Object::Ref(form));
+    let mut resources = pdfcraft_cos::Dict::new();
+    resources.set(b"XObject".to_vec(), Object::Dict(xobjects));
+    doc.update_dict(ObjRef::new(7, 0), |font| font.set(b"Resources".to_vec(), Object::Dict(resources))).unwrap();
+    doc.set(ObjRef::new(8, 0), Object::Stream(pdfcraft_cos::Stream::from_raw(pdfcraft_cos::Dict::new(), b"1 0 0 0 1 1 d1 /Fm Do".to_vec())));
+    if cycle {
+        doc.update_dict(ObjRef::new(6, 0), |xobjects| xobjects.set(b"Again".to_vec(), Object::Ref(form))).unwrap();
+    }
+    full_roundtrip(&doc)
+}
+
+#[test]
+fn extract_keeps_shared_resources_reached_through_a_type3_glyph_form() {
+    for cycle in [false, true] {
+        let src = doc_type3_glyph_form_with_shared_resources(cycle);
+        let part = full_roundtrip(&extract_pages(&src, &[0]).unwrap());
+        assert!(xobject_names(&part, 0).iter().any(|n| n.as_slice() == b"ImB"), "a glyph's nested form draws ImB; resource cycle: {cycle}");
+    }
+}
+
+#[test]
+fn extract_keeps_an_indirect_resource_owner_shared_with_a_type3_font() {
+    let mut src = doc_type3_shared_xobjects("5 0 R");
+    let xobjects = src.get(ObjRef::new(6, 0)).as_dict().unwrap().clone();
+    src.update_dict(ObjRef::new(5, 0), |resources| resources.set(b"XObject".to_vec(), Object::Dict(xobjects))).unwrap();
+    let src = full_roundtrip(&src);
+    let part = full_roundtrip(&extract_pages(&src, &[0]).unwrap());
+    assert!(xobject_names(&part, 0).iter().any(|n| n.as_slice() == b"ImB"), "the resource owner itself is shared, with inline XObjects");
+}
+
+#[test]
+fn extract_skips_pruning_when_direct_glyph_resource_children_exceed_the_budget() {
+    let mut src = doc_type3_shared_xobjects("<< /XObject << /ImB 10 0 R >> >>");
+    let font = src.get(ObjRef::new(7, 0));
+    let mut resources = font.as_dict().unwrap().get(b"Resources").unwrap().as_dict().unwrap().clone();
+    let mut unknown = vec![Object::Null; 20_000];
+    unknown.push(Object::Ref(ObjRef::new(6, 0)));
+    resources.set(b"Unknown".to_vec(), Object::Array(unknown));
+    src.update_dict(ObjRef::new(7, 0), |font| font.set(b"Resources".to_vec(), Object::Dict(resources))).unwrap();
+    let src = full_roundtrip(&src);
+    let part = full_roundtrip(&extract_pages(&src, &[0]).unwrap());
+    assert_eq!(xobject_names(&part, 0), xobject_names(&src, 0), "an incomplete glyph resource walk cannot authorize pruning any owners");
+}
+
+fn doc_type3_resources_of_undecodable_content(form: bool) -> Document {
+    let mut doc = doc_type3_shared_xobjects("<< /XObject 6 0 R >>");
+    doc.update_dict(ObjRef::new(5, 0), |resources| {
+        resources.remove(b"Font");
+    })
+    .unwrap();
+    doc.set(ObjRef::new(4, 0), Object::Stream(pdfcraft_cos::Stream::from_raw(pdfcraft_cos::Dict::new(), b"/ImA Do".to_vec())));
+    let mut fonts = pdfcraft_cos::Dict::new();
+    fonts.set(b"T3".to_vec(), Object::Ref(ObjRef::new(7, 0)));
+    let mut glyph_resources = pdfcraft_cos::Dict::new();
+    glyph_resources.set(b"Font".to_vec(), Object::Dict(fonts));
+    let mut unreadable = pdfcraft_cos::Dict::new();
+    unreadable.set(b"Filter".to_vec(), Object::name("NoSuchFilter"));
+    if form {
+        unreadable.set(b"Type".to_vec(), Object::name("XObject"));
+        unreadable.set(b"Subtype".to_vec(), Object::name("Form"));
+        unreadable.set(b"BBox".to_vec(), Object::Array(vec![Object::Int(0), Object::Int(0), Object::Int(200), Object::Int(200)]));
+        unreadable.set(b"Resources".to_vec(), Object::Dict(glyph_resources.clone()));
+    }
+    let unreadable = doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(unreadable, b"BT /T3 50 Tf 50 80 Td (A) Tj ET".to_vec())));
+    let (contents, resources) = if form {
+        let contents = doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(pdfcraft_cos::Dict::new(), b"/Fm Do".to_vec())));
+        let mut xobjects = pdfcraft_cos::Dict::new();
+        xobjects.set(b"Fm".to_vec(), Object::Ref(unreadable));
+        let mut resources = pdfcraft_cos::Dict::new();
+        resources.set(b"XObject".to_vec(), Object::Dict(xobjects));
+        (contents, resources)
+    } else {
+        (unreadable, glyph_resources)
+    };
+    let mut page = pdfcraft_cos::Dict::new();
+    page.set(b"Type".to_vec(), Object::name("Page"));
+    page.set(b"Parent".to_vec(), Object::Ref(ObjRef::new(2, 0)));
+    page.set(b"Contents".to_vec(), Object::Ref(contents));
+    page.set(b"Resources".to_vec(), Object::Dict(resources));
+    let page = doc.add(page);
+    doc.update_dict(ObjRef::new(2, 0), |pages| {
+        pages.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(3, 0)), Object::Ref(page)]));
+        pages.set(b"Count".to_vec(), Object::Int(2));
+    })
+    .unwrap();
+    full_roundtrip(&doc)
+}
+
+#[test]
+fn extract_keeps_type3_glyph_resources_of_an_undecodable_page() {
+    let part = full_roundtrip(&extract_pages(&doc_type3_resources_of_undecodable_content(false), &[0, 1]).unwrap());
+    assert!(xobject_names(&part, 0).iter().any(|n| n.as_slice() == b"ImB"), "an unreadable page's font shares a different page's XObject dictionary");
+    let contents = part.resolve(page_dict(&part, 1).get(b"Contents").unwrap());
+    let Object::Stream(contents) = &*contents else { panic!("content stream") };
+    assert_eq!(contents.dict.name(b"Filter"), Some(b"NoSuchFilter".as_slice()));
+    assert_eq!(contents.raw.as_ref(), b"BT /T3 50 Tf 50 80 Td (A) Tj ET");
+}
+
+#[test]
+fn extract_keeps_type3_glyph_resources_of_an_undecodable_form() {
+    let part = full_roundtrip(&extract_pages(&doc_type3_resources_of_undecodable_content(true), &[0, 1]).unwrap());
+    assert!(xobject_names(&part, 0).iter().any(|n| n.as_slice() == b"ImB"), "an unreadable form's font shares a different page's XObject dictionary");
+}
+
+#[test]
+fn extract_still_prunes_separate_resources_when_many_pages_share_a_type3_font() {
+    let mut src = doc_type3_shared_xobjects("<< /XObject << /ImB 10 0 R >> >>");
+    src.set(ObjRef::new(4, 0), Object::Stream(pdfcraft_cos::Stream::from_raw(pdfcraft_cos::Dict::new(), b"/ImA Do".to_vec())));
+    let page = src.get(ObjRef::new(3, 0)).as_dict().unwrap().clone();
+    let mut kids = vec![Object::Ref(ObjRef::new(3, 0))];
+    for _ in 1..4_000 {
+        kids.push(Object::Ref(src.add(page.clone())));
+    }
+    src.update_dict(ObjRef::new(2, 0), |pages| {
+        pages.set(b"Kids".to_vec(), Object::Array(kids));
+        pages.set(b"Count".to_vec(), Object::Int(4_000));
+    })
+    .unwrap();
+    let src = full_roundtrip(&src);
+    let part = full_roundtrip(&extract_pages(&src, &(0..4_000).collect::<Vec<_>>()).unwrap());
+    assert_eq!(xobject_names(&part, 0), [b"ImA".to_vec()], "one shared font's direct resource graph is protected once");
+}
+
+#[test]
+#[ignore = "requires the external Poppler pdftoppm oracle"]
+fn extract_type3_shared_xobjects_matches_poppler_pixels() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-type3-extract-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let fixtures = [
+        doc_type3_shared_xobjects("<< /XObject 6 0 R >>"),
+        doc_type3_shared_xobjects("5 0 R"),
+        doc_type3_shared_xobjects("<< /XObject << /ImB 10 0 R >> >>"),
+        doc_type3_glyph_form_with_shared_resources(false),
+        doc_type3_glyph_form_with_shared_resources(true),
+    ];
+    for (i, src) in fixtures.into_iter().enumerate() {
+        let part = full_roundtrip(&extract_pages(&src, &[0]).unwrap());
+        let render = |doc: &Document, name: &str| {
+            let path = dir.join(format!("{i}-{name}.pdf"));
+            std::fs::write(&path, write_full(doc, &SaveOptions::default()).unwrap()).unwrap();
+            let output = std::process::Command::new("pdftoppm").args(["-singlefile", "-r", "72", "-gray"]).arg(path).output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+            output.stdout
+        };
+        let before = render(&src, "source");
+        let after = render(&part, "extracted");
+        assert!(before.starts_with(b"P5\n200 200\n255\n"));
+        assert!(before.iter().filter(|&&v| v < 200).count() > 2500, "the source contains a drawn glyph");
+        assert_eq!(after, before, "extraction must keep every rendered pixel in fixture {i}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 /// A page listed twice whose widget's field keeps `/Kids` as an array object of its own: the

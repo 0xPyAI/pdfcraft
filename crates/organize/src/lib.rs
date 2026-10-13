@@ -21,6 +21,7 @@ mod outline;
 mod pdfx;
 mod prune;
 pub mod view;
+mod xmp;
 
 pub use boxes::{BoxSpec, PageBox, page_boxes, set_page_box};
 pub use dedupe::dedupe_resources;
@@ -40,7 +41,8 @@ pub use view::{InitialView, displays_doc_title, initial_view, set_initial_view};
 pub enum OrganizeError {
     #[error("the document has no page tree")]
     NoPageTree,
-    #[error("page {0} does not exist")]
+    /// Holds the 0-based index; the message names the 1-based page a user counts (#1550).
+    #[error("page {} does not exist", .0.saturating_add(1))]
     NoSuchPage(usize),
     #[error("a document must keep at least one page")]
     WouldRemoveAllPages,
@@ -158,11 +160,11 @@ pub fn rotate_pages(doc: &mut Document, indices: &[usize], degrees: i64) -> Resu
     }
     let all = walk(doc)?;
     check(indices, all.len())?;
-    let delta = (degrees / 90) * 90;
+    let delta = degrees.rem_euclid(360);
     for &i in indices {
         let (page, inherited) = &all[i];
         let current = doc.get(*page).as_dict().and_then(|d| d.int(b"Rotate")).or_else(|| inherited.int(b"Rotate")).unwrap_or(0);
-        let new = (current + delta).rem_euclid(360);
+        let new = (current.rem_euclid(360) + delta).rem_euclid(360);
         doc.update_dict(*page, |d| d.set(b"Rotate".to_vec(), Object::Int(new)))?;
     }
     Ok(())
@@ -503,12 +505,14 @@ pub fn info(doc: &Document, key: &str) -> Option<String> {
 
 /// Set (or clear, with an empty value) a document-information entry.
 ///
-/// Note: documents with XMP metadata also carry these values in the XMP packet; synchronising
-/// XMP arrives with the `model` crate (M2) — viewers that prefer XMP may still show old values.
+/// Documents with XMP metadata also carry Title, Author, Subject, Keywords, Creator and Producer
+/// in the XMP packet, and viewers that read XMP first show its value: the packet's property is
+/// changed (or removed) to match (see `xmp`).
 pub fn set_info(doc: &mut Document, key: &str, value: &str) -> Result<(), OrganizeError> {
     let value = value.trim();
     let entry = (!value.is_empty()).then(|| Object::String(PdfString::text(value)));
-    set_info_entry(doc, key.as_bytes(), entry)
+    set_info_entry(doc, key.as_bytes(), entry)?;
+    xmp::sync_info(doc, key, value)
 }
 
 /// Set (or remove, with `None`) a document-information entry of any type.

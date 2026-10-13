@@ -1096,10 +1096,11 @@ fn import_table(doc: &mut Document, text: &str) -> Result<Report, DataError> {
         tab_delimited(t)?
     } else {
         // CSV with quotes: a quoted value may hold commas, doubled quotes and line breaks.
-        let mut records: Vec<Vec<String>> = Vec::new();
+        let mut records: Vec<(Vec<String>, bool)> = Vec::new();
         let mut record = Vec::new();
         let mut cur = String::new();
         let mut quoted = false;
+        let mut has_quotes = false;
         let mut chars = t.chars().peekable();
         while let Some(c) = chars.next() {
             match c {
@@ -1107,20 +1108,25 @@ fn import_table(doc: &mut Document, text: &str) -> Result<Report, DataError> {
                     cur.push('"');
                     chars.next();
                 }
-                '"' => quoted = !quoted,
+                '"' => {
+                    quoted = !quoted;
+                    has_quotes = true;
+                }
                 ',' if !quoted => record.push(std::mem::take(&mut cur)),
                 '\r' if !quoted && chars.peek() == Some(&'\n') => {}
                 '\n' if !quoted => {
                     record.push(std::mem::take(&mut cur));
-                    records.push(std::mem::take(&mut record));
+                    records.push((std::mem::take(&mut record), std::mem::take(&mut has_quotes)));
                 }
                 c => cur.push(c),
             }
         }
         record.push(cur);
-        records.push(record);
-        // Blank lines (such as the one a trailing line break leaves) are not records.
-        let mut records = records.into_iter().filter(|r| !matches!(r.as_slice(), [only] if only.is_empty()));
+        records.push((record, has_quotes));
+        // Blank lines (such as the one a trailing line break leaves) are not records, but a
+        // quoted empty value is a record that clears a field.
+        let mut records =
+            records.into_iter().filter(|(r, has_quotes)| *has_quotes || !matches!(r.as_slice(), [only] if only.is_empty())).map(|(r, _)| r);
         let (Some(head), Some(row)) = (records.next(), records.next()) else { return Err(DataError::UnknownFormat) };
         // Text exported from a one-field form has no tab to show for it (#1321). CSV quotes a
         // value with a comma, so one name over several unquoted cells is that text, not CSV.

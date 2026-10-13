@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use egui::Ui;
 use pdfcraft_cos::ObjRef;
-use pdfcraft_engine::a11y::{TagInfo, TagProperty};
+use pdfcraft_engine::a11y::{TagInfo, TagPlacement, TagProperty};
 use pdfcraft_engine::{DocId, Edit};
 
 use crate::{icons, theme::Tokens, widgets};
@@ -181,13 +181,33 @@ pub(crate) fn panel(ui: &mut Ui, t: &Tokens, doc: DocId, tags: &[TagInfo], state
     });
     let edit = state.draft.edit(tag);
     let mut save = false;
+    let siblings: Vec<&TagInfo> = tag.parent.map(|parent| tags.iter().filter(|other| other.parent == Some(parent)).collect()).unwrap_or_default();
+    let position = siblings.iter().position(|sibling| sibling.object == tag.object);
+    let before = position.and_then(|position| position.checked_sub(1)).map(|position| siblings[position]);
+    let after = position.and_then(|position| siblings.get(position + 1)).copied();
     ui.horizontal(|ui| {
         save = ui.add_enabled(can_edit && !state.draft.kind.is_empty() && edit.is_some(), egui::Button::new(tl!("Save tag properties"))).clicked();
         if ui.add_enabled(dirty, egui::Button::new(tl!("Revert changes"))).clicked() {
             state.draft = Draft::from_tag(tag);
         }
     });
-    (page, if save { edit } else { None })
+    let (mut earlier, mut later) = (false, false);
+    ui.horizontal(|ui| {
+        earlier = ui.add_enabled(can_edit && !dirty && before.is_some(), egui::Button::new(tl!("Move tag earlier"))).clicked();
+        later = ui.add_enabled(can_edit && !dirty && after.is_some(), egui::Button::new(tl!("Move tag later"))).clicked();
+    });
+    (
+        page,
+        if save {
+            edit
+        } else if earlier {
+            before.map(|anchor| Edit::MoveTag { object: tag.object, anchor: anchor.object, placement: TagPlacement::Before })
+        } else if later {
+            after.map(|anchor| Edit::MoveTag { object: tag.object, anchor: anchor.object, placement: TagPlacement::After })
+        } else {
+            None
+        },
+    )
 }
 
 fn visible_tags<'a>(tags: &'a [TagInfo], query: &str, collapsed: &BTreeSet<ObjRef>) -> Vec<&'a TagInfo> {

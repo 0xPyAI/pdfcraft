@@ -678,6 +678,27 @@ impl Lab {
         }
     }
 
+    /// Bradford adaptation scales cone responses, so both white points must
+    /// be expressed in LMS before taking their ratios. CalRGB's separate
+    /// flat-white/black-point pipeline retains its existing normalization.
+    fn adapt_to_d65(white_point: &[f32; 3], xyz: &[f32; 3]) -> [f32; 3] {
+        let source_lms = CalRgb::matrix_product(&CalRgb::BRADFORD_SCALE_MATRIX, white_point);
+        // A malformed but positive XYZ white can still yield a zero or
+        // overflowing cone response. Leave it unadapted rather than divide by
+        // zero or propagate a non-finite scale.
+        if source_lms.iter().any(|v| !v.is_finite() || v.abs() <= f32::EPSILON) {
+            return *xyz;
+        }
+        let destination_lms = CalRgb::matrix_product(&CalRgb::BRADFORD_SCALE_MATRIX, &CalRgb::D65_WHITEPOINT);
+        let lms = CalRgb::matrix_product(&CalRgb::BRADFORD_SCALE_MATRIX, xyz);
+        let adapted = [
+            lms[0] * destination_lms[0] / source_lms[0],
+            lms[1] * destination_lms[1] / source_lms[1],
+            lms[2] * destination_lms[2] / source_lms[2],
+        ];
+        CalRgb::matrix_product(&CalRgb::BRADFORD_SCALE_INVERSE_MATRIX, &adapted)
+    }
+
     /// Inverse of the CIE f(t) helper that maps relative fX/fY/fZ to absolute
     /// XYZ as a ratio of the white point.
     fn inverse_lab_f(t: f32) -> f32 {
@@ -726,7 +747,7 @@ impl ToRgb for Lab {
                 zw * Self::inverse_lab_f(fz),
             ];
 
-            let xyz_d65 = CalRgb::normalize_white_point_to_d65(&white_point, &xyz);
+            let xyz_d65 = Self::adapt_to_d65(&white_point, &xyz);
             let srgb = CalRgb::matrix_product(&CalRgb::SRGB_D65_XYZ_TO_RGB_MATRIX, &xyz_d65);
 
             output.copy_from_slice(&[

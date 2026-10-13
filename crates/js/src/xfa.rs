@@ -1458,7 +1458,6 @@ pub(crate) fn warm_up() {
 pub(crate) fn run_here(script: &str, event: &XfaEvent, doc: &XfaDoc, root: XfaNode, limits: Limits, started: &dyn Fn()) -> XfaOutcome {
     warm_up();
     let mut ctx = Context::default();
-    started();
     ctx.runtime_limits_mut().set_loop_iteration_limit(limits.loop_iterations);
     ctx.runtime_limits_mut().set_recursion_limit(limits.recursion);
     let host_state = XHost::new(root, &event.target, doc);
@@ -1467,6 +1466,8 @@ pub(crate) fn run_here(script: &str, event: &XfaEvent, doc: &XfaDoc, root: XfaNo
     let mut out = XfaOutcome::default();
     let result = (|| -> JsResult<()> {
         install(&mut ctx, event, doc, current)?;
+        // Ready for the script: its time starts now, the set-up above not charged to it.
+        started();
         ctx.register_global_property(js_string!("__xfa_src"), s(script), Attribute::CONFIGURABLE)?;
         // Direct eval inside a function called on the node: `this` is the node and the
         // completion value is the script's last expression (what a calculate script yields).

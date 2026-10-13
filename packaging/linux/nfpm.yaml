@@ -1,6 +1,6 @@
 # .deb and .rpm packages (nfpm: https://nfpm.goreleaser.com). Run by package.sh, which stages
 # the file tree, substitutes its path for ${STAGE} (nfpm doesn't expand env vars in `src`) and
-# exports VERSION and NFPM_ARCH.
+# exports VERSION, RELEASE and NFPM_ARCH.
 #
 #   nfpm package -f packaging/linux/nfpm.yaml -p deb -t dist/release/
 name: pdfcraft
@@ -9,7 +9,9 @@ platform: linux
 version: ${VERSION}
 # semver: 0.2.0-rc.1 becomes 0.2.0~rc.1 in deb/rpm, so pre-releases sort before the release.
 version_schema: semver
-release: 1
+# 1 for releases; 1.<label> for a labelled local build (PDFCRAFT_BUILD_LABEL), which sorts after
+# the release of the same version and before the next one.
+release: ${RELEASE}
 section: graphics
 priority: optional
 maintainer: ${PDFCRAFT_MAINTAINER}

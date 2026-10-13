@@ -37,6 +37,20 @@ fn session_with(n: usize) -> (Session, DocId) {
 }
 
 #[test]
+fn prepared_open_does_not_mutate_the_session_until_commit() {
+    fn assert_send<T: Send>() {}
+    assert_send::<crate::PreparedDocument>();
+
+    let mut session = Session::new();
+    let prepared = session.prepare_open("prepared.pdf", None, Arc::new(fixture(3)), None).expect("prepares");
+    assert!(session.get(DocId(1)).is_none());
+
+    let id = session.commit_open(prepared);
+    assert_eq!(id, DocId(1));
+    assert_eq!(session.get(id).expect("committed document").info.pages.len(), 3);
+}
+
+#[test]
 fn custom_image_stamp_keeps_displayed_orientation_on_rotated_pages() {
     let colours = [[240, 20, 20, 255], [20, 180, 20, 255], [20, 20, 240, 255], [230, 180, 20, 255]];
     let image = image::RgbaImage::from_fn(80, 40, |x, y| image::Rgba(colours[usize::from(y >= 20) * 2 + usize::from(x >= 40)]));
@@ -97,6 +111,191 @@ fn custom_image_stamp_keeps_displayed_orientation_on_rotated_pages() {
         check(&session, resized_points);
         session.redo(id).unwrap();
         check(&session, [(80, 100), (140, 100), (80, 130), (140, 130)]);
+    }
+}
+
+/// A blank page turned `degrees`, with one annotation placed from displayed coordinates.
+fn rotated_blank(degrees: i64) -> (Session, DocId) {
+    let mut session = Session::new().with_clock(|| 1_700_000_000);
+    let blank = session.create_blank(200.0, 300.0, 1).unwrap();
+    let id = session.open_new("drawing.pdf", blank).unwrap();
+    session.apply(id, Edit::RotatePages { pages: vec![0], degrees }).unwrap();
+    (session, id)
+}
+
+/// The user-space box of a `w` by `h` point rectangle centred at a displayed point.
+fn displayed_rect(info: &pdfcraft_render::PageInfo, vx: f64, vy: f64, w: f64, h: f64) -> [f64; 4] {
+    let corners = [(vx - w / 2.0, vy - h / 2.0), (vx + w / 2.0, vy + h / 2.0)];
+    let mapped: Vec<[f32; 2]> = corners.iter().map(|(x, y)| info.view_to_user(*x as f32, *y as f32)).collect();
+    [
+        f64::from(mapped[0][0].min(mapped[1][0])),
+        f64::from(mapped[0][1].min(mapped[1][1])),
+        f64::from(mapped[0][0].max(mapped[1][0])),
+        f64::from(mapped[0][1].max(mapped[1][1])),
+    ]
+}
+
+fn render_page(session: &Session, id: DocId) -> pdfcraft_render::RenderedPage {
+    let doc = session.get(id).unwrap();
+    let mut renderer = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), doc.config.clone());
+    let rendered = renderer.render(pdfcraft_render::RenderRequest { page: 0, scale: 2.0, ..Default::default() });
+    assert!(rendered.error.is_none(), "{:?}", rendered.error);
+    rendered
+}
+
+fn stamp_pixel(rendered: &pdfcraft_render::RenderedPage, x: u32, y: u32) -> [u8; 4] {
+    let offset = ((y * rendered.width + x) * 4) as usize;
+    rendered.rgba[offset..offset + 4].try_into().unwrap()
+}
+
+/// #1398: a Sign Here tag points left as displayed, on every page rotation, including after save.
+#[test]
+fn rubber_stamps_point_left_as_displayed_on_rotated_pages() {
+    let (w, h) = StampKind::SignHere.size();
+    for degrees in [0, 90, 180, 270] {
+        let (mut session, id) = rotated_blank(degrees);
+        let info = session.get(id).unwrap().info.pages[0].clone();
+        let rect = displayed_rect(&info, 100.0, 40.0, w, h);
+        let shape = Shape::Stamp { rect, stamp: StampKind::SignHere, by: None };
+        session
+            .apply(
+                id,
+                Edit::AddAnnotation(NewAnnotation {
+                    page: 0,
+                    style: Style::default_for(&shape),
+                    shape,
+                    contents: String::new(),
+                    author: "Test".into(),
+                }),
+            )
+            .unwrap();
+        let check = |session: &Session, id: DocId| {
+            let rendered = render_page(session, id);
+            let doc = session.get(id).unwrap();
+            let info = doc.info.pages[0].clone();
+            let stamp = doc.info.annotations[0].rect;
+            let a = info.user_to_view(stamp[0], stamp[1]);
+            let b = info.user_to_view(stamp[2], stamp[3]);
+            let (left, top) = (a[0].min(b[0]), a[1].min(b[1]));
+            let (right, bottom) = (a[0].max(b[0]), a[1].max(b[1]));
+            let scale = 2.0;
+            let at = |x: f32, y: f32| stamp_pixel(&rendered, (x * scale) as u32, (y * scale) as u32);
+            // The tag's point is the left edge. The flat end fills the right edge.
+            let tip = at(left + 4.0, (top + bottom) / 2.0);
+            let outside = at(left + 4.0, top + 4.0);
+            let end = at(right - 4.0, top + 4.0);
+            assert!(tip[0] > 180 && tip[2] < 80, "rotation {degrees}: tip {tip:?} should be the orange point");
+            assert!(outside.iter().all(|c| *c > 240), "rotation {degrees}: above the point {outside:?} should be paper");
+            assert!(end[0] > 180 && end[2] < 80, "rotation {degrees}: flat end {end:?} should be orange");
+        };
+        check(&session, id);
+        let saved = session.save_bytes(id).unwrap();
+        let mut reopened = Session::new().with_clock(|| 1_700_000_000);
+        let again = reopened.open("drawing.pdf", None, saved, None).unwrap();
+        check(&reopened, again);
+    }
+}
+
+/// A one-page PDF whose left half is red and whose right half is white, as displayed.
+fn half_red_page() -> Vec<u8> {
+    let content = "1 0 0 rg 0 0 40 40 re f";
+    let objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 80 40] >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents 4 0 R /MediaBox [0 0 80 40] >>".to_vec(),
+        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()).into_bytes(),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, obj) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend_from_slice(obj);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for offset in offsets {
+        out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+fn quadrant_png() -> Arc<Vec<u8>> {
+    let colours = [[240, 20, 20, 255], [20, 180, 20, 255], [20, 20, 240, 255], [230, 180, 20, 255]];
+    let image = image::RgbaImage::from_fn(80, 40, |x, y| image::Rgba(colours[usize::from(y >= 20) * 2 + usize::from(x >= 40)]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+    Arc::new(png.into_inner())
+}
+
+fn assert_upright_quadrants(session: &Session, id: DocId, degrees: i64) {
+    let doc = session.get(id).unwrap();
+    let mut renderer = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), doc.config.clone());
+    let rendered = renderer.render(pdfcraft_render::RenderRequest { page: 0, scale: 1.0, ..Default::default() });
+    assert!(rendered.error.is_none(), "{:?}", rendered.error);
+    let colours = [[240, 20, 20, 255], [20, 180, 20, 255], [20, 20, 240, 255], [230, 180, 20, 255]];
+    for ((x, y), colour) in [(80, 90), (120, 90), (80, 110), (120, 110)].into_iter().zip(colours) {
+        assert_eq!(stamp_pixel(&rendered, x, y), colour, "rotation {degrees}; displayed point ({x}, {y})");
+    }
+}
+
+/// #1398: an explicit rectangle keeps the caller's box and turns the picture upright.
+#[test]
+fn explicit_image_stamps_keep_displayed_orientation_on_rotated_pages() {
+    let bytes = quadrant_png();
+    for degrees in [0, 90, 180, 270] {
+        let (mut session, id) = rotated_blank(degrees);
+        let info = session.get(id).unwrap().info.pages[0].clone();
+        let rect = displayed_rect(&info, 100.0, 100.0, 80.0, 40.0);
+        session
+            .apply(
+                id,
+                Edit::AddCustomStamp {
+                    page: 0,
+                    rect,
+                    name: "Original quadrants".into(),
+                    file: MarkFile { name: "quadrants.png".into(), bytes: bytes.clone(), page: 0 },
+                    author: "Test".into(),
+                },
+            )
+            .unwrap();
+        assert_upright_quadrants(&session, id, degrees);
+        session.apply(id, Edit::StyleAnnotation { page: 0, index: 0, color: None, opacity: Some(1.0), width: None, endings: None }).unwrap();
+        assert_upright_quadrants(&session, id, degrees);
+    }
+}
+
+/// #1398: a PDF page used as a stamp stays upright, at its natural size and in an explicit box.
+#[test]
+fn pdf_page_stamps_keep_displayed_orientation_on_rotated_pages() {
+    let bytes = Arc::new(half_red_page());
+    for (natural, degrees) in [true, false].into_iter().flat_map(|natural| [0, 90, 180, 270].map(|degrees| (natural, degrees))) {
+        let (mut session, id) = rotated_blank(degrees);
+        let info = session.get(id).unwrap().info.pages[0].clone();
+        let at = info.view_to_user(100.0, 100.0).map(f64::from);
+        let rect = if natural { [at[0], at[1], at[0], at[1]] } else { displayed_rect(&info, 100.0, 100.0, 80.0, 40.0) };
+        session
+            .apply(
+                id,
+                Edit::AddCustomStamp {
+                    page: 0,
+                    rect,
+                    name: "Half red".into(),
+                    file: MarkFile { name: "half.pdf".into(), bytes: bytes.clone(), page: 0 },
+                    author: "Test".into(),
+                },
+            )
+            .unwrap();
+        let doc = session.get(id).unwrap();
+        let mut renderer = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), doc.config.clone());
+        let rendered = renderer.render(pdfcraft_render::RenderRequest { page: 0, scale: 1.0, ..Default::default() });
+        assert!(rendered.error.is_none(), "{:?}", rendered.error);
+        let left = stamp_pixel(&rendered, 80, 100);
+        let right = stamp_pixel(&rendered, 120, 100);
+        assert!(left[0] > 200 && left[1] < 40, "rotation {degrees}, natural {natural}: left {left:?} should be red");
+        assert!(right.iter().all(|c| *c > 240), "rotation {degrees}, natural {natural}: right {right:?} should be paper");
     }
 }
 
@@ -1506,6 +1705,72 @@ fn preparing_a_form_adds_renames_and_deletes_fields() {
     s.undo(id).unwrap();
     s.undo(id).unwrap();
     assert_eq!(names(&s), ["Text1", "Check Box1", "email"]);
+}
+
+/// One 612×300 page with the content stream `body`. Object 4 is Helvetica; `resources` is what
+/// the page's /Resources holds.
+fn one_line_page(resources: &str, body: &str) -> Vec<u8> {
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 300] >>".to_string(),
+        format!("<< /Type /Page /Parent 2 0 R /Resources << {resources} >> /Contents 5 0 R >>"),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string(),
+        format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+/// Put a redaction mark over `needle` where page 1 shows it, as Find text and redact does.
+fn mark_shown_text(s: &mut Session, id: DocId, needle: &str) {
+    let doc = s.get(id).unwrap();
+    let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), pdfcraft_render::RenderConfig::default());
+    let text = r.render(RenderRequestFor::text(0)).text.expect("the page has text");
+    let range = text.find(needle).pop().expect("the page shows the text");
+    let info = &doc.info.pages[0];
+    let quads = text.line_rects(range).into_iter().map(|v| pdfcraft_annot::rect_quad(info.view_rect_to_user(v).map(f64::from))).collect();
+    let shape = Shape::Redact { quads, overlay: String::new(), look: Default::default() };
+    let mark =
+        Edit::AddAnnotation(NewAnnotation { page: 0, style: Style::default_for(&shape), shape, contents: String::new(), author: "Ada".into() });
+    s.apply(id, mark).unwrap();
+}
+
+/// Redaction removes text by the positions its own interpreter works out. Here the font and size
+/// come from an ExtGState /Font entry (`gs`), which the renderer honours and the interpreter does
+/// not model, so it places no glyph under the mark the user drew over the word as displayed: it
+/// used to report success and leave the word in the file. The renderer is asked now, and the edit
+/// is refused.
+#[test]
+fn redaction_is_refused_when_the_page_still_shows_text_under_a_mark() {
+    let line = "Public words then SECRET42 and more";
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let by_gs = one_line_page("/ExtGState << /GS1 << /Type /ExtGState /Font [4 0 R 16] >> >>", &format!("BT /GS1 gs 20 150 Td ({line}) Tj ET"));
+    let id = s.open("gs.pdf", None, Arc::new(by_gs), None).unwrap();
+    mark_shown_text(&mut s, id, "SECRET42");
+    let refused = s.apply(id, Edit::ApplyRedactions { pages: None });
+    assert!(matches!(refused, Err(EditError::Redact(pdfcraft_redact::RedactError::Residue(n))) if n > 0), "{refused:?}");
+    // Nothing was changed: the mark is still pending and the page still shows the line.
+    assert_eq!(s.get(id).unwrap().redaction_marks(), 1);
+    assert_eq!(page_texts(&s, id), [line]);
+
+    // The same line with its font set by `Tf`: the mark is applied and the word is gone.
+    let by_tf = one_line_page("/Font << /F1 4 0 R >>", &format!("BT /F1 16 Tf 20 150 Td ({line}) Tj ET"));
+    let id = s.open("tf.pdf", None, Arc::new(by_tf), None).unwrap();
+    mark_shown_text(&mut s, id, "SECRET42");
+    s.apply(id, Edit::ApplyRedactions { pages: None }).unwrap();
+    let shown = page_texts(&s, id).swap_remove(0);
+    assert!(shown.starts_with("Public words then") && shown.ends_with("and more") && !shown.contains("SECRET42"), "{shown}");
 }
 
 #[test]
@@ -3244,6 +3509,68 @@ fn xfa_rows_in_areas_are_laid_out_read_calculated_and_written_where_adobe_binds_
     let id2 = s2.open("again.pdf", None, s.get(id).unwrap().bytes.clone(), None).expect("reopens");
     let v2 = |n: &str| s2.get(id2).unwrap().form.iter().find(|f| f.name == n).unwrap().value.first().cloned().unwrap_or_default();
     assert_eq!((v2("days_2"), v2("rest")), ("2".into(), "29".into()));
+}
+
+#[test]
+fn a_value_a_script_sets_reaches_every_field_bound_to_the_same_data_node() {
+    // `carried` inside the area and a second `carried` outside it bind to one data node (areas
+    // are not data scopes). In document order: `setter` writes the inner one, `echo` reads the
+    // outer one in the same event, and the saved data holds the one value.
+    let tpl = pdfcraft_xfa::fixtures::leave_template("<form><page><carried>5</carried></page></form>")
+        .replace(
+            r#"    <field name="rest" y="2.5in" w="2in" h="0.3in" access="readOnly">"#,
+            r#"    <field name="setter" y="3in" w="2in" h="0.3in"><ui><numericEdit/></ui><calculate><script>carried = 9
+9</script></calculate></field>
+    <field name="rest" y="2.5in" w="2in" h="0.3in" access="readOnly">"#,
+        )
+        .replace(
+            "  </subform>\n </subform>\n</subform>",
+            r#"  </subform>
+  <field name="carried" y="8.2in" w="2in" h="0.3in"><ui><numericEdit/></ui></field>
+  <field name="echo" y="8.5in" w="2in" h="0.3in"><ui><numericEdit/></ui><calculate><script>carried + 0</script></calculate></field>
+ </subform>
+</subform>"#,
+        );
+    assert!(tpl.contains("name=\"echo\"") && tpl.contains("name=\"setter\""), "the fixture was reshaped");
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&tpl));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("shared.pdf", None, bytes, None).expect("opens");
+    let out = s.take_js_output(id);
+    assert!(out.errors.is_empty(), "{out:?}");
+    let values = |s: &Session, id: DocId, n: &str| {
+        s.get(id).unwrap().form.iter().filter(|f| f.name.starts_with(n)).map(|f| f.value.join("")).collect::<Vec<_>>()
+    };
+    assert_eq!(values(&s, id, "carried"), vec!["9".to_string(), "9".to_string()], "both fields show the node's value");
+    assert_eq!(values(&s, id, "echo"), vec!["9".to_string()], "read in the same event the setter ran in");
+    let cos = pdfcraft_cos::Document::open(s.get(id).unwrap().bytes.clone()).unwrap();
+    let d = pdfcraft_xfa::data_of(&cos).unwrap();
+    assert_eq!(d.text_at(&pdfcraft_xfa::som_to_path("form[0].page[0].carried[0]")), Some("9"));
+    assert_eq!(d.count(&pdfcraft_xfa::som_to_path("form[0].page[0]"), "carried"), 1, "one data node");
+    // The inner field hidden (no widget): the outer widget still takes the node's value, and
+    // an unrelated edit does not write the old value back over it.
+    let hidden = Arc::new(pdfcraft_xfa::fixtures::shell(
+        &tpl.replace(r#"<field name="carried" y="1.5in""#, r#"<field name="carried" presence="hidden" y="1.5in""#),
+    ));
+    let id = s.open("hidden.pdf", None, hidden, None).expect("opens");
+    assert_eq!(values(&s, id, "carried"), vec!["9".to_string()]);
+    assert_eq!(values(&s, id, "echo"), vec!["9".to_string()]);
+    s.apply(id, Edit::SetFieldValue { name: "allowance".into(), value: FieldValue::Text("31".into()) }).unwrap();
+    assert_eq!(values(&s, id, "carried"), vec!["9".to_string()]);
+    let cos = pdfcraft_cos::Document::open(s.get(id).unwrap().bytes.clone()).unwrap();
+    assert_eq!(pdfcraft_xfa::data_of(&cos).unwrap().text_at(&pdfcraft_xfa::som_to_path("form[0].page[0].carried[0]")), Some("9"));
+    // A check box bound to the node a text field sets: checked by its own on state.
+    let checkbox = Arc::new(pdfcraft_xfa::fixtures::shell(&tpl.replace(
+        r#"<field name="carried" y="1.5in" w="2in" h="0.3in"><ui><numericEdit/></ui></field>"#,
+        r#"<field name="carried" y="1.5in" w="2in" h="0.3in"><ui><checkButton/></ui><items><integer>9</integer><integer>0</integer></items></field>"#,
+    )));
+    let id = s.open("check.pdf", None, checkbox, None).expect("opens");
+    let carried: Vec<(pdfcraft_forms::FieldKind, Vec<String>)> =
+        s.get(id).unwrap().form.iter().filter(|f| f.name.starts_with("carried")).map(|f| (f.kind, f.value.clone())).collect();
+    assert_eq!(
+        carried,
+        vec![(pdfcraft_forms::FieldKind::CheckBox, vec!["9".to_string()]), (pdfcraft_forms::FieldKind::Text, vec!["9".to_string()])],
+        "{carried:?}"
+    );
 }
 
 #[test]
