@@ -397,11 +397,16 @@ impl Control {
     fn drag(&mut self, p: &Value) -> Result<Handled, String> {
         let point = |k: &str| -> Result<egui::Pos2, String> {
             match p.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_f64).collect::<Vec<_>>()).as_deref() {
-                Some([x, y]) => Ok(egui::pos2(*x as f32, *y as f32)),
+                Some([x, y]) => Some(egui::pos2(*x as f32, *y as f32))
+                    .filter(|pos| pos.is_finite())
+                    .ok_or_else(|| format!("ui.drag: {k} must be [x, y], finite coordinates in points")),
                 _ => Err(format!("ui.drag: {k} must be [x, y] in points")),
             }
         };
         let (from, to) = (point("from")?, point("to")?);
+        if !(to - from).is_finite() {
+            return Err("ui.drag: from and to must be a finite distance apart, in points".into());
+        }
         let steps = p.get("steps").and_then(Value::as_u64).unwrap_or(8).clamp(1, 200) as usize;
         let modifiers = modifiers(p.get("modifiers"))?;
         let which = pointer_button(p, "ui.drag")?;
@@ -417,7 +422,10 @@ impl Control {
 
     fn click(&mut self, p: &Value) -> Result<Handled, String> {
         if let (Some(x), Some(y)) = (p.get("x").and_then(Value::as_f64), p.get("y").and_then(Value::as_f64)) {
-            let pos = egui::pos2(x as f32, y as f32);
+            let point = |key: &str, n: f64| {
+                Some(n as f32).filter(|n| n.is_finite()).ok_or_else(|| format!("ui.click: {key} must be a finite coordinate in points"))
+            };
+            let pos = egui::pos2(point("x", x)?, point("y", y)?);
             let which = pointer_button(p, "ui.click")?;
             let button = |pressed| egui::Event::PointerButton { pos, button: which, pressed, modifiers: egui::Modifiers::NONE };
             let frames = self.inject(vec![vec![egui::Event::PointerMoved(pos)], vec![button(true)], vec![button(false)]]);

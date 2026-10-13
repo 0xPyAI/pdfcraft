@@ -1550,3 +1550,29 @@ fn initial_zoom_option_is_applied_before_the_first_viewport_layout() {
         assert_eq!(h.state().views[0].zoom, percent as f32 / 100.0);
     }
 }
+
+/// #1306: a coordinate that only overflows once narrowed to a pointer position is refused by
+/// click and drag, as move refuses it, before any pointer input is queued; the frames that follow
+/// run, and the channel keeps working.
+#[test]
+fn click_and_drag_refuse_coordinates_that_overflow_like_move() {
+    let (mut h, c) = harness();
+    for (method, params) in [
+        ("ui.move", json!({ "x": 1e39, "y": -1e39 })),
+        ("ui.click", json!({ "x": 1e39, "y": -1e39 })),
+        ("ui.click", json!({ "x": 40.0, "y": 1e39 })),
+        ("ui.drag", json!({ "from": [1e39, -1e39], "to": [40.0, 40.0], "steps": 1 })),
+        ("ui.drag", json!({ "from": [40.0, 40.0], "to": [40.0, -1e39], "steps": 1 })),
+        // Each end fits, but not the way from one to the other.
+        ("ui.drag", json!({ "from": [-3e38, 40.0], "to": [3e38, 40.0], "steps": 1 })),
+    ] {
+        let e = call(&mut h, &c, method, params.clone()).expect_err(&format!("{method} {params} is refused"));
+        assert!(e.starts_with(&format!("{method}: ")) && e.contains("finite"), "{e}");
+        h.run_steps(4);
+        assert_eq!(ok(&mut h, &c, "ui.inspect", json!({ "query": "Read", "role": "Button" }))["count"], 1);
+    }
+    let read = ok(&mut h, &c, "ui.inspect", json!({ "query": "Read", "role": "Button" }))["widgets"][0]["rect"].clone();
+    let (x, y) = (read[0].as_f64().unwrap() + 4.0, read[1].as_f64().unwrap() + 4.0);
+    assert_eq!(ok(&mut h, &c, "ui.click", json!({ "x": x, "y": y }))["clicked"], json!([x, y]));
+    ok(&mut h, &c, "ui.drag", json!({ "from": [x, y], "to": [x + 10.0, y], "steps": 2 }));
+}
