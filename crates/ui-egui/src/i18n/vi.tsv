@@ -2581,3 +2581,15 @@ key	Esc	Esc
 key	Home	Home
 key	End	End
 key	Space	Space
+	Allow	Cho phép
+	Maximize	Phóng to
+	Minimize	Thu nhỏ
+	Move tag earlier	Chuyển thẻ sớm hơn
+	Move tag later	Chuyển thẻ muộn hơn
+	Only allow this if you trust the source document.	Chỉ cho phép điều này nếu bạn tin tưởng tài liệu nguồn.
+	Open this local PDF?	Mở PDF cục bộ này?
+	Remove "{name}" from this list? The file itself is not deleted.	Xóa "{name}" khỏi danh sách này? Bản thân tệp không bị xóa.
+	Restore	Khôi phục
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Hiển thị thanh tiêu đề cơ bản cho các nút cửa sổ thay vì dải thẻ. GNOME không vẽ thanh tiêu đề cho ứng dụng, nên thanh này không theo chủ đề của nó.
+	This document is trying to open a local file:	Tài liệu này đang cố mở một tệp cục bộ:
+	Use system title bar	Dùng thanh tiêu đề hệ thống

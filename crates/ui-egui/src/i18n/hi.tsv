@@ -2580,3 +2580,15 @@ certificate	SHA-256 digest	SHA-256 डाइजेस्ट
 @plural	{n} file|{n} files	{n} फ़ाइल
 @plural	{n} comment|{n} comments	{n} टिप्पणी
 @plural	{n} result|{n} results	{n} परिणाम
+	Allow	अनुमति दें
+	Maximize	अधिकतम करें
+	Minimize	न्यूनतम करें
+	Move tag earlier	टैग पहले ले जाएँ
+	Move tag later	टैग बाद में ले जाएँ
+	Only allow this if you trust the source document.	इसे केवल तभी अनुमति दें जब आप स्रोत दस्तावेज़ पर भरोसा करें।
+	Open this local PDF?	यह स्थानीय पीडीएफ़ खोलें?
+	Remove "{name}" from this list? The file itself is not deleted.	"{name}" को इस सूची से हटाएँ? फ़ाइल स्वयं नहीं मिटती।
+	Restore	पुनर्स्थापित करें
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	विंडो बटनों के लिए एक साधारण शीर्षक पट्टी दिखाएँ, टैब स्ट्रिप के बजाय। GNOME ऐप्स के लिए शीर्षक पट्टी नहीं बनाता, इसलिए यह उसकी थीम का पालन नहीं करता।
+	This document is trying to open a local file:	यह दस्तावेज़ एक स्थानीय फ़ाइल खोलने का प्रयास कर रहा है:
+	Use system title bar	सिस्टम शीर्षक पट्टी का उपयोग करें

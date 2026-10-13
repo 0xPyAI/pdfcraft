@@ -2581,3 +2581,15 @@ key	Esc	Esc
 key	Home	Home
 key	End	End
 key	Space	Space
+	Allow	Izinkan
+	Maximize	Maksimalkan
+	Minimize	Minimalkan
+	Move tag earlier	Pindahkan tag lebih awal
+	Move tag later	Pindahkan tag lebih lambat
+	Only allow this if you trust the source document.	Hanya izinkan ini jika Anda mempercayai dokumen sumber.
+	Open this local PDF?	Buka PDF lokal ini?
+	Remove "{name}" from this list? The file itself is not deleted.	Hapus "{name}" dari daftar ini? File itu sendiri tidak dihapus.
+	Restore	Pulihkan
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Tampilkan bilah judul sederhana untuk tombol jendela alih-alih strip tab. GNOME tidak menggambar bilah judul untuk aplikasi, jadi yang ini tidak mengikuti temanya.
+	This document is trying to open a local file:	Dokumen ini mencoba membuka file lokal:
+	Use system title bar	Gunakan bilah judul sistem

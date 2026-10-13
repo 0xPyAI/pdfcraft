@@ -2580,3 +2580,15 @@ certificate	SHA-256 digest	SHA-256 다이제스트
 @plural	{n} file|{n} files	파일 {n}개
 @plural	{n} comment|{n} comments	주석 {n}개
 @plural	{n} result|{n} results	결과 {n}개
+	Allow	허용
+	Maximize	최대화
+	Minimize	최소화
+	Move tag earlier	태그를 앞으로 이동
+	Move tag later	태그를 뒤로 이동
+	Only allow this if you trust the source document.	원본 문서를 신뢰하는 경우에만 이를 허용하세요.
+	Open this local PDF?	이 로컬 PDF를 여시겠습니까?
+	Remove "{name}" from this list? The file itself is not deleted.	"{name}"을(를) 이 목록에서 제거하시겠습니까? 파일 자체는 삭제되지 않습니다.
+	Restore	복원
+	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	탭 스트립 대신 창 버튼이 있는 기본 제목 표시줄을 표시합니다. GNOME은 앱에 제목 표시줄을 그리지 않으므로 이 표시줄은 해당 테마를 따르지 않습니다.
+	This document is trying to open a local file:	이 문서가 로컬 파일을 열려고 합니다:
+	Use system title bar	시스템 제목 표시줄 사용
