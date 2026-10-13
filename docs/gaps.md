@@ -249,7 +249,7 @@ update the numbers.
 
 ### 16. UI precision gaps
 
-- **Missing:** moving several selected objects across pages (same-page moves shipped, #844), nudging with arrow keys, single-key tool accelerators,
+- **Missing:** moving several selected objects across pages (same-page moves shipped, #844), single-key tool accelerators,
   rulers, grids and guides, loupe and dynamic zoom, multiple windows and split view, comment
   pop-ups that can be moved, connector lines, customisable quick tools; shortcut display and tool-mode bugs (#746, #721), macOS window controls
   (#789).
