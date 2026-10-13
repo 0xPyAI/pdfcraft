@@ -199,6 +199,25 @@ impl PdfCraftApp {
         let Some(store) = self.recovery.clone() else { return };
         for key in keys {
             let Some(meta) = self.recoverable.iter().find(|m| &m.key == key).cloned() else { continue };
+            #[cfg(not(target_arch = "wasm32"))]
+            if self.ctx.is_some() && !self.run_inline {
+                self.startup_superseded = true;
+                let result = self.schedule_open(crate::OpenRequest {
+                    name: meta.name.clone(),
+                    path: None,
+                    stamp: None,
+                    input: crate::open_worker::Input::Recovery(store.clone(), key.clone()),
+                    password: None,
+                    activate: true,
+                    after_open: None,
+                    recovered: Some(meta.clone()),
+                    then: None,
+                });
+                if let Err(error) = result {
+                    self.notify_fmt("Couldn't recover {name}: {e}", &[("name", &meta.name), ("e", &error)]);
+                }
+                continue;
+            }
             let bytes = match store.read(key) {
                 Ok(b) => b,
                 Err(e) => {

@@ -37,6 +37,20 @@ fn session_with(n: usize) -> (Session, DocId) {
 }
 
 #[test]
+fn prepared_open_does_not_mutate_the_session_until_commit() {
+    fn assert_send<T: Send>() {}
+    assert_send::<crate::PreparedDocument>();
+
+    let mut session = Session::new();
+    let prepared = session.prepare_open("prepared.pdf", None, Arc::new(fixture(3)), None).expect("prepares");
+    assert!(session.get(DocId(1)).is_none());
+
+    let id = session.commit_open(prepared);
+    assert_eq!(id, DocId(1));
+    assert_eq!(session.get(id).expect("committed document").info.pages.len(), 3);
+}
+
+#[test]
 fn custom_image_stamp_keeps_displayed_orientation_on_rotated_pages() {
     let colours = [[240, 20, 20, 255], [20, 180, 20, 255], [20, 20, 240, 255], [230, 180, 20, 255]];
     let image = image::RgbaImage::from_fn(80, 40, |x, y| image::Rgba(colours[usize::from(y >= 20) * 2 + usize::from(x >= 40)]));
