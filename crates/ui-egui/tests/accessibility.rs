@@ -92,6 +92,60 @@ fn checking_fixing_skipping_and_reporting() {
     assert!(html.contains("Accessibility Report") && html.contains("Skipped"));
 }
 
+/// #1301: a rule skipped by hand is skipped for that document only. Another document checked
+/// without the options dialog reports its own result, and the first keeps its skip, even after
+/// the other is checked again through the dialog.
+#[test]
+fn a_rule_skipped_in_one_document_is_not_skipped_in_another() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("a.pdf", None, FIXTURE.to_vec()).unwrap();
+        app.open_bytes("b.pdf", None, FIXTURE.to_vec()).unwrap();
+        app.active = Some(0);
+        app.a11y_options.show_dialog = false;
+        app
+    });
+    h.run_steps(4);
+    let tagged = |h: &Harness<'static, PdfCraftApp>| {
+        let (id, report) = h.state().a11y.report.as_ref().unwrap();
+        assert_eq!(Some(*id), h.state().active_ids().map(|(_, id)| id), "the report is the active document's");
+        let r = report.result(Rule::TaggedPdf).unwrap();
+        (r.status, r.findings.len())
+    };
+    assert!(h.state_mut().execute("a11y.check"));
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, None);
+    right_click(&mut h, "Tagged PDF - Failed");
+    h.get_by_label("Skip Rule").click();
+    h.run_steps(2);
+    assert_eq!(tagged(&h), (Status::Skipped, 0));
+
+    h.state_mut().active = Some(1);
+    h.run_steps(2);
+    assert!(h.state_mut().execute("a11y.check"));
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, None);
+    assert_eq!(tagged(&h), (Status::Failed, 2), "b.pdf's own result");
+    // Starting again from the options dialog forgets b.pdf's skips, not a.pdf's.
+    right_click(&mut h, "Tagged PDF - Failed");
+    h.get_by_label("Skip Rule").click();
+    h.run_steps(2);
+    assert_eq!(tagged(&h), (Status::Skipped, 0));
+    h.state_mut().a11y_options.show_dialog = true;
+    assert!(h.state_mut().execute("a11y.check"));
+    h.run_steps(2);
+    h.get_by_label("Start Checking").click();
+    h.run_steps(3);
+    assert_eq!(tagged(&h), (Status::Failed, 2));
+
+    h.state_mut().active = Some(0);
+    h.run_steps(2);
+    h.state_mut().run_accessibility_check();
+    h.run_steps(2);
+    assert_eq!(tagged(&h), (Status::Skipped, 0), "a.pdf keeps its skip");
+}
+
 #[test]
 fn checker_summary_does_not_hide_manual_review() {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {

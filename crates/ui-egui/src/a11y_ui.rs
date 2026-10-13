@@ -364,7 +364,7 @@ impl PdfCraftApp {
         };
         // Rules skipped by hand stay skipped when checking again.
         let mut report = report;
-        for r in report.results.iter_mut().filter(|r| self.a11y_skipped.contains(&r.rule)) {
+        for r in report.results.iter_mut().filter(|r| self.a11y_skipped.contains(&(id, r.rule))) {
             r.status = Status::Skipped;
             r.findings.clear();
         }
@@ -448,12 +448,12 @@ impl PdfCraftApp {
                 }
             }
             PanelAction::Skip(rule) => {
-                self.a11y_skipped.insert(rule);
-                if let Some((_, r)) = self.a11y.report.as_mut()
-                    && let Some(x) = r.results.iter_mut().find(|x| x.rule == rule)
-                {
-                    x.status = Status::Skipped;
-                    x.findings.clear();
+                if let Some((id, r)) = self.a11y.report.as_mut() {
+                    self.a11y_skipped.insert((*id, rule));
+                    if let Some(x) = r.results.iter_mut().find(|x| x.rule == rule) {
+                        x.status = Status::Skipped;
+                        x.findings.clear();
+                    }
                 }
             }
             PanelAction::Fix(rule) => {

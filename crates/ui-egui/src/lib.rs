@@ -647,7 +647,8 @@ pub struct PdfCraftApp {
     pub doc_js: js_ui::DocJsDraft,
     pub a11y: a11y_ui::A11yState,
     pub(crate) tags_state: tags_ui::State,
-    pub a11y_skipped: std::collections::BTreeSet<pdfcraft_engine::a11y::Rule>,
+    /// Rules skipped by hand, for the document they were skipped in.
+    pub a11y_skipped: std::collections::HashSet<(DocId, pdfcraft_engine::a11y::Rule)>,
     pub alt_draft: a11y_ui::AltDraft,
     /// List the OS key store's signing identities among the digital IDs (the desktop app).
     pub os_key_store_ids: bool,

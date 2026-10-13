@@ -1333,7 +1333,9 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
         app.run_compare();
     }
     if a11y_now {
-        app.a11y_skipped.clear();
+        if let Some((_, id)) = app.active_ids() {
+            app.a11y_skipped.retain(|(doc, _)| *doc != id);
+        }
         app.run_accessibility_check();
     }
 }
