@@ -105,6 +105,8 @@ pub struct Document {
     entries: Arc<BTreeMap<u32, XrefEntry>>,
     trailer: Dict,
     revisions: Arc<Vec<Revision>>,
+    /// See [`Self::xref_oddities`].
+    xref_oddities: Arc<Vec<(u64, u32)>>,
     repair_log: Arc<Vec<String>>,
     cache: Arc<Mutex<HashMap<u32, Arc<Object>>>>,
     objstms: Arc<Mutex<HashMap<u32, Arc<ObjStm>>>>,
@@ -219,6 +221,7 @@ impl Document {
             entries: Arc::new(BTreeMap::new()),
             trailer: Dict::new(),
             revisions: Arc::new(Vec::new()),
+            xref_oddities: Arc::default(),
             repair_log: Arc::new(Vec::new()),
             cache: Arc::default(),
             objstms: Arc::default(),
@@ -282,6 +285,7 @@ impl Document {
             entries: Arc::new(BTreeMap::new()),
             trailer: Dict::new(),
             revisions: Arc::new(Vec::new()),
+            xref_oddities: Arc::default(),
             repair_log: Arc::new(Vec::new()),
             cache: Arc::default(),
             objstms: Arc::default(),
@@ -304,10 +308,11 @@ impl Document {
         let parsed = doc.read_xref_chain(&mut log);
         let mut authenticated = false;
         let ok = match parsed {
-            Ok((entries, trailer, revisions)) => {
+            Ok((entries, trailer, revisions, oddities)) => {
                 doc.entries = Arc::new(entries);
                 doc.trailer = trailer;
                 doc.revisions = Arc::new(revisions);
+                doc.xref_oddities = Arc::new(oddities);
                 // Authenticate before checking the catalog: it may sit in an encrypted object
                 // stream, which reads as garbage until the key is known.
                 if let Some(enc) = doc.trailer.get(b"Encrypt").cloned() {
@@ -585,6 +590,36 @@ impl Document {
     /// Where object `num` is stored in the file (ignoring unsaved edits).
     pub fn xref_entry(&self, num: u32) -> Option<XrefEntry> {
         self.entries.get(&num).cloned()
+    }
+
+    /// Cross-reference entries this reader did not take at face value, as (byte offset of the
+    /// section, object number): an in-use entry at offset 0, a second and different entry for
+    /// one object in the same section, a reserved cross-reference stream entry type, or a
+    /// hybrid /XRefStm entry that disagrees with the table. The reader sets such an entry aside
+    /// and keeps what it already had for the object. Another reader, the page renderer among
+    /// them, may follow it instead, so the two can then show different objects for one number.
+    /// Code that compares revisions (signature validation) must not call such an object
+    /// unchanged.
+    pub fn xref_oddities(&self) -> &[(u64, u32)] {
+        &self.xref_oddities
+    }
+
+    /// Whether the cross-reference entry of `num` locates that object itself: its `num G obj`
+    /// header at exactly the recorded offset, or the member with that number at the recorded
+    /// position of its object stream. When it does not, [`Self::get`] still finds the object by
+    /// searching, but another reader may resolve the number differently. Ignores unsaved edits.
+    pub fn xref_entry_is_exact(&self, num: u32) -> bool {
+        match self.entries.get(&num) {
+            None | Some(XrefEntry::Free { .. }) => true,
+            Some(XrefEntry::InFile { offset, .. }) => {
+                let at = |off: usize| matches!(parse_indirect_shared(&self.data, off, &|_| None), Ok((id, _)) if id.num == num);
+                // Offsets may count from a header that does not start the file.
+                usize::try_from(*offset).is_ok_and(|off| at(off) || (self.header_offset != 0 && at(off.saturating_add(self.header_offset))))
+            }
+            Some(XrefEntry::InStream { stream, index }) => {
+                self.objstm(*stream).is_ok_and(|stm| usize::try_from(*index).ok().and_then(|i| stm.index.get(i)).is_some_and(|(n, _)| *n == num))
+            }
+        }
     }
 
     /// Object `num` has an unsaved edit.
@@ -951,7 +986,7 @@ impl Document {
     }
 
     #[allow(clippy::type_complexity)]
-    fn read_xref_chain(&self, log: &mut Vec<String>) -> Result<(BTreeMap<u32, XrefEntry>, Dict, Vec<Revision>), CosError> {
+    fn read_xref_chain(&self, log: &mut Vec<String>) -> Result<(BTreeMap<u32, XrefEntry>, Dict, Vec<Revision>, Vec<(u64, u32)>), CosError> {
         let data = &self.data;
         let tail_start = data.len().saturating_sub(4096);
         let sx = rfind(data, b"startxref", tail_start).ok_or(CosError::Syntax { offset: data.len(), detail: "no startxref".into() })?;
@@ -963,6 +998,7 @@ impl Document {
         let mut entries = BTreeMap::new();
         let mut trailer: Option<Dict> = None;
         let mut revisions = Vec::new();
+        let mut oddities = Vec::new();
         let mut visited = HashSet::new();
         let mut next = Some(first);
         while let Some(off) = next.take() {
@@ -972,12 +1008,15 @@ impl Document {
             }
             // This section's own entries; older sections only fill what newer ones left out.
             let mut sect = BTreeMap::new();
-            let (sect_trailer, is_stream) = match self.read_section(off as usize, &mut sect) {
+            // Object numbers whose entry in this section was set aside ([`Self::xref_oddities`]).
+            let mut odd = Vec::new();
+            let (sect_trailer, is_stream) = match self.read_section(off as usize, &mut sect, &mut odd) {
                 Ok(v) => v,
                 Err(e) if self.header_offset > 0 => {
                     log.push(format!("xref at {off} unreadable ({e}); retrying relative to the header"));
                     sect.clear();
-                    self.read_section(off as usize + self.header_offset, &mut sect)?
+                    odd.clear();
+                    self.read_section(off as usize + self.header_offset, &mut sect, &mut odd)?
                 }
                 Err(e) => {
                     if revisions.is_empty() {
@@ -992,17 +1031,23 @@ impl Document {
             // free entries it gives objects only a cross-reference stream can locate.
             if let Some(x) = sect_trailer.int(b"XRefStm").filter(|x| *x >= 0) {
                 let mut stm = BTreeMap::new();
-                match self.read_section(x as usize, &mut stm) {
+                match self.read_section(x as usize, &mut stm, &mut odd) {
                     Ok(_) => {
                         for (num, e) in stm {
-                            if sect.get(&num).is_none_or(|old| matches!(old, XrefEntry::Free { .. })) {
-                                sect.insert(num, e);
+                            match sect.get(&num) {
+                                None | Some(XrefEntry::Free { .. }) => {
+                                    sect.insert(num, e);
+                                }
+                                // The table already places the object somewhere else.
+                                Some(old) if *old != e => odd.push(num),
+                                Some(_) => {}
                             }
                         }
                     }
                     Err(e) => log.push(format!("hybrid /XRefStm at {x} unreadable: {e}")),
                 }
             }
+            oddities.extend(odd.into_iter().map(|num| (off, num)));
             for (num, e) in sect {
                 entries.entry(num).or_insert(e);
             }
@@ -1016,11 +1061,12 @@ impl Document {
         for k in [&b"Prev"[..], b"XRefStm", b"Type", b"W", b"Index", b"Filter", b"DecodeParms", b"Length"] {
             trailer.remove(k);
         }
-        Ok((entries, trailer, revisions))
+        Ok((entries, trailer, revisions, oddities))
     }
 
-    /// Read one section at `off`, adding entries not already known (newer sections win).
-    fn read_section(&self, off: usize, entries: &mut BTreeMap<u32, XrefEntry>) -> Result<(Dict, bool), CosError> {
+    /// Read one section at `off`, adding entries not already known (newer sections win). `odd`
+    /// collects the object numbers whose entry here is set aside ([`Self::xref_oddities`]).
+    fn read_section(&self, off: usize, entries: &mut BTreeMap<u32, XrefEntry>, odd: &mut Vec<u32>) -> Result<(Dict, bool), CosError> {
         let data = &self.data;
         let mut lx = Lexer::new(data, off);
         if lx.eat_keyword(b"xref") {
@@ -1052,11 +1098,17 @@ impl Document {
                         (b"f", _) => XrefEntry::Free { next_generation: generation },
                         _ => return Err(CosError::Syntax { offset: lx.pos, detail: "bad xref entry".into() }),
                     };
-                    // Offset 0 "in use" entries are a known producer bug: ignore them.
+                    // Offset 0 "in use" entries are a known producer bug: ignore them. (Object 0
+                    // is never a real object, so its entry cannot mislead anyone.)
                     if matches!(entry, XrefEntry::InFile { offset: 0, .. }) {
+                        if num != 0 {
+                            odd.push(num);
+                        }
                         continue;
                     }
-                    entries.entry(num).or_insert(entry);
+                    if *entries.entry(num).or_insert(entry) != entry {
+                        odd.push(num);
+                    }
                 }
             }
         }
@@ -1110,12 +1162,21 @@ impl Document {
                     0 => XrefEntry::Free { next_generation: b.min(u16::MAX as u64) as u16 },
                     1 => XrefEntry::InFile { offset: a, generation: b.min(u16::MAX as u64) as u16 },
                     2 => XrefEntry::InStream { stream: a.min(u32::MAX as u64) as u32, index: b.min(u32::MAX as u64) as u32 },
-                    _ => continue, // reserved types are treated as null references (§7.5.8.3)
+                    // Reserved types are treated as null references (§7.5.8.3).
+                    _ => {
+                        odd.push(num);
+                        continue;
+                    }
                 };
                 if matches!(entry, XrefEntry::InFile { offset: 0, .. }) {
+                    if num != 0 {
+                        odd.push(num);
+                    }
                     continue;
                 }
-                entries.entry(num).or_insert(entry);
+                if *entries.entry(num).or_insert(entry) != entry {
+                    odd.push(num);
+                }
             }
         }
         Ok((s.dict.clone(), true))
@@ -1261,6 +1322,44 @@ mod tests {
         }
         out.extend_from_slice(format!("trailer\n<< /Size {} {trailer} >>\nstartxref\n{xref}\n%%EOF\n", bodies.len() + 1).as_bytes());
         out
+    }
+
+    /// Entries the reader sets aside are remembered, so a caller comparing revisions can tell
+    /// that another reader may resolve the object differently.
+    #[test]
+    fn cross_reference_entries_that_are_set_aside_are_recorded() {
+        let base = build(&["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [] /Count 0 >>", "(three)"], "/Root 1 0 R");
+        let plain = Document::open(Arc::new(base.clone())).unwrap();
+        assert!(plain.xref_oddities().is_empty());
+        assert!((1..=3).all(|n| plain.xref_entry_is_exact(n)));
+        let prev = String::from_utf8_lossy(&base).rfind("xref\n0 4").unwrap();
+        let third = plain.xref_entry(3).unwrap();
+
+        // A later section: object 3 "in use" at offset 0, object 2 listed twice with different
+        // offsets, and object 0 at offset 0 (the usual producer slip, which names no object).
+        let mut bytes = base.clone();
+        let section = bytes.len();
+        bytes.extend_from_slice(
+            format!("xref\n0 1\n0000000000 65535 n \n3 1\n0000000000 00000 n \n2 1\n0000000058 00000 n \n2 1\n0000000009 00000 n \ntrailer\n<< /Size 4 /Root 1 0 R /Prev {prev} >>\nstartxref\n{section}\n%%EOF\n").as_bytes(),
+        );
+        let doc = Document::open(Arc::new(bytes)).unwrap();
+        assert_eq!(doc.xref_oddities(), [(section as u64, 3), (section as u64, 2)]);
+        // What the reader resolves is what it resolved before: the first entry it kept.
+        assert_eq!(doc.xref_entry(3), Some(third));
+        assert_eq!(doc.xref_entry(2), Some(XrefEntry::InFile { offset: 58, generation: 0 }));
+    }
+
+    /// An entry that misses its object still resolves (by searching) but is not exact.
+    #[test]
+    fn an_entry_that_misses_its_object_is_found_by_searching_but_is_not_exact() {
+        let base = build(&["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [] /Count 0 >>", "(three)"], "/Root 1 0 R");
+        let text = String::from_utf8_lossy(&base).into_owned();
+        let at = text.find("3 0 obj").unwrap();
+        let bytes = text.replacen(&format!("{at:010} 00000 n"), &format!("{:010} 00000 n", at + 2), 1).into_bytes();
+        let doc = Document::open(Arc::new(bytes)).unwrap();
+        assert_eq!(doc.get(ObjRef { num: 3, generation: 0 }).as_string().map(|s| s.bytes.clone()), Some(b"three".to_vec()));
+        assert!(!doc.xref_entry_is_exact(3));
+        assert!(doc.xref_entry_is_exact(1) && doc.xref_entry_is_exact(2));
     }
 
     #[test]
