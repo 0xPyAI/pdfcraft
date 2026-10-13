@@ -41,7 +41,7 @@ impl Default for OcrDraft {
 impl OcrDraft {
     /// The recognition settings these choices make.
     pub fn settings(&self) -> OcrSettings {
-        OcrSettings { dpi: self.dpi as f32, language: self.language.clone(), skip_text_pages: !self.text_pages }
+        OcrSettings { dpi: self.dpi as f32, language: self.language.clone(), skip_text_pages: !self.text_pages, ..Default::default() }
     }
 }
 
@@ -171,9 +171,11 @@ impl PdfCraftApp {
     /// Edit on a scanned page: like Acrobat's "Converting scanned page to Editable Text and
     /// Images", the page's words are recognized first, so that they open for editing (Edit text &
     /// images groups the recognised words into phrases). Runs once per page, for the page in view
-    /// while Edit is on (its tab, or the Edit text & images or Add text tool), and only for a page that is a picture (an image covering at least
-    /// half of it, no text of its own: a page with text is skipped by the run). It is one undoable
-    /// step, "Recognize text", and Undo is not offered again for that page.
+    /// while Edit is on (its tab, or the Edit text & images or Add text tool). The page must be a
+    /// picture (an image covering at least half of it) with no text of its own: comments and text
+    /// boxes over it do not count as text, but real page text does, and such a page (a flyer with a
+    /// background picture) is left alone. It is one undoable step, "Recognize text", and is not
+    /// run again for that page after Undo.
     pub(crate) fn auto_ocr_scanned_page(&mut self) {
         // Edit is on when its panel is open (the Edit tab) or Edit text & images or Add text is picked,
         // the same test the page view uses for editing content.
@@ -201,10 +203,12 @@ impl PdfCraftApp {
         if !covered || !pdfcraft_engine::ocr::available() {
             return;
         }
-        // A picture on a page that has some text of its own (a comment, a text box) is still a
-        // scan, as in Acrobat; the words the page's text already has are not added twice.
+        // Only a page with no text of its own is read. Comments and text boxes over the picture do
+        // not count as its text (a scan with a few comments is still a scan, as in Acrobat), but
+        // a page with real text and a background picture is left alone.
         let mut settings = self.ocr_draft.settings();
-        settings.skip_text_pages = false;
+        settings.skip_text_pages = true;
+        settings.native_text_only = true;
         self.start_ocr_pages(id, &[page], settings);
     }
 

@@ -222,14 +222,38 @@ fn the_edit_panel_recognizes_a_scanned_page_too() {
     assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Recognize text"));
 }
 
-/// A scanned page that also carries some text of its own (a comment or text box over the map) is
-/// still a scan: Edit reads the picture, and the page's own words are not added a second time.
+/// A scan with only a comment (a text box) over it is still a scan: Edit reads the picture. The
+/// comment's own words are not read into the layer, and it counts as no page text.
 #[test]
-fn editing_a_scan_that_carries_some_text_still_recognizes_the_picture_once() {
+fn editing_a_scan_with_a_comment_over_it_recognizes_the_picture() {
     if !pdfcraft_engine::ocr::available() {
         eprintln!("skipped: OCR models not installed");
         return;
     }
+    let with_comment = {
+        let mut s = Session::new();
+        let id = s.open("scan.pdf", None, std::sync::Arc::new(scan()), None).unwrap();
+        let (w, h) = {
+            let p = &s.get(id).unwrap().info.pages[0];
+            (p.width as f64, p.height as f64)
+        };
+        let shape = pdfcraft_engine::Shape::TextBox { rect: [w * 0.1, h * 0.75, w * 0.9, h * 0.85], font_size: 18.0 };
+        let style = pdfcraft_engine::Style::default_for(&shape);
+        let note = pdfcraft_engine::NewAnnotation { page: 0, shape, style, contents: "Invoice reference 4711".into(), author: "Test".into() };
+        s.apply(id, Edit::AddAnnotation(note)).unwrap();
+        s.save_bytes(id).unwrap().to_vec()
+    };
+    let mut h = edit_harness(with_comment);
+    let id = h.state().active_ids().unwrap().1;
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(4);
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Recognize text"));
+}
+
+/// A born-digital page with a full-page background picture and real text (a flyer, a slide
+/// export) must not change just because Edit is turned on (maintainer review of #1609).
+#[test]
+fn editing_a_page_with_text_over_a_background_picture_changes_nothing() {
     let hybrid = {
         let mut s = Session::new();
         let id = s.open("scan.pdf", None, std::sync::Arc::new(scan()), None).unwrap();
@@ -245,13 +269,10 @@ fn editing_a_scan_that_carries_some_text_still_recognizes_the_picture_once() {
     let mut h = edit_harness(hybrid);
     let id = h.state().active_ids().unwrap().1;
     assert!(h.state_mut().execute("edit.edit_text"));
-    h.run_steps(4);
-    assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Recognize text"));
-    let doc = h.state().session.get(id).unwrap();
-    let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), Default::default());
-    let text = r.render(pdfcraft_render::RenderRequest { page: 0, kind: pdfcraft_render::RequestKind::Text, scale: 1.0, ..Default::default() });
-    let text = text.text.unwrap().plain_text().to_lowercase();
-    assert_eq!((text.matches("invoice").count(), text.matches("scanned").count()), (1, 1), "{text}");
+    h.run_steps(6);
+    assert!(h.state().ocr_run.is_none());
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), None, "nothing was recognized or marked modified");
+    assert!(!h.state().session.get(id).unwrap().dirty, "the file is not marked modified");
 }
 
 #[test]
