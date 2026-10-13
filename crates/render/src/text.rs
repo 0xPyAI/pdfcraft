@@ -1276,14 +1276,18 @@ pub fn layout(glyphs: Vec<TextGlyph>) -> PageText {
 
 /// [`layout`] as the reading order of indices into `glyphs`, with each one's line and word gap.
 fn arrange(glyphs: &[TextGlyph]) -> (Vec<usize>, Vec<u32>, Vec<bool>) {
-    // Drop "fake bold" duplicates: the same character redrawn at (almost) the same place.
+    // Drop "fake bold" duplicates: the same character redrawn at (almost) the same place. A redraw
+    // also overlaps most of its own width: a narrow letter in condensed text (80 Tz and below) sits
+    // closer than a fifth of its height to its double, as the second "l" of "Alle" (#1467).
     let mut keep = vec![true; glyphs.len()];
     for i in 1..glyphs.len() {
         let g = &glyphs[i];
         let h = (g.rect[3] - g.rect[1]).max(0.1);
+        let w = g.rect[2] - g.rect[0];
+        let dx = if w > 0.05 * h { (h * 0.2).min(w * 0.5) } else { h * 0.2 };
         for j in (i.saturating_sub(4)..i).rev() {
             let p = &glyphs[j];
-            if keep[j] && p.text == g.text && (p.rect[0] - g.rect[0]).abs() < h * 0.2 && (p.rect[1] - g.rect[1]).abs() < h * 0.2 {
+            if keep[j] && p.text == g.text && (p.rect[0] - g.rect[0]).abs() < dx && (p.rect[1] - g.rect[1]).abs() < h * 0.2 {
                 keep[i] = false;
                 break;
             }
@@ -1900,6 +1904,29 @@ mod tests {
             v.push(g(&c.to_string(), x + 0.3, 10.0, x + 6.3));
         }
         assert_eq!(layout(v).plain_text(), "Bold");
+        // A zero-width combining mark redrawn on itself is dropped too.
+        let v = vec![g("e", 10.0, 10.0, 16.0), g("\u{301}", 13.0, 10.0, 13.0), g("e", 10.0, 10.0, 16.0), g("\u{301}", 13.0, 10.0, 13.0)];
+        assert_eq!(layout(v).plain_text(), "e\u{301}");
+    }
+
+    /// #1467: condensed text (80 Tz and below, OCR layers fitted to the scan) sets narrow letters
+    /// closer than a fifth of their height apart; a doubled letter there is two letters, not a redraw.
+    #[test]
+    fn condensed_double_letters_are_kept() {
+        for scale in [0.8, 0.65, 0.5] {
+            let mut v = Vec::new();
+            let mut x = 10.0;
+            // Helvetica advances at 10 pt, in thousandths of an em.
+            for (c, adv) in [('A', 667.0), ('l', 222.0), ('l', 222.0), ('e', 556.0)] {
+                let w = adv / 100.0 * scale;
+                v.push(g(&c.to_string(), x, 10.0, x + w));
+                x += w;
+            }
+            assert_eq!(layout(v.clone()).plain_text(), "Alle", "at {scale} horizontal scaling");
+            // Each letter redrawn a fifth of a point to the right is still one letter.
+            let bold: Vec<TextGlyph> = v.iter().flat_map(|c| [c.clone(), g(&c.text, c.rect[0] + 0.2, 10.0, c.rect[2] + 0.2)]).collect();
+            assert_eq!(layout(bold).plain_text(), "Alle", "fake bold at {scale} horizontal scaling");
+        }
     }
 
     #[test]
