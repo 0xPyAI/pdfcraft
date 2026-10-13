@@ -300,9 +300,10 @@ fn import_pages_mapped(
             ocgs: Vec::new(),
         });
         let src_dict = src.get(page).as_dict().cloned().unwrap_or_default();
+        let resources = resources_with_ancestors(src, &src_dict);
         let mut d = Dict::new();
         for (k, v) in src_dict.iter() {
-            if SKIP_ON_PAGE.contains(&k.as_slice()) {
+            if SKIP_ON_PAGE.contains(&k.as_slice()) || (k.as_slice() == b"Resources" && resources.is_some()) {
                 continue;
             }
             if k.as_slice() == b"Annots" {
@@ -364,6 +365,10 @@ fn import_pages_mapped(
             }
             d.set(k.clone(), copier.copy_value(dst, v, None));
         }
+        if let Some(r) = resources {
+            let r = copier.copy_value(dst, &r, None);
+            d.set(b"Resources".to_vec(), r);
+        }
         for k in INHERITABLE {
             if !d.contains(k)
                 && let Some(v) = inherited.get(k)
@@ -396,6 +401,56 @@ fn import_pages_mapped(
     existing.splice(at..at, inserted);
     rebuild(dst, &existing)?;
     Ok(Imported { pages: new_pages, page_map: copier.pages, objects: copier.map, renamed_fields })
+}
+
+/// A page's `/Resources` with the names that only its page-tree ancestors list, or `None` when
+/// they add nothing to the dictionary it would have anyway (its own, or else its nearest
+/// ancestor's). Readers (ours included) look a resource name up the page and then up the tree,
+/// so a page that lists its font but inherits its images still shows them. A copy hangs from
+/// another tree, so it must list them itself or it draws nothing of them (#1628). The page's
+/// entry wins over an ancestor's, and a nearer ancestor's over a farther one's.
+fn resources_with_ancestors(src: &Document, page: &Dict) -> Option<Object> {
+    let mut merged = page.get(b"Resources").map(|r| src.dict(r).unwrap_or_default());
+    let mut added = false;
+    let mut seen = std::collections::HashSet::new();
+    let mut parent = page.reference(b"Parent");
+    // Bounded: a damaged tree's `/Parent` links can loop or run deep.
+    while let Some(r) = parent
+        && seen.insert(r)
+        && seen.len() <= 256
+    {
+        let node = src.get(r);
+        let Some(node) = node.as_dict() else { break };
+        parent = node.reference(b"Parent");
+        let Some(theirs) = node.get(b"Resources").and_then(|r| src.dict(r)) else { continue };
+        let Some(mine) = merged.as_mut() else {
+            merged = Some(theirs);
+            continue;
+        };
+        for (category, entries) in theirs.iter() {
+            match (mine.get(category).map(|c| src.dict(c)), src.dict(entries)) {
+                (None, _) => {
+                    mine.set(category.clone(), entries.clone());
+                    added = true;
+                }
+                (Some(Some(mut names)), Some(entries)) => {
+                    let before = names.len();
+                    for (name, value) in entries.iter() {
+                        if !names.contains(name) {
+                            names.set(name.clone(), value.clone());
+                        }
+                    }
+                    if names.len() > before {
+                        mine.set(category.clone(), Object::Dict(names));
+                        added = true;
+                    }
+                }
+                // `/ProcSet` and the like: the page's own value stands.
+                _ => {}
+            }
+        }
+    }
+    merged.filter(|_| added).map(Object::Dict)
 }
 
 /// Look up a named destination in the source (`/Dests` dictionary or `/Names /Dests` tree).

@@ -477,6 +477,40 @@ fn inherited_attributes_travel_with_copied_pages() {
 }
 
 #[test]
+fn resources_split_between_page_and_tree_travel_together() {
+    // The page names its own font but draws a form that only the page-tree node lists. Readers
+    // (ours included) look a name up the whole chain, so the page shows; a copy that kept only
+    // the page's own dictionary drew nothing (#1628).
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] /Resources << /XObject << /X0 5 0 R >> /Font << /F1 6 0 R /F2 6 0 R >> >> >>"
+            .into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F2 7 0 R >> >> >>".into(),
+        {
+            let s = "q 100 0 0 100 50 50 cm /X0 Do Q BT /F2 12 Tf (x) Tj ET";
+            format!("<< /Length {} >>\nstream\n{s}\nendstream", s.len())
+        },
+        {
+            let s = "0 0 1 rg 0 0 1 1 re f";
+            format!("<< /Type /XObject /Subtype /Form /BBox [0 0 1 1] /Length {} >>\nstream\n{s}\nendstream", s.len())
+        },
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>".into(),
+    ];
+    let src = open(build(&b, "/Root 1 0 R"));
+    let out = full_roundtrip(&combine(&[("S", &src), ("S again", &src)]).unwrap());
+    for i in 0..2 {
+        let res = out.dict(page_dict(&out, i).get(b"Resources").unwrap()).unwrap();
+        let entry = |cat: &[u8], name: &[u8]| res.get(cat).and_then(|c| out.dict(c)).and_then(|d| d.get(name).map(|v| out.resolve(v)));
+        let form = entry(b"XObject", b"X0").expect("the tree's form comes along");
+        assert_eq!(form.as_dict().and_then(|d| d.name(b"Subtype")), Some(&b"Form"[..]));
+        let font = |name: &[u8]| entry(b"Font", name).and_then(|f| f.as_dict().and_then(|d| d.name(b"BaseFont").map(<[u8]>::to_vec)));
+        assert_eq!(font(b"F1").as_deref(), Some(&b"Helvetica"[..]), "a name only the tree has is added");
+        assert_eq!(font(b"F2").as_deref(), Some(&b"Courier"[..]), "the page's own entry wins over the tree's");
+    }
+}
+
+#[test]
 fn links_are_rewired_to_copied_pages_or_dropped() {
     let a = doc_a();
     // Extract A3, A1 (reordered): A1's GoTo A3 must now point at the copy of A3 (index 0).
