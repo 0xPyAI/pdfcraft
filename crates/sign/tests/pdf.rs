@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use pdfcraft_cos::{Document, Object, PdfString, SaveOptions, write_incremental};
 use pdfcraft_sign::{
-    Detail, Modification, SignError, SignOptions, Status, Time, TimestampAuthority, TrustStore, WORDINGS, der, in_english, kind, pkcs12, signatures,
+    Certificate, Detail, DigitalId, Modification, Name, SignError, SignOptions, Status, Time, TimestampAuthority, TrustStore, WORDINGS, der,
+    in_english, kind, pkcs12, signatures,
 };
 
 fn data(name: &str) -> Vec<u8> {
@@ -1813,6 +1814,38 @@ fn visible_appearance_text_helvetica_cannot_draw_is_refused() {
     let doc = open(&signed);
     let s = signatures(&doc, &signed, &TrustStore::default()).into_iter().find(|s| s.signed).unwrap();
     assert_eq!(s.reason.as_deref(), Some("同意此文件"));
+}
+
+/// A visible signature with Central European characters (č, ć, ž, š) embeds the bundled
+/// Inter font and draws them cleanly instead of refusing or writing `?`.
+#[test]
+fn visible_appearance_draws_central_european_characters_with_embedded_font() {
+    let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
+    let name = Name::build("Luka Petravić", "Oddelek", "Podjetje d.o.o.", "luka@example.com", "SI");
+    let cert = Certificate::self_signed(&name, &id.key, Time::from_unix(1_700_000_000), 5, &[1]).unwrap();
+    let luka_id = DigitalId { key: id.key, certificate: cert, chain: Vec::new(), friendly_name: None };
+    let shown =
+        pdfcraft_sign::Appearance { name: true, distinguished_name: true, reason: true, location: true, ..pdfcraft_sign::Appearance::default() };
+    let sl = SignOptions {
+        rect: Some([150.0, 20.0, 280.0, 70.0]),
+        reason: Some("Podpisano s potrdilom".into()),
+        location: Some("Ljubljana, Slovenija".into()),
+        appearance: shown,
+        ..opts()
+    };
+    let signed = pdfcraft_sign::sign(&open(&fixture()), &luka_id, &sl).unwrap();
+    let (content, res) = appearance_of(&signed, "Signature1");
+    // Verify that the appearance stream does not write `?` in place of non-WinAnsi characters.
+    assert!(!content.contains('?'), "appearance content should not write '?' for Central European characters: {content}");
+    // Verify an embedded TrueType font was added to the appearance resources.
+    let fonts = res.get(b"Font").and_then(|o| o.as_dict()).unwrap();
+    assert!(fonts.contains(b"PCFull0"), "appearance should reference the embedded font: {fonts:?}");
+    // Verify signature validation still passes.
+    let doc = open(&signed);
+    let trust = TrustStore { certs: vec![luka_id.certificate.clone()] };
+    let s = signatures(&doc, &signed, &trust).into_iter().find(|s| s.signed).unwrap();
+    assert_eq!(s.status, Status::Valid);
+    assert_eq!(s.reason.as_deref(), Some("Podpisano s potrdilom"));
 }
 
 /// Every sentence this crate says about a signature is listed in `WORDINGS`, and every sentence on
