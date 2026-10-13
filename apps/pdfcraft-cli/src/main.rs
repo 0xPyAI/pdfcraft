@@ -637,8 +637,20 @@ fn short(s: &str) -> String {
 fn collect(paths: &[&str]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+    let mut visited = std::collections::HashSet::new();
     while let Some(p) = stack.pop() {
         if p.is_dir() {
+            // Directory aliases and symlink cycles must not scan the same tree repeatedly.
+            let identity = match p.canonicalize() {
+                Ok(identity) => identity,
+                Err(error) => {
+                    eprintln!("{}: could not resolve directory: {error}", p.display());
+                    continue;
+                }
+            };
+            if !visited.insert(identity) {
+                continue;
+            }
             if let Ok(rd) = std::fs::read_dir(&p) {
                 stack.extend(rd.flatten().map(|e| e.path()));
             }
