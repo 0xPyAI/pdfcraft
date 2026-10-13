@@ -659,6 +659,18 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, cx: &PageCx<'_>, 
                     view.pending_edit = Some(new_comment(cx, tool, shape, String::new()));
                 }
             }
+            // A quick press/release does not start an egui drag, but Acrobat's Draw tool treats
+            // it as a one-point ink stroke (a dot). The appearance uses round line caps, so a
+            // single PDF point is visible and remains editable like any other drawing.
+            if tool == CommentTool::Ink
+                && resp.clicked()
+                && over_page
+                && let Some(p) = pointer
+                && let Some(shape) = drawn_shape(tool, &[cx.to_user(p)])
+            {
+                cv.selected = None;
+                view.pending_edit = Some(new_comment(cx, tool, shape, String::new()));
+            }
             true
         }
         QuickTool::Comment(tool) if tool.clicks_points() => {
@@ -1094,7 +1106,7 @@ fn drawn_shape(tool: CommentTool, points: &[[f64; 2]]) -> Option<Shape> {
     let rect = [first[0].min(last[0]), first[1].min(last[1]), first[0].max(last[0]), first[1].max(last[1])];
     let big = rect[2] - rect[0] >= 2.0 && rect[3] - rect[1] >= 2.0;
     match tool {
-        CommentTool::Ink if points.len() >= 2 => Some(Shape::Ink { strokes: vec![points.to_vec()] }),
+        CommentTool::Ink if !points.is_empty() => Some(Shape::Ink { strokes: vec![points.to_vec()] }),
         CommentTool::Line | CommentTool::Arrow if far => Some(Shape::Line {
             from: first,
             to: last,
@@ -1863,7 +1875,7 @@ mod tests {
     fn drawn_shapes_ignore_slips() {
         assert_eq!(drawn_shape(CommentTool::Rectangle, &[[0.0, 0.0], [1.0, 1.0]]), None);
         assert_eq!(drawn_shape(CommentTool::Rectangle, &[[10.0, 0.0], [0.0, 10.0]]), Some(Shape::Rectangle { rect: [0.0, 0.0, 10.0, 10.0] }));
-        assert_eq!(drawn_shape(CommentTool::Ink, &[[0.0, 0.0]]), None);
+        assert_eq!(drawn_shape(CommentTool::Ink, &[[0.0, 0.0]]), Some(Shape::Ink { strokes: vec![vec![[0.0, 0.0]]] }));
         assert!(matches!(
             drawn_shape(CommentTool::Arrow, &[[0.0, 0.0], [5.0, 0.0]]),
             Some(Shape::Line { start: LineEnding::None, end: LineEnding::OpenArrow, .. })
