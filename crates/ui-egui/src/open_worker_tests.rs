@@ -346,3 +346,63 @@ fn startup_intake_waits_through_wrong_password_retry_and_cancel_preserves_the_ex
     assert_eq!(app.session.docs().iter().find(|doc| doc.name == "startup.pdf").expect("the startup document is available").info.pages.len(), 1);
     assert_eq!(app.session.get(existing).expect("the existing document remains open").bytes, original);
 }
+
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+fn assert_tool_runs_after_background_open(extension: &str, bytes: Vec<u8>, pages: usize) {
+    let (mut harness, _client) = harness();
+    harness.state_mut().close_tab(0);
+    let (gate, started, release, finished) = open_worker::prepare_gate();
+    harness.state_mut().open_prepare_gate = Some(gate);
+    let path = std::env::temp_dir().join(format!("pdfcraft-tool-worker-{}.{extension}", std::process::id()));
+    std::fs::write(&path, &bytes).expect("write picked document");
+    harness.state_mut().pick_override = Some(vec![path.to_string_lossy().into_owned()]);
+    harness.state_mut().run_command("export.text");
+    harness.step();
+    started.recv_timeout(Duration::from_secs(5)).expect("the picked document reached preparation");
+    assert!(harness.state().active.is_none());
+    assert!(harness.state().dialog.is_none(), "the tool waits for its document");
+    release.send(()).expect("release picked document preparation");
+    finished.recv_timeout(Duration::from_secs(5)).expect("picked document prepared");
+    harness.step();
+    let app = harness.state();
+    assert_eq!(app.views.len(), 1, "the chosen document opens once");
+    assert_eq!(app.session.get(app.views[0].id).expect("chosen document").info.pages.len(), pages);
+    assert!(matches!(app.dialog, Some(crate::Dialog::Export(_))), "the chosen tool runs after preparation: {:?}", app.dialog);
+    harness.run_steps(2);
+    assert_eq!(harness.state().views.len(), 1);
+    assert_eq!(std::fs::read(&path).expect("read unchanged input"), bytes);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn tool_from_home_runs_after_pdf_preparation() {
+    assert_tool_runs_after_background_open("pdf", fixture(2), 2);
+}
+
+#[test]
+fn tool_from_home_runs_after_text_conversion() {
+    assert_tool_runs_after_background_open("txt", b"Synthetic document for a chosen tool".to_vec(), 1);
+}
+
+#[test]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+fn a_startup_document_waits_for_an_active_document_to_prepare() {
+    let (mut harness, _client) = harness();
+    harness.state_mut().close_tab(0);
+    let (gate, started, release, finished) = open_worker::prepare_gate();
+    harness.state_mut().open_prepare_gate = Some(gate);
+    let path = std::env::temp_dir().join(format!("pdfcraft-startup-worker-{}.pdf", std::process::id()));
+    std::fs::write(&path, fixture(2)).expect("write chosen document");
+    harness.state_mut().open_path(&path.to_string_lossy());
+    started.recv_timeout(Duration::from_secs(5)).expect("chosen document reached preparation");
+    harness.state().startup_inbox.lock().expect("startup inbox").push(("startup.pdf".into(), fixture(1)));
+    harness.step();
+    assert_eq!(harness.state().startup_inbox.lock().expect("startup inbox").len(), 1, "startup bytes wait for the pending active open");
+    assert!(harness.state().views.is_empty());
+    release.send(()).expect("release chosen document preparation");
+    finished.recv_timeout(Duration::from_secs(5)).expect("chosen document prepared");
+    harness.step();
+    assert_eq!(harness.state().views.len(), 2);
+    assert_eq!(harness.state().active, Some(0), "the chosen document keeps focus");
+    let _ = std::fs::remove_file(path);
+}
