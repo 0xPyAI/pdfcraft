@@ -2352,3 +2352,8 @@ animation effects	Off	オフ
 	This document is trying to open a local file:	この文書はローカルファイルを開こうとしています：
 	Move tag earlier	タグを前へ移動
 	Move tag later	タグを後へ移動
+	Attach a file…	ファイルを添付…
+	Delete attachment	添付ファイルを削除
+	Attaching files is not available on the web yet	Web 版ではまだファイルを添付できません
+	Attach {name}	{name} を添付
+	Delete attachment {key}	添付ファイル {key} を削除

@@ -2265,3 +2265,8 @@ animation effects	Off	Выкл
 	This document is trying to open a local file:	Этот документ пытается открыть локальный файл:
 	Move tag earlier	Переместить тег раньше
 	Move tag later	Переместить тег позже
+	Attach a file…	Прикрепить файл…
+	Delete attachment	Удалить вложение
+	Attaching files is not available on the web yet	Прикрепление файлов в веб-версии пока недоступно
+	Attach {name}	Прикрепить {name}
+	Delete attachment {key}	Удалить вложение {key}

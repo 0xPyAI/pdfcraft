@@ -2482,3 +2482,8 @@ animation effects	Off	Desactivados
 	This document is trying to open a local file:	Este documento intenta abrir un archivo local:
 	Move tag earlier	Mover etiqueta antes
 	Move tag later	Mover etiqueta después
+	Attach a file…	Adjuntar un archivo…
+	Delete attachment	Eliminar adjunto
+	Attaching files is not available on the web yet	Adjuntar archivos aún no está disponible en la web
+	Attach {name}	Adjuntar {name}
+	Delete attachment {key}	Eliminar adjunto {key}

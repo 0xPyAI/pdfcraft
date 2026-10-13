@@ -2353,3 +2353,8 @@ animation effects	Off	Aus
 	This document is trying to open a local file:	Dieses Dokument versucht, eine lokale Datei zu öffnen:
 	Move tag earlier	Tag früher verschieben
 	Move tag later	Tag später verschieben
+	Attach a file…	Datei anhängen…
+	Delete attachment	Anhang löschen
+	Attaching files is not available on the web yet	Dateien anhängen ist im Web noch nicht verfügbar
+	Attach {name}	{name} anhängen
+	Delete attachment {key}	Anhang {key} löschen

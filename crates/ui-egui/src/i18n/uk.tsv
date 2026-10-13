@@ -2374,3 +2374,8 @@ animation effects	Off	Вимкнено
 	This document is trying to open a local file:	Цей документ намагається відкрити локальний файл:
 	Move tag earlier	Перемістити тег раніше
 	Move tag later	Перемістити тег пізніше
+	Attach a file…	Прикріпити файл…
+	Delete attachment	Видалити вкладення
+	Attaching files is not available on the web yet	Прикріплення файлів у веб-версії поки недоступне
+	Attach {name}	Прикріпити {name}
+	Delete attachment {key}	Видалити вкладення {key}

@@ -2350,3 +2350,8 @@ animation effects	Off	Өшірулі
 	This document is trying to open a local file:	Бұл құжат жергілікті файлды ашуға әрекеттеніп жатыр:
 	Move tag earlier	Тегті ертерек жылжыту
 	Move tag later	Тегті кейінірек жылжыту
+	Attach a file…	Файл тіркеу…
+	Delete attachment	Тіркемені жою
+	Attaching files is not available on the web yet	Вебте файл тіркеу әзірге қолжетімсіз
+	Attach {name}	{name} тіркеу
+	Delete attachment {key}	{key} тіркемесін жою

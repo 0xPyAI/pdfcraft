@@ -2596,3 +2596,8 @@ key	Space	Tarpas
 	This document is trying to open a local file:	Šis dokumentas bando atverti vietinį failą:
 	Move tag earlier	Perkelti žymą anksčiau
 	Move tag later	Perkelti žymą vėliau
+	Attach a file…	Pridėti failą…
+	Delete attachment	Ištrinti priedą
+	Attaching files is not available on the web yet	Failų pridėjimas žiniatinklyje dar negalimas
+	Attach {name}	Pridėti {name}
+	Delete attachment {key}	Ištrinti priedą {key}

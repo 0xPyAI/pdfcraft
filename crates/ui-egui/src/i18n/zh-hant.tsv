@@ -2226,3 +2226,8 @@ animation effects	Off	關
 	This document is trying to open a local file:	此文件正嘗試開啟本機檔案：
 	Move tag earlier	將標記前移
 	Move tag later	將標記後移
+	Attach a file…	附加檔案…
+	Delete attachment	刪除附件
+	Attaching files is not available on the web yet	網頁版尚不支援附加檔案
+	Attach {name}	附加 {name}
+	Delete attachment {key}	刪除附件 {key}

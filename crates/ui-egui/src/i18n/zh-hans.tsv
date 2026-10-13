@@ -2316,3 +2316,8 @@ animation effects	Off	关
 	This document is trying to open a local file:	此文档正尝试打开本地文件：
 	Move tag earlier	将标签前移
 	Move tag later	将标签后移
+	Attach a file…	附加文件…
+	Delete attachment	删除附件
+	Attaching files is not available on the web yet	网页版尚不支持附加文件
+	Attach {name}	附加 {name}
+	Delete attachment {key}	删除附件 {key}

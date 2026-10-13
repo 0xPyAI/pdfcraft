@@ -2373,3 +2373,8 @@ animation effects	Off	معطّلة
 	This document is trying to open a local file:	يحاول هذا المستند فتح ملف محلي:
 	Move tag earlier	نقل العلامة للأعلى
 	Move tag later	نقل العلامة للأسفل
+	Attach a file…	إرفاق ملف…
+	Delete attachment	حذف المرفق
+	Attaching files is not available on the web yet	إرفاق الملفات غير متاح على الويب بعد
+	Attach {name}	إرفاق {name}
+	Delete attachment {key}	حذف المرفق {key}

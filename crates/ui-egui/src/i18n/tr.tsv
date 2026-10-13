@@ -2348,3 +2348,8 @@ animation effects	Off	Kapalı
 	This document is trying to open a local file:	Bu belge yerel bir dosya açmaya çalışıyor:
 	Move tag earlier	Etiketi daha erken taşı
 	Move tag later	Etiketi daha geç taşı
+	Attach a file…	Dosya ekle…
+	Delete attachment	Eki sil
+	Attaching files is not available on the web yet	Dosya eklemek web'de henüz kullanılamıyor
+	Attach {name}	{name} ekle
+	Delete attachment {key}	{key} ekini sil

@@ -2351,3 +2351,8 @@ animation effects	Off	Ki
 	This document is trying to open a local file:	Ez a dokumentum egy helyi fájlt próbál megnyitni:
 	Move tag earlier	Címke korábbra helyezése
 	Move tag later	Címke későbbre helyezése
+	Attach a file…	Fájl csatolása…
+	Delete attachment	Melléklet törlése
+	Attaching files is not available on the web yet	Fájlok csatolása a weben még nem érhető el
+	Attach {name}	{name} csatolása
+	Delete attachment {key}	{key} melléklet törlése

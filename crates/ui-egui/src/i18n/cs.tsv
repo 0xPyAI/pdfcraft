@@ -2426,3 +2426,8 @@ animation effects	Off	Vypnuto
 	This document is trying to open a local file:	Tento dokument se pokouší otevřít místní soubor:
 	Move tag earlier	Přesunout značku dříve
 	Move tag later	Přesunout značku později
+	Attach a file…	Připojit soubor…
+	Delete attachment	Odstranit přílohu
+	Attaching files is not available on the web yet	Připojování souborů zatím na webu není k dispozici
+	Attach {name}	Připojit {name}
+	Delete attachment {key}	Odstranit přílohu {key}

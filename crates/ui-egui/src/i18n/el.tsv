@@ -2362,3 +2362,8 @@ animation effects	Off	Ανενεργά
 	This document is trying to open a local file:	Αυτό το έγγραφο προσπαθεί να ανοίξει ένα τοπικό αρχείο:
 	Move tag earlier	Μετακίνηση ετικέτας νωρίτερα
 	Move tag later	Μετακίνηση ετικέτας αργότερα
+	Attach a file…	Επισύναψη αρχείου…
+	Delete attachment	Διαγραφή συνημμένου
+	Attaching files is not available on the web yet	Η επισύναψη αρχείων δεν είναι ακόμη διαθέσιμη στον ιστό
+	Attach {name}	Επισύναψη {name}
+	Delete attachment {key}	Διαγραφή συνημμένου {key}
