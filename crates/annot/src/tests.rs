@@ -187,6 +187,7 @@ fn invalid_geometry_is_rejected() {
         assert!(matches!(add_annotation(&mut doc, &new(0, s.clone()), &meta("x")), Err(AnnotError::Invalid(_))), "{s:?}");
     }
     assert_eq!(add_annotation(&mut doc, &new(5, Shape::Rectangle { rect: [0.0, 0.0, 10.0, 10.0] }), &meta("x")), Err(AnnotError::NoSuchPage(5)));
+    assert_eq!(AnnotError::NoSuchPage(5).to_string(), "page 6 does not exist", "the message counts pages from 1 (#1550)");
     assert!(!doc.is_modified(), "failed adds change nothing");
 }
 

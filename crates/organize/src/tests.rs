@@ -229,6 +229,7 @@ fn cannot_delete_every_page_or_missing_pages() {
     assert_eq!(delete_pages(&mut doc, &[0, 1, 2]), Err(OrganizeError::WouldRemoveAllPages));
     assert_eq!(delete_pages(&mut doc, &[7]), Err(OrganizeError::NoSuchPage(7)));
     assert_eq!(rotate_pages(&mut doc, &[3], 90), Err(OrganizeError::NoSuchPage(3)));
+    assert_eq!(OrganizeError::NoSuchPage(3).to_string(), "page 4 does not exist", "the message counts pages from 1 (#1550)");
     assert!(!doc.is_modified(), "failed operations leave the document untouched");
 }
 

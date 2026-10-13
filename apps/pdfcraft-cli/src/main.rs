@@ -51,6 +51,7 @@ pdfcraft-cli render <file.pdf> --page N [--dpi 96] --out x.png   (.png, .jpg, .t
 pdfcraft-cli text   <file.pdf> [--page N]                  extracted text (pages separated by form feeds)
 pdfcraft-cli edit   <in.pdf> --out out.pdf [--rotate 1,3:90] [--delete 2,4] [--move 5:1]
                       [--insert-blank 1] [--title T] [--author A] [--full]
+                      (options run in order; page numbers refer to the document after the earlier options)
 pdfcraft-cli combine <a.pdf> <b.pdf> … --out combined.pdf
 pdfcraft-cli extract <in.pdf> --pages 1,3,5 --out out.pdf
 pdfcraft-cli split   <in.pdf> (--every N | --before 3,7) [--out-dir DIR]
@@ -438,6 +439,17 @@ fn edit(args: &[String]) -> Result<(), CliError> {
         };
         if let Some((option, at)) = destination.filter(|(_, at)| *at > n) {
             return Err(format!("{option} {} is past the end: it must be between 1 and {} (the document has {n} pages)", at + 1, n + 1).into());
+        }
+        // Pages count from the document as the earlier options left it, so a page past the end is
+        // reported with its own option and the current page count (#1550).
+        let listed = match &e {
+            Edit::RotatePages { pages, .. } => Some(("--rotate", pages)),
+            Edit::DeletePages { pages } => Some(("--delete", pages)),
+            Edit::MovePages { pages, .. } => Some(("--move", pages)),
+            _ => None,
+        };
+        if let Some((option, bad)) = listed.and_then(|(option, pages)| pages.iter().find(|p| **p >= n).map(|p| (option, *p))) {
+            return Err(format!("{option}: page {} does not exist; after the earlier options the document has {n} pages", bad + 1).into());
         }
         session.apply(id, e).map_err(|e| e.to_string())?;
     }

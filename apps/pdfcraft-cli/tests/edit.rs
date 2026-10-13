@@ -224,3 +224,18 @@ fn the_append_destination_and_counts_grown_by_earlier_edits_are_accepted() {
         assert_eq!(sizes, expected, "{name}");
     }
 }
+
+/// A page past the end names its own option and the page count left by the earlier options (#1550).
+#[test]
+fn a_page_past_the_end_after_earlier_edits_names_that_option() {
+    let input = tmp("chained", "in.pdf");
+    std::fs::write(&input, fixture()).unwrap();
+    let output = tmp("chained", "out.pdf");
+    // 1 page, grown to 3, then --delete leaves 2: the 3 in --move 3:1 is the page that is gone.
+    let args = ["--insert-blank", "2", "--insert-blank", "3", "--delete", "3", "--move", "3:1"];
+    let out = Command::new(BIN).args(["edit", input.to_str().unwrap(), "--out", output.to_str().unwrap()]).args(args).output().unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("--move: page 3 does not exist") && err.contains("has 2 pages"), "{err}");
+    assert!(!output.exists());
+}

@@ -179,6 +179,7 @@ fn invalid_requests_change_nothing() {
         add_background(&mut doc, &[9], &Background { color: [1.0; 3], opacity: 1.0, ..Background::default() }, false),
         Err(EditError::NoSuchPage(9))
     );
+    assert_eq!(EditError::NoSuchPage(9).to_string(), "page 10 does not exist", "the message counts pages from 1 (#1550)");
     assert!(!doc.is_modified());
 }
 

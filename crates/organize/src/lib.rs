@@ -40,7 +40,8 @@ pub use view::{InitialView, displays_doc_title, initial_view, set_initial_view};
 pub enum OrganizeError {
     #[error("the document has no page tree")]
     NoPageTree,
-    #[error("page {0} does not exist")]
+    /// Holds the 0-based index; the message names the 1-based page a user counts (#1550).
+    #[error("page {} does not exist", .0.saturating_add(1))]
     NoSuchPage(usize),
     #[error("a document must keep at least one page")]
     WouldRemoveAllPages,
