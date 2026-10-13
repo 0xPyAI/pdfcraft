@@ -185,15 +185,16 @@ update the numbers.
 - **Impact:** government and legal users sign with tokens and need B-LT/B-LTA.
 - **Estimate:** 40–70 h; tokens need hardware to test. **Doc:** [pdf-spec-parity.md](pdf-spec-parity.md).
 
-### 11. Accessibility: no automatic structure creation
+### 11. Accessibility: only text-only automatic structure creation
 
-- **Missing:** apply auto-tag proposals to marked content and a valid parent tree, autotag fields,
-  visual Tags, Order and Content panels, Reading Order tool, table editor, Make Accessible action,
+- **Missing:** auto-tag mixed text, images, tables, lists, links and fields; connect preview heading
+  proposals to Apply; visual Order and Content panels, Reading Order tool, table editor, Make Accessible action,
   Read Out Loud; full keyboard operation of PdfCraft itself and a screen-reader audit.
 - **Evidence:** all 32 checker rules, figure alt text, tag property and sibling order edits, and
-  a bounded text-only auto-tag preview exist. The preview does not write PDF structure;
+  a bounded auto-tag preview exist. Apply writes valid structure and parent-tree links for
+  text-only files; it refuses mixed content and existing tags;
   `a11y.keyboard-only` (P0) planned, `a11y.app-screen-reader` partial.
-- **Impact:** untagged files still need another editor to build their structure; PdfCraft itself is
+- **Impact:** most untagged files still need another editor to build their structure; PdfCraft itself is
   not yet usable without a mouse.
 - **Estimate:** 40–70 h. **Doc:** [target-app-parity.md](target-app-parity.md).
 

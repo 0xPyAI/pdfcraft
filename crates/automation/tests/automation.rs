@@ -145,6 +145,32 @@ fn autotag_preview_proposes_text_without_changing_the_pdf() {
     assert!(preview["candidates"].as_array().unwrap().iter().any(|c| c["text"] == "First paragraph" && c["type"] == "P"));
 }
 
+#[test]
+fn autotag_apply_writes_reviewable_tags_and_survives_save_reopen() {
+    let dir = workdir("autotag-apply");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "b.pdf" }))["doc"].as_u64().unwrap();
+    let before = ok(&mut a, "accessibility_check", json!({ "doc": doc, "rules": ["tagged-pdf", "tagged-content"] }));
+    assert_eq!(before["failed"], 2);
+    let rendered_before = a.call("page_render", &json!({ "doc": doc, "page": 1, "dpi": 72 })).unwrap();
+
+    let applied = ok(&mut a, "accessibility_autotag_apply", json!({ "doc": doc }));
+    assert_eq!(applied["count"], 3, "Document plus one paragraph per page");
+    assert_eq!(applied["tags"][1]["type"], "P");
+    let after = ok(&mut a, "accessibility_check", json!({ "doc": doc, "rules": ["tagged-pdf", "tagged-content"] }));
+    assert_eq!(after["passed"], 2);
+    assert_eq!(a.call("page_render", &json!({ "doc": doc, "page": 1, "dpi": 72 })).unwrap(), rendered_before);
+    assert!(matches!(a.call("accessibility_autotag_apply", &json!({ "doc": doc })), Err(ToolError::Failed(_))));
+
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "tagged.pdf" }));
+    let saved = std::fs::read(dir.join("tagged.pdf")).unwrap();
+    let reopened = pdfcraft_cos::Document::open(std::sync::Arc::new(saved)).unwrap();
+    let pages = pdfcraft_model::pages(&reopened);
+    assert_eq!(pages.len(), 2);
+    assert!(pages.iter().all(|page| page.dict.contains(b"StructParents")));
+    assert!(reopened.get(reopened.root().unwrap()).as_dict().unwrap().contains(b"StructTreeRoot"));
+}
+
 /// A one-page PDF whose form holds one text field named `name`.
 fn form_pdf(name: &str) -> Vec<u8> {
     let objs: Vec<String> = vec![
