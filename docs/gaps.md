@@ -226,6 +226,15 @@ update the numbers.
   112]` as a 112-unit band over the two lines of text, and the fixture is named "this text should
   be visible". Ours is the readable rendering. Anything at the top of the list needs a person to
   look at both images before it is treated as a bug of ours.
+- **The JBIG2 cluster was Poppler too, and the suite checks itself (2026-10-14).** The next four
+  worst files were JBIG2, which looked like a defect in `hayro-jbig2` and its local patches. It is
+  the reverse. The 96 `bitmap-*.pdf` fixtures are a conformance suite: one picture encoded through
+  every corner of JBIG2, so a correct decoder renders all 96 identically — a real test needing no
+  reference image and no oracle. **We render 1 distinct image across all 96; Poppler renders 8**,
+  drawing a blank page for the seven halftone-skip and symbol fixtures and mis-decoding TPGRON
+  refinement (its output changes when TPGRON is switched on, which a correct decoder's cannot).
+  Pinned as `crates/render/tests/jbig2_invariants.rs`. **Poppler is not a usable oracle for JBIG2**,
+  and roughly a fifth of its fixtures should be read as its bugs rather than ours.
 - **Annotations are shown, and that was measured rather than argued.** Poppler synthesises an
   appearance for an annotation that has none, where we draw only what the document carries (link
   borders without `/AP` are recorded as not covered under `view.render-annotation-appearances`), so
