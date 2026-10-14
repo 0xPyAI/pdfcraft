@@ -2346,6 +2346,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     }
     let Some(doc) = app.session.get(app.views[index].id) else { return };
     let info = &doc.info;
+    let paper = app.session.reading_colors(app.views[index].id).and_then(|c| c.params).map_or(Color32::WHITE, |p| {
+        let [r, g, b] = p.background;
+        Color32::from_rgb(r, g, b)
+    });
     if info.pages.is_empty() {
         app.views[index].auto_scroll.cancel();
         ui.centered_and_justified(|ui| ui.label(tl!("This document has no pages.")));
@@ -2849,7 +2853,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             let xf = PageXform { rect: r, rot: view.rotation, pw: info.pages[i].width.max(1.0), ph: info.pages[i].height.max(1.0) };
             // Soft shadow + paper.
             painter.add(egui::epaint::Shadow { offset: [0, 3], blur: 14, spread: 0, color: t.page_shadow }.as_shape(r, CornerRadius::ZERO));
-            painter.rect_filled(r, CornerRadius::ZERO, Color32::WHITE);
+            painter.rect_filled(r, CornerRadius::ZERO, paper);
             if let Some(err) = view.errors.get(&i) {
                 painter.rect_filled(r, CornerRadius::ZERO, Color32::from_rgb(0xFB, 0xF4, 0xF4));
                 icons::paint(
