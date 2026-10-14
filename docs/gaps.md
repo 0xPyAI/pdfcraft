@@ -221,6 +221,18 @@ update the numbers.
   CI, and a first reading of a borrowed renderer is a baseline to improve on, not a bar to clear.
   The worst results cluster on JBIG2 `bitmap-*` files (`hayro-jbig2` carries 3 local patches) and
   on ZapfDingbats, which points the renderer work at something specific for the first time.
+- **Read the score as a disagreement, not a verdict (2026-10-14).** The worst file of the 250,
+  `bug1552113.pdf` at 84%, turned out to be Poppler's defect: it paints the link's `/Border [0 0
+  112]` as a 112-unit band over the two lines of text, and the fixture is named "this text should
+  be visible". Ours is the readable rendering. Anything at the top of the list needs a person to
+  look at both images before it is treated as a bug of ours.
+- **Annotations are shown, and that was measured rather than argued.** Poppler synthesises an
+  appearance for an annotation that has none, where we draw only what the document carries (link
+  borders without `/AP` are recorded as not covered under `view.render-annotation-appearances`), so
+  showing them scores us for a known gap. Hiding them is worse, because it then scores Poppler for
+  every appearance we *do* draw: over the same 250 files, shown gives mean 2.16% / p90 5.35% / 25
+  files within 0.1%, hidden gives 2.18% / 5.55% / 22, with `annotation-tx3.pdf` jumping to 45.64%.
+  The biases nearly cancel; `--hide-annotations` tells the two apart for one file at a time.
 - **Evidence:** text extraction (word-F1 0.98 against `pdftotext`) and now rendering (above); qpdf
   checks written output on every CI run since `PDFCRAFT_ORACLES_REQUIRED`. Acrobat captures must
   stay local in `plan/acrobat/` (clean-room, `AGENTS.md` §1.1).

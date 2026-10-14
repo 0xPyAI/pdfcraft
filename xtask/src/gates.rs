@@ -253,6 +253,19 @@ pub fn render_oracle(args: &[String]) -> anyhow::Result<()> {
     let limit: usize = flag_num(args, "--limit").unwrap_or(usize::MAX);
     let dpi: u32 = flag_num(args, "--dpi").unwrap_or(72);
     let tolerance: u8 = flag_num(args, "--tolerance").unwrap_or(8);
+    // Annotations are shown by default, which is not the obvious choice and was settled by
+    // measurement rather than argument. Poppler synthesises an appearance for an annotation that
+    // has none, where we draw only what the document carries (`view.render-annotation-appearances`
+    // records link borders without `/AP` as not covered), so showing them scores us for a known
+    // gap: bug1552113.pdf is 84% purely because Poppler paints a 112-unit link border over the
+    // text that fixture exists to show -- and our rendering, not Poppler's, is the readable one.
+    //
+    // Hiding them is worse, though, because it scores Poppler for every appearance we *do* draw.
+    // Over the same 250 files: shown gives mean 2.16%, p90 5.35%, 25 files within 0.1%; hidden
+    // gives 2.18%, 5.55% and 22, with annotation-tx3.pdf jumping to 45.64%. The two biases very
+    // nearly cancel, so the default stays with the fuller picture and this flag exists to tell
+    // the two apart when a single file's score needs explaining.
+    let hide_annotations = args.iter().any(|a| a == "--hide-annotations");
     let dir =
         args.iter().position(|a| a == "--dir").and_then(|i| args.get(i + 1)).map_or_else(|| root().join("corpus/pdfjs/test/pdfs"), PathBuf::from);
 
@@ -287,9 +300,13 @@ pub fn render_oracle(args: &[String]) -> anyhow::Result<()> {
             .filter(std::process::ExitStatus::success)
             .and_then(|_| std::fs::read(&out_pam).ok())
             .and_then(|b| pdfcraft_oracle::pixels::decode_pam_gray(&b));
-        let theirs =
-            run_capture_bytes(pdftoppm.command().args(["-singlefile", "-gray", "-f", "1", "-l", "1", "-r"]).arg(dpi.to_string()).arg(file), 30)
-                .and_then(|b| pdfcraft_oracle::pixels::decode_pgm(&b));
+        let mut theirs_cmd = pdftoppm.command();
+        theirs_cmd.args(["-singlefile", "-gray", "-f", "1", "-l", "1", "-r"]).arg(dpi.to_string());
+        if hide_annotations {
+            theirs_cmd.arg("-hide-annotations");
+        }
+        theirs_cmd.arg(file);
+        let theirs = run_capture_bytes(&mut theirs_cmd, 30).and_then(|b| pdfcraft_oracle::pixels::decode_pgm(&b));
         // An oracle that cannot read a file says nothing about our fidelity, and a file we cannot
         // read is `xtask check`'s business, not this one's. Count each side and move on.
         if ours.is_none() {

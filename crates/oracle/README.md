@@ -80,6 +80,13 @@ transparent margin is not scored as black.
 
 `cargo xtask render-oracle` drives it over the corpus. It reports; it does not gate.
 
+A high score is a *disagreement*, not a verdict on us. The worst file of the first 250,
+`bug1552113.pdf` at 84%, is Poppler painting a link's `/Border [0 0 112]` as a band over the text
+the fixture exists to show; ours is the readable rendering. Look at both images before believing
+the number. `--hide-annotations` separates annotation differences from page content, though the
+default shows them: hiding is slightly worse overall, because it then scores Poppler for every
+appearance we do draw.
+
 ## Still to do
 
 - Acrobat itself as the reference, rather than other open renderers.
