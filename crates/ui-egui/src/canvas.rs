@@ -174,14 +174,14 @@ pub struct ViewDefaults {
     /// The zoom with [`Fit::None`] (1.0 = 100%).
     pub zoom: f32,
     /// Highlight existing fields: a preference in Acrobat, so it carries over to the next
-    /// document and the next session.
+    /// document and the next session. On for new settings; a stored choice wins.
     pub highlight_fields: bool,
 }
 
 impl Default for ViewDefaults {
     fn default() -> Self {
         // Single page, scrolling continuously at fit width: the earlier "continuous" default.
-        Self { layout: PageLayout::Single, continuous: true, fit: Fit::Width, zoom: 1.0, highlight_fields: false }
+        Self { layout: PageLayout::Single, continuous: true, fit: Fit::Width, zoom: 1.0, highlight_fields: true }
     }
 }
 

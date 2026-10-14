@@ -1059,6 +1059,8 @@ fn highlight_fields_tints_the_field_area() {
     let _gpu = gpu();
     let mut h = form_harness();
     h.state_mut().set_option("panel", "none").unwrap();
+    // Highlighting is on by default; start from plain fields.
+    h.state_mut().set_option("fields", "off").unwrap();
     for _ in 0..100 {
         h.run_steps(2);
         if !h.state().render_pending() {
@@ -1136,27 +1138,47 @@ fn required_radio_buttons_get_a_round_red_border() {
     assert!(!stroke(at(50.3, 339.7)), "the widget's corner, outside the circle, is not: {:?}", at(50.3, 339.7));
 }
 
-/// Acrobat's Highlight existing fields is a preference, not a per-document choice: turned on
-/// once, the next document (and the next session) opens with fields highlighted.
+/// Acrobat's Highlight existing fields is a preference, not a per-document choice: turned off
+/// once, the next document (and the next session) opens with fields plain. New settings start
+/// with it on.
 #[test]
-fn field_highlighting_is_remembered() {
+fn field_highlighting_is_on_by_default_and_remembered() {
     use egui_kittest::kittest::Queryable;
     let mut h = form_harness();
     h.state_mut().set_option("panel", "none").unwrap();
     h.run_steps(4);
-    assert!(!h.state().views[0].highlight_fields, "off by default");
-    h.get_by_label("Highlight fields").click();
+    assert!(h.state().views[0].highlight_fields, "on by default");
+    h.get_by_label("Hide field highlights").click();
     h.run_steps(4);
-    assert!(h.state().views[0].highlight_fields);
+    assert!(!h.state().views[0].highlight_fields);
     h.state_mut().open_bytes("radios.pdf", None, RADIOS.to_vec()).expect("opens");
     h.run_steps(4);
-    assert!(h.state().views[1].highlight_fields, "the next document opens highlighted");
+    assert!(!h.state().views[1].highlight_fields, "the next document opens plain");
     let saved = h.state().persist();
     let mut next = PdfCraftApp::new();
     next.set_option("language", "en").unwrap();
     next.restore(&saved);
     next.open_bytes("form.pdf", None, FORM.to_vec()).expect("opens");
-    assert!(next.views[0].highlight_fields, "and so does the next session");
+    assert!(!next.views[0].highlight_fields, "and so does the next session");
+}
+
+/// Settings saved before the default changed keep their stored choice; a missing or malformed
+/// value falls back to the default instead of failing.
+#[test]
+fn stored_field_highlight_choice_wins_over_the_default() {
+    for (stored, expected) in [
+        (r#"{"highlight_fields": false}"#, false),
+        (r#"{"highlight_fields": true}"#, true),
+        (r#"{}"#, true),
+        (r#"{"highlight_fields": "no"}"#, true),
+        (r#"{"highlight_fields": null}"#, true),
+    ] {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.restore(stored);
+        app.open_bytes("form.pdf", None, FORM.to_vec()).expect("opens");
+        assert_eq!(app.views[0].highlight_fields, expected, "{stored}");
+    }
 }
 
 #[test]
