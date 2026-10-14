@@ -335,7 +335,7 @@ status = "shipped"
 commands = []
 tools = []
 evidence = ["crates/cos/tests/encryption.rs::qpdf_agrees", "crates/cos/tests/writer.rs::qpdf_accepts_object_stream_output"]
-notes = "skipped when qpdf is absent"
+notes = "qpdf is installed on the Linux CI runner and PDFCRAFT_ORACLES_REQUIRED makes its absence a failure, so these run on every CI run rather than skipping; on a machine without qpdf they skip with a notice (crates/oracle)"
 
 [[feature]]
 id = "core.deterministic-save"

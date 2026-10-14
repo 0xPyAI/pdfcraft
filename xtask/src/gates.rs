@@ -200,9 +200,10 @@ pub fn check(args: &[String]) -> anyhow::Result<()> {
 /// median. Plan target (M2): median ≥ 0.97.
 pub fn text_oracle(args: &[String]) -> anyhow::Result<()> {
     let limit: usize = args.iter().position(|a| a == "--limit").and_then(|i| args.get(i + 1)).and_then(|v| v.parse().ok()).unwrap_or(usize::MAX);
-    if Command::new("pdftotext").arg("-v").output().is_err() {
-        bail!("pdftotext (poppler) not found; install it to run the text oracle (brew install poppler / apt install poppler-utils)");
-    }
+    let pdftotext = match pdfcraft_oracle::pdftotext() {
+        Ok(o) => o,
+        Err(absent) => bail!("{absent}"),
+    };
     run_args(&["build", "--release", "-p", "pdfcraft-cli"])?;
     let corpus = root().join("corpus/pdfjs/test/pdfs");
     let mut files: Vec<PathBuf> =
@@ -213,7 +214,7 @@ pub fn text_oracle(args: &[String]) -> anyhow::Result<()> {
     let mut worst: Vec<(f64, String)> = Vec::new();
     for f in files.iter().take(limit) {
         let ours = run_capture(Command::new(&cli).arg("text").arg(f), 20);
-        let theirs = run_capture(Command::new("pdftotext").arg("-q").arg(f).arg("-"), 20);
+        let theirs = run_capture(pdftotext.command().arg("-q").arg(f).arg("-"), 20);
         let (Some(ours), Some(theirs)) = (ours, theirs) else { continue };
         let (a, b) = (words(&ours), words(&theirs));
         if b.len() < 20 {

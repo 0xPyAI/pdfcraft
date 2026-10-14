@@ -3983,6 +3983,7 @@ dependencies = [
  "hayro-syntax",
  "pdfcraft-crypt",
  "pdfcraft-filters",
+ "pdfcraft-oracle",
  "proptest",
  "serde_json",
  "thiserror 2.0.21",
@@ -4161,12 +4162,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdfcraft-oracle"
+version = "0.8.0"
+
+[[package]]
 name = "pdfcraft-organize"
 version = "0.8.0"
 dependencies = [
  "hayro-syntax",
  "pdfcraft-content",
  "pdfcraft-cos",
+ "pdfcraft-oracle",
  "thiserror 2.0.21",
 ]
 
@@ -7946,6 +7952,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "lopdf",
+ "pdfcraft-oracle",
  "png 0.18.1",
  "serde",
  "serde_json",

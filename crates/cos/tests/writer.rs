@@ -159,18 +159,14 @@ fn classic_table() -> Vec<u8> {
     bytes
 }
 
-fn qpdf_check(bytes: &[u8]) -> Option<std::process::Output> {
-    let Ok(version) = std::process::Command::new("qpdf").arg("--version").output() else {
-        return None;
-    };
-    assert!(version.status.success());
+fn qpdf_check(qpdf: &pdfcraft_oracle::Oracle, bytes: &[u8]) -> std::process::Output {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!("pdfcraft-xref-{}-{n}.pdf", std::process::id()));
     std::fs::write(&path, bytes).unwrap();
-    let check = std::process::Command::new("qpdf").arg("--check").arg(&path).output().unwrap();
+    let check = qpdf.command().arg("--check").arg(&path).output().unwrap();
     let _ = std::fs::remove_file(&path);
-    Some(check)
+    check
 }
 
 fn page(doc: &Document) -> Dict {
@@ -181,10 +177,8 @@ fn page(doc: &Document) -> Dict {
 }
 
 fn assert_qpdf_clean(bytes: &[u8]) {
-    let Some(check) = qpdf_check(bytes) else {
-        eprintln!("qpdf not installed: skipped");
-        return;
-    };
+    let qpdf = pdfcraft_oracle::or_skip!(pdfcraft_oracle::qpdf());
+    let check = qpdf_check(&qpdf, bytes);
     let report = format!("{}{}", String::from_utf8_lossy(&check.stdout), String::from_utf8_lossy(&check.stderr));
     assert!(check.status.success() && !report.contains("WARNING"), "{report}");
 }
@@ -247,16 +241,12 @@ fn incremental_save_keeps_a_trailer_only_edit() {
 
 #[test]
 fn qpdf_accepts_object_stream_output() {
-    let Ok(out) = std::process::Command::new("qpdf").arg("--version").output() else {
-        eprintln!("qpdf not installed: skipped");
-        return;
-    };
-    assert!(out.status.success());
+    let qpdf = pdfcraft_oracle::or_skip!(pdfcraft_oracle::qpdf());
     let doc = Document::open(Arc::new(fixture())).unwrap();
     let packed = write_full(&doc, &SaveOptions::default()).unwrap();
     let path = std::env::temp_dir().join(format!("pdfcraft-objstm-{}.pdf", std::process::id()));
     std::fs::write(&path, &packed).unwrap();
-    let check = std::process::Command::new("qpdf").arg("--check").arg(&path).output().unwrap();
+    let check = qpdf.command().arg("--check").arg(&path).output().unwrap();
     let _ = std::fs::remove_file(&path);
     let report = String::from_utf8_lossy(&check.stdout);
     assert!(check.status.success() && report.contains("No syntax or stream encoding errors"), "{report}");

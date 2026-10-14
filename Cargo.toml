@@ -34,6 +34,7 @@ pdfcraft-xfdf = { path = "crates/xfdf", version = "0.8.0" }
 pdfcraft-sign = { path = "crates/sign", version = "0.8.0" }
 pdfcraft-optimize = { path = "crates/optimize", version = "0.8.0" }
 pdfcraft-a11y = { path = "crates/a11y", version = "0.8.0" }
+pdfcraft-oracle = { path = "crates/oracle", version = "0.8.0" }
 pdfcraft-ocr = { path = "crates/ocr", version = "0.8.0" }
 pdfcraft-js = { path = "crates/js", version = "0.8.0" }
 pdfcraft-compare = { path = "crates/compare", version = "0.8.0" }

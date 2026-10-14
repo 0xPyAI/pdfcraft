@@ -202,24 +202,23 @@ fn unencrypted_metadata_is_left_readable() {
     let _ = ObjRef::new(1, 0);
 }
 
-/// Second independent oracle when qpdf is installed: it must accept both passwords, identify
-/// the owner password, and find no structural errors.
+/// The second independent oracle: qpdf must accept both passwords, identify the owner password,
+/// and find no structural errors. For R2-R4 this is the *only* check of owner-password
+/// authentication (Algorithm 7) that does not go through our own code, so it is the one place a
+/// silent skip would cost the most -- see `pdfcraft-oracle`, which makes absence loud.
 #[test]
 fn qpdf_agrees() {
-    if std::process::Command::new("qpdf").arg("--version").output().is_err() {
-        eprintln!("qpdf not installed; skipping");
-        return;
-    }
+    let qpdf = pdfcraft_oracle::or_skip!(pdfcraft_oracle::qpdf());
     let dir = std::env::temp_dir().join(format!("pdfcraft-enc-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     for alg in ALL {
         let path = dir.join(format!("{alg:?}.pdf"));
         std::fs::write(&path, protect(alg, "user", "owner", -1)).unwrap();
         for (pw, expect) in [("user", "user password"), ("owner", "owner password")] {
-            let out = std::process::Command::new("qpdf").arg(format!("--password={pw}")).arg("--show-encryption").arg(&path).output().unwrap();
+            let out = qpdf.command().arg(format!("--password={pw}")).arg("--show-encryption").arg(&path).output().unwrap();
             let text = String::from_utf8_lossy(&out.stdout);
             assert!(text.contains(&format!("Supplied password is {expect}")), "{alg:?}/{pw}: {text}");
-            let check = std::process::Command::new("qpdf").arg(format!("--password={pw}")).arg("--check").arg(&path).output().unwrap();
+            let check = qpdf.command().arg(format!("--password={pw}")).arg("--check").arg(&path).output().unwrap();
             assert!(check.status.success(), "{alg:?}/{pw}: {}", String::from_utf8_lossy(&check.stdout));
         }
     }
