@@ -524,6 +524,44 @@ fn an_in_place_save_reports_a_required_rewrite_as_not_incremental() {
     }
 }
 
+/// Issue #1698: a save whose bytes don't reopen is refused before it touches the file. The
+/// catalog's `/Pages` is not a page tree, so the reader finds the page by scanning, while a
+/// full rewrite keeps only what the catalog reaches and drops it.
+#[test]
+fn a_save_that_does_not_reopen_leaves_the_file_as_it_was() {
+    let dir = workdir("save-verify-before-write");
+    let objs: [&[u8]; 4] = [
+        b"<< /Type /Catalog /Pages 3 0 R >>",
+        b"<< /Type /Page /MediaBox [0 0 200 300] /Contents 4 0 R >>",
+        b"[ 0 ]",
+        b"<< /Length 18 >>\nstream\n0 0 m 100 100 l S\nendstream",
+    ];
+    let mut original = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(original.len());
+        original.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        original.extend_from_slice(o);
+        original.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = original.len();
+    original.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
+    for o in offsets {
+        original.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    original.extend_from_slice(format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
+    std::fs::write(dir.join("damaged.pdf"), &original).unwrap();
+
+    let mut a = auto(&dir);
+    let opened = ok(&mut a, "doc_open", json!({ "path": "damaged.pdf" }));
+    assert_eq!(opened["pages"], 1, "{opened}");
+    let doc = opened["doc"].as_u64().unwrap();
+    let e = err(&mut a, "doc_save", json!({ "doc": doc, "full": true }));
+    assert!(e.to_string().contains("could not be reopened"), "{e}");
+    let on_disk = std::fs::read(dir.join("damaged.pdf")).unwrap();
+    assert!(on_disk == original, "the file was replaced by {} bytes that don't reopen", on_disk.len());
+}
+
 /// organize.field-name-conflicts: combining files whose forms share a field name keeps the
 /// fields separate by renaming, says so in the result, and can be told to merge instead; any
 /// other policy is an argument error.
