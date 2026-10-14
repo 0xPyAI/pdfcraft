@@ -34,6 +34,13 @@ const SKIP_ON_ANNOT: &[&[u8]] = &[b"StructParent", b"P"];
 /// objects, each shallow enough for the parser, would otherwise exhaust the stack (#1800).
 const MAX_COPY_DEPTH: usize = 256;
 
+/// Keys that stay on the widget when a combined field/widget is split (#1810): the annotation's
+/// appearance, placement and page. Field state (name, value, flags, default appearance) moves to
+/// the new parent field, where the widgets inherit it.
+const WIDGET_KEYS: &[&[u8]] = &[
+    b"Type", b"Subtype", b"Rect", b"P", b"AP", b"AS", b"MK", b"BS", b"Border", b"C", b"CA", b"F", b"H", b"R", b"NM", b"M", b"StructParent", b"StructParents", b"OC", b"Tabs",
+];
+
 struct Copier<'a> {
     src: &'a Document,
     /// Current recursion depth, bounded by [`MAX_COPY_DEPTH`].
@@ -393,27 +400,32 @@ fn import_pages_mapped(
                         let r = dst.add(Object::Null);
                         let c = copier.copy_value(dst, &resolved, Some(r))?;
                         dst.set(r, c);
-                        // `/Kids` may be an array object of its own: add to it there, so the
-                        // field keeps its other widgets.
-                        match dst.get(copied).as_dict().and_then(|f| f.get(b"Kids").cloned()) {
-                            Some(Object::Ref(list)) => {
-                                let mut kids = dst.get(list).as_array().cloned().unwrap_or_default();
-                                kids.push(Object::Ref(r));
-                                dst.set(list, Object::Array(kids));
-                            }
-                            _ => dst.update_dict(copied, |f| {
-                                let mut kids = f.get(b"Kids").and_then(|k| k.as_array()).cloned().unwrap_or_default();
-                                kids.push(Object::Ref(r));
-                                f.set(b"Kids".to_vec(), Object::Array(kids));
-                            })?,
-                        }
+                        add_kid(dst, copied, r)?;
                         annot_pages.insert(r, new);
                         out.push(Object::Ref(r));
                         continue;
                     }
-                    // A widget that is its own field (no parent to hang a second widget on) stays
-                    // the one object, shown on both pages, so the field stays one.
+                    // A widget that is its own field (no parent to hang a second widget on): on
+                    // its first copy it is split into a parent field and a widget child (#1810);
+                    // every later copy of the page gets one more widget child of that field, so
+                    // the pages no longer share one widget whose `/P` names only the last page.
                     let own_field = resolved.as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Widget") && !d.contains(b"Parent"));
+                    if own_field
+                        && let Some(first) = a.as_ref().and_then(|r| copier.map.get(&r).copied())
+                        && let Some(parent) = dst.get(first).as_dict().and_then(|d| d.reference(b"Parent"))
+                    {
+                        let r = dst.add(Object::Null);
+                        let c = copier.copy_value(dst, &resolved, Some(r))?;
+                        let Object::Dict(mut d) = c else { continue };
+                        d.set(b"Parent".to_vec(), Object::Ref(parent));
+                        // The new widget is not a field root of its own.
+                        copier.fields.retain(|f| *f != r);
+                        dst.set(r, Object::Dict(d));
+                        add_kid(dst, parent, r)?;
+                        annot_pages.insert(r, new);
+                        out.push(Object::Ref(r));
+                        continue;
+                    }
                     let annots = if own_field { &mut copier } else { own.as_mut().unwrap_or(&mut copier) };
                     // Direct (inline) annotation dictionaries become indirect objects, so every
                     // copied annotation can be fixed up the same way.
@@ -427,6 +439,9 @@ fn import_pages_mapped(
                         }
                         _ => continue,
                     };
+                    if own_field && copier.fields.contains(&r) {
+                        split_own_field(dst, &mut copier.fields, r);
+                    }
                     annot_pages.insert(r, new);
                     out.push(Object::Ref(r));
                 }
@@ -803,6 +818,49 @@ fn qualified(prefix: &str, name: &str) -> String {
 /// The prefix a node's children hang under: its own name, when it has one.
 fn qualified_optional(prefix: &str, name: &str) -> String {
     if name.is_empty() { prefix.to_string() } else { qualified(prefix, name) }
+}
+
+/// Add `kid` to `field`'s `/Kids`, in the array object itself when `/Kids` is one, so the field
+/// keeps its other widgets.
+fn add_kid(dst: &mut Document, field: ObjRef, kid: ObjRef) -> Result<(), OrganizeError> {
+    match dst.get(field).as_dict().and_then(|f| f.get(b"Kids").cloned()) {
+        Some(Object::Ref(list)) => {
+            let mut kids = dst.get(list).as_array().cloned().unwrap_or_default();
+            kids.push(Object::Ref(kid));
+            dst.set(list, Object::Array(kids));
+        }
+        _ => dst.update_dict(field, |f| {
+            let mut kids = f.get(b"Kids").and_then(|k| k.as_array()).cloned().unwrap_or_default();
+            kids.push(Object::Ref(kid));
+            f.set(b"Kids".to_vec(), Object::Array(kids));
+        })?,
+    }
+    Ok(())
+}
+
+/// PdfCraft patch (#1810): split a widget that doubles as its own field into a parent field
+/// holding the field keys (name, value, flags…) and a widget child holding the annotation keys
+/// (rectangle, appearance, page). The parent takes the widget's place among the top-level fields;
+/// later copies of the page add widget children of it, so every page has its own widget and the
+/// field stays one.
+fn split_own_field(dst: &mut Document, fields: &mut [ObjRef], widget: ObjRef) {
+    let Some(d) = dst.get(widget).as_dict().cloned() else { return };
+    let (mut field, mut child) = (Dict::new(), Dict::new());
+    for (k, v) in d.iter() {
+        if WIDGET_KEYS.contains(&k.as_slice()) {
+            child.set(k.clone(), v.clone());
+        } else {
+            field.set(k.clone(), v.clone());
+        }
+    }
+    let parent = dst.add(Object::Null);
+    field.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(widget)]));
+    child.set(b"Parent".to_vec(), Object::Ref(parent));
+    dst.set(parent, Object::Dict(field));
+    dst.set(widget, Object::Dict(child));
+    if let Some(entry) = fields.iter_mut().find(|f| **f == widget) {
+        *entry = parent;
+    }
 }
 
 /// Add top-level fields to the destination's `/AcroForm /Fields` (creating the form if needed).
