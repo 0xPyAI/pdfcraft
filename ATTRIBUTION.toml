@@ -272,7 +272,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Korean UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "b570144be1a0296fa4a95648611709641420efbff44de7845344c1cbe2c37004"
+sha256 = "c59ead567704ee3840c7da88fa06edf3b7315c6609eb2038384001c7ad0c1054"
 
 [[asset]]
 path = "assets/icons/accessibility.svg"

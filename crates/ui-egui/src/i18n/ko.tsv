@@ -182,7 +182,7 @@
 	Replace text	텍스트 바꾸기
 	Attach a file	파일 첨부
 	Erase drawings	그림 지우기
-	Flatten comments	주석 병합
+	Flatten comments	주석 평탄화
 	Import comments…	주석 가져오기…
 	Add a stamp	스탬프 추가
 	Export all comments to data file…	모든 주석을 데이터 파일로 내보내기…
@@ -763,7 +763,7 @@
 	No problems found: the document conforms to {level}.	발견된 문제가 없습니다. 문서가 {level}을(를) 준수합니다.
 	 (page {p})	 (페이지 {p})
 	  · not fixable here	 · 여기서는 수정할 수 없음
-	Verify	확인
+	Verify	검증
 	Box	박스
 	Units	단위
 	Set to zero	0으로 설정
@@ -918,7 +918,7 @@
 	Set document title	문서 제목 설정
 	Run a JavaScript	JavaScript 실행
 	Prepare for Distribution	배포 준비
-	Remove hidden information and flatten comments and form fields, so recipients see only the pages.	숨겨진 정보를 제거하고 주석과 양식 필드를 병합하여 받는 사람이 페이지만 보도록 합니다.
+	Remove hidden information and flatten comments and form fields, so recipients see only the pages.	숨겨진 정보를 제거하고 주석과 양식 필드를 평탄화하여 받는 사람이 페이지만 보도록 합니다.
 	Optimize Scanned Documents	스캔한 문서 최적화
 	Make scans searchable, then make them smaller.	스캔본을 검색 가능하게 만든 다음 크기를 줄입니다.
 	Add Page Numbers	페이지 번호 추가
@@ -986,7 +986,7 @@
 	Check again	다시 검사
 	Report	보고서
 	Show the accessibility report	접근성 보고서 표시
-	Collapse	축소
+	Collapse	접기
 	Expand	확장
 	{rule} - {status}	{rule} - {status}
 	Passed	통과
@@ -1140,9 +1140,9 @@
 	Links, actions and JavaScripts	링크, 동작, JavaScript
 	Private data of other applications	다른 응용 프로그램의 개인 데이터
 	None found	발견된 항목 없음
-	Form fields are flattened: their values stay visible. Saving rewrites the whole file.	양식 필드가 병합되어 값은 계속 표시됩니다. 저장하면 파일 전체가 다시 쓰여집니다.
+	Form fields are flattened: their values stay visible. Saving rewrites the whole file.	양식 필드가 평탄화되어 값은 계속 표시됩니다. 저장하면 파일 전체가 다시 쓰여집니다.
 	Remove	제거
-	Sanitizing removes hidden information from the document: metadata, file attachments, comments, form fields (flattened), hidden text and layers, bookmarks, links, actions and scripts, and private application data.	정리는 문서에서 숨겨진 정보를 제거합니다: 메타데이터, 파일 첨부, 주석, 양식 필드(병합됨), 숨겨진 텍스트와 레이어, 책갈피, 링크, 동작과 스크립트, 응용 프로그램 개인 데이터 등입니다.
+	Sanitizing removes hidden information from the document: metadata, file attachments, comments, form fields (flattened), hidden text and layers, bookmarks, links, actions and scripts, and private application data.	정리는 문서에서 숨겨진 정보를 제거합니다: 메타데이터, 파일 첨부, 주석, 양식 필드(평탄화됨), 숨겨진 텍스트와 레이어, 책갈피, 링크, 동작과 스크립트, 응용 프로그램 개인 데이터 등입니다.
 	Save the document afterwards; saving rewrites the whole file so nothing removed stays in it.	그 후 문서를 저장하세요. 저장하면 파일 전체가 다시 쓰여져 제거된 항목이 남지 않습니다.
 	Printer:	프린터:
 	Save as PDF	PDF로 저장
@@ -1203,8 +1203,8 @@
 	Removed 1 hidden item. Save to remove them from the file.	숨겨진 항목 1개를 제거했습니다. 파일에서 완전히 제거하려면 저장하세요.
 	Removed {n} hidden items. Save to remove them from the file.	숨겨진 항목 {n}개를 제거했습니다. 파일에서 완전히 제거하려면 저장하세요.
 	Document sanitized. Save to finish: saving rewrites the whole file.	문서가 정리되었습니다. 완료하려면 저장하세요: 저장하면 파일 전체가 다시 작성됩니다.
-	Applied 1 redaction mark. Save to remove the content from the file.	수정 표시 1개가 적용되었습니다. 파일에서 콘텐츠를 제거하려면 저장하세요.
-	Applied {n} redaction marks. Save to remove the content from the file.	수정 표시 {n}개가 적용되었습니다. 파일에서 콘텐츠를 제거하려면 저장하세요.
+	Applied 1 redaction mark. Save to remove the content from the file.	제거 대상 표시 1개가 적용되었습니다. 파일에서 콘텐츠를 제거하려면 저장하세요.
+	Applied {n} redaction marks. Save to remove the content from the file.	제거 대상 표시 {n}개가 적용되었습니다. 파일에서 콘텐츠를 제거하려면 저장하세요.
 	JavaScript Console	JavaScript 콘솔
 	JavaScript is turned off (Preferences ▸ JavaScript).	JavaScript가 꺼져 있습니다(기본 설정 ▸ JavaScript).
 	Output appears here.	출력이 여기에 표시됩니다.
@@ -1706,9 +1706,9 @@
 	Nothing to undo	취소할 작업이 없습니다
 	Nothing to redo	다시 실행할 작업이 없습니다
 	This document has no form fields you can fill in	이 문서에는 채울 수 있는 양식 필드가 없습니다
-	This document has no comments to flatten	이 문서에는 평면화할 주석이 없습니다
-	This document has no form fields to flatten	이 문서에는 평면화할 양식 필드가 없습니다
-	There are no redaction marks (mark text, areas or pages first)	수정 표시가 없습니다(먼저 텍스트, 영역 또는 페이지를 표시하세요)
+	This document has no comments to flatten	이 문서에는 평탄화할 주석이 없습니다
+	This document has no form fields to flatten	이 문서에는 평탄화할 양식 필드가 없습니다
+	There are no redaction marks (mark text, areas or pages first)	제거 대상 표시가 없습니다(먼저 텍스트, 영역 또는 페이지를 표시하세요)
 	This document has no {kind} to change	이 문서에는 변경할 {kind}이(가) 없습니다
 	header or footer	머리글 또는 바닥글
 	watermark	워터마크
@@ -1726,7 +1726,7 @@
 	Security will be removed when you save	저장할 때 보안이 제거됩니다
 	Click text or an image to edit it	텍스트나 이미지를 클릭하여 편집하세요
 	Drag a rectangle to create a link; double-click a link to edit it	드래그하여 사각형을 그려 링크를 만들고, 링크를 두 번 클릭하여 편집하세요
-	There are no redaction marks to apply	적용할 수정 표시가 없습니다
+	There are no redaction marks to apply	적용할 제거 대상 표시가 없습니다
 	Drag to draw the area where the signature should appear.	서명이 표시될 영역을 드래그하여 그리세요.
 	Couldn't fit the visible content: {e}	보이는 콘텐츠를 맞출 수 없습니다: {e}
 	Drag a rectangle around the area to copy	복사할 영역 주위에 사각형을 드래그하세요
@@ -1910,7 +1910,7 @@
 	Change link properties	링크 속성 변경
 	Delete link	링크 삭제
 	Create link	링크 만들기
-	Flatten	병합
+	Flatten	평탄화
 	Add sticky note	스티커 메모 추가
 	Add highlight	형광펜 추가
 	Add underline	밑줄 추가
@@ -2165,7 +2165,7 @@ calendar date	December	12월
 	Larger pages	더 큰 페이지
 	Smaller pages	더 작은 페이지
 	Reset page size	페이지 크기 재설정
-	Flatten Fill & Sign when saving	저장 시 입력 내용과 서명을 페이지에 고정
+	Flatten Fill & Sign when saving	저장 시 채우기 및 서명 평탄화
 	Text, marks and signatures become part of the page. Other comments stay editable.	텍스트, 표시 및 서명이 페이지의 일부가 됩니다. 다른 주석은 계속 편집할 수 있습니다.
 	Date format	날짜 형식
 	Fill & Sign dates	채우기 및 서명 날짜
@@ -2407,7 +2407,7 @@ animation effects	Off	끄기
 	Every PDF in the folder and the folders inside it	폴더와 그 안의 폴더에 있는 모든 PDF
 	Field "{}" on page {p} has no description (tooltip)	{p}페이지의 필드 "{}"에 설명(도구 설명)이 없습니다
 	Filename	파일 이름
-	Flatten Fill & Sign	채우기 및 서명 병합
+	Flatten Fill & Sign	채우기 및 서명 평탄화
 	Font (unnamed) on page {p} doesn't map its characters to Unicode	{p}페이지의 글꼴(이름 없음)이 문자를 유니코드에 매핑하지 않습니다
 	Font {} on page {p} doesn't map its characters to Unicode	{p}페이지의 글꼴 {}이(가) 문자를 유니코드에 매핑하지 않습니다
 	Form field on page {p} isn't tagged	{p}페이지의 양식 필드에 태그가 없습니다
