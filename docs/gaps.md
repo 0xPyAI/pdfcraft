@@ -212,10 +212,25 @@ update the numbers.
   signature validation against Acrobat on synthetic fixtures; an interop suite that opens every
   kind of output we write (encrypted ones above all, after #774) in pdf.js, MuPDF and Poppler as
   oracle processes.
-- **Evidence:** none exists; only text extraction has an oracle (word-F1 0.98 against `pdftotext`).
-  Acrobat captures must stay local in `plan/acrobat/` (clean-room, `AGENTS.md` §1.1).
-- **Impact:** until it exists, every quality number here is a judgement.
-- **Estimate:** counted in gap 2 (≈ 20–30 h of it). **Doc:** [target-app-parity.md](target-app-parity.md).
+- **Progress (2026-10-14):** rendering now has an oracle too. `cargo xtask render-oracle` compares
+  page 1 of every corpus file against Poppler's `pdftoppm` and reports a disagreement rate: the
+  share of pixels with no near match in the other renderer's 3×3 neighbourhood, which forgives
+  antialiasing and subpixel placement but not missing or wrong content (`crates/oracle`, module
+  `pixels`). **First reading, 250 files at 72 dpi, tolerance 8: 229 compared, median 0.89%, mean
+  2.16%, p90 5.35%, 25 within 0.1%.** It reports rather than gates — the corpus is not fetched on
+  CI, and a first reading of a borrowed renderer is a baseline to improve on, not a bar to clear.
+  The worst results cluster on JBIG2 `bitmap-*` files (`hayro-jbig2` carries 3 local patches) and
+  on ZapfDingbats, which points the renderer work at something specific for the first time.
+- **Evidence:** text extraction (word-F1 0.98 against `pdftotext`) and now rendering (above); qpdf
+  checks written output on every CI run since `PDFCRAFT_ORACLES_REQUIRED`. Acrobat captures must
+  stay local in `plan/acrobat/` (clean-room, `AGENTS.md` §1.1).
+- **Still missing:** Acrobat itself as the reference rather than other open renderers; form
+  calculation and signature validation; the interop suite that opens every kind of output we write
+  (encrypted ones above all, after #774) in pdf.js and MuPDF; and 15 of those 250 files could not
+  be compared at all because the two renderers round the page box to different pixel sizes.
+- **Impact:** until it is complete, quality numbers outside rendering and text are judgements.
+- **Estimate:** counted in gap 2 (≈ 20–30 h of it; roughly a third done).
+  **Doc:** [target-app-parity.md](target-app-parity.md).
 
 ### 13. Performance budgets and lazy loading of very large files
 

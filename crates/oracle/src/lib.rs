@@ -23,6 +23,8 @@
 //! This crate is test scaffolding (`Class::Testkit` in `xtask/src/layers.rs`): a dev-dependency
 //! only, never compiled into the product.
 
+pub mod pixels;
+
 use std::fmt;
 use std::process::Command;
 

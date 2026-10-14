@@ -62,9 +62,28 @@ test result: FAILED. 1 failed
 `or_skip!` expands to a `return`, so it belongs in a test returning `()`; a test returning `Result`
 should match on the probe directly.
 
+## Comparing pixels (`pixels`)
+
+Rendering needs more than "did the tool run". A raw pixel-for-pixel difference is useless here:
+two correct renderers disagree on every glyph edge, so a strict comparison calls a perfect page
+badly wrong and tells you nothing about whether a shading is missing.
+
+`pixels::compare` counts a pixel as differing only when it differs from **every** pixel in the
+other image's 3x3 neighbourhood by more than a tolerance. A one-pixel shift or a differently
+weighted edge finds a near match next door and is forgiven; a glyph that is not there, or a region
+painted the wrong colour, has no near match and is counted. The test runs in both directions and
+reports the worse result, so neither argument order flatters the blurrier renderer.
+
+`decode_pgm` reads what `pdftoppm -gray` writes; `decode_pam_gray` reads what
+`pdfcraft-cli render --out x.pam` writes, compositing premultiplied alpha over white first so a
+transparent margin is not scored as black.
+
+`cargo xtask render-oracle` drives it over the corpus. It reports; it does not gate.
+
 ## Still to do
 
-- CI installs only `qpdf`, the one tool the test job uses. The Poppler pixel comparison in
-  `crates/organize` stays `#[ignore]`d until a change turns it on and verifies it there.
+- Acrobat itself as the reference, rather than other open renderers.
 - Oracles that are not external processes (hayro, `lopdf`) are ordinary dev-dependencies and are
   not routed through this crate.
+- Two renderers sometimes round the same page box to different pixel sizes, and those files are
+  counted as unmeasurable rather than compared.
