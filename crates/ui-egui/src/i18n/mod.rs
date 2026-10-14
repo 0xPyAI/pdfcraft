@@ -147,7 +147,7 @@ fn plural_sl(n: u64) -> usize {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 23] = [
+pub static LANGUAGES: [LangInfo; 24] = [
     LangInfo { code: "en", name: "English", source: "", plural: plural_one_other, rtl: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Simplified Chinese; `zh`, `zh-CN`, `zh-SG` and `zh-Hans-*` locales resolve here (see `candidates`).
@@ -210,6 +210,8 @@ pub static LANGUAGES: [LangInfo; 23] = [
     // Vietnamese; every `vi-*` locale (`vi-VN`, `vi_VN.UTF-8`) resolves here. CLDR `vi` counts have
     // one form ("other"), so `@plural` entries list a single form.
     LangInfo { code: "vi", name: "Tiếng Việt", source: include_str!("vi.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
+    // Thai; every `th-*` locale (`th-TH`, `th_TH.UTF-8`) resolves here. No grammatical plural.
+    LangInfo { code: "th", name: "ไทย", source: include_str!("th.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
