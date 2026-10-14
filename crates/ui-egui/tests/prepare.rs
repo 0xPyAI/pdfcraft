@@ -194,6 +194,20 @@ fn appearance_tab_restyles_the_field() {
 }
 
 #[test]
+fn appearance_tab_keeps_auto_font_size() {
+    let mut h = harness();
+    h.state_mut().execute("form.prepare");
+    h.run_steps(2);
+    h.state_mut().open_field_props("city", 0);
+    h.run_steps(2);
+    h.get_by_label("Appearance").click();
+    h.run_steps(2);
+    h.state_mut().field_props.as_mut().unwrap().font_size = 0.0;
+    h.run_steps(3);
+    assert_eq!(h.state().field_props.as_ref().unwrap().font_size, 0.0, "Auto (0) must survive a frame");
+}
+
+#[test]
 fn position_tab_rotates_a_field() {
     let mut h = harness();
     h.state_mut().open_field_props("city", 0);
