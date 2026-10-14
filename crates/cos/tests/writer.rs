@@ -4,34 +4,23 @@
 use std::sync::Arc;
 
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, SaveOptions, Stream, write_full, write_incremental};
+use pdfcraft_testkit::Pdf;
 
 /// Four pages, a shared font, document info with a non-ASCII title.
 fn fixture() -> Vec<u8> {
-    let mut objs: Vec<String> = vec!["<< /Type /Catalog /Pages 2 0 R >>".into()];
     let kids: Vec<String> = (0..4).map(|i| format!("{} 0 R", 4 + 2 * i)).collect();
-    objs.push(format!("<< /Type /Pages /Kids [{}] /Count 4 /MediaBox [0 0 200 300] >>", kids.join(" ")));
-    objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into());
+    let mut pdf = Pdf::new()
+        .version("1.4")
+        .obj("<< /Type /Catalog /Pages 2 0 R >>")
+        .obj(format!("<< /Type /Pages /Kids [{}] /Count 4 /MediaBox [0 0 200 300] >>", kids.join(" ")))
+        .obj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
     for i in 0..4 {
-        objs.push(format!("<< /Type /Page /Parent 2 0 R /Contents {} 0 R /Resources << /Font << /F1 3 0 R >> >> >>", 5 + 2 * i));
-        let body = format!("BT /F1 24 Tf 20 150 Td (Page {}) Tj ET", i + 1);
-        objs.push(format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()));
+        pdf = pdf
+            .obj(format!("<< /Type /Page /Parent 2 0 R /Contents {} 0 R /Resources << /Font << /F1 3 0 R >> >> >>", 5 + 2 * i))
+            .stream("", format!("BT /F1 24 Tf 20 150 Td (Page {}) Tj ET", i + 1));
     }
-    objs.push("<< /Title (Caf\\351 \\(draft\\)) >>".into());
-    let mut out = b"%PDF-1.4\n".to_vec();
-    let mut offsets = Vec::new();
-    for (i, o) in objs.iter().enumerate() {
-        offsets.push(out.len());
-        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
-    }
-    let xref = out.len();
-    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
-    for o in offsets {
-        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
-    }
-    out.extend_from_slice(
-        format!("trailer\n<< /Size {} /Root 1 0 R /Info {} 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1, objs.len()).as_bytes(),
-    );
-    out
+    let info = pdf.next_obj();
+    pdf.obj("<< /Title (Caf\\351 \\(draft\\)) >>").trailer_entry(&format!("/Info {info} 0 R")).build()
 }
 
 fn title(doc: &Document) -> Vec<u8> {

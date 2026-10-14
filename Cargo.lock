@@ -3984,6 +3984,7 @@ dependencies = [
  "pdfcraft-crypt",
  "pdfcraft-filters",
  "pdfcraft-oracle",
+ "pdfcraft-testkit",
  "proptest",
  "serde_json",
  "thiserror 2.0.21",
@@ -4127,6 +4128,7 @@ dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
  "pdfcraft-model",
+ "pdfcraft-testkit",
  "serde",
  "thiserror 2.0.21",
 ]
@@ -4215,6 +4217,7 @@ dependencies = [
  "pdfcraft-fonts",
  "pdfcraft-forms",
  "pdfcraft-model",
+ "pdfcraft-testkit",
  "thiserror 2.0.21",
 ]
 
@@ -4270,6 +4273,10 @@ dependencies = [
  "sha3",
  "thiserror 2.0.21",
 ]
+
+[[package]]
+name = "pdfcraft-testkit"
+version = "0.8.0"
 
 [[package]]
 name = "pdfcraft-ui-egui"
