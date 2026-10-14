@@ -32,6 +32,12 @@ Each source page becomes a Form XObject (its content wrapped in q/Q, plus the pr
 annotations); sheets place them with a clip. The result is a fresh, unencrypted,
 garbage-collected file (callers check the print permission).
 
+The GUI Print dialog remembers its last selected paper size across application sessions,
+including when Print is cancelled. The preference stores a canonical name such as `A4`;
+unrecognized saved values retain the current selection (US Letter on a fresh app).
+This change does not alter persistence of other print preferences.
+Headless `doc_print` defaults are unchanged.
+
 `spool` delegates discovery, driver options, preferences and submission to
 [`craft-print`](https://github.com/storytold/craft-libs/tree/main/crates/print).
 PdfCraft retains page selection, imposition, annotations and print-permission checks.

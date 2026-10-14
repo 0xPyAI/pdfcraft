@@ -7912,8 +7912,8 @@ milestone = "M10"
 status = "shipped"
 commands = ["print.dialog"]
 tools = ["doc_print", "printers"]
-evidence = ["crates/ui-egui/tests/print.rs::print_dialog_lays_out_sheets_and_saves_a_pdf", "crates/engine/src/tests.rs::printing_lays_out_sheets_that_render", "crates/ui-egui/src/web_print.rs::a_job_draws_every_sheet_at_its_planned_resolution_then_builds_the_page", "crates/ui-egui/src/web_print.rs::the_print_page_turns_sideways_sheets_names_other_sizes_and_ends_without_a_blank_page"]
-notes = "⌘P; settings and live sheet preview; on the web the same dialog prints through the browser's print dialog"
+evidence = ["crates/ui-egui/tests/print.rs::paper_choice_survives_cancel_and_settings_restore", "crates/ui-egui/tests/print.rs::restored_paper_keeps_preview_and_saved_sheet_dimensions", "crates/ui-egui/tests/print.rs::print_dialog_lays_out_sheets_and_saves_a_pdf", "crates/engine/src/tests.rs::printing_lays_out_sheets_that_render", "crates/ui-egui/src/web_print.rs::a_job_draws_every_sheet_at_its_planned_resolution_then_builds_the_page", "crates/ui-egui/src/web_print.rs::the_print_page_turns_sideways_sheets_names_other_sizes_and_ends_without_a_blank_page"]
+notes = "⌘P; settings and live sheet preview; on the web the same dialog prints through the browser's print dialog; last paper selection, including cancelled Print dialogs, persists by canonical name; this change does not alter persistence of other print preferences"
 
 [[feature]]
 id = "print.printer-selection"
