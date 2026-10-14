@@ -212,7 +212,16 @@ pub fn text_oracle(args: &[String]) -> anyhow::Result<()> {
     let cli = release_cli();
     let mut scores = Vec::new();
     let mut worst: Vec<(f64, String)> = Vec::new();
+    let mut not_permitted = 0usize;
     for f in files.iter().take(limit) {
+        // A document may forbid copying its text, and we honour that: `pdfcraft-cli text` refuses
+        // and says how to override it with the owner password. pdftotext ignores the flag and
+        // extracts anyway, so scoring us against it there measures obedience, not quality --
+        // bug1815476.pdf scored 0.000 for behaving correctly on a page we render perfectly.
+        if !copying_allowed(f) {
+            not_permitted = not_permitted.saturating_add(1);
+            continue;
+        }
         let ours = run_capture(Command::new(&cli).arg("text").arg(f), 20);
         let theirs = run_capture(pdftotext.command().arg("-q").arg(f).arg("-"), 20);
         let (Some(ours), Some(theirs)) = (ours, theirs) else { continue };
@@ -232,6 +241,9 @@ pub fn text_oracle(args: &[String]) -> anyhow::Result<()> {
     let median = scores[scores.len() / 2];
     let mean = scores.iter().sum::<f64>() / scores.len() as f64;
     println!("text oracle: {} files with text; median F1 {:.3}, mean {:.3}, p10 {:.3}", scores.len(), median, mean, scores[scores.len() / 10]);
+    if not_permitted > 0 {
+        println!("  {not_permitted} skipped: the document forbids copying its text, which we honour and pdftotext does not");
+    }
     println!("lowest:");
     for (s, n) in worst.iter().take(12) {
         println!("  {s:.3}  {n}");
@@ -348,6 +360,17 @@ pub fn render_oracle(args: &[String]) -> anyhow::Result<()> {
         println!("  {score:6.2}%  {name}");
     }
     Ok(())
+}
+
+/// Whether the document lets its text be copied.
+///
+/// `true` when it is unencrypted, when the flag is set, and when the file cannot be opened at all
+/// — a file we cannot read is a different problem, and silently dropping it from the comparison
+/// would hide it.
+fn copying_allowed(path: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(path) else { return true };
+    let Ok(doc) = pdfcraft_cos::Document::open(std::sync::Arc::new(bytes)) else { return true };
+    doc.permissions().is_none_or(|p| p.copy())
 }
 
 /// The value after `name` on the command line, parsed, or `None` when it is absent or malformed.
