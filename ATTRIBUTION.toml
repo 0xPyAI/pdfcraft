@@ -232,6 +232,17 @@ sha256 = "7fa70f68a9fa24d0b1cac05fe3aaabaeaca9750c57416124bd317a4eda806d5a"
 
 
 [[asset]]
+path = "crates/ui-egui/src/i18n/fi.tsv"
+title = "Finnish interface translation catalog"
+author = "PdfCraft contributors"
+source = "Contributor-original: AI-assisted (Claude Code) clean-room translations of PdfCraft's English UI labels and user-facing messages; not yet proofread by a native Finnish speaker"
+licence = "MIT OR Apache-2.0"
+licence_file = "LICENSE-MIT"
+kind = "translation"
+usage = "Finnish UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
+sha256 = "01e5422ceb5fb7dd8bd23d6da93ce5210357589ceec6e4cf1725c56da13d1a98"
+
+[[asset]]
 path = "assets/icons/accessibility.svg"
 title = "Lucide icon \"accessibility\""
 author = "Lucide Contributors (portions Cole Bemis, Feather)"

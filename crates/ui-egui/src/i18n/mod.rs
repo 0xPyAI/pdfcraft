@@ -147,7 +147,7 @@ fn plural_sl(n: u64) -> usize {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 23] = [
+pub static LANGUAGES: [LangInfo; 24] = [
     LangInfo { code: "en", name: "English", source: "", plural: plural_one_other, rtl: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Simplified Chinese; `zh`, `zh-CN`, `zh-SG` and `zh-Hans-*` locales resolve here (see `candidates`).
@@ -210,6 +210,9 @@ pub static LANGUAGES: [LangInfo; 23] = [
     // Vietnamese; every `vi-*` locale (`vi-VN`, `vi_VN.UTF-8`) resolves here. CLDR `vi` counts have
     // one form ("other"), so `@plural` entries list a single form.
     LangInfo { code: "vi", name: "Tiếng Việt", source: include_str!("vi.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
+    // Finnish; every `fi-*` locale (`fi-FI`, `fi_FI.UTF-8`) resolves here. Two plural forms (one, other):
+    // the partitive singular follows any number but 1 (`1 sivu`, `2 sivua`).
+    LangInfo { code: "fi", name: "Suomi", source: include_str!("fi.tsv"), plural: plural_one_other, rtl: false, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
@@ -2170,6 +2173,102 @@ mod tests {
         assert_eq!(fmt(t("{n} pages selected"), &[("n", "3")]), "Выбрано 3 страницы");
         assert_eq!(tr(ru, "CheckBox"), "Флажок");
         set_current(Lang::EN);
+    }
+
+    #[test]
+    fn finnish_is_registered_and_persists() {
+        let fi = Lang::from_code("fi").expect("fi registered");
+        assert_eq!(fi.name(), "Suomi");
+        assert_eq!(normalize_pref("FI"), Some("fi"));
+        for tag in ["fi", "fi-FI", "fi_FI.UTF-8", "FI-fi"] {
+            assert_eq!(lang_from_tag(tag), Some(fi), "{tag}");
+        }
+        // Filipino (`fil`) and Swedish in Finland (`sv-FI`) don't pick Finnish.
+        assert_ne!(lang_from_tag("fil"), Some(fi));
+        assert_ne!(lang_from_tag("sv-FI"), Some(fi));
+        assert_eq!(tr(fi, "File"), "Tiedosto");
+        assert_eq!(tr(fi, "Edit"), "Muokkaa");
+        assert_eq!(tr(fi, "Save"), "Tallenna");
+        assert_eq!(tr(fi, "Interface language"), "Käyttöliittymän kieli");
+        // The partitive singular follows any number but 1.
+        assert_eq!(trn(fi, 0, "{n} page", "{n} pages"), "0 sivua");
+        assert_eq!(trn(fi, 1, "{n} page", "{n} pages"), "1 sivu");
+        assert_eq!(trn(fi, 2, "{n} page", "{n} pages"), "2 sivua");
+        assert_eq!(trn(fi, 21, "{n} page", "{n} pages"), "21 sivua");
+        // Calendar headings use the nominative, dates the partitive.
+        assert_eq!(fmt(tr(fi, "{month} {y}"), &[("month", tr(fi, "October")), ("y", "2026")]), "Lokakuu 2026");
+        assert_eq!(
+            fmt(tr(fi, "{month} {day}, {y}"), &[("month", tr_ctx(fi, "calendar date", "October")), ("day", "14"), ("y", "2026")]),
+            "14. lokakuuta 2026"
+        );
+        let mut app = crate::PdfCraftApp::default();
+        app.set_option("language", "FI").unwrap();
+        assert_eq!(app.language, "fi");
+        let mut restored = crate::PdfCraftApp::default();
+        restored.restore(&app.persist());
+        assert_eq!(restored.language, "fi");
+    }
+
+    #[test]
+    fn finnish_covers_commands_and_tools() {
+        let fi = Lang::from_code("fi").expect("fi registered");
+        let mut missing = std::collections::BTreeSet::new();
+        for command in pdfcraft_engine::commands::COMMANDS {
+            if !has(fi, command.label) {
+                missing.insert(command.label);
+            }
+            if let Some(menu) = command.menu
+                && !has(fi, menu)
+            {
+                missing.insert(menu);
+            }
+        }
+        for group in pdfcraft_engine::catalog::TOOL_GROUPS {
+            if !has(fi, group.label) {
+                missing.insert(group.label);
+            }
+            for section in group.sections {
+                if !has(fi, section.title) {
+                    missing.insert(section.title);
+                }
+                for item in section.items {
+                    if !has(fi, item.label) {
+                        missing.insert(item.label);
+                    }
+                }
+            }
+        }
+        assert!(missing.is_empty(), "Finnish misses commands/tools: {missing:#?}");
+    }
+
+    #[test]
+    fn finnish_covers_ui_literals() {
+        let fi = Lang::from_code("fi").expect("fi registered");
+        let missing: Vec<_> = scan_ui_literals(true).into_iter().filter(|label| !has(fi, label)).collect();
+        assert!(missing.is_empty(), "Untranslated Finnish UI labels: {missing:#?}");
+    }
+
+    #[test]
+    fn finnish_covers_bundled_catalog_keys() {
+        // Compare English keys, not other languages' translations.
+        let fi = Lang::from_code("fi").expect("fi registered");
+        let mut missing = std::collections::BTreeSet::new();
+        for reference in LANGUAGES.iter().filter(|language| language.code != "fi") {
+            let (entries, errors) = catalog::parse_entries(reference.source, reference.plural_forms());
+            assert!(errors.is_empty(), "{}: invalid reference catalog: {errors:?}", reference.code);
+            for entry in entries {
+                let translated = match entry.context.as_str() {
+                    "" => fi.catalog().plain(&entry.source),
+                    "@id" => fi.catalog().id(&entry.source),
+                    "@plural" => entry.source.split_once('|').and_then(|(one, other)| fi.catalog().plural(one, other, 0)),
+                    context => fi.catalog().contextual(context, &entry.source),
+                };
+                if translated.is_none() {
+                    missing.insert((entry.context, entry.source));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "Finnish misses bundled catalog keys: {missing:#?}");
     }
 
     #[test]
