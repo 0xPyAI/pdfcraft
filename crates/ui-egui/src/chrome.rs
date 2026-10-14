@@ -98,15 +98,19 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 if overflow && arrow(ui, "chevron-left", offset > 0.5, tl!("Scroll tabs left")) {
                     scroll_to = Some((offset - (TAB_MIN_WIDTH + gap)).max(0.0));
                 }
-                let state = (app.active, app.views.len(), app.combine_showing());
+                // Keyed by document, not index: a tab dragged past the active one moves it without
+                // the strip jumping to it.
+                let state = (app.active_ids().map(|(_, id)| id), app.views.len(), app.combine_showing());
                 let changed = ui.data_mut(|data| {
                     let id = ui.id().with("active_tab");
-                    let changed = data.get_temp::<(Option<usize>, usize, bool)>(id) != Some(state);
+                    let changed = data.get_temp::<(Option<pdfcraft_engine::DocId>, usize, bool)>(id) != Some(state);
                     data.insert_temp(id, state);
                     changed
                 });
                 let mut action = None;
                 let mut close = None;
+                // The pointer's x while a tab is dragged, for scrolling at the strip's edges.
+                let mut drag_x = None;
                 ui.scope(|ui| {
                     ui.style_mut().always_scroll_the_only_direction = true;
                     let mut area = egui::ScrollArea::horizontal().id_salt("document_tabs").max_width(tabs_width).auto_shrink([true, true]);
@@ -115,6 +119,10 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                     }
                     let out = area.show(ui, |ui| {
                         ui.horizontal_centered(|ui| {
+                            // Each document tab's index and rect, and the one being dragged
+                            // (with whether it was just released).
+                            let mut slots = Vec::with_capacity(app.views.len());
+                            let mut dragged = None;
                             for i in 0..app.views.len() {
                                 let Some(doc) = app.session.get(app.views[i].id) else { continue };
                                 let (name, dirty) = (doc.display_name(), doc.dirty);
@@ -133,7 +141,12 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                                     i,
                                     cap,
                                     tab_h,
+                                    true,
                                 );
+                                slots.push((i, response.rect));
+                                if response.dragged() || response.drag_stopped() {
+                                    dragged = Some((i, response.drag_stopped()));
+                                }
                                 if changed && app.active == Some(i) && !app.combine_showing() {
                                     response.scroll_to_me(Some(Align::Center));
                                 }
@@ -156,6 +169,25 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                                 });
                                 if response.clicked() {
                                     app.active = Some(i);
+                                }
+                            }
+                            // Dragging a tab moves it (#1537): a line marks the gap it will land
+                            // in, and releasing the button drops it there.
+                            if let Some((from, released)) = dragged
+                                && let Some(x) = ui.ctx().pointer_latest_pos().map(|p| p.x)
+                            {
+                                let to = drop_index(&slots, from, x);
+                                if released {
+                                    if close.is_none() && action.is_none() {
+                                        app.move_tab(from, to);
+                                    }
+                                } else {
+                                    drag_x = Some(x);
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                                    if let Some(marker) = drop_marker(&slots, from, to, ui.spacing().item_spacing.x) {
+                                        let span = slots.first().map_or(ui.max_rect().y_range(), |(_, r)| r.y_range());
+                                        ui.painter().vline(marker, span.shrink(4.0), Stroke::new(2.0, t.accent));
+                                    }
                                 }
                             }
                             if let Some(i) = close
@@ -182,6 +214,7 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                                     usize::MAX,
                                     cap,
                                     tab_h,
+                                    false,
                                 );
                                 if changed && app.combine_showing() {
                                     response.scroll_to_me(Some(Align::Center));
@@ -197,6 +230,22 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                     });
                     let max = (out.content_size.x - out.inner_rect.width()).max(0.0);
                     ui.data_mut(|d| d.insert_temp(scroll_id, (out.state.offset.x, max)));
+                    // A tab dragged to either edge of a strip that scrolls brings the hidden tabs in.
+                    if let Some(x) = drag_x
+                        && max > 0.0
+                    {
+                        let step = if x < out.inner_rect.left() + TAB_DRAG_EDGE {
+                            -TAB_DRAG_STEP
+                        } else if x > out.inner_rect.right() - TAB_DRAG_EDGE {
+                            TAB_DRAG_STEP
+                        } else {
+                            0.0
+                        };
+                        if step != 0.0 {
+                            ui.data_mut(|d| d.insert_temp(scroll_id.with("to"), (out.state.offset.x + step).clamp(0.0, max)));
+                            ui.ctx().request_repaint();
+                        }
+                    }
                 });
                 if overflow && arrow(ui, "chevron-right", offset < max_offset - 0.5, tl!("Scroll tabs right")) {
                     scroll_to = Some((offset + TAB_MIN_WIDTH + gap).min(max_offset));
@@ -289,6 +338,29 @@ fn tabs_overflow(natural: &[f32], budget: f32, gap: f32, min: f32) -> bool {
     narrowest + gap * natural.len().saturating_sub(1) as f32 > budget
 }
 
+/// How close to either end of a scrolling strip a dragged tab scrolls it, and how far per frame.
+const TAB_DRAG_EDGE: f32 = 24.0;
+const TAB_DRAG_STEP: f32 = 8.0;
+
+/// Where the tab at `from` lands when dropped with the pointer at `x`: past every other tab
+/// whose centre is left of the pointer. `slots` are the tabs' indices and rects, in order.
+fn drop_index(slots: &[(usize, Rect)], from: usize, x: f32) -> usize {
+    slots.iter().filter(|(i, r)| *i != from && r.center().x < x).count()
+}
+
+/// The x of the line marking where the tab at `from` drops at `to`: in the gap before the other
+/// tab it lands in front of, or after the last. `None` when it would stay where it is.
+fn drop_marker(slots: &[(usize, Rect)], from: usize, to: usize, gap: f32) -> Option<f32> {
+    if slots.iter().position(|(i, _)| *i == from) == Some(to) {
+        return None;
+    }
+    let mut others = slots.iter().filter(|(i, _)| *i != from).map(|(_, r)| r);
+    match to.checked_sub(1) {
+        None => others.next().map(|r| r.left() - gap / 2.0),
+        Some(before) => others.nth(before).map(|r| r.right() + gap / 2.0),
+    }
+}
+
 /// A scroll arrow beside the tabs; dimmed (and inert) at its end. True when clicked.
 fn arrow(ui: &mut egui::Ui, icon: &str, enabled: bool, tip: &str) -> bool {
     ui.add_enabled_ui(enabled, |ui| icons::button(ui, icon, TAB_ARROW, false, tip)).inner.clicked()
@@ -343,6 +415,7 @@ fn tab(
     index: usize,
     cap: Option<f32>,
     height: f32,
+    draggable: bool,
 ) -> egui::Response {
     let font = theme::regular(13.0);
     let mut label = tab_name(name);
@@ -361,7 +434,8 @@ fn tab(
     let height = ui.available_height().max(height);
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let a11y = if dirty { format!("{name} (edited)") } else { name.to_string() };
-    let resp = craft_ui::tabs::Tab::new(id, &a11y, active).focus_stroke(Stroke::new(1.0, t.accent)).show_at(ui, rect, |ui, resp| {
+    let sense = if draggable { Sense::click_and_drag() } else { Sense::click() };
+    let resp = craft_ui::tabs::Tab::new(id, &a11y, active).sense(sense).focus_stroke(Stroke::new(1.0, t.accent)).show_at(ui, rect, |ui, resp| {
         let press = theme::Press::track(ui, resp);
         let bg = if active {
             press.fill(t.chrome, t.chrome.lerp_to_gamma(t.hover, 0.65), t.hover)
@@ -748,6 +822,41 @@ mod tab_widths {
     fn tabs_stop_at_their_minimum() {
         assert_eq!(tab_cap(&[250.0; 12], 600.0, 4.0, 110.0), Some(110.0));
         assert_eq!(tab_cap(&[250.0; 3], 0.0, 4.0, 110.0), Some(110.0));
+    }
+
+    /// Three 100-wide tabs, 4 apart, starting at x = 0.
+    fn three_slots() -> Vec<(usize, egui::Rect)> {
+        (0..3).map(|i| (i, egui::Rect::from_min_size(egui::pos2(i as f32 * 104.0, 0.0), egui::vec2(100.0, 30.0)))).collect()
+    }
+
+    /// A dragged tab lands past every other tab whose centre the pointer has crossed.
+    #[test]
+    fn a_dragged_tab_drops_past_the_centres_it_crossed() {
+        use super::drop_index;
+        let slots = three_slots();
+        // Centres at 50, 154 and 258.
+        assert_eq!(drop_index(&slots, 0, 10.0), 0, "still over itself");
+        assert_eq!(drop_index(&slots, 0, 160.0), 1, "past the middle tab's centre");
+        assert_eq!(drop_index(&slots, 0, 900.0), 2, "past the end");
+        assert_eq!(drop_index(&slots, 2, -50.0), 0, "before the start");
+        assert_eq!(drop_index(&slots, 2, 100.0), 1, "between the first and middle centres");
+        assert_eq!(drop_index(&[], 0, 100.0), 0);
+    }
+
+    /// The drop line sits in the gap the tab will land in, and not at all where it already is.
+    #[test]
+    fn the_drop_line_marks_the_gap_and_hides_when_nothing_moves() {
+        use super::drop_marker;
+        let slots = three_slots();
+        assert_eq!(drop_marker(&slots, 0, 0, 4.0), None);
+        assert_eq!(drop_marker(&slots, 1, 1, 4.0), None);
+        // The first tab dropped at the end: after the last tab.
+        assert_eq!(drop_marker(&slots, 0, 2, 4.0), Some(310.0));
+        // The first tab dropped between the middle and the last: in the gap between them.
+        assert_eq!(drop_marker(&slots, 0, 1, 4.0), Some(206.0));
+        // The last tab dropped at the start: before the first tab.
+        assert_eq!(drop_marker(&slots, 2, 0, 4.0), Some(-2.0));
+        assert_eq!(drop_marker(&[], 0, 1, 4.0), None);
     }
 
     #[test]

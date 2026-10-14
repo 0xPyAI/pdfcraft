@@ -1,10 +1,12 @@
 //! Autosave and crash recovery: a session is "crashed" by dropping the app without a clean
 //! quit, and a new session must offer, recover or discard what was autosaved.
 
+mod support;
+
 use egui::accesskit::Role;
 use egui::{Key, Modifiers};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use pdfcraft_engine::Edit;
 use pdfcraft_ui_egui::{PdfCraftApp, RecoveryStore};
 
@@ -80,7 +82,7 @@ fn a_crashed_session_is_offered_and_recovered_unsaved() {
     h.get_by_label("Recover unsaved documents?");
     h.get_by_label("work.pdf");
     h.get_by_label("Recover").click();
-    h.run_steps(4);
+    support::wait_until(&mut h, "recovered document", |app| app.views.len() == 1);
     let app = h.state();
     assert_eq!(app.views.len(), 1);
     let doc = app.session.get(app.views[0].id).unwrap();
@@ -180,13 +182,13 @@ fn encrypted_documents_are_autosaved_encrypted_and_recovered_with_the_password()
     let mut h = harness(s.clone());
     h.get_by_label_contains("password-protected");
     h.get_by_label("Recover").click();
-    h.run_steps(3);
+    support::wait_until(&mut h, "recovery password prompt", |app| app.password_prompt.is_some());
     let field = h.get_by_role(Role::PasswordInput);
     field.focus();
     field.type_text("pw");
     h.run_steps(2);
     h.key_press(Key::Enter);
-    h.run_steps(4);
+    support::wait_until(&mut h, "unlocked recovery", |app| app.views.len() == 1);
     let app = h.state();
     assert_eq!(app.views.len(), 1);
     let d = app.session.get(app.views[0].id).unwrap();
@@ -205,8 +207,15 @@ fn a_cancelled_recovery_password_does_not_attach_to_the_next_unlocked_document()
     assert_eq!(s.list().len(), 1);
     let mut h = harness(s.clone());
     h.get_by_label("Recover").click();
-    h.run_steps(3);
+    support::wait_until(&mut h, "recovery password prompt", |app| app.password_prompt.is_some());
     assert!(h.state().password_prompt.is_some(), "the snapshot asks for its password");
+    // The new modal registers its layer before its controls become interactive.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while h.query_by_label("Cancel").is_none_or(|node| node.accesskit_node().is_disabled()) {
+        h.step();
+        assert!(std::time::Instant::now() < deadline, "the password Cancel button did not become enabled");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     h.get_by_label("Cancel").click();
     h.run_steps(3);
     assert!(h.state().password_prompt.is_none());
@@ -215,7 +224,7 @@ fn a_cancelled_recovery_password_does_not_attach_to_the_next_unlocked_document()
     let app = h.state_mut();
     app.open_bytes("B.pdf", Some("/docs/B.pdf".into()), encrypted(fixture(1), "pw-b")).unwrap();
     app.submit_password(Some("pw-b".into()));
-    h.run_steps(3);
+    support::wait_until(&mut h, "unlocked B", |app| app.views.len() == 1);
     let app = h.state();
     assert_eq!(app.views.len(), 1);
     let b = app.session.get(app.views[0].id).unwrap();
@@ -291,7 +300,7 @@ fn missing_corrupt_or_mismatched_metadata_recovers_the_snapshot_without_an_origi
         }
         let mut h = harness(s.clone());
         h.get_by_label("Recover").click();
-        h.run_steps(4);
+        support::wait_until(&mut h, "recovery without valid metadata", |app| app.views.len() == 1);
         let app = h.state();
         assert_eq!(app.views.len(), 1, "{case}");
         let doc = app.session.get(app.views[0].id).unwrap();
@@ -316,14 +325,14 @@ fn an_encrypted_snapshot_without_metadata_still_requires_its_password() {
     std::fs::remove_file(s.dir().join(format!("{}.json", meta.key))).unwrap();
     let mut h = harness(s.clone());
     h.get_by_label("Recover").click();
-    h.run_steps(3);
+    support::wait_until(&mut h, "orphan recovery password prompt", |app| app.password_prompt.is_some());
     assert!(h.state().views.is_empty());
     let field = h.get_by_role(Role::PasswordInput);
     field.focus();
     field.type_text("pw");
     h.run_steps(2);
     h.key_press(Key::Enter);
-    h.run_steps(4);
+    support::wait_until(&mut h, "unlocked orphan recovery", |app| app.views.len() == 1);
     let app = h.state();
     assert_eq!(app.views.len(), 1);
     let doc = app.session.get(app.views[0].id).unwrap();

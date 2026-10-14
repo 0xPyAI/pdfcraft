@@ -178,7 +178,7 @@ impl PrintDraft {
 }
 
 /// Lists the printers off the UI thread (the desktop app sets [`PdfCraftApp::printer_source`]):
-/// on Windows that takes PowerShell a second or more, and CUPS' driverless discovery can wait on
+/// on Windows each driver's capabilities are read for its two-sided support, and CUPS' driverless discovery can wait on
 /// the network. Without a source the dialog reads them as it opens, so tests stay deterministic.
 pub type PrinterSource = std::sync::Arc<dyn Fn() -> Vec<spool::Printer> + Send + Sync>;
 

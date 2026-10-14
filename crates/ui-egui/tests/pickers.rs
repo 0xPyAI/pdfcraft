@@ -4,6 +4,8 @@
 //! used on a later frame. `pick_override` stands in for the native panel and, like it, answers
 //! on a later frame.
 
+mod support;
+
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use pdfcraft_render::PageRenderer;
@@ -56,7 +58,7 @@ fn harness(docs: &[usize]) -> Harness<'static, PdfCraftApp> {
 }
 
 #[test]
-fn file_open_returns_at_once_and_opens_the_pick_on_the_next_frame() {
+fn file_open_returns_at_once_and_opens_the_pick_when_preparation_finishes() {
     let dir = std::env::temp_dir().join(format!("printcraft-pickers-open-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("picked.pdf");
@@ -66,9 +68,13 @@ fn file_open_returns_at_once_and_opens_the_pick_on_the_next_frame() {
     h.state_mut().pick_override = Some(vec![file.to_string_lossy().into_owned()]);
     assert!(h.state_mut().execute("file.open"));
     assert!(h.state().views.is_empty(), "the command must not wait for the picker");
-    h.run_steps(2);
+    support::wait_until(&mut h, "picked document", |app| app.views.len() == 1 && app.password_prompt.is_none());
     assert_eq!(h.state().views.len(), 1, "the picked file opens on a later frame");
     assert_eq!(pages(h.state(), 0), 2);
+    let (_, id) = h.state().active_ids().unwrap();
+    let doc = h.state().session.get(id).unwrap();
+    assert_eq!(doc.path.as_deref(), Some(file.to_string_lossy().as_ref()));
+    assert_eq!(doc.bytes.as_slice(), fixture(2).as_slice());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -621,17 +627,37 @@ fn encrypted_fixture() -> Vec<u8> {
 fn a_startup_url_does_not_replace_another_documents_password_prompt() {
     for cancel in [false, true] {
         let mut h = harness(&[]);
-        h.state_mut().open_bytes("local-encrypted.pdf", None, encrypted_fixture()).unwrap();
-        deliver_startup(&h, "late.pdf", fixture(2));
+        let local_bytes = encrypted_fixture();
+        let late_bytes = fixture(2);
+        h.state_mut().open_bytes("local-encrypted.pdf", None, local_bytes.clone()).unwrap();
+        deliver_startup(&h, "late.pdf", late_bytes.clone());
         h.run_steps(2);
         assert_eq!(h.state().password_prompt.as_ref().unwrap().name, "local-encrypted.pdf");
         assert!(h.state().views.is_empty());
         assert_eq!(h.state().startup_inbox.lock().unwrap().len(), 1, "startup bytes wait for the prompt");
         h.state_mut().submit_password((!cancel).then(|| "test-password".into()));
-        h.run_steps(2);
+        support::wait_until(&mut h, "local password completion and startup open", |app| {
+            app.password_prompt.is_none() && app.views.len() == if cancel { 1 } else { 2 }
+        });
         assert!(h.state().password_prompt.is_none());
         assert!(h.state().startup_inbox.lock().unwrap().is_empty());
-        assert_eq!(h.state().active, if cancel { None } else { Some(0) });
+        let app = h.state();
+        let late: Vec<_> = app.session.docs().iter().filter(|doc| doc.name == "late.pdf").collect();
+        assert_eq!(late.len(), 1);
+        assert_eq!(late[0].bytes.as_slice(), late_bytes.as_slice());
+        assert_eq!(late[0].info.pages.len(), 2);
+        if cancel {
+            assert_eq!(app.active, None);
+            assert_eq!(app.session.docs().len(), 1);
+            assert!(!app.session.docs().iter().any(|doc| doc.name == "local-encrypted.pdf"));
+        } else {
+            let (_, id) = app.active_ids().expect("the authenticated local document is active");
+            let local = app.session.get(id).unwrap();
+            assert_eq!(local.name, "local-encrypted.pdf");
+            assert_eq!(local.bytes.as_slice(), local_bytes.as_slice());
+            assert_eq!(local.info.pages.len(), 1);
+            assert_eq!(app.session.docs().len(), 2);
+        }
         assert_eq!(h.state().views.len(), if cancel { 1 } else { 2 });
     }
 }
@@ -639,19 +665,27 @@ fn a_startup_url_does_not_replace_another_documents_password_prompt() {
 #[test]
 fn unlocking_a_late_startup_url_keeps_it_in_the_background() {
     let mut h = harness(&[3]);
-    deliver_startup(&h, "late-encrypted.pdf", encrypted_fixture());
+    let original = h.state().views[0].id;
+    let late_bytes = encrypted_fixture();
+    deliver_startup(&h, "late-encrypted.pdf", late_bytes.clone());
     h.run_steps(2);
     assert_eq!(h.state().active, Some(0));
     assert_eq!(h.state().password_prompt.as_ref().unwrap().name, "late-encrypted.pdf");
     h.state_mut().submit_password(Some("wrong-password".into()));
-    h.run_steps(2);
+    support::wait_until(&mut h, "startup wrong-password reply", |app| {
+        app.password_prompt.as_ref().is_some_and(|p| p.name == "late-encrypted.pdf" && p.error.as_deref() == Some("Incorrect password. Try again."))
+    });
     assert!(h.state().password_prompt.as_ref().unwrap().error.is_some());
     assert_eq!(h.state().active, Some(0));
     h.state_mut().submit_password(Some("test-password".into()));
-    h.run_steps(2);
+    support::wait_until(&mut h, "unlocked startup document", |app| app.password_prompt.is_none() && app.views.len() == 2);
     assert!(h.state().password_prompt.is_none());
     assert_eq!(h.state().active, Some(0));
     assert_eq!(h.state().views.len(), 2);
+    assert_eq!(h.state().active_ids().map(|(_, id)| id), Some(original));
+    assert_eq!(h.state().session.get(original).unwrap().bytes.as_slice(), fixture(3).as_slice());
+    let late = h.state().session.docs().iter().find(|doc| doc.name == "late-encrypted.pdf").unwrap();
+    assert_eq!(late.bytes.as_slice(), late_bytes.as_slice());
     h.get_by_label("late-encrypted.pdf").click();
     h.run_steps(2);
     assert_eq!(h.state().active, Some(1));

@@ -22,7 +22,7 @@ milestone = "M1"
 status = "shipped"
 commands = ["file.open"]
 tools = ["doc_open"]
-evidence = ["crates/automation/tests/automation.rs::open_inspect_render_and_find", "crates/ui-egui/tests/ui.rs::opening_a_pdf_shows_comments_and_bookmarks", "crates/ui-egui/tests/ui.rs::files_and_quit_from_the_operating_system"]
+evidence = ["crates/automation/tests/automation.rs::open_inspect_render_and_find", "crates/ui-egui/tests/ui.rs::opening_a_pdf_shows_comments_and_bookmarks", "crates/ui-egui/tests/ui.rs::files_and_quit_from_the_operating_system", "crates/ui-egui/src/open_worker_tests.rs::a_chosen_tool_runs_on_its_file_only_after_native_preparation_commits"]
 notes = "File ▸ Open, the command line (Linux and Windows file associations), the Windows MSI's \"Edit with PdfCraft\" entry on PDF files' File Explorer right-click menu (#682; several selected PDFs open as tabs of one window), and on macOS Finder, Open With and the Dock (Apple events; the bundle declares PDF as a document type). Not yet: a first-level Windows 11 menu entry (needs package identity) or Combine from the file manager (#585)"
 
 [[feature]]
@@ -166,7 +166,7 @@ milestone = "M1"
 status = "shipped"
 commands = ["file.open"]
 tools = ["doc_open"]
-evidence = ["crates/ui-egui/tests/editing.rs::password_prompt_opens_and_security_tab_reports_the_details", "crates/crypt/src/tests.rs::empty_user_password_opens_without_asking"]
+evidence = ["crates/ui-egui/tests/editing.rs::password_prompt_opens_and_security_tab_reports_the_details", "crates/crypt/src/tests.rs::empty_user_password_opens_without_asking", "crates/ui-egui/src/open_worker_tests.rs::a_chosen_tool_survives_wrong_password_retry_and_runs_after_unlock", "crates/ui-egui/src/open_worker_tests.rs::startup_intake_waits_for_local_authentication_and_keeps_its_own_background_password_prompt"]
 notes = ""
 
 [[feature]]
@@ -1188,10 +1188,10 @@ area = "B"
 tier = "P1"
 milestone = "M3"
 status = "shipped"
-commands = []
+commands = ["view.next_tab", "view.previous_tab"]
 tools = ["doc_list"]
-evidence = ["crates/ui-egui/tests/editing.rs::combining_files_opens_a_new_unsaved_tab", "crates/ui-egui/tests/control.rs::state_and_view_options", "crates/ui-egui/tests/viewer.rs::each_document_keeps_its_own_scroll_position", "crates/ui-egui/tests/viewer.rs::a_new_document_opens_at_the_top_after_a_relaunch"]
-notes = "each tab keeps its own scroll position (#189), and a newly opened one starts at the top, not where an earlier session left the scroll"
+evidence = ["crates/ui-egui/tests/editing.rs::combining_files_opens_a_new_unsaved_tab", "crates/ui-egui/tests/control.rs::state_and_view_options", "crates/ui-egui/tests/viewer.rs::each_document_keeps_its_own_scroll_position", "crates/ui-egui/tests/viewer.rs::a_new_document_opens_at_the_top_after_a_relaunch", "crates/ui-egui/tests/ui.rs::dragging_a_tab_moves_it_and_keeps_the_same_document_active", "crates/ui-egui/tests/ui.rs::a_tab_dropped_where_it_was_stays_and_a_click_still_selects_it", "crates/ui-egui/tests/ui.rs::the_combine_tab_does_not_move_and_documents_stay_in_order", "crates/ui-egui/tests/commands.rs::ctrl_tab_steps_through_the_tabs_in_order_and_wraps_around"]
+notes = "each tab keeps its own scroll position (#189), and a newly opened one starts at the top, not where an earlier session left the scroll. Document tabs are dragged to reorder them (#1537): a line marks where the tab will land, the strip scrolls at its edges when it overflows, and the same document stays active; the Combine files tab stays after the documents. Dragging a tab out into its own window is view.multiple-windows. Ctrl+Tab and Ctrl+Shift+Tab (⌃Tab and ⌃⇧Tab on macOS; View ▸ Next tab / Previous tab) step through the tabs in their order on screen, Combine files included, and wrap around at either end (#1542)."
 
 [[feature]]
 id = "view.multiple-windows"
@@ -3436,8 +3436,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["file.properties"]
 tools = ["doc_info"]
-evidence = ["crates/ui-egui/tests/view.rs::fonts_tab_lists_fonts_and_embedding"]
-notes = ""
+evidence = ["crates/ui-egui/tests/view.rs::fonts_tab_lists_fonts_and_embedding", "crates/render/src/inspect.rs::doc_info_says_which_face_stands_in_and_why", "crates/render/src/inspect.rs::an_embedded_font_reports_no_substitution_at_all"]
+notes = "name, type, embedding, subset and encoding; doc_info also reports the face standing in for a program the document does not embed and why it was chosen (Acrobat's Actual Font), including the case where no licensed face exists so nothing is drawn. Still missing: the Fonts tab in the interface does not show the substituted face yet, only the data layer does"
 
 [[feature]]
 id = "organize.initial-view"
@@ -7925,7 +7925,7 @@ status = "shipped"
 commands = ["print.dialog"]
 tools = ["printers", "printer_options", "doc_print"]
 evidence = ["crates/print/src/tests.rs::spooler_arguments_and_printer_list", "crates/print/src/tests.rs::driverless_printers_join_the_list_without_a_queue", "crates/print/src/tests.rs::windows_printers_carry_one_default_and_keep_their_names", "crates/print/src/tests.rs::printer_options_come_from_the_ppd", "crates/print/src/tests.rs::printer_option_defaults_and_job_arguments", "crates/ui-egui/tests/print.rs::print_dialog_shows_the_printer_driver_options", "crates/ui-egui/tests/print.rs::printers_listed_in_the_background_preselect_the_default_unless_one_was_picked", "crates/ui-egui/src/web_print.rs::resolution_falls_with_the_sheet_count_and_long_jobs_are_refused", "crates/ui-egui/src/web_print.rs::large_sheets_are_drawn_within_the_pixel_cap_and_bad_sizes_are_refused", "crates/ui-egui/src/web_print.rs::a_sink_error_or_a_page_that_isnt_there_stops_the_job"]
-notes = "CUPS queues via lpstat -p -d and driverless destinations without a queue via lpstat -e; on Windows the queues and the default come from Win32_Printer (PowerShell CIM) and jobs are rendered with Windows.Data.Pdf and spooled through shared craft-print at each sheet's physical size and orientation, with bounded raster resolution up to 600 dpi (not vector passthrough); the printer list and submission run on workers without a console window. Native Windows regression execution is pending; Save as PDF on every platform. Properties…: on CUPS the driver's own PPD job options (tray, paper type, finishing …, not installable options or what the dialog sets) for this job, sent as lp -o; on Windows the driver's Printing Preferences window (printui), saved as that printer's per-user defaults rather than per job. On the web: \"Browser's print dialog\" (the default there) reaches the system's printers through the browser; PdfCraft draws the sheets itself (300 dpi up to 100 sheets, 200 up to 300, 150 up to 1,000; at most 64 megapixels a sheet and 1 GiB a job) and prints them from a hidden iframe, one per printed page, a landscape sheet among portrait ones turned onto the paper; copies, two-sided and colour are chosen in the browser's dialog; a browser that refuses to print gets the print-ready PDF as a download. Checked in headless Chromium, not yet in Firefox or Safari; pictures, not vectors; sheets of another paper size print at their own size only where the browser honours named @page sizes (Chromium doesn't)"
+notes = "CUPS queues via lpstat -p -d and driverless destinations without a queue via lpstat -e; on Windows shared craft-print lists the queues (EnumPrinters), the default (GetDefaultPrinter) and each driver's two-sided support in this process, and draws jobs as vectors with Windows.Data.Pdf into the XPS print API with a driver-validated PrintTicket (exact paper, orientation, no scaling; portrait and landscape sheets in one job via /Rotate), starting no PowerShell, so printing works under App Control script enforcement (#1107); the printer list and submission run on workers; Save as PDF on every platform. Properties…: on CUPS the driver's own PPD job options (tray, paper type, finishing …, not installable options or what the dialog sets) for this job, sent as lp -o; on Windows the driver's Printing Preferences window (printui), saved as that printer's per-user defaults rather than per job. On the web: \"Browser's print dialog\" (the default there) reaches the system's printers through the browser; PdfCraft draws the sheets itself (300 dpi up to 100 sheets, 200 up to 300, 150 up to 1,000; at most 64 megapixels a sheet and 1 GiB a job) and prints them from a hidden iframe, one per printed page, a landscape sheet among portrait ones turned onto the paper; copies, two-sided and colour are chosen in the browser's dialog; a browser that refuses to print gets the print-ready PDF as a download. Checked in headless Chromium, not yet in Firefox or Safari; pictures, not vectors; sheets of another paper size print at their own size only where the browser honours named @page sizes (Chromium doesn't)"
 
 [[feature]]
 id = "print.copies-collate"

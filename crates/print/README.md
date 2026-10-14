@@ -71,7 +71,7 @@ this is not per-page paper-source selection.
 
 **PDF scale** describes the source-to-sheet transform in the previewed print-ready
 PDF, not measured physical output. Fit reserves an 18 pt margin and can reduce even
-a matching page. The current Windows backend still rasterises and can substitute
-paper/shrink a job if its driver lacks the requested size. These controls do not
-add #599's strict PrintTicket validation or vector spooler. Verify the driver's
-paper/scaling settings and physical calibration before relying on drawing scale.
+a matching page. On Windows craft-print sends the sheets as vectors with a PrintTicket
+for the sheet's exact paper and no scaling (#599's approach), validated by the driver:
+a job is refused, not shrunk, when the driver lacks the paper or would change it. Verify
+the driver's paper settings and physical calibration before relying on drawing scale.

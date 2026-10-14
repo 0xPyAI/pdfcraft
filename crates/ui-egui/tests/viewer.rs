@@ -1206,6 +1206,9 @@ fn selection_mouse_wheel_resumes_after_point_scrolling() {
         });
         h.run_steps(delay);
         let before = h.state().views[view].page_screen_rect(0).unwrap().top();
+        // One Line notch follows this platform's configured speed. A Point tail can
+        // still add travel in the one-frame case, so require at least the whole notch.
+        let expected = h.ctx.options(|o| o.input_options.line_scroll_speed);
         h.event(egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Line,
             delta: egui::vec2(0.0, -1.0),
@@ -1215,6 +1218,10 @@ fn selection_mouse_wheel_resumes_after_point_scrolling() {
         h.run_steps(40);
         let after = h.state().views[view].page_screen_rect(0).unwrap().top();
         eprintln!("Point-to-Line delay={delay}: point={}, line={}", start - before, before - after);
-        assert!(before - after > 50.0, "Line input must resume after Point: {before} -> {after}");
+        let travelled = before - after;
+        assert!(travelled >= expected - 1.0, "Line input must resume after Point at the configured speed: {travelled} vs {expected}");
+        if delay >= 16 {
+            assert!((travelled - expected).abs() < 1.0, "settled Line travel must match its configured speed: {travelled} vs {expected}");
+        }
     }
 }
