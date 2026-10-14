@@ -10,7 +10,17 @@ fn result(auto: &mut Automation, args: Value) -> Value {
 }
 
 fn pdf() -> Vec<u8> {
-    Session::new().create_from_text("Original", "Original text").unwrap().as_ref().clone()
+    // Reuse one synthetic document so byte comparisons cannot straddle the
+    // writer's modification-time clock. Each caller gets an independent buffer.
+    static PDF: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    PDF.get_or_init(|| Session::new().create_from_text("Original", "Original text").unwrap().as_ref().clone()).clone()
+}
+
+#[test]
+fn pdf_fixture_remains_identical_across_metadata_clock_tick() {
+    let before = pdf();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    assert_eq!(before, pdf());
 }
 
 #[test]
