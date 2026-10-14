@@ -48,10 +48,31 @@ fn open_view_menu(h: &mut Harness<'static, PdfCraftApp>) {
     }
 }
 
+/// A fresh install follows the desktop's appearance (#1248): dark on a dark desktop, light where
+/// the desktop says nothing; a saved choice still wins.
+#[test]
+fn a_fresh_install_follows_the_system_theme() {
+    let h = harness();
+    assert_theme(&h, ThemePreference::System, ThemeKind::Dark);
+    let mut quiet = Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app
+    });
+    quiet.run_steps(4);
+    assert_theme(&quiet, ThemePreference::System, ThemeKind::Light);
+    let mut app = PdfCraftApp::new();
+    app.restore(r#"{"theme":"Light"}"#);
+    assert_eq!(app.theme_preference, ThemePreference::Light, "a saved choice wins over the default");
+}
+
 #[test]
 fn toolbar_and_view_menu_share_three_state_preferences() {
     let mut h = harness();
-    // Explicit light wins even on a dark desktop, including egui's popup style.
+    // Fresh, on a dark desktop: System, shown dark. One click on, explicit light wins even on a
+    // dark desktop, including egui's popup style.
+    assert_theme(&h, ThemePreference::System, ThemeKind::Dark);
+    click_toolbar(&mut h, "Use system setting");
     assert_theme(&h, ThemePreference::Light, ThemeKind::Light);
     click_toolbar(&mut h, "Light gray");
     assert_theme(&h, ThemePreference::Dark, ThemeKind::Dark);
