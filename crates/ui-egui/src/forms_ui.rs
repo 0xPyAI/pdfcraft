@@ -1,10 +1,10 @@
 //! Filling in forms on the page (execution plan M6; Acrobat fills fields in every viewing mode).
 //!
 //! Text fields open an in-place editor over the widget (Enter or clicking away commits, Escape
-//! cancels, Tab moves to the next field). Check boxes and radio buttons toggle on click. List
-//! boxes are directly selectable in-place on the page (clicking picks an option; Ctrl-click
-//! toggles on multi-select lists). Combo boxes open a list of their options. Every change is one
-//! undoable engine edit.
+//! cancels, Tab moves to the next field). Check boxes and radio buttons toggle on click, or on
+//! Space once Tab or a click has focused them. List boxes are directly selectable in-place on the
+//! page (clicking picks an option; Ctrl-click toggles on multi-select lists). Combo boxes open a
+//! list of their options. Every change is one undoable engine edit.
 
 use std::collections::HashSet;
 
@@ -57,6 +57,13 @@ pub struct FormView {
     pub notice: Option<FormNotice>,
     /// A push button was clicked: (its field name, what it does).
     pub button: Option<(String, pdfcraft_engine::form_scripts::ButtonAction)>,
+    /// The focused check box or radio button was clicked. It toggles once no other edit is
+    /// queued: the text the click committed goes first, and the toggle is dropped if that text
+    /// is refused and its field reopens.
+    pub(crate) toggle: bool,
+    /// The widget holding egui's keyboard focus for the focused check box or radio button, and
+    /// whether it takes the arrows (radio buttons). The page keys still work around it.
+    pub(crate) keys: Option<(egui::Id, bool)>,
 }
 
 /// A form message for the app to show, with document data kept separate so the visible
@@ -91,6 +98,29 @@ fn open_focus(f: &FormField, widget: usize) -> Focus {
         calendar: None,
         calendar_rect: None,
     }
+}
+
+/// Select a radio button, if it isn't selected already.
+fn select_edit(f: &FormField, w: &FormWidget) -> Option<Edit> {
+    (w.on_state.as_ref() != f.value.first()).then(|| Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::Radio(w.on_state.clone()) })
+}
+
+/// What clicking a check box or radio button does.
+fn toggle_edit(f: &FormField, w: &FormWidget) -> Option<Edit> {
+    let value = match f.kind {
+        FormFieldKind::CheckBox => FieldValue::Check(f.value.is_empty()),
+        FormFieldKind::Radio => {
+            let on = w.on_state.clone();
+            // Clicking the selected button again turns it off unless the group forbids it.
+            let value = if f.value.first() == on.as_ref() && !f.has(field_flags::NO_TOGGLE_TO_OFF) { None } else { on };
+            if value.as_ref() == f.value.first() {
+                return None;
+            }
+            FieldValue::Radio(value)
+        }
+        _ => return None,
+    };
+    Some(Edit::SetFieldValue { name: f.name.clone(), value })
 }
 
 /// Where the pointer is relative to one page's form widgets.
@@ -159,18 +189,14 @@ pub(crate) fn page_input(
             None => view.forms.notice = Some(FormNotice::NoAction(f.name.clone())),
         },
         FormFieldKind::Signature => view.sign.field = Some(f.name.clone()),
-        FormFieldKind::CheckBox => {
-            view.forms.focus = None;
-            view.pending_edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::Check(f.value.is_empty()) });
-        }
-        FormFieldKind::Radio => {
-            view.forms.focus = None;
-            let on = w.on_state.clone();
-            // Clicking the selected button again turns it off unless the group forbids it.
-            let value = if f.value.first() == on.as_ref() && !f.has(field_flags::NO_TOGGLE_TO_OFF) { None } else { on };
-            if value.as_ref() != f.value.first() {
-                view.pending_edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::Radio(value) });
+        FormFieldKind::CheckBox | FormFieldKind::Radio => {
+            // The box takes the focus, as in Acrobat, so Tab goes on from it (#2223). The overlay
+            // toggles it, after the edit for any text this commits.
+            if view.forms.focus.as_ref().is_none_or(|x| x.name != f.name || x.widget != wi) {
+                commit(view, form);
+                view.forms.focus = Some(open_focus(f, wi));
             }
+            view.forms.toggle = true;
         }
         // The press already committed the previous field and opened this one (above), unless
         // press and release came in one frame. Committing again would re-run a validation that
@@ -468,6 +494,8 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
     if !ctx.input(|i| i.pointer.primary_down()) {
         view.forms.pressed = false;
     }
+    let toggle = std::mem::take(&mut view.forms.toggle);
+    view.forms.keys = None;
     let focus = view.forms.focus.clone()?;
     let Some(f) = form.iter().find(|f| f.name == focus.name) else {
         view.forms.focus = None;
@@ -475,7 +503,15 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
     };
     let w = f.widgets.get(focus.widget)?;
     let page = w.page?;
-    let xf = view.page_xform(page)?;
+    let Some(xf) = view.page_xform(page) else {
+        // A check box or radio button scrolled out of view lets go (it has no draft to keep):
+        // taking the keyboard back when its page returns would turn scrolling arrows into
+        // choices, or pull the keyboard from wherever the user went meanwhile.
+        if matches!(f.kind, FormFieldKind::CheckBox | FormFieldKind::Radio) {
+            view.forms.focus = None;
+        }
+        return None;
+    };
     let rect = widget_rect(&xf, info, page, w.rect);
     let zoom = xf.rect.width() / xf.pw.max(1.0);
     let t = Tokens::get(ctx);
@@ -628,6 +664,69 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
                 close = true;
             }
         }
+        FormFieldKind::CheckBox | FormFieldKind::Radio => {
+            // Nothing is drawn over the box, but a widget there holds egui's keyboard focus, so
+            // Space, Tab and the arrows come here instead of turning or scrolling the page.
+            let id = egui::Id::new(("form-field", view.id.0, &f.name, focus.widget));
+            let mut has_focus = false;
+            // Not interactable, so clicks still reach the page under it.
+            let area = egui::Area::new(egui::Id::new(("form-toggle", view.id.0))).order(egui::Order::Foreground).interactable(false);
+            area.fixed_pos(rect.min).show(ctx, |ui| {
+                let r = ui.interact(rect, id, egui::Sense::focusable_noninteractive());
+                if let Some(fx) = view.forms.focus.as_mut()
+                    && std::mem::take(&mut fx.request_focus)
+                {
+                    r.request_focus();
+                }
+                let filter = egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: false };
+                ui.memory_mut(|m| m.set_focus_lock_filter(id, filter));
+                has_focus = r.has_focus();
+            });
+            view.forms.keys = Some((id, f.kind == FormFieldKind::Radio));
+            let (esc, tab, shift) = ctx.input(|i| (i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Tab), i.modifiers.shift));
+            let space = has_focus && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
+            let arrow = has_focus && f.kind == FormFieldKind::Radio;
+            let step = ctx.input(|i| {
+                if !arrow {
+                    None
+                } else if i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown) {
+                    Some(true)
+                } else if i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::ArrowUp) {
+                    Some(false)
+                } else {
+                    None
+                }
+            });
+            let clicked_away = ctx.input(|i| i.pointer.any_click() && !i.pointer.hover_pos().is_some_and(|p| rect.contains(p)));
+            if esc || clicked_away {
+                close = true;
+            } else if tab {
+                next = Some(!shift);
+            } else if toggle && view.pending_edit.is_some() {
+                view.forms.toggle = true;
+            } else if toggle {
+                edit = toggle_edit(f, w);
+            } else if space {
+                // Space toggles a check box and selects a radio button, as in browsers: it never
+                // turns the selected button off.
+                edit = if f.kind == FormFieldKind::Radio { select_edit(f, w) } else { toggle_edit(f, w) };
+            } else if let Some(forward) = step {
+                // The arrows move to the group's next or previous button and select it, wrapping.
+                let stops: Vec<usize> = f.widgets.iter().enumerate().filter(|(_, w)| w.page.is_some() && !w.hidden).map(|(i, _)| i).collect();
+                if let Some(pos) = stops.iter().position(|&i| i == focus.widget) {
+                    let k = if forward { (pos + 1) % stops.len() } else { (pos + stops.len() - 1) % stops.len() };
+                    if let Some((wi, target)) = stops.get(k).and_then(|&wi| Some((wi, f.widgets.get(wi)?))) {
+                        view.forms.focus = Some(open_focus(f, wi));
+                        edit = select_edit(f, target);
+                        if let Some(p) = target.page
+                            && view.page_screen_rect(p).is_none()
+                        {
+                            view.go_to_page(p);
+                        }
+                    }
+                }
+            }
+        }
         _ => close = true,
     }
     if close {
@@ -636,11 +735,11 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
     if let Some(forward) = next {
         commit(view, form);
         let pending = view.pending_edit.take();
-        // The next widget that takes typing or a choice, in the document's tab order (each
-        // page's /Tabs: rows, columns or structure), wrapping.
+        // The next field that can be filled in, check boxes and radio buttons included (#2223), in
+        // the document's tab order (each page's /Tabs: rows, columns or structure), wrapping.
         let mut order: Vec<(usize, &FormField, usize)> = form
             .iter()
-            .filter(|x| fillable(x) && matches!(x.kind, FormFieldKind::Text | FormFieldKind::Combo | FormFieldKind::List))
+            .filter(|x| fillable(x))
             .flat_map(|x| x.widgets.iter().enumerate().filter(|(_, w)| w.page.is_some() && !w.hidden).map(move |(wi, w)| (w.tab, x, wi)))
             .collect();
         order.sort_by_key(|o| o.0);
