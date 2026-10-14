@@ -590,3 +590,45 @@ fn palette_ime_outside_click_closes_without_running_a_command() {
     assert!(h.state().palette_query.is_empty());
     assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().info.pages[0].rotation, 0);
 }
+
+/// Ctrl+Tab and Ctrl+Shift+Tab step through the tabs in the strip's order, wrap around at either
+/// end and include the Combine files tab after the documents (#1542). A Windows or Linux Ctrl
+/// press is both `ctrl` and `command`.
+#[test]
+fn ctrl_tab_steps_through_the_tabs_in_order_and_wraps_around() {
+    let mut h = harness();
+    h.state_mut().open_bytes("second.pdf", None, fixture(1)).unwrap();
+    h.state_mut().open_bytes("third.pdf", None, fixture(1)).unwrap();
+    h.run_steps(3);
+    let ctrl = Modifiers::CTRL | Modifiers::COMMAND;
+    let press = |h: &mut Harness<'static, PdfCraftApp>, modifiers: Modifiers| {
+        h.key_press_modifiers(modifiers, Key::Tab);
+        h.run_steps(2);
+        h.state().active
+    };
+    assert_eq!(h.state().active, Some(2));
+    assert_eq!(press(&mut h, ctrl), Some(0), "the last tab wraps to the first");
+    assert_eq!(press(&mut h, ctrl), Some(1));
+    assert_eq!(press(&mut h, ctrl | Modifiers::SHIFT), Some(0));
+    assert_eq!(press(&mut h, ctrl | Modifiers::SHIFT), Some(2), "the first tab wraps to the last");
+    // The order is the one on screen, after the tabs are moved.
+    let ids: Vec<_> = h.state().views.iter().map(|v| v.id).collect();
+    h.state_mut().move_tab(2, 0);
+    h.run_steps(2);
+    assert_eq!(h.state().active_ids().map(|(_, id)| id), Some(ids[2]));
+    press(&mut h, ctrl);
+    assert_eq!(h.state().active_ids().map(|(_, id)| id), Some(ids[0]));
+    // Combine files comes after the documents.
+    h.state_mut().execute("page.combine");
+    h.run_steps(2);
+    assert!(h.state().combine_showing());
+    assert_eq!(press(&mut h, ctrl), Some(0), "Combine files wraps to the first document");
+    assert_eq!(press(&mut h, ctrl | Modifiers::SHIFT), None);
+    assert!(h.state().combine_showing(), "back from the first document is Combine files");
+    // Plain Tab still belongs to keyboard focus, not to the tabs.
+    press(&mut h, Modifiers::NONE);
+    assert!(h.state().combine_showing());
+    for doc in h.state().session.docs() {
+        assert!(!doc.dirty, "switching tabs changes no document");
+    }
+}
