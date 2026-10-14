@@ -147,7 +147,7 @@ fn plural_sl(n: u64) -> usize {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 23] = [
+pub static LANGUAGES: [LangInfo; 24] = [
     LangInfo { code: "en", name: "English", source: "", plural: plural_one_other, rtl: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Simplified Chinese; `zh`, `zh-CN`, `zh-SG` and `zh-Hans-*` locales resolve here (see `candidates`).
@@ -210,6 +210,8 @@ pub static LANGUAGES: [LangInfo; 23] = [
     // Vietnamese; every `vi-*` locale (`vi-VN`, `vi_VN.UTF-8`) resolves here. CLDR `vi` counts have
     // one form ("other"), so `@plural` entries list a single form.
     LangInfo { code: "vi", name: "Tiếng Việt", source: include_str!("vi.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
+    // Catalan; every `ca-*` locale (`ca-ES`, `ca_ES.UTF-8`, `ca_ES@valencia`) resolves here.
+    LangInfo { code: "ca", name: "Català", source: include_str!("ca.tsv"), plural: plural_one_other, rtl: false, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
@@ -2537,6 +2539,89 @@ mod tests {
             }
         }
         assert!(unchanged.is_empty(), "unapproved English Vietnamese catalog entries: {unchanged:#?}");
+    }
+
+    #[test]
+    fn catalan_is_registered_and_persists() {
+        let ca = Lang::from_code("ca").expect("ca registered");
+        assert_eq!(ca.name(), "Català");
+        assert_eq!(normalize_pref("CA"), Some("ca"));
+        for tag in ["ca", "ca-ES", "ca_ES.UTF-8", "CA-es", "ca_ES@valencia"] {
+            assert_eq!(lang_from_tag(tag), Some(ca), "{tag}");
+        }
+        assert_eq!(first_supported("ca-ES\r\nen-US"), Some(ca));
+        assert_eq!(tr(ca, "File"), "Fitxer");
+        assert_eq!(tr(ca, "Save as…"), "Anomena i desa…");
+        assert_eq!(tr(ca, "Cancel"), "Cancel·la");
+        assert_eq!(tr_ctx(ca, "comment menu", "Edit"), "Edita");
+        assert_eq!(tr_ctx(ca, "signature pad", "Type"), "Escriu");
+        // one (1), other (0, 2+), as in English
+        assert_eq!((0..=3).map(|n| (ca.0.plural)(n)).collect::<Vec<_>>(), [1, 0, 1, 1]);
+        assert_eq!(trn(ca, 1, "{n} page", "{n} pages"), "1 pàgina");
+        assert_eq!(trn(ca, 3, "{n} page", "{n} pages"), "3 pàgines");
+        let mut app = crate::PdfCraftApp::default();
+        app.set_option("language", "CA").unwrap();
+        assert_eq!(app.language, "ca");
+        let mut restored = crate::PdfCraftApp::default();
+        restored.restore(&app.persist());
+        assert_eq!(restored.language, "ca");
+        assert!(restored.set_option("language", "xx").is_err());
+        assert_eq!(restored.language, "ca");
+    }
+
+    /// Catalan translates every registered command, menu, All tools group, section and item.
+    #[test]
+    fn catalan_covers_commands_and_catalogue() {
+        let ca = Lang::from_code("ca").expect("ca registered");
+        for command in pdfcraft_engine::commands::COMMANDS {
+            assert!(has(ca, command.label), "missing command: {}", command.label);
+            if let Some(menu) = command.menu {
+                assert!(has(ca, menu), "missing menu: {menu}");
+            }
+        }
+        for group in pdfcraft_engine::catalog::TOOL_GROUPS {
+            assert!(has(ca, group.label), "missing group: {}", group.label);
+            for section in group.sections {
+                assert!(has(ca, section.title), "missing section: {}", section.title);
+                for item in section.items {
+                    assert!(has(ca, item.label), "missing item: {}", item.label);
+                }
+            }
+        }
+    }
+
+    /// Catalan translates every `tl!("…")` literal in the UI source, so a new string can't ship in
+    /// English by accident.
+    #[test]
+    fn catalan_covers_ui_literals() {
+        let ca = Lang::from_code("ca").expect("ca registered");
+        let literals = ui_literals();
+        assert!(literals.len() > 900, "source scan found only {} literals", literals.len());
+        let missing: Vec<_> = literals.iter().filter(|label| !has(ca, label)).collect();
+        assert!(missing.is_empty(), "untranslated Catalan UI literals: {missing:#?}");
+    }
+
+    /// Catalan has every key the other bundled catalogs have (English keys, not their translations).
+    #[test]
+    fn catalan_covers_bundled_catalog_keys() {
+        let ca = Lang::from_code("ca").expect("ca registered");
+        let mut missing = std::collections::BTreeSet::new();
+        for reference in LANGUAGES.iter().filter(|language| language.code != "ca") {
+            let (entries, errors) = catalog::parse_entries(reference.source, reference.plural_forms());
+            assert!(errors.is_empty(), "{}: invalid reference catalog: {errors:?}", reference.code);
+            for entry in entries {
+                let translated = match entry.context.as_str() {
+                    "" => ca.catalog().plain(&entry.source),
+                    "@id" => ca.catalog().id(&entry.source),
+                    "@plural" => entry.source.split_once('|').and_then(|(one, other)| ca.catalog().plural(one, other, 0)),
+                    context => ca.catalog().contextual(context, &entry.source),
+                };
+                if translated.is_none() {
+                    missing.insert((entry.context, entry.source));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "Catalan misses bundled catalog keys: {missing:#?}");
     }
 
     #[test]
