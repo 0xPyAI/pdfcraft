@@ -527,6 +527,28 @@ pub(crate) fn image_input(
             let target = Rect::from_min_max(preview.min + (raw.min - b.min) * factor, preview.min + (raw.max - b.min) * factor);
             let visible = preview.intersect(xf.rect);
             if visible.is_positive() {
+                // The pixels follow the frame: the page raster's picture of the image, stretched
+                // into the preview over a blank where it was. Re-rendering every frame of a drag
+                // would lag; the edit renders it properly on release.
+                if preview != b
+                    && let Some(tex) = view.page_raster(page)
+                {
+                    let clipped = painter.with_clip_rect(painter.clip_rect().intersect(xf.rect));
+                    clipped.rect_filled(b, CornerRadius::ZERO, Color32::WHITE);
+                    let mut mesh = egui::Mesh::with_texture(tex);
+                    for (from, to) in [
+                        (b.left_top(), preview.left_top()),
+                        (b.right_top(), preview.right_top()),
+                        (b.right_bottom(), preview.right_bottom()),
+                        (b.left_bottom(), preview.left_bottom()),
+                    ] {
+                        let (u, v) = xf.screen_to_norm(from);
+                        mesh.vertices.push(egui::epaint::Vertex { pos: to, uv: Pos2::new(u, v), color: Color32::WHITE });
+                    }
+                    mesh.add_triangle(0, 1, 2);
+                    mesh.add_triangle(0, 2, 3);
+                    clipped.add(egui::Shape::mesh(mesh));
+                }
                 painter.rect_filled(visible, CornerRadius::ZERO, ACCENT.gamma_multiply(0.04));
                 painter.rect_stroke(visible, CornerRadius::ZERO, Stroke::new(1.5, ACCENT), egui::StrokeKind::Outside);
                 handles(preview);

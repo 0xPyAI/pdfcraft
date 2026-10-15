@@ -3929,6 +3929,74 @@ fn cropped_image_corner_resize_keeps_opposite_corner_and_scales_crop() {
     assert_eq!(reopened.get(re).unwrap().page_images(0), h.state().session.get(id).unwrap().page_images(0));
 }
 
+/// While a corner is dragged, the image's pixels are drawn in the blue frame, not left at their
+/// old size until release (#1671).
+#[test]
+fn image_pixels_follow_the_frame_while_a_corner_is_dragged() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 1100.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("clipped.pdf", None, clipped_artwork_with_labels_drawn(true)).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.state_mut().views[0].set_zoom(1.2);
+    h.run_steps(4);
+    let page = h.state().views[0].page_screen_rect(0).unwrap();
+    let at = |x: f32, y: f32| egui::pos2(page.left() + x / 200.0 * page.width(), page.top() + (300.0 - y) / 300.0 * page.height());
+    let p = at(95.0, 195.0);
+    h.hover_at(p);
+    h.run_steps(1);
+    h.drag_at(p);
+    h.run_steps(1);
+    h.drop_at(p);
+    h.run_steps(3);
+    assert!(h.state().views[0].image_selection.is_some());
+    let frame = |h: &Harness<'static, PdfCraftApp>| {
+        h.output().shapes.iter().find_map(|s| match &s.shape {
+            egui::Shape::Rect(r) if r.stroke.color == egui::Color32::from_rgb(0x14, 0x73, 0xE6) && r.rect.width() > 20.0 => Some(r.rect),
+            _ => None,
+        })
+    };
+    // Textured meshes smaller than the page: the page raster itself always covers the page.
+    let pictures = |h: &Harness<'static, PdfCraftApp>| -> Vec<egui::Rect> {
+        h.output()
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Mesh(m) if m.texture_id != egui::TextureId::default() => Some(m.calc_bounds()),
+                _ => None,
+            })
+            .filter(|b| b.width() < page.width() - 1.0)
+            .collect()
+    };
+    let start = frame(&h).expect("the selected image has a frame");
+    let (grip, fixed) = (start.right_top(), start.left_bottom());
+    for factor in [0.6, 1.3] {
+        let to = fixed + (grip - fixed) * factor;
+        h.hover_at(grip);
+        h.run_steps(1);
+        h.drag_at(grip);
+        h.run_steps(1);
+        for k in 1..=4 {
+            h.hover_at(grip + (to - grip) * (k as f32 / 4.0));
+            h.run_steps(1);
+        }
+        let live = frame(&h).expect("the drag shows its frame");
+        assert!((live.width() - start.width() * factor).abs() < 1.0, "the frame follows the grip: {live:?} from {start:?}");
+        let drawn = pictures(&h);
+        assert!(
+            drawn.iter().any(|b| (b.min - live.min).length() < 0.5 && (b.max - live.max).length() < 0.5),
+            "the picture is drawn in the frame {live:?}, not only at {drawn:?}"
+        );
+        h.drop_at(to);
+        h.run_steps(4);
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        h.run_steps(4);
+    }
+}
+
 /// Exercise actual pointer gestures on each cropped placement, without capturing private pixels.
 #[test]
 #[ignore = "requires an explicitly supplied local PDF with cropped artwork"]
