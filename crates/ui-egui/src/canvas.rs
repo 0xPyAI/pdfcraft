@@ -266,6 +266,16 @@ impl Selection {
     }
 }
 
+/// The glyphs `clicks` quick clicks select around glyph `a`: two the word, three the line, more
+/// the page.
+fn click_unit(text: &PageText, clicks: u32, a: usize) -> Option<(usize, usize)> {
+    match clicks {
+        2 => text.word_at(a),
+        3 => text.line_at(a),
+        _ => text.glyphs.len().checked_sub(1).map(|last| (0, last)),
+    }
+}
+
 struct PageTex {
     tag: u64,
     tex: TextureHandle,
@@ -2840,11 +2850,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                         // Multi-click highlights immediately on pointer press instead of release (#1024).
                         let clicks = if view.clicks > 2 && tool != QuickTool::Select { 1 } else { view.clicks };
                         if clicks >= 2 && over_text {
-                            let span = text.nearest(vx, vy).and_then(|a| match clicks {
-                                2 => text.word_at(a),
-                                3 => text.line_at(a),
-                                _ => text.glyphs.len().checked_sub(1).map(|last| (0, last)),
-                            });
+                            let span = text.nearest(vx, vy).and_then(|a| click_unit(&text, clicks, a));
                             if let Some((first, last)) = span {
                                 view.selection = Some(Selection::run(i, first, last));
                             }
@@ -2862,10 +2868,22 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                             };
                         }
                     }
+                    let clicks = if view.clicks > 2 && tool != QuickTool::Select { 1 } else { view.clicks };
                     if resp.dragged()
                         && let Some(sel) = view.selection.as_mut().filter(|s| s.page == i)
                     {
                         match &mut sel.span {
+                            // After a multi-click the drag extends by its unit (#1685), as in
+                            // Acrobat and browsers: whole words or lines, always keeping the one
+                            // clicked, which holds the anchor whichever way the drag went.
+                            Span::Run { anchor, head } if clicks >= 2 => {
+                                if let Some(h) = text.nearest(vx, vy)
+                                    && let Some((first, last)) = click_unit(&text, clicks, *anchor)
+                                {
+                                    let (to_first, to_last) = click_unit(&text, clicks, h).unwrap_or((h, h));
+                                    (*anchor, *head) = if to_first < first { (last, to_first) } else { (first, to_last.max(last)) };
+                                }
+                            }
                             Span::Run { head, .. } => {
                                 if let Some(h) = text.nearest(vx, vy) {
                                     *head = h;
@@ -2901,11 +2919,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     // (a highlight made by the double-click left its word selected).
                     if release_clicks > 0 && clicks >= 2 && over_text {
                         if view.selection.is_none() {
-                            let span = text.nearest(vx, vy).and_then(|a| match clicks {
-                                2 => text.word_at(a),
-                                3 => text.line_at(a),
-                                _ => text.glyphs.len().checked_sub(1).map(|last| (0, last)),
-                            });
+                            let span = text.nearest(vx, vy).and_then(|a| click_unit(&text, clicks, a));
                             if let Some((first, last)) = span {
                                 view.selection = Some(Selection::run(i, first, last));
                             }

@@ -314,3 +314,38 @@ fn a_selection_drag_held_at_the_bottom_edge_scrolls_the_view() {
     h.run_steps(2);
     assert_eq!(h.state().views[0].selected_text(), Some(held), "releasing keeps the selection");
 }
+
+/// Click at `at`, then press there again and drag to `to` before releasing: a double-click drag.
+fn double_click_drag(h: &mut Harness<'static, PdfCraftApp>, at: Pos2, to: Pos2) {
+    click(h, at);
+    press_and_move(h, at, to);
+    h.event(Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(1);
+}
+
+/// Issue #1685: dragging after a double-click extends the selection a word at a time, and the
+/// double-clicked word stays selected whichever way the drag goes.
+#[test]
+fn a_double_click_drag_extends_by_whole_words_both_ways() {
+    let (mut h, _) = harness(|_| {});
+    let glyph = |h: &Harness<'static, PdfCraftApp>, g: usize| h.state().views[0].glyph_screen_pos(0, g).expect("glyph on screen");
+    // "The quick brown fox": the "u" of "quick" is glyph 5, the "o" of "brown" glyph 12.
+    let (u, o) = (glyph(&h, 5), glyph(&h, 12));
+    double_click_drag(&mut h, u, o);
+    let right = h.state().views[0].selected_text();
+    h.run_steps(60);
+    double_click_drag(&mut h, o, u);
+    let left = h.state().views[0].selected_text();
+    assert_eq!([right.as_deref(), left.as_deref()], [Some("quick brown"); 2], "dragging right, then left");
+}
+
+/// Issue #1685: after a triple-click the drag extends a whole line at a time.
+#[test]
+fn a_triple_click_drag_extends_by_whole_lines() {
+    let (mut h, at) = harness(|_| {});
+    // A glyph inside "jumps over the dog", on the second line.
+    let below = h.state().views[0].glyph_screen_pos(0, 23).expect("glyph on screen");
+    click(&mut h, at);
+    double_click_drag(&mut h, at, below);
+    assert_eq!(h.state().views[0].selected_text().as_deref(), Some("The quick brown fox\njumps over the dog"));
+}
