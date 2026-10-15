@@ -128,7 +128,7 @@ fn every_catalog_tool_is_listed_after_view_more() {
 #[test]
 fn expanded_all_tools_lists_every_tool_by_category_and_searches() {
     let mut h = harness(|_| {});
-    h.get_by_label("Expand").click();
+    h.get_by_label("Expand all tools").click();
     h.run_steps(3);
     assert!(h.state().all_tools_full);
     for c in pdfcraft_engine::catalog::TOOL_CATEGORIES {
@@ -158,11 +158,11 @@ fn expanded_all_tools_lists_every_tool_by_category_and_searches() {
 #[test]
 fn collapse_and_escape_close_the_expanded_all_tools() {
     let mut h = harness(|app| app.set_option("tools", "full").unwrap());
-    h.get_by_label("Collapse").click();
+    h.get_by_label("Collapse all tools").click();
     h.run_steps(3);
     assert!(!h.state().all_tools_full);
     h.get_by_label("View more");
-    h.get_by_label("Expand").click();
+    h.get_by_label("Expand all tools").click();
     h.run_steps(3);
     h.key_press(egui::Key::Escape);
     h.run_steps(3);

@@ -37,7 +37,7 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(tl!("All tools")).font(theme::semibold(22.0)).color(t.text));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if icons::button(ui, "minimize-2", 28.0, false, tl!("Collapse")).clicked() {
+                    if icons::button(ui, "minimize-2", 28.0, false, tl!("Collapse all tools")).clicked() {
                         app.all_tools_full = false;
                     }
                 });

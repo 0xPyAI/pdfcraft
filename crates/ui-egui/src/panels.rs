@@ -40,8 +40,9 @@ fn panel_header(ui: &mut egui::Ui, t: &Tokens, title: &str, back: bool) -> (bool
     let mut go_back = false;
     let mut close = false;
     ui.horizontal(|ui| {
-        let (icon, tip) = if back { ("chevron-left", "Back to all tools") } else { ("maximize-2", "Expand") };
-        if icons::button(ui, icon, 26.0, false, tl!(tip)).clicked() {
+        // Labels distinct from the Combine grid's Expand and Collapse, which can show beside them.
+        let (icon, tip) = if back { ("chevron-left", tl!("Back to all tools")) } else { ("maximize-2", tl!("Expand all tools")) };
+        if icons::button(ui, icon, 26.0, false, tip).clicked() {
             go_back = true;
         }
         // Reserve space for Close before laying out the translated title. Long tool names
