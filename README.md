@@ -172,7 +172,7 @@ Open **Organize pages** to see every page at once:
 **Saves you can trust:**
 - *Incremental:* the original bytes stay byte-for-byte intact.
 - *Atomic:* the file is written to a temporary copy, then swapped in.
-- *Verified:* independently checked with qpdf.
+- *Verified:* independently checked with qpdf, on every CI run.
 
 When open documents exceed the window width, scroll over the tab strip with the mouse wheel or trackpad, or use its horizontal scrollbar. Opening or switching to a document brings its tab into view.
 
@@ -365,7 +365,8 @@ On top of those, two corpus sweeps run over real-world files:
 - **Opening and rendering:** of the 983 pdf.js test files, 963 open and render cleanly, with 0 crashes.
 - **Open, edit and save round trips:** 958 succeed.
 
-The output is verified with independent tools: hayro, qpdf and poppler.
+The output is verified against independent implementations: hayro and qpdf on every CI run, and
+poppler over the corpus on demand (`cargo xtask text-oracle`).
 
 PdfCraft is a clean-room implementation. Its behaviour comes from the ISO 32000 specification and black-box observation, never from anyone else's code. Every icon, font and image is openly licensed and listed in [ATTRIBUTION.md](ATTRIBUTION.md).
 

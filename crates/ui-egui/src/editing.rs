@@ -664,7 +664,7 @@ impl PdfCraftApp {
             self.notify_tr("The document was closed before it could be saved.");
             return false;
         };
-        let bytes = match self.session.save_bytes(id) {
+        let bytes = match self.session.save_bytes(id).and_then(|b| self.session.check_save(id, &b).map(|()| b)) {
             Ok(b) => b,
             Err(e) => {
                 self.notify_fmt("Couldn't save {name}: {e}", &[("name", &name), ("e", &e.to_string())]);

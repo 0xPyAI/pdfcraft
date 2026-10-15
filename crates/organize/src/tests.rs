@@ -2025,9 +2025,12 @@ fn extract_still_prunes_separate_resources_when_many_pages_share_a_type3_font() 
     assert_eq!(xobject_names(&part, 0), [b"ImA".to_vec()], "one shared font's direct resource graph is protected once");
 }
 
+// Both sides of the comparison go through the same pdftoppm, so the assertion is about our two
+// documents rather than about Poppler's output, and no Poppler version can change the verdict.
+// It skips where pdftoppm is absent and fails where PDFCRAFT_ORACLES_REQUIRED is set.
 #[test]
-#[ignore = "requires the external Poppler pdftoppm oracle"]
 fn extract_type3_shared_xobjects_matches_poppler_pixels() {
+    let pdftoppm = pdfcraft_oracle::or_skip!(pdfcraft_oracle::pdftoppm());
     let dir = std::env::temp_dir().join(format!("pdfcraft-type3-extract-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let fixtures = [
@@ -2042,7 +2045,7 @@ fn extract_type3_shared_xobjects_matches_poppler_pixels() {
         let render = |doc: &Document, name: &str| {
             let path = dir.join(format!("{i}-{name}.pdf"));
             std::fs::write(&path, write_full(doc, &SaveOptions::default()).unwrap()).unwrap();
-            let output = std::process::Command::new("pdftoppm").args(["-singlefile", "-r", "72", "-gray"]).arg(path).output().unwrap();
+            let output = pdftoppm.command().args(["-singlefile", "-r", "72", "-gray"]).arg(path).output().unwrap();
             assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
             assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
             output.stdout

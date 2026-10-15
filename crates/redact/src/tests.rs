@@ -2,32 +2,12 @@ use std::sync::Arc;
 
 use pdfcraft_annot::{Meta, NewAnnotation, Shape, Style, add_annotation, rect_quad};
 use pdfcraft_cos::{Document, SaveOptions, write_full, write_incremental};
+use pdfcraft_testkit::{Pdf, stream_obj as stream};
 
 use super::*;
 
-fn stream(dict: &str, data: &[u8]) -> Vec<u8> {
-    let mut v = format!("<< {dict} /Length {} >>\nstream\n", data.len()).into_bytes();
-    v.extend_from_slice(data);
-    v.extend_from_slice(b"\nendstream");
-    v
-}
-
 fn pdf(objs: Vec<Vec<u8>>) -> Document {
-    let mut out = b"%PDF-1.7\n".to_vec();
-    let mut offs = Vec::new();
-    for (i, o) in objs.iter().enumerate() {
-        offs.push(out.len());
-        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
-        out.extend_from_slice(o);
-        out.extend_from_slice(b"\nendobj\n");
-    }
-    let x = out.len();
-    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
-    for o in offs {
-        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
-    }
-    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n", objs.len() + 1).as_bytes());
-    Document::open(Arc::new(out)).unwrap()
+    Document::open(Arc::new(Pdf::new().objs(objs).build())).unwrap()
 }
 
 /// A font where every glyph is 500 units wide (so a 10 pt glyph advances 5 pt).
@@ -252,7 +232,7 @@ fn vertical_writing_text_under_a_mark_fails_closed() {
 #[test]
 fn images_are_removed_or_have_their_pixels_cleared() {
     // Image 1 is fully covered; image 2 (4×1 gray, all white) is half covered.
-    let img = stream("/Type /XObject /Subtype /Image /Width 4 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", &[255, 255, 255, 255]);
+    let img = stream("/Type /XObject /Subtype /Image /Width 4 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", [255, 255, 255, 255]);
     let src = b"q 10 0 0 10 10 10 cm /Im1 Do Q q 40 0 0 10 100 100 cm /Im2 Do Q";
     let mut doc = one_page(src, "/XObject << /Im1 7 0 R /Im2 7 0 R >>", vec![img]);
     mark(&mut doc, 0, &[[5.0, 5.0, 25.0, 25.0], [95.0, 95.0, 120.0, 115.0]], "");

@@ -335,7 +335,7 @@ status = "shipped"
 commands = []
 tools = []
 evidence = ["crates/cos/tests/encryption.rs::qpdf_agrees", "crates/cos/tests/writer.rs::qpdf_accepts_object_stream_output"]
-notes = "skipped when qpdf is absent"
+notes = "qpdf is installed on the Linux CI runner and PDFCRAFT_ORACLES_REQUIRED makes its absence a failure, so these run on every CI run rather than skipping; on a machine without qpdf they skip with a notice (crates/oracle)"
 
 [[feature]]
 id = "core.deterministic-save"
@@ -1188,10 +1188,10 @@ area = "B"
 tier = "P1"
 milestone = "M3"
 status = "shipped"
-commands = []
+commands = ["view.next_tab", "view.previous_tab"]
 tools = ["doc_list"]
-evidence = ["crates/ui-egui/tests/editing.rs::combining_files_opens_a_new_unsaved_tab", "crates/ui-egui/tests/control.rs::state_and_view_options", "crates/ui-egui/tests/viewer.rs::each_document_keeps_its_own_scroll_position", "crates/ui-egui/tests/viewer.rs::a_new_document_opens_at_the_top_after_a_relaunch"]
-notes = "each tab keeps its own scroll position (#189), and a newly opened one starts at the top, not where an earlier session left the scroll"
+evidence = ["crates/ui-egui/tests/editing.rs::combining_files_opens_a_new_unsaved_tab", "crates/ui-egui/tests/control.rs::state_and_view_options", "crates/ui-egui/tests/viewer.rs::each_document_keeps_its_own_scroll_position", "crates/ui-egui/tests/viewer.rs::a_new_document_opens_at_the_top_after_a_relaunch", "crates/ui-egui/tests/ui.rs::dragging_a_tab_moves_it_and_keeps_the_same_document_active", "crates/ui-egui/tests/ui.rs::a_tab_dropped_where_it_was_stays_and_a_click_still_selects_it", "crates/ui-egui/tests/ui.rs::the_combine_tab_does_not_move_and_documents_stay_in_order", "crates/ui-egui/tests/commands.rs::ctrl_tab_steps_through_the_tabs_in_order_and_wraps_around"]
+notes = "each tab keeps its own scroll position (#189), and a newly opened one starts at the top, not where an earlier session left the scroll. Document tabs are dragged to reorder them (#1537): a line marks where the tab will land, the strip scrolls at its edges when it overflows, and the same document stays active; the Combine files tab stays after the documents. Dragging a tab out into its own window is view.multiple-windows. Ctrl+Tab and Ctrl+Shift+Tab (⌃Tab and ⌃⇧Tab on macOS; View ▸ Next tab / Previous tab) step through the tabs in their order on screen, Combine files included, and wrap around at either end (#1542)."
 
 [[feature]]
 id = "view.multiple-windows"
@@ -3436,8 +3436,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["file.properties"]
 tools = ["doc_info"]
-evidence = ["crates/ui-egui/tests/view.rs::fonts_tab_lists_fonts_and_embedding"]
-notes = ""
+evidence = ["crates/ui-egui/tests/view.rs::fonts_tab_lists_fonts_and_embedding", "crates/render/src/inspect.rs::doc_info_says_which_face_stands_in_and_why", "crates/render/src/inspect.rs::an_embedded_font_reports_no_substitution_at_all"]
+notes = "name, type, embedding, subset and encoding; doc_info also reports the face standing in for a program the document does not embed and why it was chosen (Acrobat's Actual Font), including the case where no licensed face exists so nothing is drawn. Still missing: the Fonts tab in the interface does not show the substituted face yet, only the data layer does"
 
 [[feature]]
 id = "organize.initial-view"

@@ -4,9 +4,11 @@ Layer L2. Font helpers for the appearance streams PdfCraft generates (comments, 
 
 Today it holds what generated appearances need without a font program:
 
-- `helvetica_width`: an approximation of Helvetica's proportions by character class. No metrics
-  file or font program from any vendor is bundled; widths are PdfCraft's own estimates, good
-  enough for line breaking and alignment, not for typesetting.
+- `helvetica_width`: the **exact** standard-14 advance widths, via `Std14::Helvetica`. It was an
+  estimate by character class until the generated tables landed; those tables are Adobe-authored
+  non-visual technical data, the item `AGENTS.md` §1.1 permits, carried in `std14_metrics.rs` with
+  `adobe_data = true` in `ATTRIBUTION.toml`. **No font program or typeface from any vendor is
+  bundled** — widths and encodings only. Reach for `Std14` directly for any other face.
 - `wrap`: greedy line breaking with that measure (paragraphs on newlines, long words split).
 - `win_ansi`: Unicode → WinAnsiEncoding bytes (`?` for characters it can't represent), and
   `literal` to write bytes as a PDF literal string. Nothing writes that `?` silently. Callers

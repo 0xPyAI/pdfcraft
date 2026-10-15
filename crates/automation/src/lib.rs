@@ -858,6 +858,10 @@ impl Automation {
     }
 
     fn doc_save(&mut self, a: &Args) -> Result<Value> {
+        self.doc_save_with(a, write_atomic)
+    }
+
+    fn doc_save_with(&mut self, a: &Args, write: impl FnOnce(&Path, &[u8]) -> Result<()>) -> Result<Value> {
         let doc = self.doc(a)?;
         let id = doc.id;
         let target = match a.opt_str("path")? {
@@ -875,7 +879,8 @@ impl Automation {
         // A save that adds or removes encryption, or must not keep the old revision (Sanitize,
         // redaction), is rewritten in full even when an incremental save was asked for.
         let incremental = !full && bytes.starts_with(&self.doc(a)?.saved_bytes());
-        write_atomic(&target, &bytes)?;
+        self.session.check_save(id, &bytes).map_err(failed)?;
+        write(&target, &bytes)?;
         let path = target.to_string_lossy().into_owned();
         self.session.mark_saved(id, bytes.clone(), Some(path.clone())).map_err(failed)?;
         Ok(json!({ "path": path, "bytes": bytes.len(), "incremental": incremental, "document": summary(self.doc(a)?) }))
@@ -2205,8 +2210,13 @@ fn info(d: &Document) -> Value {
         })).collect::<Vec<_>>(),
         "layers": i.layers.iter().map(|l| json!({ "name": l.name, "visible": l.visible })).collect::<Vec<_>>(),
         "attachments": i.attachments.iter().map(|a| json!({ "name": a.name, "description": a.description, "size": a.size })).collect::<Vec<_>>(),
+        // `substitute` names the face standing in for a program the document does not embed, and
+        // `substitution` says why. Both are null for an embedded font: nothing stands in. A null
+        // `substitute` with a non-null `substitution` means no face was available at all, so
+        // nothing is drawn for that font -- which is the answer to "why is my text missing?".
         "fonts": i.fonts.iter().map(|f| json!({
             "name": f.name, "kind": f.kind, "embedded": f.embedded, "subset": f.subset, "encoding": f.encoding,
+            "substitute": f.substitute, "substitution": f.substitution,
         })).collect::<Vec<_>>(),
         "warnings": i.warnings,
         "repairs": d.repair_log(),
@@ -2301,13 +2311,24 @@ fn unused(dir: &Path, stem: &str) -> PathBuf {
     (2..10_000u32).map(|n| child(dir, &format!("{stem} ({n}).pdf"))).find(|p| !p.exists()).unwrap_or(first)
 }
 
-/// Write via a temporary file in the same directory, then rename over the target.
+/// Write and sync a temporary file in the same directory, then rename over the target.
+/// This flushes staged contents; it does not promise parent-directory durability after a
+/// power loss. Filesystems that refuse sync cause the save to fail before publication.
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     write_atomic_with(path, bytes, staging_suffixes())
 }
 
 /// [`write_atomic`], trying the staging names that `suffixes` give.
 fn write_atomic_with(path: &Path, bytes: &[u8], suffixes: impl IntoIterator<Item = u64>) -> Result<()> {
+    write_atomic_synced(path, bytes, suffixes, std::fs::File::sync_all)
+}
+
+fn write_atomic_synced(
+    path: &Path,
+    bytes: &[u8],
+    suffixes: impl IntoIterator<Item = u64>,
+    sync: impl FnOnce(&std::fs::File) -> std::io::Result<()>,
+) -> Result<()> {
     use std::io::Write;
     // A folder can't be replaced, and staging beside it could land outside the root: "." names
     // the root itself, whose parent isn't ours to write in.
@@ -2322,7 +2343,9 @@ fn write_atomic_with(path: &Path, bytes: &[u8], suffixes: impl IntoIterator<Item
     // Closed at the end of the block, before the rename.
     let written = {
         let mut file = file;
-        file.write_all(bytes)
+        // Surface delayed writeback failures before replacing the destination or marking
+        // a document clean. The handle is closed before rename (required on Windows).
+        file.write_all(bytes).and_then(|()| sync(&file))
     };
     if let Err(e) = written {
         let _ = std::fs::remove_file(&tmp);
@@ -2678,6 +2701,79 @@ mod tests {
             assert_eq!(read(&staged(&dir, s)), "PLANTED");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_staging_sync_keeps_the_destination_and_cleans_up() {
+        for exists in [false, true] {
+            let dir = staging_dir(if exists { "sync-existing" } else { "sync-new" });
+            let target = dir.join("out.pdf");
+            if exists {
+                std::fs::write(&target, "OLD").unwrap();
+            }
+            let result = write_atomic_synced(&target, b"NEW", [1], |_| {
+                assert_eq!(std::fs::read(staged(&dir, 1)).unwrap(), b"NEW", "sync follows writing");
+                if exists {
+                    assert_eq!(read(&target), "OLD", "sync precedes publication");
+                }
+                Err(std::io::Error::other("injected storage sync failure"))
+            });
+            assert!(result.is_err(), "sync failure must refuse publication");
+            assert!(result.unwrap_err().to_string().contains("injected storage sync failure"));
+            if exists {
+                assert_eq!(read(&target), "OLD");
+                assert_eq!(listing(&dir), ["out.pdf"]);
+            } else {
+                assert!(!target.exists());
+                assert!(listing(&dir).is_empty());
+            }
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_failed_save_sync_keeps_the_document_dirty_and_can_be_retried() {
+        let dir = staging_dir("sync-dirty");
+        let target = dir.join("out.pdf");
+        let mut a = Automation::new().with_root(&dir).unwrap();
+        let id = search_document(&mut a, 2);
+        json(&mut a, "doc_save", json!({"doc": id.0, "path": "out.pdf"}));
+        let old = std::fs::read(&target).unwrap();
+        json(&mut a, "page_rotate", json!({"doc": id.0, "pages": [1], "degrees": 90}));
+        let args = json!({"doc": id.0});
+        let before = summary(a.doc(&Args(&args)).unwrap());
+        let result = a.doc_save_with(&Args(&args), |path, bytes| {
+            write_atomic_synced(path, bytes, [1], |_| Err(std::io::Error::other("injected storage sync failure")))
+        });
+        assert!(result.is_err());
+        let doc = a.doc(&Args(&args)).unwrap();
+        assert!(doc.dirty);
+        assert_eq!(summary(doc), before, "failed save must not reset history or saved state");
+        assert_eq!(std::fs::read(&target).unwrap(), old);
+        assert_eq!(listing(&dir), ["out.pdf"]);
+        json(&mut a, "doc_save", args.clone());
+        assert!(!a.doc(&Args(&args)).unwrap().dirty);
+        assert_ne!(std::fs::read(&target).unwrap(), old);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn successful_staging_sync_precedes_publication() {
+        let dir = staging_dir("sync-success");
+        let target = dir.join("out.pdf");
+        std::fs::write(&target, "OLD").unwrap();
+        let mut called = false;
+        write_atomic_synced(&target, b"NEW", [1], |file| {
+            called = true;
+            assert_eq!(read(&target), "OLD");
+            assert_eq!(std::fs::read(staged(&dir, 1)).unwrap(), b"NEW");
+            file.sync_all()
+        })
+        .unwrap();
+        assert!(called);
+        assert_eq!(read(&target), "NEW");
+        assert_eq!(listing(&dir), ["out.pdf"]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// The names in a folder: what a test can see was left behind.
