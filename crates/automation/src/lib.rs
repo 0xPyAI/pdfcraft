@@ -140,6 +140,12 @@ impl Automation {
         self
     }
 
+    /// The clock and time zone of a host without its own. See [`Session::with_wall_clock`].
+    pub fn with_wall_clock(mut self, clock: fn() -> i64, utc_offset: fn() -> i64) -> Self {
+        self.session = std::mem::take(&mut self.session).with_wall_clock(clock, utc_offset);
+        self
+    }
+
     pub fn session(&self) -> &Session {
         &self.session
     }

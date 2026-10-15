@@ -669,6 +669,26 @@ mod tests {
         assert_eq!(s.date_format(), "dd.mm.yyyy", "a rejected pattern keeps the previous one");
     }
 
+    /// 21:30 on 14 Oct 2026 in São Paulo (UTC-3) is 00:30Z on the 15th. The date Fill & Sign
+    /// stamps is the wall-clock day (14th); the time the file records (`/M`, `/ModDate`) is UTC.
+    /// The test shortcut (`with_clock`) takes the injected time as local and says the 15th, which
+    /// is why it cannot serve a host that knows both the UTC time and the zone.
+    #[test]
+    fn a_wall_clock_gives_the_local_day_and_keeps_utc_for_the_file() {
+        let sao_paulo = Session::new().with_wall_clock(|| 1_792_024_200, || -3 * 3600);
+        assert_eq!(sao_paulo.today(), (2026, 10, 14));
+        assert_eq!(sao_paulo.today_text(None, None).as_deref(), Ok("10/14/2026"));
+        assert_eq!(sao_paulo.signing_date(), "D:20261014213000-03'00'");
+        assert_eq!(sao_paulo.stamp_by_line("Ada"), "By Ada at 9:30 pm, Oct 14, 2026");
+        assert_eq!(sao_paulo.now_secs(), 1_792_024_200, "the file's instant stays in UTC");
+
+        let utc = Session::new().with_wall_clock(|| 1_792_024_200, || 0);
+        assert_eq!(utc.today(), (2026, 10, 15));
+
+        let clock_only = Session::new().with_clock(|| 1_792_024_200);
+        assert_eq!(clock_only.today(), (2026, 10, 15), "on its own, an injected clock counts as local time");
+    }
+
     #[test]
     fn names_follow_the_date_language() {
         assert_eq!(in_lang("dddd, d \\de mmmm \\de yyyy", "es"), "sábado, 7 de marzo de 2026");
