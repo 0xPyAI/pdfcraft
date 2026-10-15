@@ -3713,3 +3713,32 @@ fn a_subset_program_is_not_trusted_for_new_characters_and_the_error_names_the_ch
     assert!(msg.contains("ő (U+0151)") && msg.contains("Load font") && !msg.contains("Japanese"), "{msg}");
     assert_eq!(page_content_bytes(&doc, 0), before);
 }
+
+#[test]
+fn draft_layout_matches_the_paragraph_an_applied_edit_draws() {
+    let content = "BT /F1 12 Tf 14 TL 72 700 Td (A first paragraph of words) Tj T* (with a second row) Tj ET \
+                   BT /F1 12 Tf 72 600 Td (Another paragraph below) Tj ET BT /F1 12 Tf 320 700 Td (Side note) Tj ET";
+    let doc = text_page(content);
+    let block = text::text_blocks(&doc, 0).unwrap().into_iter().position(|b| b.text.starts_with("A first")).unwrap();
+    let source = text::text_blocks(&doc, 0).unwrap()[block].clone();
+    for draft in [
+        source.editor_text.replacen("words", "many more words than before", 1),
+        source.editor_text.replacen(" of words", "", 1),
+        format!("{}\nand a third row", source.editor_text),
+    ] {
+        let layout = text::text_edit_layout(&doc, 0, block, &draft, &text::BlockStyle::default()).unwrap();
+        // Apply the same edit and measure every run that isn't one of the page's other runs.
+        let mut applied = doc.clone();
+        text::rewrite_block(&mut applied, 0, block, Some(&draft), &text::BlockStyle::default()).unwrap();
+        let others: Vec<_> =
+            text::text_lines(&doc, 0).unwrap().into_iter().enumerate().filter(|(i, _)| !source.lines.contains(i)).map(|(_, l)| l.rect).collect();
+        let drawn = text::text_lines(&applied, 0)
+            .unwrap()
+            .into_iter()
+            .map(|l| l.rect)
+            .filter(|r| !others.contains(r))
+            .reduce(|a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]);
+        assert_eq!(layout.draft_rect, drawn, "{draft:?}");
+        assert_eq!(layout.source_rect, source.rect);
+    }
+}
