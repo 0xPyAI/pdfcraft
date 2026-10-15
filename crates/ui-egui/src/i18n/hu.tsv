@@ -2356,3 +2356,19 @@ animation effects	Off	Ki
 	Mark as artifact	Megjelölés műtárgyként
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Távolítsa el ezt a levélcímkét az olvasási sorrendből, és jelölje meg a közvetlen tartalmát műtárgyként
 	Mark content as artifact	Tartalom megjelölése műtárgyként
+	Word count	Szavak száma
+	Current page only	Csak az aktuális oldal
+	Exclude tagged tables	Címkézett táblázatok kizárása
+	Exclude tagged code blocks	Címkézett kódblokkok kizárása
+	Exclude image/OCR text	Képek és OCR szövegének kizárása
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	A kizárások PDF-címkéket használnak. A címkézetlen táblázatok és kódok továbbra is beleszámítanak. A képek kizárása a láthatatlan szöveget is eltávolítja.
+	Words	Szavak
+	Characters	Karakterek
+	Characters without spaces	Karakterek szóközök nélkül
+	Pages counted	Megszámolt oldalak
+	Some pages contain no countable text. Scanned images need OCR first.	Egyes oldalakon nincs megszámolható szöveg. A beolvasott képeken először OCR-t kell futtatni.
+	Some content could not be classified safely and was kept in the count.	Egyes tartalmakat nem lehetett megbízhatóan besorolni, ezért beleszámítanak az eredménybe.
+	Counting words… {n} pages read	Szavak számlálása… {n} oldal beolvasva
+	Word counting stopped unexpectedly.	A szavak számlálása váratlanul leállt.
+	Word count…	Szavak száma…
+@id	file.word_count	Szavak száma…

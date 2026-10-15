@@ -2311,3 +2311,19 @@ animation effects	Off	關
 	Drawing scale changes. Use Actual size for full-scale plans.	圖面比例會改變。如需原尺寸的圖面，請使用「實際大小」。
 	Done adding text	完成新增文字
 	Discard this text (Esc)	捨棄此文字（Esc）
+	Word count	字詞統計
+	Current page only	僅目前頁面
+	Exclude tagged tables	排除帶標籤的表格
+	Exclude tagged code blocks	排除帶標籤的程式碼區塊
+	Exclude image/OCR text	排除影像/OCR文字
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	排除規則使用PDF標籤。沒有標籤的表格和程式碼仍計入統計。排除影像時也會排除不可見文字。
+	Words	詞數
+	Characters	字元數
+	Characters without spaces	不含空白的字元數
+	Pages counted	已統計頁數
+	Some pages contain no countable text. Scanned images need OCR first.	部分頁面沒有可統計的文字。掃描影像需要先進行OCR辨識。
+	Some content could not be classified safely and was kept in the count.	部分內容無法可靠分類，已保留在統計中。
+	Counting words… {n} pages read	正在統計字詞… 已讀取{n}頁
+	Word counting stopped unexpectedly.	字詞統計意外停止。
+	Word count…	字詞統計…
+@id	file.word_count	字詞統計…

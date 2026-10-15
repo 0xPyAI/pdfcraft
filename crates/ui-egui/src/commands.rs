@@ -174,6 +174,7 @@ impl PdfCraftApp {
             "file.close_all" => self.close_all(),
             "file.revert" => self.dialog = Some(Dialog::Revert),
             "file.properties" => self.dialog = Some(Dialog::Properties(PropsTab::Description)),
+            "file.word_count" => self.dialog = Some(Dialog::WordCount),
             "protect.properties" => self.dialog = Some(Dialog::Properties(PropsTab::Security)),
             // A restricted document's security changes once its permissions password is entered.
             "protect.password" | "protect.remove" if self.active_ids().and_then(|(_, id)| self.session.get(id)).is_some_and(|d| d.can_unlock()) => {

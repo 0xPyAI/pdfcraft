@@ -2357,3 +2357,19 @@ animation effects	Off	オフ
 	Mark as artifact	アーティファクトとしてマーク
 	Remove this leaf tag from reading order and mark its direct content as an artifact	このリーフタグを読み上げ順序から削除し、その直接のコンテンツをアーティファクトとしてマークします
 	Mark content as artifact	コンテンツをアーティファクトとしてマーク
+	Word count	文字数と単語数
+	Current page only	現在のページのみ
+	Exclude tagged tables	タグ付きの表を除外
+	Exclude tagged code blocks	タグ付きのコードブロックを除外
+	Exclude image/OCR text	画像・OCRのテキストを除外
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	除外にはPDFタグを使用します。タグのない表やコードは集計に含まれます。画像の除外では非表示のテキストも除外されます。
+	Words	単語数
+	Characters	文字数
+	Characters without spaces	空白を除く文字数
+	Pages counted	集計したページ数
+	Some pages contain no countable text. Scanned images need OCR first.	一部のページには集計できるテキストがありません。スキャン画像には先にOCRを実行してください。
+	Some content could not be classified safely and was kept in the count.	正確に分類できなかった内容は集計に含まれています。
+	Counting words… {n} pages read	単語を集計中… {n}ページ読み取り済み
+	Word counting stopped unexpectedly.	単語の集計が予期せず停止しました。
+	Word count…	文字数と単語数…
+@id	file.word_count	文字数と単語数…

@@ -2362,3 +2362,19 @@ animation effects	Off	Izklopljeni
 	Mark as artifact	Označi kot artefakt
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Odstranite to listno oznako iz vrstnega reda branja in označite njeno neposredno vsebino kot artefakt
 	Mark content as artifact	Označi vsebino kot artefakt
+	Word count	Število besed
+	Current page only	Samo trenutna stran
+	Exclude tagged tables	Izključi označene tabele
+	Exclude tagged code blocks	Izključi označene bloke kode
+	Exclude image/OCR text	Izključi besedilo slik/OCR
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	Izključitve uporabljajo oznake PDF. Neoznačene tabele in koda ostanejo vključene. Izključitev slik odstrani tudi nevidno besedilo.
+	Words	Besede
+	Characters	Znaki
+	Characters without spaces	Znaki brez presledkov
+	Pages counted	Preštete strani
+	Some pages contain no countable text. Scanned images need OCR first.	Nekatere strani ne vsebujejo besedila za štetje. Optično prebrane slike najprej potrebujejo OCR.
+	Some content could not be classified safely and was kept in the count.	Nekatere vsebine ni bilo mogoče zanesljivo razvrstiti, zato je ostala vključena v štetje.
+	Counting words… {n} pages read	Štetje besed… prebrane strani: {n}
+	Word counting stopped unexpectedly.	Štetje besed se je nepričakovano ustavilo.
+	Word count…	Število besed…
+@id	file.word_count	Število besed…

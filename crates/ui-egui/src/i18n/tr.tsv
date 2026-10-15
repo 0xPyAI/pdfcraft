@@ -2353,3 +2353,19 @@ animation effects	Off	Kapalı
 	Mark as artifact	Yapıt olarak işaretle
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Bu yaprak etiketini okuma sırasından kaldırın ve doğrudan içeriğini yapıt olarak işaretleyin
 	Mark content as artifact	İçeriği yapıt olarak işaretle
+	Word count	Sözcük sayısı
+	Current page only	Yalnızca geçerli sayfa
+	Exclude tagged tables	Etiketli tabloları hariç tut
+	Exclude tagged code blocks	Etiketli kod bloklarını hariç tut
+	Exclude image/OCR text	Görüntü/OCR metnini hariç tut
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	Hariç tutma işlemleri PDF etiketlerini kullanır. Etiketsiz tablolar ve kod sayılmaya devam eder. Görüntüleri hariç tutmak görünmez metni de kaldırır.
+	Words	Sözcükler
+	Characters	Karakterler
+	Characters without spaces	Boşluksuz karakterler
+	Pages counted	Sayılan sayfalar
+	Some pages contain no countable text. Scanned images need OCR first.	Bazı sayfalarda sayılabilecek metin yok. Taranmış görüntüler için önce OCR gerekir.
+	Some content could not be classified safely and was kept in the count.	Bazı içerikler güvenilir biçimde sınıflandırılamadığı için sayıma dahil edildi.
+	Counting words… {n} pages read	Sözcükler sayılıyor… {n} sayfa okundu
+	Word counting stopped unexpectedly.	Sözcük sayımı beklenmedik şekilde durdu.
+	Word count…	Sözcük sayısı…
+@id	file.word_count	Sözcük sayısı…

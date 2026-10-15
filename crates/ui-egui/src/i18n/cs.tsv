@@ -2431,3 +2431,19 @@ animation effects	Off	Vypnuto
 	Mark as artifact	Označit jako artefakt
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Odeberte tuto značku listu z pořadí čtení a označte její přímý obsah jako artefakt
 	Mark content as artifact	Označit obsah jako artefakt
+	Word count	Počet slov
+	Current page only	Pouze aktuální stránka
+	Exclude tagged tables	Vynechat označené tabulky
+	Exclude tagged code blocks	Vynechat označené bloky kódu
+	Exclude image/OCR text	Vynechat text obrázků a OCR
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	Vynechávání využívá tagy PDF. Neoznačené tabulky a kód zůstávají zahrnuty. Vynechání obrázků odstraní i neviditelný text.
+	Words	Slova
+	Characters	Znaky
+	Characters without spaces	Znaky bez mezer
+	Pages counted	Započítané stránky
+	Some pages contain no countable text. Scanned images need OCR first.	Některé stránky neobsahují text k počítání. U naskenovaných obrázků je nejprve nutné OCR.
+	Some content could not be classified safely and was kept in the count.	Část obsahu nebylo možné spolehlivě zařadit a zůstala zahrnuta v počtu.
+	Counting words… {n} pages read	Počítání slov… přečtené stránky: {n}
+	Word counting stopped unexpectedly.	Počítání slov se neočekávaně zastavilo.
+	Word count…	Počet slov…
+@id	file.word_count	Počet slov…

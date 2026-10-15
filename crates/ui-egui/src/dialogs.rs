@@ -21,6 +21,9 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     link_prompt(app, ctx);
     remote_link_prompt(app, ctx);
     crate::updates::dialog(app, ctx);
+    if app.dialog != Some(Dialog::WordCount) {
+        app.word_count_draft.cancel();
+    }
     let Some(dialog) = app.dialog else {
         app.props_draft = None;
         app.view_draft = None;
@@ -82,6 +85,9 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
             _ => 520.0,
         });
         match dialog {
+            Dialog::WordCount => {
+                close = crate::word_count_ui::body(ui, app);
+            }
             Dialog::CreateImages => {
                 let (go, cancel) = crate::create_ui::image_import_body(ui, app);
                 images_now = go;

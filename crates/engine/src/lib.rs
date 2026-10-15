@@ -36,6 +36,7 @@ pub mod signature_scan;
 pub mod text_fonts;
 mod text_preview;
 mod upright_image;
+pub mod word_count;
 pub mod xfa;
 
 pub use signature_image::{ImageSignaturePreview, SignatureImage};

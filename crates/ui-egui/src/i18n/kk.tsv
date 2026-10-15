@@ -2355,3 +2355,19 @@ animation effects	Off	Өшірулі
 	Mark as artifact	Артефакт ретінде белгілеу
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Осы жапырақ тегін оқу ретінен алып тастап, оның тікелей мазмұнын артефакт ретінде белгілеңіз
 	Mark content as artifact	Мазмұнды артефакт ретінде белгілеу
+	Word count	Сөздер саны
+	Current page only	Тек ағымдағы бет
+	Exclude tagged tables	Белгіленген кестелерді есепке алмау
+	Exclude tagged code blocks	Белгіленген код блоктарын есепке алмау
+	Exclude image/OCR text	Сурет/OCR мәтінін есепке алмау
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	Есептен шығару PDF тегтерін пайдаланады. Тегсіз кестелер мен код есепте қалады. Суреттерді алып тастау көрінбейтін мәтінді де алып тастайды.
+	Words	Сөздер
+	Characters	Таңбалар
+	Characters without spaces	Бос орынсыз таңбалар
+	Pages counted	Есептелген беттер
+	Some pages contain no countable text. Scanned images need OCR first.	Кейбір беттерде санауға болатын мәтін жоқ. Сканерленген суреттерге алдымен OCR қажет.
+	Some content could not be classified safely and was kept in the count.	Кейбір мазмұнды сенімді түрде жіктеу мүмкін болмады, сондықтан ол есепте қалды.
+	Counting words… {n} pages read	Сөздер саналуда… {n} бет оқылды
+	Word counting stopped unexpectedly.	Сөздерді санау күтпеген жерден тоқтады.
+	Word count…	Сөздер саны…
+@id	file.word_count	Сөздер саны…

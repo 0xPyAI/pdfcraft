@@ -2270,3 +2270,19 @@ animation effects	Off	ఆఫ్
 	Mark as artifact	ఆర్టిఫాక్ట్‌గా గుర్తించు
 	Remove this leaf tag from reading order and mark its direct content as an artifact	ఈ లీఫ్ ట్యాగ్‌ను పఠన క్రమం నుంచి తీసివేసి, దాని ప్రత్యక్ష కంటెంట్‌ను ఆర్టిఫాక్ట్‌గా గుర్తించండి
 	Mark content as artifact	కంటెంట్‌ను ఆర్టిఫాక్ట్‌గా గుర్తించు
+	Word count	పదాల లెక్క
+	Current page only	ప్రస్తుత పేజీ మాత్రమే
+	Exclude tagged tables	ట్యాగ్ చేసిన పట్టికలను మినహాయించు
+	Exclude tagged code blocks	ట్యాగ్ చేసిన కోడ్ బ్లాక్‌లను మినహాయించు
+	Exclude image/OCR text	చిత్రాలు/OCR వచనాన్ని మినహాయించు
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	మినహాయింపులు PDF ట్యాగ్‌లను ఉపయోగిస్తాయి. ట్యాగ్‌లు లేని పట్టికలు, కోడ్ లెక్కలో ఉంటాయి. చిత్రాలను మినహాయిస్తే కనిపించని వచనం కూడా తొలగించబడుతుంది.
+	Words	పదాలు
+	Characters	అక్షరాలు
+	Characters without spaces	ఖాళీలు లేని అక్షరాలు
+	Pages counted	లెక్కించిన పేజీలు
+	Some pages contain no countable text. Scanned images need OCR first.	కొన్ని పేజీల్లో లెక్కించగల వచనం లేదు. స్కాన్ చేసిన చిత్రాలకు ముందుగా OCR అవసరం.
+	Some content could not be classified safely and was kept in the count.	కొంత కంటెంట్‌ను విశ్వసనీయంగా వర్గీకరించలేకపోయాం, కాబట్టి దాన్ని లెక్కలో ఉంచాం.
+	Counting words… {n} pages read	పదాలను లెక్కిస్తోంది… {n} పేజీలు చదివింది
+	Word counting stopped unexpectedly.	పదాల లెక్క అనుకోకుండా ఆగిపోయింది.
+	Word count…	పదాల లెక్క…
+@id	file.word_count	పదాల లెక్క…

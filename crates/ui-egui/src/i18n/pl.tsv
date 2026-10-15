@@ -2337,3 +2337,19 @@ animation effects	Off	Wyłączone
 	Mark as artifact	Oznacz jako artefakt
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Usuń ten znacznik liścia z kolejności odczytu i oznacz jego bezpośrednią zawartość jako artefakt
 	Mark content as artifact	Oznacz zawartość jako artefakt
+	Word count	Liczba słów
+	Current page only	Tylko bieżąca strona
+	Exclude tagged tables	Wyklucz oznaczone tabele
+	Exclude tagged code blocks	Wyklucz oznaczone bloki kodu
+	Exclude image/OCR text	Wyklucz tekst obrazów/OCR
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	Wykluczenia używają znaczników PDF. Nieoznaczone tabele i kod nadal są uwzględniane. Wykluczenie obrazów usuwa również niewidoczny tekst.
+	Words	Słowa
+	Characters	Znaki
+	Characters without spaces	Znaki bez spacji
+	Pages counted	Policzone strony
+	Some pages contain no countable text. Scanned images need OCR first.	Niektóre strony nie zawierają tekstu do policzenia. Zeskanowane obrazy wymagają najpierw OCR.
+	Some content could not be classified safely and was kept in the count.	Części treści nie udało się wiarygodnie sklasyfikować, więc pozostała uwzględniona w liczbie.
+	Counting words… {n} pages read	Liczenie słów… odczytane strony: {n}
+	Word counting stopped unexpectedly.	Liczenie słów zostało nieoczekiwanie przerwane.
+	Word count…	Liczba słów…
+@id	file.word_count	Liczba słów…

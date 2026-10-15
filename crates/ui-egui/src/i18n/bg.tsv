@@ -2320,3 +2320,19 @@ animation effects	Off	Изключени
 	Mark as artifact	Маркиране като артефакт
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Премахнете този листов етикет от реда на четене и маркирайте прякото му съдържание като артефакт
 	Mark content as artifact	Маркиране на съдържание като артефакт
+	Word count	Брой думи
+	Current page only	Само текущата страница
+	Exclude tagged tables	Изключване на маркираните таблици
+	Exclude tagged code blocks	Изключване на маркираните блокове с код
+	Exclude image/OCR text	Изключване на текст от изображения/OCR
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	Изключването използва PDF тагове. Немаркираните таблици и код остават включени. Изключването на изображения премахва и невидимия текст.
+	Words	Думи
+	Characters	Знаци
+	Characters without spaces	Знаци без интервали
+	Pages counted	Преброени страници
+	Some pages contain no countable text. Scanned images need OCR first.	Някои страници не съдържат текст за преброяване. Сканираните изображения първо изискват OCR.
+	Some content could not be classified safely and was kept in the count.	Част от съдържанието не може да бъде класифицирана надеждно и е включена в броя.
+	Counting words… {n} pages read	Преброяване на думи… прочетени страници: {n}
+	Word counting stopped unexpectedly.	Преброяването на думи спря неочаквано.
+	Word count…	Брой думи…
+@id	file.word_count	Брой думи…

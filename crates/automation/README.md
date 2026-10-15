@@ -30,6 +30,10 @@ mcp::McpServer::new(a).serve(stdin, stdout)?             // newline-delimited JS
 
 ## Text search and cache limits
 
+`text_word_count` counts the current snapshot without filling the text cache. It returns totals
+and per-page Unicode word/character counts, with optional tagged-table, tagged-code and
+image/OCR exclusions. See [word count](../../docs/word-count.md) for counting rules and limits.
+
 Extracted page text is reused in a session-wide LRU cache: at most **64 MiB** of estimated owned
 text storage and **4,096 pages**, shared by all open documents. Accounting includes glyph-vector
 capacity, each glyph string's capacity, line indexes and word-break flags. Cache hits share the

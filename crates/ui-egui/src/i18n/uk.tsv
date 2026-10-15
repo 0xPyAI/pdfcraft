@@ -2379,3 +2379,19 @@ animation effects	Off	Вимкнено
 	Mark as artifact	Позначити як артефакт
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Вилучіть цей кінцевий тег із порядку читання та позначте його безпосередній вміст як артефакт
 	Mark content as artifact	Позначити вміст як артефакт
+	Word count	Кількість слів
+	Current page only	Лише поточна сторінка
+	Exclude tagged tables	Виключити таблиці з тегами
+	Exclude tagged code blocks	Виключити блоки коду з тегами
+	Exclude image/OCR text	Виключити текст зображень та OCR
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	Виключення використовують теги PDF. Таблиці й код без тегів залишаються в підрахунку. Виключення зображень також видаляє невидимий текст.
+	Words	Слова
+	Characters	Символи
+	Characters without spaces	Символи без пробілів
+	Pages counted	Пораховані сторінки
+	Some pages contain no countable text. Scanned images need OCR first.	Деякі сторінки не містять тексту для підрахунку. Для відсканованих зображень спочатку потрібне OCR.
+	Some content could not be classified safely and was kept in the count.	Частину вмісту не вдалося надійно класифікувати, тому вона залишилася в підрахунку.
+	Counting words… {n} pages read	Підрахунок слів… прочитано сторінок: {n}
+	Word counting stopped unexpectedly.	Підрахунок слів несподівано зупинився.
+	Word count…	Кількість слів…
+@id	file.word_count	Кількість слів…

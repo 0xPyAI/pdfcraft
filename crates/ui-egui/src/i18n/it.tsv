@@ -2366,3 +2366,19 @@ animation effects	Off	Disattivati
 	Mark as artifact	Segna come artefatto
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Rimuovi questo tag foglia dall'ordine di lettura e segna il suo contenuto diretto come artefatto
 	Mark content as artifact	Segna il contenuto come artefatto
+	Word count	Conteggio parole
+	Current page only	Solo la pagina corrente
+	Exclude tagged tables	Escludi le tabelle con tag
+	Exclude tagged code blocks	Escludi i blocchi di codice con tag
+	Exclude image/OCR text	Escludi il testo di immagini/OCR
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	Le esclusioni usano i tag PDF. Le tabelle e il codice senza tag restano inclusi. L’esclusione delle immagini rimuove anche il testo invisibile.
+	Words	Parole
+	Characters	Caratteri
+	Characters without spaces	Caratteri senza spazi
+	Pages counted	Pagine conteggiate
+	Some pages contain no countable text. Scanned images need OCR first.	Alcune pagine non contengono testo da contare. Le immagini acquisite richiedono prima il riconoscimento OCR.
+	Some content could not be classified safely and was kept in the count.	Alcuni contenuti non sono stati classificati in modo affidabile e sono rimasti nel conteggio.
+	Counting words… {n} pages read	Conteggio parole… {n} pagine lette
+	Word counting stopped unexpectedly.	Il conteggio delle parole si è interrotto in modo imprevisto.
+	Word count…	Conteggio parole…
+@id	file.word_count	Conteggio parole…

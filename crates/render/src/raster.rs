@@ -433,6 +433,14 @@ impl PageRenderer {
         self.stats
     }
 
+    /// Extract one page for statistics, with semantic exclusions. Never rasterizes or panics.
+    pub fn filtered_text(&mut self, page: usize, filter: crate::text::TextFilter) -> Result<crate::PageText, String> {
+        let pdf = self.pdf.as_ref().ok_or("the document could not be parsed")?;
+        self.stats.text_interpretations = self.stats.text_interpretations.saturating_add(1);
+        catch_unwind(AssertUnwindSafe(|| crate::text::extract_page_filtered(pdf, page, &self.settings, filter)))
+            .map_err(|e| format!("text extraction failed: {}", panic_message(&e)))?
+    }
+
     /// Render one page. Never panics.
     pub fn render(&mut self, req: RenderRequest) -> RenderedPage {
         let start = Stopwatch::start();

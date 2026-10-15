@@ -2321,3 +2321,19 @@ animation effects	Off	关
 	Mark as artifact	标记为工件
 	Remove this leaf tag from reading order and mark its direct content as an artifact	从阅读顺序中移除此叶标签，并将其直接内容标记为工件
 	Mark content as artifact	将内容标记为工件
+	Word count	字词统计
+	Current page only	仅当前页
+	Exclude tagged tables	排除带标签的表格
+	Exclude tagged code blocks	排除带标签的代码块
+	Exclude image/OCR text	排除图像/OCR文本
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	排除规则使用PDF标签。无标签的表格和代码仍计入统计。排除图像时也会排除不可见文本。
+	Words	词数
+	Characters	字符数
+	Characters without spaces	不含空白的字符数
+	Pages counted	已统计页数
+	Some pages contain no countable text. Scanned images need OCR first.	部分页面没有可统计的文本。扫描图像需要先进行OCR识别。
+	Some content could not be classified safely and was kept in the count.	部分内容无法可靠分类，已保留在统计中。
+	Counting words… {n} pages read	正在统计字词… 已读取{n}页
+	Word counting stopped unexpectedly.	字词统计意外停止。
+	Word count…	字词统计…
+@id	file.word_count	字词统计…

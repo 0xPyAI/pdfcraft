@@ -14,6 +14,18 @@ areas = { A = "core", B = "view", C = "edit", D = "organize", E = "comment", F =
 # ==================================================================================================
 
 [[feature]]
+id = "core.word-count"
+title = "Word and character count"
+area = "A"
+tier = "P2"
+milestone = "M2"
+status = "shipped"
+commands = ["file.word_count"]
+tools = ["text_word_count"]
+evidence = ["crates/engine/src/word_count.rs::word_count_filters_are_independent_and_do_not_change_normal_extraction", "crates/automation/tests/automation.rs::word_count_reads_selected_pages_and_unsaved_edits_without_mutating", "crates/ui-egui/src/word_count_ui.rs::word_count_dialog_counts_changes_pages_and_closes"]
+notes = "Unicode words and characters for the current snapshot; all or current page in GUI, selected pages headlessly. Desktop background work with cancellation. Optional semantic table/code/Figure and invisible-text exclusions; no OCR or visual layout classification. Unsupported structure remains counted and is reported. Mixed ActualText exclusions fail explicitly. See docs/word-count.md."
+
+[[feature]]
 id = "core.open-pdf"
 title = "Open PDF files"
 area = "A"

@@ -2378,3 +2378,19 @@ animation effects	Off	معطّلة
 	Mark as artifact	وضع علامة كعنصر زخرفي
 	Remove this leaf tag from reading order and mark its direct content as an artifact	أزل هذه العلامة من ترتيب القراءة وضع علامة على محتواها المباشر كعنصر زخرفي
 	Mark content as artifact	وضع علامة على المحتوى كعنصر زخرفي
+	Word count	عدد الكلمات
+	Current page only	الصفحة الحالية فقط
+	Exclude tagged tables	استبعاد الجداول الموسومة
+	Exclude tagged code blocks	استبعاد كتل التعليمات البرمجية الموسومة
+	Exclude image/OCR text	استبعاد نص الصور والتعرف الضوئي على الحروف
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	تعتمد الاستثناءات على وسوم PDF. تبقى الجداول والتعليمات البرمجية غير الموسومة ضمن العدد. يستبعد خيار الصور النص غير المرئي أيضًا.
+	Words	الكلمات
+	Characters	الأحرف
+	Characters without spaces	الأحرف دون مسافات
+	Pages counted	الصفحات المحسوبة
+	Some pages contain no countable text. Scanned images need OCR first.	لا تحتوي بعض الصفحات على نص قابل للعد. تتطلب الصور الممسوحة ضوئيًا التعرف الضوئي على الحروف أولًا.
+	Some content could not be classified safely and was kept in the count.	تعذر تصنيف بعض المحتوى بشكل موثوق، لذا بقي ضمن العدد.
+	Counting words… {n} pages read	جارٍ عد الكلمات… تمت قراءة {n} من الصفحات
+	Word counting stopped unexpectedly.	توقف عد الكلمات بشكل غير متوقع.
+	Word count…	عدد الكلمات…
+@id	file.word_count	عدد الكلمات…

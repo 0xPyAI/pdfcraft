@@ -186,6 +186,7 @@ impl Automation {
             "page_render" => return self.page_render(&a).map(|c| vec![c]),
             "comment_image_preview" => return self.comment_image_preview(&a),
             "text_extract" => self.text_extract(&a)?,
+            "text_word_count" => self.text_word_count(&a)?,
             "text_find" => self.text_find(&a)?,
             "page_rotate" => {
                 let degrees = a.int("degrees")?;
@@ -1756,6 +1757,28 @@ impl Automation {
         // The batch owns its Arcs: evicting a cache entry cannot lose a requested result. A
         // worker that fails to return a page is an explicit failure, never an empty success.
         Ok(pages.iter().map(|p| (*p, results.get(p).cloned().unwrap_or_else(|| Err("text extraction returned no result".into())))).collect())
+    }
+
+    fn text_word_count(&self, a: &Args) -> Result<Value> {
+        use pdfcraft_engine::word_count::{self, Counts, Options};
+        let doc = self.doc_to_copy(a)?;
+        let pages = match a.opt_ints("pages")? {
+            Some(_) => self.pages(a, "pages")?,
+            None => (0..doc.info.pages.len()).collect(),
+        };
+        let options = Options {
+            exclude_tables: a.opt_bool("exclude_tables")?.unwrap_or(false),
+            exclude_code: a.opt_bool("exclude_code")?.unwrap_or(false),
+            exclude_images: a.opt_bool("exclude_images")?.unwrap_or(false),
+        };
+        let report = word_count::count(doc.export_source(), &pages, options, |_| true).map_err(failed)?;
+        let counts = |c: Counts| json!({ "words": c.words, "characters": c.characters, "characters_without_spaces": c.characters_without_spaces });
+        Ok(json!({
+            "total": counts(report.total),
+            "pages": report.pages.into_iter().map(|(p, c)| json!({ "page": p + 1, "counts": counts(c) })).collect::<Vec<_>>(),
+            "pages_without_text": report.pages_without_text,
+            "unclassified_structure": report.unclassified_structure,
+        }))
     }
 
     fn text_extract(&mut self, a: &Args) -> Result<Value> {

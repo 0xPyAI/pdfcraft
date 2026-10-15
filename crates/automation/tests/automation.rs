@@ -434,6 +434,29 @@ fn open_inspect_render_and_find() {
 }
 
 #[test]
+fn word_count_reads_selected_pages_and_unsaved_edits_without_mutating() {
+    let dir = workdir("word-count");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let before = ok(&mut a, "doc_list", json!({}));
+    let report = ok(&mut a, "text_word_count", json!({ "doc": doc }));
+    assert_eq!(report["total"]["words"], 6);
+    assert_eq!(report["pages"].as_array().unwrap().len(), 3);
+    let subset = ok(&mut a, "text_word_count", json!({ "doc": doc, "pages": [3, 1], "exclude_tables": true }));
+    assert_eq!(subset["total"]["words"], 4);
+    assert_eq!(subset["pages"][0]["page"], 3);
+    assert_eq!(subset["unclassified_structure"], true);
+    assert_eq!(ok(&mut a, "doc_list", json!({})), before);
+    assert!(a.call("text_word_count", &json!({ "doc": doc, "pages": [4] })).is_err());
+    ok(&mut a, "page_delete", json!({ "doc": doc, "pages": [1] }));
+    assert_eq!(ok(&mut a, "text_word_count", json!({ "doc": doc }))["total"]["words"], 4);
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert_eq!(ok(&mut a, "text_word_count", json!({ "doc": doc }))["total"]["words"], 6);
+    let def = tools().into_iter().find(|t| t.name == "text_word_count").unwrap();
+    assert!(def.read_only && !def.destructive);
+}
+
+#[test]
 fn text_editor_background_is_read_only_and_removes_source_glyphs() {
     let dir = workdir("text-preview");
     let mut a = auto(&dir);
@@ -1599,6 +1622,7 @@ fn protecting_through_tools() {
     // Copying wasn't allowed either (#568): no text or images come out, though search works.
     for (tool, args) in [
         ("text_extract", json!({ "doc": re })),
+        ("text_word_count", json!({ "doc": re })),
         ("text_paragraphs", json!({ "doc": re, "page": 1 })),
         ("doc_export_text", json!({ "doc": re, "path": "out.txt" })),
         ("doc_export_images", json!({ "doc": re, "folder": "pages" })),

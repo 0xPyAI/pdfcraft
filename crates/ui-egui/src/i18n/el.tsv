@@ -2367,3 +2367,19 @@ animation effects	Off	Ανενεργά
 	Mark as artifact	Σήμανση ως τεχνούργημα
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Αφαιρέστε αυτήν την ετικέτα φύλλου από τη σειρά ανάγνωσης και σημειώστε το άμεσο περιεχόμενό της ως τεχνούργημα
 	Mark content as artifact	Σήμανση περιεχομένου ως τεχνούργημα
+	Word count	Καταμέτρηση λέξεων
+	Current page only	Μόνο η τρέχουσα σελίδα
+	Exclude tagged tables	Εξαίρεση πινάκων με ετικέτες
+	Exclude tagged code blocks	Εξαίρεση μπλοκ κώδικα με ετικέτες
+	Exclude image/OCR text	Εξαίρεση κειμένου εικόνων/OCR
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	Οι εξαιρέσεις χρησιμοποιούν ετικέτες PDF. Οι πίνακες και ο κώδικας χωρίς ετικέτες παραμένουν στην καταμέτρηση. Η εξαίρεση εικόνων αφαιρεί και το αόρατο κείμενο.
+	Words	Λέξεις
+	Characters	Χαρακτήρες
+	Characters without spaces	Χαρακτήρες χωρίς κενά
+	Pages counted	Σελίδες που καταμετρήθηκαν
+	Some pages contain no countable text. Scanned images need OCR first.	Ορισμένες σελίδες δεν περιέχουν κείμενο για καταμέτρηση. Οι σαρωμένες εικόνες χρειάζονται πρώτα OCR.
+	Some content could not be classified safely and was kept in the count.	Ορισμένο περιεχόμενο δεν ήταν δυνατό να ταξινομηθεί αξιόπιστα και παρέμεινε στην καταμέτρηση.
+	Counting words… {n} pages read	Καταμέτρηση λέξεων… αναγνώστηκαν {n} σελίδες
+	Word counting stopped unexpectedly.	Η καταμέτρηση λέξεων σταμάτησε απροσδόκητα.
+	Word count…	Καταμέτρηση λέξεων…
+@id	file.word_count	Καταμέτρηση λέξεων…
