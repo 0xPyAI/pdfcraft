@@ -452,17 +452,40 @@ logs and crash recovery in a `PdfCraftData` folder next to `pdfcraft.exe`, so no
 `%APPDATA%`; delete that file to use the normal per-user folders.
 
 The MSI installs for all users and requires administrator privileges. It adds "Edit with PdfCraft"
-to the right-click menu of PDF files in File Explorer (on Windows 11, under "Show more options"),
-without changing which app opens PDFs by default. For unattended deployment without a desktop
-shortcut, run from an elevated terminal:
+to the right-click menu of PDF files and "Create PDF with PdfCraft…" to the right-click menu of
+images (.png .jpg .jpeg .tif .tiff .gif .bmp .jp2 .j2k .jpx) in File Explorer (on Windows 11, under
+"Show more options"), without changing which app opens them by default. For unattended deployment
+without a desktop shortcut, run from an elevated terminal:
 
 ```powershell
 msiexec /i "pdfcraft-<ver>-windows-x64.msi" /qn /norestart INSTALLDESKTOPSHORTCUT=0
 ```
 
-Add `INSTALLPDFCONTEXTMENU=0` to leave out the right-click menu entry. Pass both on upgrades too,
-since each install applies its own choices. Use the MSI for your architecture. Per-user
-installation overrides are not supported.
+| Property | `=0` leaves out |
+|---|---|
+| `INSTALLDESKTOPSHORTCUT` | the all-users desktop shortcut |
+| `INSTALLPDFCONTEXTMENU` | "Edit with PdfCraft" on PDF files |
+| `INSTALLIMAGECONTEXTMENU` | "Create PDF with PdfCraft…" on images |
+
+All three are on for a first install. An upgrade keeps what the installed version has: a shortcut
+or menu entry that is there stays, and one that is missing (left out at install, or a desktop
+shortcut someone deleted) stays missing, so you don't need to pass them again. A value on the
+command line always wins: `=1` puts one back and `=0` removes it. Upgrading from a release that
+didn't have a menu yet (0.6.0 and earlier for the PDF menu, 0.2.1 and earlier for the image menu)
+adds it, as a first install would. Use the MSI for your architecture. Per-user installation
+overrides are not supported.
+
+**Pin the checksum, not just the version.** Release candidates of a version share its MSI version
+(MSI versions are numbers only, so 1.2.3-rc.1 and 1.2.3 are both 1.2.3), and the installer lets an
+MSI of the same version replace the installed one without asking. Two different `0.7.1` MSIs can't
+be told apart by version, so if your deployment tool checks the file, pin its SHA-256 from
+`SHA256SUMS.txt` (`Get-FileHash <file> -Algorithm SHA256`).
+
+**Signing identities.** The Windows MSIs and both executables are signed through Azure Trusted
+Signing with a certificate issued to `Learning Machines Inc` (Atlanta, Georgia, US). The macOS app
+and command-line tool are signed with the Developer ID `Learning Machines LLC (DJ6XS33FX8)` and
+notarized. The MSI's manufacturer, shown as the publisher in Installed apps, is
+`Learning Machines LLC`.
 
 ### macOS
 
