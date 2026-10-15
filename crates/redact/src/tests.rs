@@ -1057,6 +1057,21 @@ fn redacting_every_inheriting_page_retires_the_parent_resources() {
 }
 
 #[test]
+fn a_hostile_icc_component_count_is_refused_not_multiplied_into_a_crash() {
+    // /N comes from the file. 2^60 × 8 bpc × width 2 overflows the row size; a negative /N wrapped
+    // to a huge usize. Either way the half-covered image can't be cleared, so it is removed whole.
+    for n in ["1152921504606846976", "-1", "2"] {
+        let img = stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace [/ICCBased 8 0 R] /BitsPerComponent 8", [255, 255]);
+        let icc = stream(&format!("/N {n}"), b"");
+        let mut doc = one_page(b"q 20 0 0 10 100 100 cm /Im Do Q", "/XObject << /Im 7 0 R >>", vec![img, icc]);
+        mark(&mut doc, 0, &[[95.0, 95.0, 110.0, 115.0]], "");
+        let r = apply(&mut doc, None).unwrap();
+        assert_eq!((r.images_removed, r.images_cleared), (1, 0), "/N {n}: {r:?}");
+        assert!(!content(&doc, 0).contains("/Im Do"), "/N {n}");
+    }
+}
+
+#[test]
 fn image_alternatives_and_masks_cannot_keep_redacted_pixels() {
     for extra in ["/Alternates [<< /Image 8 0 R >>]", "/SMask 8 0 R", "/Mask 8 0 R", "/Mask [0 0]"] {
         let mut doc = one_page(
