@@ -4185,6 +4185,60 @@ fn a_new_character_comes_from_the_source_fonts_own_embedded_program() {
 }
 
 #[test]
+fn a_shaped_run_is_one_text_object_with_each_glyph_where_shaping_put_it() {
+    let inter = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+    let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Stable text) Tj ET");
+    let resource = text::register_text_font(&mut doc, 0, inter).unwrap();
+    // Marks shaped beside their letters (q́, x̣) and one stacked above another (ñ̄).
+    let typed = "q\u{301}x\u{323} n\u{303}\u{304} Cafe\u{301}";
+    let style = text::BlockStyle { width: Some(400.0), resource: Some(resource), ..Default::default() };
+    text::rewrite_block(&mut doc, 0, 0, Some(typed), &style).unwrap();
+    assert_eq!(text::text_blocks(&reopen(&doc), 0).unwrap()[0].editor_text, typed);
+    let ops = pdfcraft_content::parse(&page_content_bytes(&doc, 0)).ops;
+    let start = ops.iter().position(|o| o.is("BDC")).unwrap();
+    let end = start + ops[start..].iter().position(|o| o.is("EMC")).unwrap();
+    let run = &ops[start..end];
+    let count = |name: &str| run.iter().filter(|o| o.is(name)).count();
+    assert_eq!((count("BT"), count("Tm"), count("Tj")), (1, 1, 0), "{run:?}");
+    // Each glyph's origin, read back with the text-space displacements of ISO 32000-1 §9.4.4.
+    let font = run.iter().find(|o| o.is("Tf")).unwrap();
+    let (resource, size) = (font.operands[0].as_name().unwrap().to_vec(), font.operands[1].as_f64().unwrap());
+    let page = pdfcraft_model::pages(&doc).remove(0);
+    let resources = doc.resolve(page.dict.get(b"Resources").unwrap()).as_dict().unwrap().clone();
+    let fonts = doc.resolve(resources.get(b"Font").unwrap()).as_dict().unwrap().clone();
+    let metrics = pdfcraft_fonts::pdf::Metrics::from_dict(&doc, doc.resolve(fonts.get(&resource).unwrap()).as_dict().unwrap());
+    let (mut x, mut rise, mut drawn) = (0.0, 0.0, Vec::new());
+    for op in run {
+        match op.op.as_slice() {
+            b"Ts" => rise = op.operands[0].as_f64().unwrap(),
+            b"Tc" | b"Tw" => assert_eq!(op.operands[0].as_f64(), Some(0.0), "{run:?}"),
+            b"Tz" => assert_eq!(op.operands[0].as_f64(), Some(100.0), "{run:?}"),
+            b"TJ" => {
+                for item in op.operands[0].as_array().unwrap() {
+                    match item.as_string() {
+                        Some(s) => {
+                            for code in s.bytes.chunks(2) {
+                                drawn.push((x, rise));
+                                x += metrics.width(u32::from(u16::from_be_bytes([code[0], code[1]]))) * size;
+                            }
+                        }
+                        None => x -= item.as_f64().unwrap() / 1000.0 * size,
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let shaped = pdfcraft_fonts::source_shaping::shape(inter, typed).unwrap();
+    assert_eq!(drawn.len(), shaped.glyphs.len());
+    assert!(shaped.glyphs.iter().any(|g| g.position[1] != 0.0), "a mark is raised");
+    for (glyph, (x, y)) in shaped.glyphs.iter().zip(&drawn) {
+        assert!((glyph.position[0] * size - x).abs() < 1e-3 && (glyph.position[1] * size - y).abs() < 1e-3, "{glyph:?} at {x}, {y}");
+    }
+    assert_eq!(rise, 0.0, "the rise is reset after the run");
+}
+
+#[test]
 fn a_subset_program_is_not_trusted_for_new_characters_and_the_error_names_the_character() {
     let mut doc = embedded_program_page("BT /F1 12 Tf 72 700 Td (Stable text) Tj ET", "ABCDEF+Inter-Regular");
     let before = page_content_bytes(&doc, 0);
