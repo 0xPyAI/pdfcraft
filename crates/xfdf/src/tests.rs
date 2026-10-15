@@ -1011,3 +1011,34 @@ fn xfdf_import_keeps_text_around_xml_comments_and_instructions() {
         assert_eq!(values(&reopened)[0].1, want, "{xml_text}");
     }
 }
+
+#[test]
+fn xml_form_import_preserves_text_around_comments_and_instructions() {
+    for (body, expected) in [
+        ("left<!-- ignored -->right", "leftright"),
+        ("<!-- first -->left<?note ignored?>middle<!-- last -->right", "leftmiddleright"),
+        ("<![CDATA[<left>]]><!-- ignored -->&amp;right", "<left>&right"),
+        (" left <!-- ignored --> right ", " left  right "),
+        ("<!-- empty --><?note ignored?>", ""),
+    ] {
+        let mut original = one_field();
+        let root = original.root().unwrap();
+        original.update_dict(root, |dict| dict.set(b"PCUnknown".to_vec(), PdfString::text("retained"))).unwrap();
+        set_value(&mut original, "Name", &FieldValue::Text("replace me".into())).unwrap();
+        let source = write_full(&original, &SaveOptions::default()).unwrap();
+        let mut doc = Document::open(Arc::new(source.clone())).unwrap();
+        let xml = format!("<?xml version=\"1.0\"?><fields><Name>{body}</Name></fields>");
+        let report = import(&mut doc, xml.as_bytes()).unwrap();
+        assert_eq!(report.fields, 1);
+        assert!(report.rejected.is_empty());
+        for saved in [write_full(&doc, &SaveOptions::default()).unwrap(), write_incremental(&doc, &SaveOptions::default()).unwrap()] {
+            let reopened = Document::open(Arc::new(saved)).unwrap();
+            let name = fields(&reopened).into_iter().find(|f| f.name == "Name").unwrap();
+            let want = if expected.is_empty() { Vec::new() } else { vec![expected.to_string()] };
+            assert_eq!(name.value, want, "XML body: {body}");
+            let root = reopened.get(reopened.root().unwrap());
+            assert_eq!(root.as_dict().unwrap().get(b"PCUnknown").unwrap().as_string().unwrap().to_text(), "retained");
+        }
+        assert_eq!(fields(&original).into_iter().find(|f| f.name == "Name").unwrap().value, vec!["replace me"]);
+    }
+}
