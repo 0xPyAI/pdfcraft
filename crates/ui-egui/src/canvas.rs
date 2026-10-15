@@ -299,6 +299,8 @@ pub struct DocView {
     pub organize: bool,
     pub highlight_fields: bool,
     pub page_input: String,
+    /// Select the replacement page label once if its editor remains focused.
+    pub(crate) page_input_reselect: bool,
     pub notice_dismissed: bool,
     /// The user has been told that the form's scripts were turned off (it is said once).
     pub scripts_off_noted: bool,
@@ -593,6 +595,7 @@ impl DocView {
             organize: false,
             highlight_fields: defaults.highlight_fields,
             page_input: "1".into(),
+            page_input_reselect: false,
             notice_dismissed: false,
             scripts_off_noted: false,
             disk_changed: false,
@@ -695,7 +698,6 @@ impl DocView {
         self.page_heights = info.pages.iter().map(|p| p.height).collect();
         let last = self.page_count.saturating_sub(1);
         self.current = self.current.min(last);
-        self.page_input = (self.current + 1).to_string();
         self.selected.retain(|p| *p <= last);
         // Text being typed on a page that no longer exists goes with the page.
         if self.content.draft.as_ref().is_some_and(|d| d.page > last || self.page_count == 0) {
@@ -722,6 +724,7 @@ impl DocView {
         fresh.zoom = self.zoom;
         fresh.fit = self.fit;
         fresh.layout = self.layout;
+        fresh.continuous = self.continuous;
         fresh.rotation = self.rotation;
         fresh.current = self.current;
         fresh.organize = self.organize;
@@ -742,6 +745,8 @@ impl DocView {
         *self = fresh;
         // Marks the kept images out of date and clamps the page to the new page count.
         self.document_changed(info);
+        self.page_input = self.current_page_label(info.pages.get(self.current).map(|page| page.label.as_str()));
+        self.page_input_reselect = true;
     }
 
     /// Pages an organize command acts on: the selection, or the current page.
@@ -1027,7 +1032,6 @@ impl DocView {
         self.wheel.clear_motion();
         self.goto = Some((page, 0.0));
         self.current = page;
-        self.page_input = (page + 1).to_string();
     }
 
     /// Go to a destination, a bookmark's or a link's (ISO 32000-2 §12.3.2.2): its page, scrolled
@@ -1112,9 +1116,25 @@ impl DocView {
         self.go_to_page(target);
     }
 
-    /// Go to the page typed in the page box: a page label (logical page numbers, as Acrobat
-    /// does), else a page number. `false` when it names no page.
+    /// Page-editor focus and drafts belong to a document, even while another tab is active.
+    pub(crate) fn page_input_id(&self) -> egui::Id {
+        egui::Id::new(("page-input", self.id.0))
+    }
+
+    /// The idle page box and unchanged-input lookup share the same label fallback.
+    pub(crate) fn current_page_label(&self, label: Option<&str>) -> String {
+        label.filter(|l| !l.is_empty()).map(str::to_owned).unwrap_or_else(|| (self.current + 1).to_string())
+    }
+
+    /// Retain the current page when `typed` exactly matches its displayed label, even if
+    /// another page has that label. Otherwise resolve a trimmed label (case-insensitive),
+    /// then a physical page number. `false` when it names no page.
     pub fn go_to_typed(&mut self, typed: &str, labels: &[String]) -> bool {
+        // Compare the displayed value before trimming: a label may itself contain spaces.
+        // Repeated labels occur in restarted sections and prefix-only ranges.
+        if self.current < self.page_count && self.current_page_label(labels.get(self.current).map(String::as_str)) == typed {
+            return true;
+        }
         let t = typed.trim();
         let page = labels
             .iter()
@@ -1137,7 +1157,6 @@ impl DocView {
         let page = page.min(self.page_count.saturating_sub(1));
         self.goto = Some((page, 0.0));
         self.current = page;
-        self.page_input = (page + 1).to_string();
         true
     }
 
@@ -3046,9 +3065,6 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         }
         if view.continuous {
             view.current = current;
-            if !ui.memory(|m| m.has_focus(egui::Id::new("page-input"))) {
-                view.page_input = (current + 1).to_string();
-            }
         }
         resp.context_menu(|ui| {
             // Preparing a form: the selected field's menu.

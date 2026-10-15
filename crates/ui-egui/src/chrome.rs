@@ -696,8 +696,21 @@ pub fn right_rail(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                     view.step_page(false);
                 }
                 ui.label(egui::RichText::new(page_count.to_string()).font(theme::regular(11.0)).color(t.text_muted));
+                let page_input_id = view.page_input_id();
+                // Consume replacement selection once, including when the editor has lost focus.
+                let reselect = std::mem::take(&mut view.page_input_reselect);
+                // Navigation updates the idle display, never the text being edited.
+                if !ui.memory(|m| m.has_focus(page_input_id)) {
+                    view.page_input = view.current_page_label(labels.get(view.current).map(String::as_str));
+                } else if reselect {
+                    // The replacement changed the label while egui retained this editor's cursor.
+                    let mut state = egui::TextEdit::load_state(ui.ctx(), page_input_id).unwrap_or_default();
+                    let end = egui::text::CCursor::new(view.page_input.chars().count());
+                    state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), end)));
+                    state.store(ui.ctx(), page_input_id);
+                }
                 let edit = egui::TextEdit::singleline(&mut view.page_input)
-                    .id(egui::Id::new("page-input"))
+                    .id(page_input_id)
                     .desired_width(34.0)
                     .horizontal_align(Align::Center)
                     .font(theme::medium(12.0))
@@ -709,12 +722,13 @@ pub fn right_rail(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                     .show(ui, |ui| ui.add(edit))
                     .inner
                     .on_hover_text(tl!("Current page — type a page number or label (such as iv) and press Enter"));
-                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    // A page label first (logical page numbers, as Acrobat), then a number.
-                    let typed = view.page_input.clone();
-                    if !view.go_to_typed(&typed, &labels) {
-                        view.page_input = (view.current + 1).to_string();
+                if r.lost_focus() {
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        // A page label first (logical page numbers, as Acrobat), then a number.
+                        let typed = view.page_input.clone();
+                        view.go_to_typed(&typed, &labels);
                     }
+                    view.page_input = view.current_page_label(labels.get(view.current).map(String::as_str));
                 }
             });
             if let Some(id) = page_display {

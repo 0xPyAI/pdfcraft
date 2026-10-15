@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{By, Queryable};
 use pdfcraft_ui_egui::{PdfCraftApp, SaveTarget};
 
 /// An `n`-page document with a proper xref table; page `i` shows "Page i+1", and with `notes`
@@ -117,6 +117,92 @@ fn a_rebuilt_file_reloads_in_place_keeping_the_page_and_zoom() {
     assert_eq!(pages(&h), 4, "the new version shows");
     assert_eq!((app.views.len(), app.views[0].id), (1, id), "in the same tab");
     assert_eq!((app.views[0].current, app.views[0].zoom), (2, 1.5), "at the same page and zoom");
+}
+
+#[test]
+fn a_watched_label_replacement_keeps_the_display_mode_and_focused_page() {
+    use pdfcraft_engine::{Edit, LabelStyle, Session};
+    use pdfcraft_ui_egui::canvas::display_token;
+    use std::sync::Arc;
+
+    let labelled = |ranges: &[(usize, usize, LabelStyle)]| {
+        let mut source = Session::new().with_clock(|| 1_700_000_000);
+        let id = source.open("labels.pdf", None, Arc::new(fixture(5)), None).unwrap();
+        for &(from, to, style) in ranges {
+            source.apply(id, Edit::NumberPages { from, to, style, prefix: String::new(), first: 1 }).unwrap();
+        }
+        source.save_bytes(id).unwrap()
+    };
+    let original = labelled(&[(0, 1, LabelStyle::LowerRoman), (2, 4, LabelStyle::Decimal)]);
+    let replacement = labelled(&[(0, 4, LabelStyle::LowerRoman)]);
+    for display in ["single", "continuous"] {
+        let file = TempPdf::new(&format!("focused-label-{display}"), &original);
+        let mut h = harness(&file.path);
+        let id = h.state().views[0].id;
+        h.state_mut().set_option("layout", display).unwrap();
+        h.state_mut().set_option("zoom", "100").unwrap();
+        h.state_mut().set_option("page", "4").unwrap();
+        h.run_steps(3);
+        let view = &h.state().views[0];
+        assert_eq!((view.current, display_token(view.layout, view.continuous())), (3, display));
+        let doc = h.state().session.get(id).unwrap();
+        assert_eq!(doc.bytes, original);
+        assert!(!doc.dirty);
+        assert_eq!((doc.can_undo(), doc.can_redo()), (None, None));
+        assert!(h.state_mut().execute("view.focus_page_input"));
+        h.run_steps(3);
+        h.get(By::new().role(egui::accesskit::Role::TextInput).value("2"));
+        let editor = h.ctx.memory(|m| m.focused()).expect("the page editor is focused");
+
+        // A build atomically publishes a whole, clean PDF. The real watcher detects it.
+        let next = file.dir.join("next.pdf");
+        std::fs::write(&next, replacement.as_slice()).unwrap();
+        let published = std::fs::File::options().write(true).open(&next).unwrap();
+        published.set_modified(SystemTime::now() + Duration::from_secs(60)).unwrap();
+        drop(published);
+        std::fs::rename(next, &file.path).unwrap();
+        for _ in 0..8 {
+            h.run_steps(1);
+            if h.state().session.get(id).unwrap().bytes == replacement {
+                break;
+            }
+        }
+        h.run_steps(2);
+        let app = h.state();
+        let view = &app.views[0];
+        let doc = app.session.get(id).unwrap();
+        assert_eq!((app.views.len(), app.active, view.id), (1, Some(0), id));
+        assert_eq!(doc.bytes, replacement, "the watcher loaded the replacement before checking navigation");
+        assert_eq!((doc.info.pages.len(), doc.info.pages[3].label.as_str()), (5, "iv"));
+        // First causal negative: a single-page reader must not become a continuous reader.
+        assert_eq!((view.current, display_token(view.layout, view.continuous())), (3, display), "reload retains the physical page and display mode");
+        assert_eq!(view.zoom, 1.0);
+        assert_eq!(view.page_input, "iv");
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(editor));
+        h.get(By::new().role(egui::accesskit::Role::TextInput).value("iv"));
+
+        // Keep the replacement editor's selection and then its caret, without re-focusing it.
+        h.event(egui::Event::Text("2".into()));
+        h.run_steps(2);
+        assert_eq!((h.state().views[0].current, h.state().views[0].page_input.as_str()), (3, "2"));
+        h.event(egui::Event::Text("x".into()));
+        h.run_steps(1);
+        assert_eq!(h.state().views[0].page_input, "2x");
+        h.key_press(egui::Key::Backspace);
+        h.run_steps(1);
+        assert_eq!(h.state().views[0].page_input, "2");
+        h.key_press(egui::Key::Enter);
+        h.run_steps(3);
+        let app = h.state();
+        assert_eq!((app.views[0].id, app.views[0].current, app.views[0].page_input.as_str()), (id, 1, "ii"));
+        let doc = app.session.get(id).unwrap();
+        assert_eq!(doc.path.as_deref(), Some(file.path.as_str()));
+        assert!(!doc.dirty);
+        assert_eq!((doc.can_undo(), doc.can_redo()), (None, None));
+        assert_eq!(doc.bytes, replacement);
+        assert_eq!(app.session.save_bytes(id).unwrap(), replacement);
+        assert_eq!(std::fs::read(&file.path).unwrap(), replacement.as_ref().clone());
+    }
 }
 
 #[test]
