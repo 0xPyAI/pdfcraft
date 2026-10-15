@@ -1,18 +1,19 @@
 //! Filling in forms on the page (execution plan M6; Acrobat fills fields in every viewing mode).
 //!
 //! Text fields open an in-place editor over the widget (Enter or clicking away commits, Escape
-//! cancels, Tab moves to the next field). Check boxes and radio buttons toggle on click. Combo
-//! and list boxes open a list of their options. Every change is one undoable engine edit.
+//! cancels, Tab moves to the next field). Check boxes and radio buttons toggle on click. List
+//! boxes are directly selectable in-place on the page (clicking picks an option; Ctrl-click
+//! toggles on multi-select lists). Combo boxes open a list of their options. Every change is one
+//! undoable engine edit.
 
 use std::collections::HashSet;
 
 use egui::{Color32, CornerRadius, Rect, Stroke, vec2};
-use pdfcraft_engine::{Edit, FieldValue, FormField, FormFieldKind, FormWidget, field_flags};
+use pdfcraft_engine::{Edit, FieldValue, FormField, FormFieldKind, FormWidget, field_flags, form_appearance};
 use pdfcraft_render::DocInfo;
 
 use crate::canvas::{DocView, PageXform};
 use crate::theme::Tokens;
-use crate::widgets;
 
 const FOCUS_BLUE: Color32 = Color32::from_rgb(0x14, 0x73, 0xE6);
 /// Background of the in-place text field editor, the same in every theme.
@@ -181,10 +182,46 @@ pub(crate) fn page_input(
                 x.request_focus = true;
             }
         }
-        FormFieldKind::Text | FormFieldKind::Combo | FormFieldKind::List => {
+        FormFieldKind::Text | FormFieldKind::Combo => {
             if view.forms.focus.as_ref().is_none_or(|x| x.name != f.name || x.widget != wi) {
                 commit(view, form);
                 view.forms.focus = Some(open_focus(f, wi));
+            }
+        }
+        FormFieldKind::List => {
+            commit(view, form);
+            view.forms.focus = Some(open_focus(f, wi));
+            let r = widget_rect(xf, info, page, w.rect);
+            let height_pt = if matches!(w.rotation, 90 | 270) { (w.rect[2] - w.rect[0]).max(1.0) } else { (w.rect[3] - w.rect[1]).max(1.0) };
+            let zoom = (r.height() as f64) / height_pt;
+            let y_pt = (p.y - r.min.y) as f64 / zoom;
+            let rows = w.list.unwrap_or(form_appearance::ListRows { top: 0, inset: 2.0, row: 12.0 * 1.15, size: 12.0 });
+            let picked_indices: Vec<usize> = f.value.iter().filter_map(|v| f.options.iter().position(|(e, _)| e == v)).collect();
+            let top = form_appearance::ListRows::top_showing(rows.top, &picked_indices, rows.visible(height_pt), f.options.len());
+            if let Some(opt_idx) = rows.option_at(top, y_pt).filter(|&i| i < f.options.len()) {
+                let export = &f.options[opt_idx].0;
+                let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+                let shift = ui.input(|i| i.modifiers.shift);
+                let multi = f.has(field_flags::MULTI_SELECT);
+                let new_value = if multi && ctrl {
+                    let mut picked = f.value.clone();
+                    if let Some(pos) = picked.iter().position(|x| x == export) {
+                        picked.remove(pos);
+                    } else {
+                        picked.push(export.clone());
+                    }
+                    FieldValue::Choice(picked)
+                } else if multi && shift && !f.value.is_empty() {
+                    let anchor = f.value.last().and_then(|last| f.options.iter().position(|(e, _)| e == last)).unwrap_or(opt_idx);
+                    let (min, max) = (anchor.min(opt_idx), anchor.max(opt_idx));
+                    let picked = f.options[min..=max].iter().map(|(e, _)| e.clone()).collect();
+                    FieldValue::Choice(picked)
+                } else {
+                    FieldValue::Choice(vec![export.clone()])
+                };
+                if new_value != FieldValue::Choice(f.value.clone()) {
+                    view.pending_edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: new_value });
+                }
             }
         }
     }
@@ -196,7 +233,6 @@ pub(crate) fn draft_edit(focus: &Focus, form: &[FormField]) -> Option<Edit> {
     let f = form.iter().find(|f| f.name == focus.name)?;
     let value = match f.kind {
         FormFieldKind::Text if f.value.first().map(String::as_str).unwrap_or("") != focus.text => FieldValue::Text(focus.text.clone()),
-        FormFieldKind::List if f.has(field_flags::MULTI_SELECT) && focus.picked != f.value => FieldValue::Choice(focus.picked.clone()),
         _ => return None,
     };
     Some(Edit::SetFieldValue { name: f.name.clone(), value })
@@ -309,13 +345,11 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform,
             let focused = view.forms.focus.as_ref().is_some_and(|x| x.name == f.name && x.widget == wi);
             if focused {
                 painter.rect_stroke(r.expand(1.0), CornerRadius::same(2), Stroke::new(2.0, FOCUS_BLUE), egui::StrokeKind::Outside);
-            } else {
-                if view.forms.unbaked.contains(&(f.name.clone(), page)) {
-                    paint_unbaked_widget(painter, xf, f, w, r);
-                }
-                if fillable(f) && pointer.is_some_and(|p| r.contains(p)) {
-                    painter.rect_stroke(r, CornerRadius::same(1), Stroke::new(1.0, FOCUS_BLUE.gamma_multiply(0.8)), egui::StrokeKind::Outside);
-                }
+            }
+            if view.forms.unbaked.contains(&(f.name.clone(), page)) {
+                paint_unbaked_widget(painter, xf, f, w, r);
+            } else if fillable(f) && pointer.is_some_and(|p| r.contains(p)) {
+                painter.rect_stroke(r, CornerRadius::same(1), Stroke::new(1.0, FOCUS_BLUE.gamma_multiply(0.8)), egui::StrokeKind::Outside);
             }
         }
     }
@@ -352,7 +386,7 @@ pub fn field_text_size(painter: &egui::Painter, f: &FormField, w: &FormWidget, t
 
 fn paint_unbaked_widget(painter: &egui::Painter, xf: &PageXform, f: &FormField, w: &FormWidget, r: Rect) {
     match f.kind {
-        FormFieldKind::Text | FormFieldKind::Combo | FormFieldKind::List => {
+        FormFieldKind::Text | FormFieldKind::Combo => {
             let text = f.value.first().map(String::as_str).unwrap_or("");
             painter.rect_filled(r, CornerRadius::same(1), Color32::from_rgb(0xFF, 0xFF, 0xF4));
             painter.rect_stroke(r, CornerRadius::same(1), Stroke::new(1.0, Color32::from_gray(180)), egui::StrokeKind::Inside);
@@ -372,6 +406,38 @@ fn paint_unbaked_widget(painter: &egui::Painter, xf: &PageXform, f: &FormField, 
                 let wrap = if f.has(field_flags::MULTILINE) { (r.width() - 6.0 * zoom).max(1.0) } else { f32::INFINITY };
                 let galley = p.layout(display_text, egui::FontId::proportional(font_size), Color32::BLACK, wrap);
                 p.galley(align.anchor_size(pos, galley.size()).min, galley, Color32::BLACK);
+            }
+        }
+        FormFieldKind::List => {
+            painter.rect_filled(r, CornerRadius::same(1), Color32::from_rgb(0xFF, 0xFF, 0xF4));
+            painter.rect_stroke(r, CornerRadius::same(1), Stroke::new(1.0, Color32::from_gray(180)), egui::StrokeKind::Inside);
+            let unrotated_w = if xf.rot % 180 == 90 { xf.ph } else { xf.pw };
+            let zoom = (xf.rect.width() / unrotated_w.max(1.0)) as f64;
+            let rows = w.list.unwrap_or(form_appearance::ListRows { top: 0, inset: 2.0, row: 12.0 * 1.15, size: 12.0 });
+            let height_pt = if matches!(w.rotation, 90 | 270) { (w.rect[2] - w.rect[0]).max(1.0) } else { (w.rect[3] - w.rect[1]).max(1.0) };
+            let picked_indices: Vec<usize> = f.value.iter().filter_map(|v| f.options.iter().position(|(e, _)| e == v)).collect();
+            let top = form_appearance::ListRows::top_showing(rows.top, &picked_indices, rows.visible(height_pt), f.options.len());
+            let font_size = (rows.size * zoom).clamp(6.0, 64.0) as f32;
+            let row_h = (rows.row * zoom) as f32;
+            let inset = (rows.inset * zoom) as f32;
+            let p = painter.with_clip_rect(r);
+            let mut y = r.min.y + inset;
+            for (export, display) in f.options.iter().skip(top) {
+                if y + row_h > r.max.y {
+                    break;
+                }
+                let row_rect = Rect::from_min_size(egui::pos2(r.min.x + 1.0, y), egui::vec2(r.width() - 2.0, row_h));
+                if f.value.contains(export) {
+                    p.rect_filled(row_rect, CornerRadius::ZERO, Color32::from_rgb(0x99, 0xC0, 0xDC));
+                }
+                p.text(
+                    egui::pos2(r.min.x + 3.0, y + font_size * 0.15),
+                    egui::Align2::LEFT_TOP,
+                    display,
+                    egui::FontId::proportional(font_size),
+                    Color32::BLACK,
+                );
+                y += row_h;
             }
         }
         FormFieldKind::CheckBox => {
@@ -502,8 +568,7 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
                 return view.pending_edit.take();
             }
         }
-        FormFieldKind::Combo | FormFieldKind::List => {
-            let multi = f.kind == FormFieldKind::List && f.has(field_flags::MULTI_SELECT);
+        FormFieldKind::Combo => {
             let resp = egui::Area::new(egui::Id::new(("form-choices", view.id.0)))
                 .order(egui::Order::Foreground)
                 .fixed_pos(rect.left_bottom() + vec2(0.0, 2.0))
@@ -512,27 +577,14 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
                         ui.set_min_width(rect.width().max(160.0));
                         ui.label(egui::RichText::new(&f.name).small().color(t.text_faint));
                         egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                            let Some(fx) = view.forms.focus.as_mut() else { return };
                             for (export, display) in &f.options {
-                                let on = if multi { fx.picked.contains(export) } else { f.value.first() == Some(export) };
-                                if multi {
-                                    let mut c = on;
-                                    if ui.add(widgets::checkbox(&mut c, display)).changed() {
-                                        if c {
-                                            fx.picked.push(export.clone());
-                                        } else {
-                                            fx.picked.retain(|x| x != export);
-                                        }
-                                    }
-                                } else if ui.selectable_label(on, display).clicked() {
+                                let on = f.value.first() == Some(export);
+                                if ui.selectable_label(on, display).clicked() {
                                     edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::Choice(vec![export.clone()]) });
                                     close = true;
                                 }
                             }
                         });
-                        if multi && ui.button(tl!("Done")).clicked() {
-                            commit(view, form);
-                        }
                     });
                 });
             let clicked_away = ctx.input(|i| i.pointer.any_click())
@@ -545,6 +597,35 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
                 next = Some(!shift);
             } else if clicked_away {
                 commit(view, form);
+                close = true;
+            }
+        }
+        FormFieldKind::List => {
+            let (up, down, esc, tab, shift) = ctx.input_mut(|i| {
+                (
+                    // Consumed, so the arrows move the selection without also scrolling the page.
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                    i.key_pressed(egui::Key::Escape),
+                    i.key_pressed(egui::Key::Tab),
+                    i.modifiers.shift,
+                )
+            });
+            if esc {
+                close = true;
+            } else if tab {
+                next = Some(!shift);
+            } else if (up || down) && !f.options.is_empty() {
+                let current_idx = f.value.last().and_then(|v| f.options.iter().position(|(e, _)| e == v)).unwrap_or(0);
+                let next_idx = if up { current_idx.saturating_sub(1) } else { (current_idx + 1).min(f.options.len().saturating_sub(1)) };
+                if next_idx != current_idx && next_idx < f.options.len() {
+                    let export = f.options[next_idx].0.clone();
+                    edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::Choice(vec![export]) });
+                }
+            }
+            let clicked_away = ctx.input(|i| i.pointer.any_click()) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| rect.contains(p));
+            if clicked_away {
+                close = true;
             }
         }
         _ => close = true,

@@ -318,6 +318,93 @@ fn frame(doc: &Document, wd: &Dict, w: f64, h: f64) -> (String, f64) {
     (c, 0.0)
 }
 
+/// The width [`frame`] insets the content by: the `/BS` border width when the widget has a
+/// border colour, doubled for beveled and inset borders, and 0 without a border.
+fn border_width(doc: &Document, wd: &Dict) -> f64 {
+    let mk = wd.get(b"MK").map(|m| doc.resolve(m)).and_then(|m| m.as_dict().cloned());
+    let bs = wd.get(b"BS").map(|b| doc.resolve(b)).and_then(|b| b.as_dict().cloned());
+    let bw = bs.as_ref().and_then(|b| b.get(b"W")).and_then(|x| doc.resolve(x).as_f64()).unwrap_or(1.0).max(0.0);
+    if color_array(doc, mk.as_ref(), b"BC").is_none() || bw <= 0.0 {
+        return 0.0;
+    }
+    let style = bs.as_ref().and_then(|b| b.name(b"S").map(<[u8]>::to_vec)).unwrap_or_default();
+    if style == b"B" || style == b"I" { 2.0 * bw } else { bw }
+}
+
+/// Where a list box draws its options: one row per option from the top, starting with option
+/// `top` (`/TI`, §12.7.4.4). The appearance PdfCraft writes and the viewer's in-place list share
+/// it, so a click picks the option drawn under the pointer (#1524).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ListRows {
+    /// The first option shown (`/TI`).
+    pub top: usize,
+    /// From the widget's top edge to the first row, in points.
+    pub inset: f64,
+    /// The height of one row, in points.
+    pub row: f64,
+    /// The text size, in points.
+    pub size: f64,
+}
+
+impl ListRows {
+    /// How many whole rows fit in a list box `height` points tall (at least one).
+    pub fn visible(&self, height: f64) -> usize {
+        if !(height.is_finite() && self.row > 0.0) {
+            return 1;
+        }
+        let rows = ((height - self.inset) / self.row).floor();
+        if rows >= 1.0 { rows.min(10_000.0) as usize } else { 1 }
+    }
+
+    /// The option at `y` points below the widget's top edge when the list starts at option `top`,
+    /// or `None` above the first row. The caller checks it against the number of options.
+    pub fn option_at(&self, top: usize, y: f64) -> Option<usize> {
+        if !(y.is_finite() && self.row > 0.0) || y < self.inset {
+            return None;
+        }
+        let k = ((y - self.inset) / self.row).floor();
+        (k < 1.0e6).then(|| top.saturating_add(k as usize))
+    }
+
+    /// The top index that shows as many of the `selected` option indices as fit in `visible`
+    /// rows, staying at `current` when they are all shown already, among `count` options.
+    pub fn top_showing(current: usize, selected: &[usize], visible: usize, count: usize) -> usize {
+        let visible = visible.max(1);
+        let last_top = count.saturating_sub(visible);
+        let (Some(&first), Some(&last)) = (selected.iter().min(), selected.iter().max()) else { return current.min(last_top) };
+        let top = if first >= current && last < current.saturating_add(visible) {
+            current
+        } else if last.saturating_sub(first) >= visible || first < current {
+            first
+        } else {
+            // Scroll down just far enough that the last selected option is the bottom row.
+            last.saturating_add(1).saturating_sub(visible)
+        };
+        top.min(last_top)
+    }
+}
+
+/// `/TI` of a list box: on the widget, else on the field.
+fn top_index(doc: &Document, wd: &Dict, field: Option<&Dict>) -> usize {
+    let ti = |d: &Dict| d.get(b"TI").and_then(|o| doc.resolve(o).as_int());
+    ti(wd).or_else(|| field.and_then(ti)).and_then(|i| usize::try_from(i).ok()).unwrap_or(0)
+}
+
+/// The rows of a list box whose field's `/DA` is `f_da`, in widget `wd`.
+pub(crate) fn list_rows_of(doc: &Document, f_da: &str, field: Option<&Dict>, wd: &Dict) -> ListRows {
+    let da = parse_da(wd.get(b"DA").and_then(|o| doc.resolve(o).as_string().map(|s| s.to_text())).as_deref().unwrap_or(f_da));
+    let size = if da.size > 0.0 { da.size } else { 12.0 };
+    ListRows { top: top_index(doc, wd, field), inset: 2.0 + border_width(doc, wd), row: size * 1.15, size }
+}
+
+/// The rows of list box `f` as drawn in widget `w`.
+pub fn list_rows(doc: &Document, f: &Field, w: &Widget) -> ListRows {
+    let wobj = doc.get(w.obj);
+    let wd = wobj.as_dict().cloned().unwrap_or_default();
+    let fobj = doc.get(f.obj);
+    list_rows_of(doc, &f.da, fobj.as_dict(), &wd)
+}
+
 /// The appearance of a text or choice field's widget showing `values`. Characters its font can't
 /// hold come out as `?`; [`field_appearance_drawn`] says which.
 pub fn field_appearance(doc: &Document, f: &Field, w: &Widget, values: &[String]) -> Stream {
@@ -400,14 +487,13 @@ pub fn field_appearance_drawn(doc: &Document, f: &Field, w: &Widget, values: &[S
     let mut size = da.size;
     match f.kind {
         FieldKind::List => {
-            // Every option, one per line from the top; selected ones highlighted.
-            if size == 0.0 {
-                size = 12.0;
-            }
-            let line = size * 1.15;
-            let top = wd.get(b"TI").and_then(|o| doc.resolve(o).as_int()).unwrap_or(0).max(0) as usize;
-            let mut y = height - pad;
-            for (export, display) in f.options.iter().skip(top) {
+            // Every option, one per line from the top (from `/TI`); selected ones highlighted.
+            let fobj = doc.get(f.obj);
+            let rows = list_rows_of(doc, &f.da, fobj.as_dict(), &wd);
+            size = rows.size;
+            let line = rows.row;
+            let mut y = height - rows.inset;
+            for (export, display) in f.options.iter().skip(rows.top) {
                 if y - line < 0.0 {
                     break;
                 }
@@ -617,5 +703,24 @@ mod tests {
         assert_eq!(parse_da("/Cour 9 Tf 0 0 0 1 k").color, "0 0 0 1 k");
         assert_eq!(parse_da("garbage").font, "Helv");
         assert_eq!(stroke_op("1 0 0 rg"), "1 0 0 RG");
+    }
+
+    #[test]
+    fn list_rows_visibility_and_scrolling() {
+        let rows = ListRows { top: 0, inset: 2.0, row: 11.5, size: 10.0 };
+        assert_eq!(rows.visible(46.0), 3);
+        assert_eq!(rows.option_at(0, 1.0), None);
+        assert_eq!(rows.option_at(0, 5.0), Some(0));
+        assert_eq!(rows.option_at(0, 15.0), Some(1));
+        assert_eq!(rows.option_at(2, 5.0), Some(2));
+
+        // When Tue (1) and Thu (3) are selected in 5 options with 3 visible rows:
+        assert_eq!(ListRows::top_showing(0, &[1, 3], 3, 5), 1);
+        // When staying within view:
+        assert_eq!(ListRows::top_showing(1, &[1, 2], 3, 5), 1);
+        // When selecting before current top:
+        assert_eq!(ListRows::top_showing(2, &[0], 3, 5), 0);
+        // When empty selection:
+        assert_eq!(ListRows::top_showing(0, &[], 3, 5), 0);
     }
 }

@@ -872,6 +872,77 @@ fn the_fields_panel_lists_a_field_on_a_missing_page_as_unplaced() {
     assert_eq!(h.query_all_by_label("orphan").count(), 1);
 }
 
+#[test]
+fn list_box_clicks_select_directly_and_ctrl_click_toggles_multi() {
+    let bytes = pdf_from_objects(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] /DA (/Helv 10 Tf 0 g) /DR << /Font << /Helv 6 0 R >> >> >> >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 400 400] >>",
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (ListOne) /Opt [(Red) (Green) (Blue)] /Rect [50 250 200 320] /P 3 0 R /F 4 >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (ListMulti) /Ff 2097152 /Opt [(Mon) (Tue) (Wed) (Thu) (Fri)] /Rect [50 100 200 170] /P 3 0 R /F 4 >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    ]);
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("lists.pdf", None, bytes).unwrap();
+        app.set_option("left", "closed").unwrap();
+        app.set_option("zoom", "100").unwrap();
+        app
+    });
+    h.run_steps(4);
+
+    // Click row 1 (Green) in ListOne
+    let r_one = {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f = doc.form.iter().find(|f| f.name == "ListOne").unwrap();
+        pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen")
+    };
+    let zoom_one = r_one.height() / 70.0;
+    let p_green = egui::pos2(r_one.center().x, r_one.min.y + 19.0 * zoom_one);
+    h.hover_at(p_green);
+    h.run_steps(1);
+    h.drag_at(p_green);
+    h.run_steps(1);
+    h.drop_at(p_green);
+    h.run_steps(3);
+
+    assert_eq!(value(&h, "ListOne"), ["Green"], "clicking row 1 in ListOne selected Green");
+
+    // Click row 1 (Tue) in ListMulti
+    let r_multi = {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f = doc.form.iter().find(|f| f.name == "ListMulti").unwrap();
+        pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen")
+    };
+    let zoom_multi = r_multi.height() / 70.0;
+    let p_tue = egui::pos2(r_multi.center().x, r_multi.min.y + 19.0 * zoom_multi);
+    h.hover_at(p_tue);
+    h.run_steps(1);
+    h.drag_at(p_tue);
+    h.run_steps(1);
+    h.drop_at(p_tue);
+    h.run_steps(3);
+
+    assert_eq!(value(&h, "ListMulti"), ["Tue"], "clicking row 1 in ListMulti selected Tue");
+
+    // Ctrl/Cmd-click row 3 (Thu) in ListMulti
+    let p_thu = egui::pos2(r_multi.center().x, r_multi.min.y + 42.0 * zoom_multi);
+    h.hover_at(p_thu);
+    h.run_steps(1);
+    h.event(egui::Event::PointerMoved(p_thu));
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::COMMAND));
+    h.event(egui::Event::PointerButton { pos: p_thu, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::COMMAND });
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: p_thu, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::COMMAND });
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    h.run_steps(3);
+
+    assert_eq!(value(&h, "ListMulti"), ["Tue", "Thu"], "Ctrl-clicking Thu toggled it on, keeping Tue");
+}
+
 /// Auto-size (`0 Tf`, inherited from the AcroForm) single-line and multiline fields, and a fixed 10 pt one.
 fn auto_size_form() -> Vec<u8> {
     pdf_from_objects(&[

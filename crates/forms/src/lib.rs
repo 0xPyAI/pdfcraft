@@ -103,6 +103,8 @@ pub struct Widget {
     pub hidden: bool,
     /// `/MK /R` as 0, 90, 180 or 270 degrees counterclockwise. Anything else is stored as 0.
     pub rotation: i64,
+    /// List boxes: where the options are drawn, so a click can pick the one under the pointer.
+    pub list: Option<appearance::ListRows>,
 }
 
 /// A terminal form field.
@@ -800,6 +802,7 @@ fn walk(
                 locked: annot_flags & 128 != 0,
                 hidden: annot_flags & (2 | 32) != 0,
                 rotation: appearance::mk_rotation(doc, wd),
+                list: (kind == FieldKind::List).then(|| appearance::list_rows_of(doc, inh.da.as_deref().unwrap_or("/Helv 0 Tf 0 g"), Some(d), wd)),
             })
         })
         .collect();
@@ -1053,6 +1056,16 @@ fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scripts: &mut 
             // /I lists option indices in ascending order; /V keeps the caller's value order.
             // Every entry above is an integer, so this sorts by its numeric option index.
             indices.sort_unstable_by_key(Object::as_int);
+            // A list box scrolls (`/TI`) so the picked options are among the rows it draws, as
+            // in other viewers: a pick below the last visible row would otherwise not show (#1524).
+            let top = match (f.kind, f.widgets.first()) {
+                (FieldKind::List, Some(w)) => w.list.map(|rows| {
+                    let height = if matches!(w.rotation, 90 | 270) { w.rect[2] - w.rect[0] } else { w.rect[3] - w.rect[1] };
+                    let picked: Vec<usize> = indices.iter().filter_map(|i| i.as_int()).filter_map(|i| usize::try_from(i).ok()).collect();
+                    (rows.top, appearance::ListRows::top_showing(rows.top, &picked, rows.visible(height), f.options.len()))
+                }),
+                _ => None,
+            };
             doc.update_dict(f.obj, |d| {
                 match exports.as_slice() {
                     [] => {
@@ -1066,7 +1079,22 @@ fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scripts: &mut 
                 } else {
                     d.set(b"I".to_vec(), Object::Array(indices));
                 }
+                if let Some((old, new)) = top
+                    && old != new
+                {
+                    d.set(b"TI".to_vec(), Object::Int(i64::try_from(new).unwrap_or(0)));
+                }
             })?;
+            // A widget with its own `/TI` (read before the field's) scrolls too.
+            if let Some((old, new)) = top
+                && old != new
+            {
+                for w in f.widgets.iter().filter(|w| w.obj != f.obj) {
+                    if doc.get(w.obj).as_dict().is_some_and(|d| d.contains(b"TI")) {
+                        doc.update_dict(w.obj, |d| d.set(b"TI".to_vec(), Object::Int(i64::try_from(new).unwrap_or(0))))?;
+                    }
+                }
+            }
             redraw(doc, f, &exports, scripts)
         }
         (FieldKind::PushButton, _) => invalid(format!("{:?} is a button; it has no value", f.name)),
