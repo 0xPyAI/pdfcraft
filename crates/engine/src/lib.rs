@@ -78,6 +78,8 @@ pub enum ImageEdit {
     Flip {
         horizontal: bool,
     },
+    /// Show only this box of it (user space), the pixels staying where they are.
+    Crop([f64; 4]),
     /// Draw this image file (PNG, JPEG, TIFF, GIF, BMP, JPEG 2000) in its place.
     Replace {
         name: String,
@@ -1872,6 +1874,7 @@ impl Edit {
             Edit::EditPageImage { change, .. } => Label::of(match change {
                 ImageEdit::Move(_) => "Move image",
                 ImageEdit::Rotate(_) => "Rotate image",
+                ImageEdit::Crop(_) => "Crop image",
                 ImageEdit::Flip { .. } => "Flip image",
                 ImageEdit::Replace { .. } => "Replace image",
                 ImageEdit::Delete => "Delete image",
@@ -2381,6 +2384,7 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
                     }
                     pdfcraft_edit::ImageChange::Replace(embed_image(doc, name, bytes)?.0)
                 }
+                ImageEdit::Crop(keep) => pdfcraft_edit::ImageChange::Crop(*keep),
                 ImageEdit::Delete => pdfcraft_edit::ImageChange::Delete,
             };
             pdfcraft_edit::change_image(doc, *page, *index, &c)?;

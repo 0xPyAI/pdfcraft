@@ -4361,3 +4361,66 @@ fn moving_text_offers_the_four_way_arrow() {
     let frame = screen((moved.rect[0] + moved.rect[2]) / 2.0, moved.rect[3]) - egui::vec2(0.0, 4.0);
     assert_eq!(cursor_at(&mut h, frame), egui::CursorIcon::Move);
 }
+
+/// Cropping a picture on the page (Acrobat's crop handles): in crop mode the
+/// handles trim, Enter applies what is kept, Esc leaves the picture as it was.
+#[test]
+fn cropping_a_picture_with_its_handles() {
+    let mut png = Vec::new();
+    image::RgbImage::from_pixel(80, 40, image::Rgb([200, 40, 40])).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("picture.png", None, png.clone()).expect("opens");
+        app
+    });
+    h.run_steps(4);
+    let id = h.state().views[0].id;
+    let before = h.state().session.get(id).unwrap().page_images(0)[0].visible_rect.unwrap();
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let c = r.center();
+    h.hover_at(c);
+    h.run_steps(1);
+    h.drag_at(c);
+    h.run_steps(1);
+    h.drop_at(c);
+    h.run_steps(2);
+    assert!(h.state().views[0].image_selection.is_some(), "selected");
+    // Crop mode (as the context menu's Crop Image starts it): drag the right-bottom handle a
+    // quarter of the picture inward, then Enter.
+    h.state_mut().views[0].image_selection.as_mut().unwrap().crop = Some(pdfcraft_ui_egui::CropMode::new(before));
+    h.run_steps(2);
+    let corner = r.right_bottom();
+    let to = corner - egui::vec2(r.width() / 4.0, r.height() / 4.0);
+    h.hover_at(corner);
+    h.run_steps(1);
+    h.drag_at(corner);
+    h.run_steps(1);
+    for k in 1..=4 {
+        h.hover_at(corner + (to - corner) * (k as f32 / 4.0));
+        h.run_steps(1);
+    }
+    h.drop_at(to);
+    h.run_steps(2);
+    let keep = h.state().views[0].image_selection.as_ref().unwrap().crop.as_ref().unwrap().keep;
+    assert!(keep[2] < before[2] - 1.0 && keep[1] > before[1] + 1.0, "trimmed on the right and the bottom: {keep:?} of {before:?}");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    let doc = h.state().session.get(id).unwrap();
+    assert_eq!(doc.can_undo(), Some("Crop image"));
+    let im = &doc.page_images(0)[0];
+    assert_eq!(im.rect, [0.0, 0.0, 80.0, 40.0], "the placement is not scaled");
+    let v = im.visible_rect.unwrap();
+    assert!((v[2] - 60.0).abs() < 1.5 && (v[1] - 10.0).abs() < 1.5, "kept {v:?}");
+    assert!(h.state().views[0].image_selection.as_ref().is_some_and(|s| s.crop.is_none()), "crop mode ends");
+    // Esc leaves it.
+    h.state_mut().views[0].image_selection.as_mut().unwrap().crop = Some(pdfcraft_ui_egui::CropMode::new([10.0, 10.0, 20.0, 20.0]));
+    h.run_steps(2);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    let doc = h.state().session.get(id).unwrap();
+    assert_eq!(doc.page_images(0)[0].visible_rect.unwrap(), v);
+    assert!(h.state().views[0].image_selection.as_ref().is_none_or(|s| s.crop.is_none()));
+}

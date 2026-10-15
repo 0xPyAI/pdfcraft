@@ -2091,11 +2091,11 @@ title = "Crop an image"
 area = "C"
 tier = "P0"
 milestone = "M7"
-status = "partial"
+status = "shipped"
 commands = ["edit.image"]
-tools = ["content_update"]
-evidence = ["crates/engine/src/tests.rs::added_images_rotate_flip_and_crop_as_drawn", "crates/automation/tests/automation.rs::adding_content_through_tools"]
-notes = "for added images: trim each side, clipped"
+tools = ["content_update", "image_edit"]
+evidence = ["crates/ui-egui/tests/editing.rs::cropping_a_picture_with_its_handles", "crates/engine/src/tests.rs::cropping_an_existing_image_clips_it_and_moves_with_it", "crates/automation/tests/automation.rs::editing_page_images_through_tools", "crates/engine/src/tests.rs::added_images_rotate_flip_and_crop_as_drawn", "crates/automation/tests/automation.rs::adding_content_through_tools"]
+notes = "Existing page images: right-click ▸ Crop Image puts the picture in crop mode: its eight handles trim (the inside pans), the part that will go is dimmed, Enter or Done applies, Esc or Cancel leaves it; Remove Crop shows the whole picture again. The pixels stay where they are (a clipping path inside the picture's own scope, so a later move or resize carries it along; cropping again replaces the earlier crop, so it can grow back); image_edit crop. Added images: trim each side by percent in Edit image, clipped. Not yet: cropping grouped Form artwork by handles is allowed the same way (it is a clip), but a shared clip of the original file is not changed."
 
 [[feature]]
 id = "edit.image-rotate-flip"

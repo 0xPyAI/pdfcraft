@@ -5074,3 +5074,68 @@ fn exporting_a_jpeg_logo_to_word_keeps_the_image() {
         assert!(docx.windows(jpeg.len()).any(|w| w == jpeg.as_slice()), "the JPEG is stored unchanged (overlap {overlaps})");
     }
 }
+
+/// Cropping an existing page image (Acrobat's crop handles on a picture) shows only the chosen
+/// box, the pixels staying where they are: `visible_rect` says what shows, the full placement is
+/// unchanged, and a later move carries the crop along.
+#[test]
+fn cropping_an_existing_image_clips_it_and_moves_with_it() {
+    let mut s = Session::new();
+    let mut px = image::RgbaImage::new(40, 40);
+    for (x, y, p) in px.enumerate_pixels_mut() {
+        *p = if x < 20 {
+            image::Rgba([255, 0, 0, 255])
+        } else if y < 20 {
+            image::Rgba([0, 255, 0, 255])
+        } else {
+            image::Rgba([0, 0, 255, 255])
+        };
+    }
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(px).write_to(&mut png, image::ImageFormat::Png).unwrap();
+    let pic = s.create_from_images(&[("p.png".into(), png.into_inner())]).unwrap();
+    let id = s.open("p.pdf", None, pic, None).unwrap();
+    let full = s.get(id).unwrap().page_images(0)[0].rect;
+    let (w, h) = (full[2] - full[0], full[3] - full[1]);
+    // Keep the right half, upper part.
+    let keep = [full[0] + w / 2.0, full[1] + h / 2.0, full[2], full[3]];
+    s.apply(id, Edit::EditPageImage { page: 0, index: 0, change: ImageEdit::Crop(keep) }).unwrap();
+    let d = s.get(id).unwrap();
+    assert_eq!(d.can_undo(), Some("Crop image"));
+    let im = &d.page_images(0)[0];
+    assert_eq!(im.rect, full, "the placement is not scaled");
+    let v = im.visible_rect.expect("clipped");
+    assert!(v.iter().zip(keep.iter()).all(|(a, b)| (a - b).abs() < 0.01), "{v:?} vs {keep:?}");
+    // What shows: the kept quarter is green, the cropped-away quarters are paper.
+    let (pw, ph, rgba) = {
+        let mut ex = crate::export::Exporter::new(d);
+        let png = ex.png(0, 72.0).unwrap();
+        let img = image::load_from_memory(&png).unwrap().to_rgba8();
+        (img.width(), img.height(), img)
+    };
+    let at = |fx: f64, fy: f64| rgba.get_pixel((pw as f64 * fx) as u32, (ph as f64 * fy) as u32).0;
+    let page_h = d.info.pages[0].height as f64;
+    let page_w = d.info.pages[0].width as f64;
+    // Fractions of the page from the top-left: the kept box is the top-right quarter of the image.
+    let fx = |x: f64| x / page_w;
+    let fy = |y: f64| 1.0 - y / page_h;
+    assert_eq!(at(fx(full[0] + 0.75 * w), fy(full[1] + 0.75 * h))[1], 255, "kept green");
+    assert_eq!(at(fx(full[0] + 0.25 * w), fy(full[1] + 0.25 * h)), [255, 255, 255, 255], "cropped-away red is gone");
+    // A move takes the crop along (down and left, so the kept part stays on the page).
+    let to = [full[0] - 10.0, full[1] - 10.0, full[2] - 10.0, full[3] - 10.0];
+    s.apply(id, Edit::EditPageImage { page: 0, index: 0, change: ImageEdit::Move(to) }).unwrap();
+    let im = &s.get(id).unwrap().page_images(0)[0];
+    let v = im.visible_rect.expect("still clipped");
+    let moved_keep = [keep[0] - 10.0, keep[1] - 10.0, keep[2] - 10.0, keep[3] - 10.0];
+    assert!(v.iter().zip(moved_keep.iter()).all(|(a, b)| (a - b).abs() < 0.01), "{v:?} vs {moved_keep:?}");
+    // Cropping again replaces the earlier crop, so the picture can grow back (Remove crop).
+    let full_now = s.get(id).unwrap().page_images(0)[0].rect;
+    s.apply(id, Edit::EditPageImage { page: 0, index: 0, change: ImageEdit::Crop(full_now) }).unwrap();
+    let im = &s.get(id).unwrap().page_images(0)[0];
+    let v = im.visible_rect.expect("visible");
+    let page = [0.0, 0.0, page_w, page_h];
+    let shown = [full_now[0].max(page[0]), full_now[1].max(page[1]), full_now[2].min(page[2]), full_now[3].min(page[3])];
+    assert!(v.iter().zip(shown.iter()).all(|(a, b)| (a - b).abs() < 0.01), "{v:?} vs {shown:?}");
+    // No area, or a box off the image, is refused.
+    assert!(s.apply(id, Edit::EditPageImage { page: 0, index: 0, change: ImageEdit::Crop([10.0, 10.0, 10.0, 50.0]) }).is_err());
+}

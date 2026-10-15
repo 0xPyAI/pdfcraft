@@ -2326,6 +2326,12 @@ fn editing_page_images_through_tools() {
     assert_eq!(r["undo"], "Move image");
     let moved = ok(&mut a, "page_images", json!({ "doc": made, "page": 1 }))["images"][0]["rect"].clone();
     assert_eq!(moved, json!([5.0, 5.0, 25.0, 35.0]));
+    // Crop keeps part of it in place: the placement stays, visible_rect says what shows.
+    let r = ok(&mut a, "image_edit", json!({ "doc": made, "page": 1, "image": 1, "action": "crop", "rect": [10, 10, 25, 30] }));
+    assert_eq!(r["undo"], "Crop image");
+    let cropped = ok(&mut a, "page_images", json!({ "doc": made, "page": 1 }))["images"][0].clone();
+    assert_eq!(cropped["rect"], json!([5.0, 5.0, 25.0, 35.0]));
+    assert_eq!(cropped["visible_rect"], json!([10.0, 10.0, 25.0, 30.0]));
     ok(&mut a, "image_edit", json!({ "doc": made, "page": 1, "image": 1, "action": "rotate" }));
     ok(&mut a, "image_edit", json!({ "doc": made, "page": 1, "image": 1, "action": "flip_horizontal" }));
     let saved = ok(&mut a, "image_save", json!({ "doc": made, "page": 1, "image": 1, "path": "out/picture" }));

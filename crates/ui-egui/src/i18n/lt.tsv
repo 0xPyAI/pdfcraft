@@ -2635,3 +2635,6 @@ key	Space	Tarpas
 	Print as image	Spausdinti kaip vaizdą
 	Resolution:	Raiška:
 	Use it when a printer skips text, shading or transparency. The print is no longer searchable text; with Print in grayscale, the pictures are grey.	Naudokite, kai spausdintuvas praleidžia tekstą, šešėliavimą ar skaidrumą. Atspaudas nebėra ieškomas tekstas; spausdinant pilkais atspalviais vaizdai yra pilki.
+	Crop Image	Apkarpyti vaizdą
+	Remove Crop	Pašalinti apkarpymą
+	Trim the picture with its handles; Enter or Done applies	Apkarpykite paveikslėlį rankenėlėmis; Enter arba Atlikta pritaiko
