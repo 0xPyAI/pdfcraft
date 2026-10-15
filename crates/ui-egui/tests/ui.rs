@@ -270,6 +270,28 @@ fn a_tab_with_an_arabic_file_name_keeps_its_logical_accessible_name() {
     h.get_by_label(long);
 }
 
+/// A middle click on a tab closes it, as in Acrobat and browsers (#1853); a tab with unsaved
+/// changes asks first, as its close button does.
+#[test]
+fn a_middle_click_closes_the_tab() {
+    let mut h = harness(|app| {
+        app.open_bytes("first.pdf", None, FIXTURE.to_vec()).unwrap();
+        app.open_bytes("second.pdf", None, FIXTURE.to_vec()).unwrap();
+    });
+    h.get_by_label("first.pdf").click_button(egui::PointerButton::Middle);
+    h.run_steps(3);
+    let app = h.state();
+    assert_eq!(app.views.len(), 1);
+    assert_eq!(app.session.get(app.views[0].id).unwrap().name, "second.pdf");
+    assert!(app.close_request.is_none(), "a clean document closes without asking");
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::RotatePages { pages: vec![0], degrees: 90 });
+    h.run_steps(2);
+    h.get_by_label("second.pdf (edited)").click_button(egui::PointerButton::Middle);
+    h.run_steps(3);
+    assert_eq!(h.state().views.len(), 1, "unsaved changes ask first");
+    assert!(h.state().close_request.is_some());
+}
+
 #[test]
 fn overflowing_tabs_can_be_reached_by_scrolling() {
     let mut h = harness(|app| {

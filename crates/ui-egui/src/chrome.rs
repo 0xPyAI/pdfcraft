@@ -170,6 +170,11 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                                 if response.clicked() {
                                     app.active = Some(i);
                                 }
+                                // A middle click closes the tab, as in Acrobat and browsers (#1853);
+                                // unsaved changes ask first, as the close button does.
+                                if response.middle_clicked() {
+                                    close = Some(i);
+                                }
                             }
                             // Dragging a tab moves it (#1537): a line marks the gap it will land
                             // in, and releasing the button drops it there.
@@ -222,7 +227,7 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                                 if response.clicked() {
                                     app.open_combine_tab();
                                 }
-                                if close.is_some() {
+                                if close.is_some() || response.middle_clicked() {
                                     app.close_combine_tab();
                                 }
                             }
