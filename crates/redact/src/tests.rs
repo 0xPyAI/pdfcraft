@@ -920,3 +920,50 @@ fn redacting_every_inheriting_page_retires_the_parent_resources() {
         assert_eq!(under(&mut saved, page, &[[0.0, 190.0, 300.0, 220.0]]), 0);
     }
 }
+
+#[test]
+fn image_alternatives_and_masks_cannot_keep_redacted_pixels() {
+    for extra in ["/Alternates [<< /Image 8 0 R >>]", "/SMask 8 0 R", "/Mask 8 0 R", "/Mask [0 0]"] {
+        let mut doc = one_page(
+            b"q 0 0 300 300 re W n 8 0 0 10 10 10 cm /Im Do Q",
+            "/XObject << /Im 7 0 R >>",
+            vec![
+                stream(
+                    &format!("/Type /XObject /Subtype /Image /Width 8 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8 {extra}"),
+                    b"LEAK_TOPPUBLIC__",
+                ),
+                stream("/Type /XObject /Subtype /Image /Width 8 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", b"LEAK_ALT"),
+            ],
+        );
+        mark(&mut doc, 0, &[[10.0, 15.0, 18.0, 20.0]], "");
+        let report = apply(&mut doc, None).unwrap();
+        assert_no_secret(&doc, b"LEAK_");
+        assert_eq!((report.images_cleared, report.images_removed), if extra.starts_with("/Alternates") { (1, 0) } else { (0, 1) });
+    }
+}
+
+#[test]
+fn masks_and_alternates_outside_redaction_stay() {
+    let mut doc = one_page(
+        b"q 8 0 0 10 10 10 cm /Im Do Q",
+        "/XObject << /Im 7 0 R >>",
+        vec![
+            stream(
+                "/Type /XObject /Subtype /Image /Width 8 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8 /SMask 8 0 R /Alternates [<< /Image 8 0 R >>]",
+                b"PUBLIC_TOPBOTTOM",
+            ),
+            stream("/Type /XObject /Subtype /Image /Width 8 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", b"PUBLIC__"),
+        ],
+    );
+    mark(&mut doc, 0, &[[100.0, 100.0, 120.0, 120.0]], "");
+    let report = apply(&mut doc, None).unwrap();
+    assert_eq!((report.images_removed, report.images_cleared), (0, 0));
+    let saved = reopen(&doc);
+    let page = pdfcraft_model::pages(&saved).swap_remove(0);
+    let resources = saved.resolve(page.dict.get(b"Resources").unwrap());
+    let xobjects = saved.resolve(resources.as_dict().unwrap().get(b"XObject").unwrap());
+    let image = saved.resolve(xobjects.as_dict().unwrap().get(b"Im").unwrap());
+    let Object::Stream(image) = &*image else { panic!() };
+    assert!(image.dict.contains(b"SMask") && image.dict.contains(b"Alternates"));
+    assert_eq!(image.decoded().unwrap(), b"PUBLIC_TOPBOTTOM");
+}

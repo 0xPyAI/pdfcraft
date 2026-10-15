@@ -41,6 +41,10 @@ pub(crate) fn clear(doc: &Document, s: &Stream, ctm: &Matrix, rects: &[[f64; 4]]
 }
 
 fn decode_and_clear(doc: &Document, s: &Stream, ctm: &Matrix, rects: &[[f64; 4]]) -> Option<Option<Stream>> {
+    // Separate masks can retain the original image data.
+    if s.dict.contains(b"SMask") || s.dict.contains(b"Mask") {
+        return None;
+    }
     let supported = |n: &[u8]| {
         matches!(
             n,
@@ -114,5 +118,6 @@ fn decode_and_clear(doc: &Document, s: &Stream, ctm: &Matrix, rects: &[[f64; 4]]
     let mut dict = s.dict.clone();
     dict.remove(b"Length");
     dict.remove(b"DecodeParms");
+    dict.remove(b"Alternates");
     Some(Some(Stream::flate(dict, &data)))
 }

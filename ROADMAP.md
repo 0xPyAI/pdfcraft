@@ -444,5 +444,6 @@ Newest first: the date, what moved, and the new overall estimate.
 | 2026-10-10 | major | Restructured to the progress-docs standard (stage, two numbers, dimensions, features, languages, upcoming, log); full re-measure; assessment, gaps and milestones moved to `docs/`; log sorted newest first and a stray merged entry dated |
 | 2026-10-07 | minor | 806 tracked features, 51.0% shipped, effort-weighted ≈ 30–35%, 600–1,100 h |
 | 2026-10-05 | major | Honest assessment and "Where we're lacking" added |
+| 2026-10-12 | minor | M8: image redaction removes alternate images and unsupported masks only on affected images. Estimates unchanged. |
 
 - **2026-10-12 (M8):** Redaction cleans indirect and form structure references, preserving surviving form tags.

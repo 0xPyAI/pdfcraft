@@ -20,7 +20,8 @@ clear_marks(&mut doc, None)?;                        // remove marks without app
 - **images**: fully covered → removed; partly covered → a copy with the covered pixels cleared
   (8/16-bit and 1/2/4-bit images, image masks; Flate/LZW/RL/A85/AHx). Codecs PdfCraft can't
   re-encode (DCT, JPX, JBIG2, CCITT) are removed whole (fail-closed); inline images under an
-  area are removed;
+  area are removed. Images with separate `/SMask` or `/Mask` data are removed whole;
+  cleared copies drop `/Alternates` so alternate pixels cannot survive;
 - **vectors**: covered paths are removed; partly covered paths and shadings are clipped so
   nothing paints inside the areas;
 - **form XObjects**: rewritten recursively into new objects (pages sharing the original keep it);
