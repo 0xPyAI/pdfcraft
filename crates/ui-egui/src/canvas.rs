@@ -2397,7 +2397,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // Paging owns the vertical axis in single-page view; leave it to the pager.
     // The rest of a gesture that turned the page is swallowed too, or it would pan the new page
     // away from the edge it was shown at.
-    if single_paging || (!view.continuous && view.wheel.gesture_turned()) {
+    let paging_owns_vertical = single_paging || (!view.continuous && view.wheel.gesture_turned());
+    if paging_owns_vertical {
         precise_scroll.y = 0.0;
     }
     if now < view.precise_scroll_until {
@@ -2410,7 +2411,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // dialog has the input, or animations are off; any click, key, zoom or other scrolling ends it.
     // Asked of the preference, not of egui's animation time, which test harnesses zero.
     let animates = app.animation_effects.animates(app.motion.reduced);
-    let may_glide = !single_paging && !middle_gesture && navigation_enabled && unobstructed && animates;
+    let may_glide = !paging_owns_vertical && !middle_gesture && navigation_enabled && unobstructed && animates;
     let over_page = ui.rect_contains_pointer(avail);
     ui.input(|i| view.fling.read(&i.events, now, may_glide && over_page));
     let interrupted = ui.input(|i| i.pointer.any_pressed() || i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })));
@@ -5107,6 +5108,7 @@ trailer << /Root 1 0 R >>
     fn explicit_search_jumps_record_history_and_keep_match_destination() {
         for step in [None, Some(true), Some(false)] {
             let mut v = history_search_view();
+            v.page_input = "draft in progress".into();
             v.goto_point = Some((3, Some(0.8), Some(0.9), Vec2::ZERO));
             if let Some(forward) = step {
                 v.find_step(forward);
@@ -5115,7 +5117,11 @@ trailer << /Root 1 0 R >>
             }
             assert_eq!(v.back, vec![0], "explicit search jump must remember its origin");
             assert_eq!(v.goto, Some((3, 0.5)), "keep the match offset instead of the page top");
-            assert_eq!(v.page_input, "4");
+            assert_eq!(v.current, 3);
+            assert_eq!(v.current_page_label(None), "4");
+            // Chrome refreshes the idle page box; navigation must not overwrite a draft
+            // that may still be focused. DocView does not own the editor's focus state.
+            assert_eq!(v.page_input, "draft in progress");
             assert!(v.goto_point.is_none(), "an earlier link destination cannot override the search offset");
             v.go_to_match(1);
             assert_eq!(v.back, vec![0], "same-page matches do not duplicate history");
