@@ -14,6 +14,7 @@ mod raster;
 mod reading;
 mod structure;
 pub mod text;
+pub mod transition;
 
 pub use inspect::{
     Annotation, Attachment, AttachmentSource, DestView, DocInfo, Field, FieldKind, FontInfo, Layer, LayerOp, Link, LinkTarget, OutlineItem, PageInfo,
