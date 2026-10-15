@@ -182,6 +182,19 @@ fn saved_value(path: &std::path::Path, name: &str) -> Vec<String> {
     app.session.get(app.views[0].id).unwrap().form.iter().find(|f| f.name == name).unwrap().value.clone()
 }
 
+/// Step frames until the save has written `path`, instead of assuming it is there after a fixed
+/// number of frames. The write is atomic, so the file appears only when it is complete.
+fn wait_for_file(h: &mut Harness<'static, PdfCraftApp>, path: &std::path::Path) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !path.exists() {
+        assert!(std::time::Instant::now() < deadline, "the save never wrote {}", path.display());
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    // One more frame so the app has seen its own save before the test looks at its state.
+    h.run_steps(1);
+}
+
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("pdfcraft-forms-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -257,7 +270,7 @@ fn tabbing_back_to_the_same_field_then_saving_keeps_the_committed_value() {
             h.run_steps(3);
             h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::S);
         }
-        h.run_steps(4);
+        wait_for_file(&mut h, &out);
         assert_eq!(saved_value(&out, "qty"), ["42"], "{case}: saving cannot restore the old value");
         assert_eq!(value(&h, "qty"), ["42"], "{case}");
         // One typing action is one history entry, even after saving. Escape closes the
