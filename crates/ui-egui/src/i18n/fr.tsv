@@ -1604,6 +1604,7 @@
 	Sent to {printer}	Envoyé à {printer}
 	Sent to {printer}: {msg}	Envoyé à {printer} : {msg}
 	Looking for printers…	Recherche des imprimantes…
+	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Aucune imprimante trouvée. Vérifiez que l’imprimante est installée et que le spouleur d’impression fonctionne, puis rouvrez Imprimer.
 	Sending to {printer}…	Envoi à {printer}…
 	Choose a folder for the searchable files	Choisissez un dossier pour les fichiers recherchables
 	Files are combined in this order. Leave Pages empty to take every page.	Les fichiers sont combinés dans cet ordre. Laissez Pages vide pour prendre toutes les pages.

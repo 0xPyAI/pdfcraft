@@ -2183,6 +2183,7 @@ key	Space	Boşluk
 
 # Printing and multi-object selection
 	Looking for printers…	Yazıcılar aranıyor…
+	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Yazıcı bulunamadı. Yazıcının yüklü olduğunu ve yazdırma biriktiricisinin çalıştığını denetleyip Yazdır'ı yeniden açın.
 	Sending to {printer}…	{printer} yazıcısına gönderiliyor…
 	Column select	Sütun seçimi
 @plural	{n} object selected|{n} objects selected	{n} nesne seçildi

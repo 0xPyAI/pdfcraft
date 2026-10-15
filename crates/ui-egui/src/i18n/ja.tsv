@@ -1625,6 +1625,7 @@
 	Sent to {printer}	{printer} に送信しました
 	Sent to {printer}: {msg}	{printer} に送信しました: {msg}
 	Looking for printers…	プリンターを検索しています…
+	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	プリンターが見つかりません。プリンターがインストールされ、印刷スプーラーが動作していることを確認してから、もう一度［印刷］を開いてください。
 	Sending to {printer}…	{printer} に送信しています…
 	Choose a folder for the searchable files	検索可能なファイルの保存先フォルダーを選択
 	Files are combined from top to bottom. Leave Pages empty to take every page.	ファイルは上から順に結合されます。すべてのページを使用する場合は「ページ」を空欄にしてください。

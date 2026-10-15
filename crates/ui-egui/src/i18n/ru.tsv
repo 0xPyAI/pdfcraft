@@ -1616,6 +1616,7 @@
 	Sent to {printer}	Отправлено на {printer}
 	Sent to {printer}: {msg}	Отправлено на {printer}: {msg}
 	Looking for printers…	Поиск принтеров…
+	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Принтеры не найдены. Проверьте, что принтер установлен, а диспетчер печати запущен, и снова откройте «Печать».
 	Sending to {printer}…	Отправка на {printer}…
 	Choose a folder for the searchable files	Выберите папку для доступных для поиска файлов
 	Files are combined from top to bottom. Leave Pages empty to take every page.	Файлы объединяются сверху вниз. Оставьте «Страницы» пустыми, чтобы взять все страницы.

@@ -232,6 +232,13 @@ fn listed_printers() -> Vec<spool::Printer> {
     }
 }
 
+/// The first list is still being read and the user hasn't chosen yet (#160): no printer is
+/// selected only because none is known yet, so the dialog says it is looking rather than
+/// offering Save as PDF, and its button waits. Printing then would have saved a PDF.
+fn still_looking(d: &PrintDraft) -> bool {
+    d.printers_loading && d.printer.is_none() && !d.printer_picked
+}
+
 /// A printer's name as the dialog shows it.
 fn printer_label(name: &str) -> String {
     if name == crate::web_print::BROWSER_PRINTER { crate::web_print::browser_printer_label().to_string() } else { name.to_string() }
@@ -676,7 +683,11 @@ pub(crate) fn body(
                 // The browser's print dialog sets copies, two-sided printing and colour itself.
                 let browser = d.printer.as_deref() == Some(crate::web_print::BROWSER_PRINTER);
                 ui.horizontal(|ui| {
-                    let shown = d.printer.as_deref().map_or_else(|| tl!("Save as PDF").to_string(), printer_label);
+                    let shown = match d.printer.as_deref() {
+                        Some(p) => printer_label(p),
+                        None if still_looking(d) => tl!("Looking for printers…").to_string(),
+                        None => tl!("Save as PDF").to_string(),
+                    };
                     egui::ComboBox::from_id_salt("printer").selected_text(shown).width(260.0).show_ui(ui, |ui| {
                         if d.printers_loading {
                             ui.add_enabled(false, egui::Label::new(tl!("Looking for printers…")));
@@ -690,7 +701,11 @@ pub(crate) fn body(
                             };
                             ui.selectable_value(&mut d.printer, Some(p.name.clone()), label);
                         }
-                        ui.selectable_value(&mut d.printer, None, tl!("Save as PDF"));
+                        // Chosen even when it was already the selection, so the list arriving
+                        // later doesn't replace it with the default printer.
+                        if ui.selectable_value(&mut d.printer, None, tl!("Save as PDF")).clicked() {
+                            d.printer_picked = true;
+                        }
                     });
                     let tip = if spool::HAS_PRINTER_PREFERENCES {
                         tl!("Opens the printer driver's preferences. They are saved for every print from this computer; the copies, two-sided, grayscale and paper chosen here still apply.")
@@ -718,6 +733,17 @@ pub(crate) fn body(
                     d.driver_error = None;
                 }
                 ui.end_row();
+                // The spooler answered with no printer at all (#160): say so, rather than
+                // leaving Save as PDF looking like the only thing PdfCraft can do.
+                if !d.printers_loading && d.printers.is_empty() {
+                    ui.label("");
+                    ui.label(
+                        egui::RichText::new(tl!("No printers were found. Check that the printer is installed and the print spooler is running, then open Print again."))
+                            .small()
+                            .color(t.text_muted),
+                    );
+                    ui.end_row();
+                }
                 ui.label(tl!("Copies:"));
                 ui.add_enabled_ui(!browser, |ui| {
                     ui.horizontal(|ui| {
@@ -1048,8 +1074,9 @@ pub(crate) fn body(
     ui.add_space(12.0);
     let (mut go, mut cancel) = (false, false);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        let label = if d.printer.is_some() { "Print" } else { "Save as PDF" };
-        if ui.add_enabled_ui(settings.is_ok() && !sheets.is_empty(), |ui| widgets::pill_button(ui, label, true)).inner.clicked() {
+        let looking = still_looking(d);
+        let label = if d.printer.is_some() || looking { tl!("Print") } else { tl!("Save as PDF") };
+        if ui.add_enabled_ui(settings.is_ok() && !sheets.is_empty() && !looking, |ui| widgets::pill_button(ui, label, true)).inner.clicked() {
             go = true;
         }
         if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
