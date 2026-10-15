@@ -73,6 +73,17 @@ impl Default for HeaderFooter {
     }
 }
 
+impl HeaderFooter {
+    /// The first character [`add_header_footer`] would refuse, because the standard fonts can't
+    /// draw it (#125). Tokens only add ASCII (Bates prefixes and suffixes are part of the
+    /// template), so checking the templates, split as `expand`'s output is, covers every page
+    /// (and a `\r` that would be drawn is refused too). The dialog asks this too, so its preview
+    /// never offers text that applying refuses (#2013).
+    pub fn first_undrawable(&self) -> Option<char> {
+        self.text.iter().flat_map(|t| t.lines()).find_map(pdfcraft_fonts::first_non_win_ansi)
+    }
+}
+
 /// A picture for a background or watermark (Acrobat: Source ▸ File): an XObject already in
 /// the document, an image (drawn into a unit square) or a form (a page of a PDF).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -102,6 +113,17 @@ pub struct Watermark {
     pub behind: bool,
     /// Offset of the centre from the page centre, in points (right, up).
     pub offset: [f64; 2],
+}
+
+impl Watermark {
+    /// The first character of a text watermark [`add_watermark`] would refuse, because the
+    /// standard fonts can't draw it (#125). A picture watermark draws no text.
+    pub fn first_undrawable(&self) -> Option<char> {
+        match self.source {
+            Some(_) => None,
+            None => self.text.trim().lines().find_map(pdfcraft_fonts::first_non_win_ansi),
+        }
+    }
 }
 
 impl Default for Watermark {
@@ -383,16 +405,6 @@ fn begin(kind: MarkKind, subtype: &str, matrix: [f64; 6]) -> String {
 
 const END: &str = "EMC\nQ\n";
 
-/// Refuses page text the standard-14 fonts (WinAnsiEncoding) can't draw: written anyway, each
-/// such character would become a `?` on the page (#125). `lines` must split the text the way the
-/// caller draws it, so a `\r` that would be drawn is refused too.
-pub(crate) fn drawable<'a>(lines: impl IntoIterator<Item = &'a str>) -> Result<(), EditError> {
-    match lines.into_iter().find_map(pdfcraft_fonts::first_non_win_ansi) {
-        Some(c) => Err(undrawable(c)),
-        None => Ok(()),
-    }
-}
-
 /// The refusal for page text with `c`, which nothing here can draw.
 pub(crate) fn undrawable(c: char) -> EditError {
     EditError::Invalid(undrawable_message(c))
@@ -418,9 +430,9 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
     if hf.text.iter().all(|t| t.trim().is_empty()) {
         return Err(EditError::Invalid("type the header or footer text first".into()));
     }
-    // Tokens only add ASCII (Bates prefixes and suffixes are part of the template), so checking
-    // the templates, split as `expand`'s output is, covers every page.
-    hf.text.iter().try_for_each(|t| drawable(t.lines()))?;
+    if let Some(c) = hf.first_undrawable() {
+        return Err(undrawable(c));
+    }
     if !(hf.font_size.is_finite() && hf.font_size > 0.0 && hf.font_size <= 200.0 && hf.margins.iter().all(|m| m.is_finite() && *m >= 0.0)) {
         return Err(EditError::Invalid("invalid font size or margins".into()));
     }
@@ -498,8 +510,8 @@ pub fn add_watermark(doc: &mut Document, pages: &[usize], wm: &Watermark, replac
     if text.is_empty() && wm.source.is_none() {
         return Err(EditError::Invalid("type the watermark text first".into()));
     }
-    if wm.source.is_none() {
-        drawable(text.lines())?;
+    if let Some(c) = wm.first_undrawable() {
+        return Err(undrawable(c));
     }
     if !(wm.opacity.is_finite()
         && wm.rotation.is_finite()

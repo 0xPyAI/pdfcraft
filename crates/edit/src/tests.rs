@@ -2318,6 +2318,37 @@ fn hebrew_letters_the_page_font_lacks_use_the_hebrew_face() {
     assert_eq!(text::text_blocks(&reopen(&doc), 0).unwrap()[0].text, "עברית מלאה");
 }
 
+/// #2013: the dialog asks `first_undrawable` before offering OK, so it must refuse exactly what
+/// applying refuses: a Cyrillic footer was previewed (in the interface font) and then failed.
+#[test]
+fn header_and_watermark_drawability_matches_what_applying_refuses() {
+    let footer = |t: &str| HeaderFooter {
+        text: [String::new(), String::new(), String::new(), String::new(), String::new(), t.into()],
+        ..HeaderFooter::default()
+    };
+    for (text, refused) in [
+        ("Страница <<1>> из 1 / Page <<1>> of 1", Some('С')),
+        ("TEST-001 <<Page 1 of n>>", None),
+        ("Café — 5€ ™ <<Bates Number#6#1#ACME-#>>", None),
+        ("Left\r\nRight", None),
+        ("A\rB", Some('\r')),
+        ("line one\nΕλληνικά", Some('Ε')),
+    ] {
+        let hf = footer(text);
+        assert_eq!(hf.first_undrawable(), refused, "{text:?}");
+        let mut doc = fixture();
+        let applied = add_header_footer(&mut doc, &[0], &hf, false, &cx());
+        match refused {
+            Some(c) => assert_eq!(applied.unwrap_err().to_string(), undrawable_message(c), "{text:?}"),
+            None => applied.unwrap(),
+        }
+        let wm = Watermark { text: text.into(), ..Watermark::default() };
+        assert_eq!(wm.first_undrawable(), refused, "{text:?}");
+        let applied = add_watermark(&mut fixture(), &[0], &wm, false);
+        assert_eq!(applied.err().map(|e| e.to_string()), refused.map(undrawable_message), "{text:?}");
+    }
+}
+
 /// #125: page-content tools refuse text the standard fonts can't draw instead of writing `?`,
 /// and leave the document untouched.
 #[test]
