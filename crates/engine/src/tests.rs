@@ -5016,3 +5016,61 @@ fn printing_as_image_sends_pictures_instead_of_pages() {
     let img = image::load_from_memory(&png).unwrap().to_rgba8();
     assert!(img.pixels().all(|p| p[0] == p[1] && p[1] == p[2]), "every pixel grey");
 }
+
+/// A one-page PDF: a JPEG logo (DCTDecode) at the top and a big text title below it.
+fn jpeg_cover_pdf(logo_y: i32) -> Vec<u8> {
+    let mut jpeg = Vec::new();
+    let img = image::RgbImage::from_fn(40, 20, |x, y| image::Rgb([(x * 6) as u8, (y * 12) as u8, 90]));
+    image::codecs::jpeg::JpegEncoder::new(&mut jpeg).encode_image(&img).unwrap();
+    let content = format!(
+        "q 200 0 0 100 72 {logo_y} cm /Im1 Do Q BT /F1 30 Tf 72 580 Td (Annual Report) Tj ET \
+BT /F1 11 Tf 72 500 Td (Body text that is long enough to count as the body size of this page.) Tj ET"
+    );
+    let mut pdf = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    let mut add = |pdf: &mut Vec<u8>, n: usize, body: &[u8]| {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{n} 0 obj\n").as_bytes());
+        pdf.extend_from_slice(body);
+        pdf.extend_from_slice(b"\nendobj\n");
+    };
+    add(&mut pdf, 1, b"<< /Type /Catalog /Pages 2 0 R >>");
+    add(&mut pdf, 2, b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    add(
+        &mut pdf,
+        3,
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> /XObject << /Im1 6 0 R >> >> >>",
+    );
+    add(&mut pdf, 4, format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()).as_bytes());
+    add(&mut pdf, 5, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut obj = format!("<< /Type /XObject /Subtype /Image /Width 40 /Height 20 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {} >>\nstream\n", jpeg.len()).into_bytes();
+    obj.extend_from_slice(&jpeg);
+    obj.extend_from_slice(b"\nendstream");
+    add(&mut pdf, 6, &obj);
+    let xref = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
+    for o in &offsets {
+        pdf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", offsets.len() + 1).as_bytes());
+    pdf
+}
+
+/// #1936: a JPEG logo on a cover page reaches the Word file as the unchanged JPEG, both where it
+/// sits clear of the title (inline) and where it overlaps it (a positioned page).
+#[test]
+fn exporting_a_jpeg_logo_to_word_keeps_the_image() {
+    for (logo_y, overlaps) in [(650, false), (560, true)] {
+        let pdf = jpeg_cover_pdf(logo_y);
+        let mut s = Session::new();
+        let id = s.open("c.pdf", None, Arc::new(pdf), None).unwrap();
+        let d = s.get(id).unwrap();
+        let pages = d.export_pages();
+        assert_eq!((pages[0].images.len(), pages[0].images[0].ext), (1, "jpg"), "overlap {overlaps}");
+        let jpeg = pages[0].images[0].bytes.clone();
+        assert!(jpeg.starts_with(&[0xFF, 0xD8]));
+        let docx = d.export_office(compare::OfficeFormat::Docx);
+        assert!(docx.windows(21).any(|w| w == b"word/media/image1.jpg"), "overlap {overlaps}");
+        assert!(docx.windows(jpeg.len()).any(|w| w == jpeg.as_slice()), "the JPEG is stored unchanged (overlap {overlaps})");
+    }
+}
