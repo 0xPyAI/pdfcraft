@@ -4527,11 +4527,11 @@ fn signature_appearances(path: &Path) -> String {
 fn signing_with_translated_labels_through_tools() {
     let dir = workdir("signing-labels");
     let mut a = auto(&dir);
-    ok(&mut a, "sign_id_create", json!({ "name": "Ada Lovelace", "key": "p256", "password": "secret1", "path": "ada.p12" }));
+    ok(&mut a, "sign_id_create", json!({ "name": "Ada Lovelace", "key": "p256", "password": "secret12", "path": "ada.p12" }));
     let open = |a: &mut Automation| ok(a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
     let doc = open(&mut a);
     let args = |doc: u64, extra: Value, out: &str| {
-        let mut args = json!({ "doc": doc, "id": "ada.p12", "password": "secret1", "page": 1, "rect": [10, 150, 190, 290], "reason": "Genehmigt", "location": "Berlin", "out": out });
+        let mut args = json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "page": 1, "rect": [10, 150, 190, 290], "reason": "Genehmigt", "location": "Berlin", "out": out });
         for (k, v) in extra.as_object().unwrap() {
             args[k] = v.clone();
         }
