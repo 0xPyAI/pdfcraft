@@ -5,6 +5,7 @@
 //! remains the compatibility fallback. When neither can inspect a renderable file, panels
 //! are empty and `warnings` says why.
 
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
@@ -499,13 +500,17 @@ struct Inspector<'a> {
     /// Named destinations (`/Names /Dests` tree), keyed by raw string bytes, built once.
     /// Looking each name up by walking the tree was O(links × names): minutes on manuals.
     named: HashMap<Vec<u8>, &'a Object>,
+    /// The page of each annotation (the first page that lists it), built when a field's widget
+    /// has no `/P`. Searching every page's `/Annots` for each such field was O(fields ×
+    /// annotations): a second on a form of 8,000 fields.
+    annotation_pages: OnceCell<HashMap<ObjectId, usize>>,
 }
 
 impl<'a> Inspector<'a> {
     fn new(doc: &'a dyn Structure) -> Self {
         let page_ids = doc.page_ids();
         let page_index = page_ids.iter().copied().enumerate().map(|(index, id)| (id, index)).collect();
-        let mut me = Self { doc, page_ids, page_index, named: HashMap::new() };
+        let mut me = Self { doc, page_ids, page_index, named: HashMap::new(), annotation_pages: OnceCell::new() };
         let mut named = HashMap::new();
         if let Some(tree) =
             doc.catalog().ok().and_then(|c| c.get(b"Names").ok()).and_then(|o| me.dict(o)).and_then(|n| n.get(b"Dests").ok()).and_then(|o| me.dict(o))
@@ -1184,17 +1189,25 @@ impl<'a> Inspector<'a> {
         out.push(Field { name: full, kind, value, page, tooltip: self.text(d, b"TU"), has_actions, rect });
     }
 
+    /// The first page whose `/Annots` lists the field or one of its kids.
     fn find_widget_page(&self, field: &Object, kids: &[Object]) -> Option<usize> {
-        let targets: HashSet<ObjectId> =
-            std::iter::once(field).chain(kids.iter()).filter_map(|o| if let Object::Reference(id) = o { Some(*id) } else { None }).collect();
-        if targets.is_empty() {
-            return None;
+        let pages = self.annotation_pages.get_or_init(|| self.annotation_pages());
+        std::iter::once(field).chain(kids).filter_map(|o| if let Object::Reference(id) = o { pages.get(id).copied() } else { None }).min()
+    }
+
+    /// Each annotation listed in a page's `/Annots`, with the first page that lists it.
+    fn annotation_pages(&self) -> HashMap<ObjectId, usize> {
+        let mut pages = HashMap::new();
+        for (idx, &pid) in self.page_ids.iter().enumerate() {
+            let Some(annots) = self.doc.get_dictionary(pid).ok().and_then(|d| d.get(b"Annots").ok()) else { continue };
+            let Ok(annots) = self.resolve(annots).as_array() else { continue };
+            for a in annots {
+                if let Object::Reference(id) = a {
+                    pages.entry(*id).or_insert(idx);
+                }
+            }
         }
-        self.page_index.iter().find_map(|(&pid, &idx)| {
-            let annots = self.doc.get_dictionary(pid).ok()?.get(b"Annots").ok()?;
-            let arr = self.resolve(annots).as_array().ok()?;
-            arr.iter().any(|a| matches!(a, Object::Reference(id) if targets.contains(id))).then_some(idx)
-        })
+        pages
     }
 
     /// The topmost field above widget `id` (itself without a `/Parent`), or `None` when it or an
@@ -2060,6 +2073,70 @@ trailer << /Root 1 0 R >>
         let info = inspect(Arc::new(ORPHAN_FIELDS.to_vec()), None).expect("opens");
         let listed: Vec<_> = info.fields.iter().map(|f| (f.name.as_str(), f.value.as_deref(), f.page)).collect();
         assert_eq!(listed, [("alpha", Some("one"), Some(0)), ("beta", None, Some(0))], "{:?}", info.fields);
+    }
+
+    /// A `Structure` that counts the objects read through it.
+    struct CountingReads<'a> {
+        doc: &'a Document,
+        reads: std::cell::Cell<usize>,
+    }
+
+    impl Structure for CountingReads<'_> {
+        fn trailer(&self) -> &Dictionary {
+            &self.doc.trailer
+        }
+        fn get_object(&self, id: ObjectId) -> lopdf::Result<&Object> {
+            self.reads.set(self.reads.get() + 1);
+            self.doc.get_object(id)
+        }
+        fn encrypted(&self) -> bool {
+            false
+        }
+    }
+
+    /// Widgets without `/P` are placed on the page that lists them with one pass over the pages'
+    /// `/Annots`, not a search of every page per field: that was O(fields × annotations), a
+    /// second to open a form of 8,000 fields. A widget two pages list is on the first of them.
+    #[test]
+    fn widgets_without_a_page_entry_are_placed_in_one_pass() {
+        const PAGES: usize = 100;
+        const PER_PAGE: usize = 10;
+        let field = |p: usize, k: usize| 4 + PAGES + p * PER_PAGE + k;
+        let mut pdf = String::from("%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm 3 0 R >> endobj\n");
+        let kids: Vec<String> = (0..PAGES).map(|p| format!("{} 0 R", 4 + p)).collect();
+        pdf += &format!("2 0 obj << /Type /Pages /Kids [{}] /Count {PAGES} >> endobj\n", kids.join(" "));
+        let fields: Vec<String> = (0..PAGES).flat_map(|p| (0..PER_PAGE).map(move |k| format!("{} 0 R", field(p, k)))).collect();
+        pdf += &format!("3 0 obj << /Fields [{}] >> endobj\n", fields.join(" "));
+        for p in 0..PAGES {
+            let mut annots: Vec<String> = (0..PER_PAGE).map(|k| format!("{} 0 R", field(p, k))).collect();
+            // The last page lists the first page's first widget too.
+            if p == PAGES - 1 {
+                annots.push(format!("{} 0 R", field(0, 0)));
+            }
+            pdf += &format!("{} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [{}] >> endobj\n", 4 + p, annots.join(" "));
+        }
+        for p in 0..PAGES {
+            for k in 0..PER_PAGE {
+                pdf += &format!("{} 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (f{p}_{k}) /Rect [10 10 90 30] >> endobj\n", field(p, k));
+            }
+        }
+        pdf += "trailer << /Root 1 0 R >>\n%%EOF";
+        let doc = Document::load_mem(pdf.as_bytes()).expect("loads");
+        let counting = CountingReads { doc: &doc, reads: std::cell::Cell::new(0) };
+        let mut info = DocInfo {
+            pages: (0..PAGES)
+                .map(|_| PageInfo { width: 200.0, height: 200.0, crop: [0.0, 0.0, 200.0, 200.0], rotation: 0, label: String::new() })
+                .collect(),
+            ..Default::default()
+        };
+        Inspector::new(&counting).fill(&mut info);
+        let placed: Vec<_> = info.fields.iter().map(|f| (f.name.clone(), f.page)).collect();
+        let want: Vec<_> = (0..PAGES).flat_map(|p| (0..PER_PAGE).map(move |k| (format!("f{p}_{k}"), Some(p)))).collect();
+        assert_eq!(placed, want);
+        // A handful of reads per page and field; searching the pages for each field read the
+        // page dictionaries about 50,000 times.
+        let reads = counting.reads.get();
+        assert!(reads < 20 * (PAGES + PAGES * PER_PAGE), "{reads} object reads");
     }
 
     #[test]
