@@ -78,6 +78,7 @@ mod editing;
 pub mod file_watch;
 mod files;
 pub mod fill_sign;
+mod fling;
 pub mod folders_ui;
 pub mod forms_ui;
 mod home;

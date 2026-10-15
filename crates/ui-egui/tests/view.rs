@@ -256,6 +256,86 @@ fn precise_touchpad_wheel_scrolls_one_to_one() {
     assert!(drift.abs() < 2.0, "no easing tail after the swipe: drifted {drift}");
 }
 
+/// Steps `frames` frames and returns how far the document scrolled down over them, from the
+/// pages on screen in each pair of consecutive frames (a page can leave the screen on the way).
+fn scroll_over(h: &mut Harness<'static, PdfCraftApp>, frames: usize) -> f32 {
+    let tops = |h: &Harness<'static, PdfCraftApp>| (0..3).map(|p| rect(h, p).map(|r| r.min.y)).collect::<Vec<_>>();
+    let mut moved = 0.0;
+    for _ in 0..frames {
+        let before = tops(h);
+        h.step();
+        let after = tops(h);
+        let step = before.iter().zip(&after).find_map(|(b, a)| Some(b.as_ref()? - a.as_ref()?));
+        moved += step.expect("a page stays on screen from one frame to the next");
+    }
+    moved
+}
+
+/// A two-finger swipe down the page, 25 points a frame for six frames, lifted the frame after
+/// (the axis stop Wayland sends), at 300 % so the document is long enough to glide in: how far
+/// it scrolled by the frame after the lift (the page is drawn a frame behind its scroll).
+fn swipe_and_lift(h: &mut Harness<'static, PdfCraftApp>) -> f32 {
+    let at = h.state().views[0].viewport_rect().center();
+    h.hover_at(at);
+    h.run_steps(2);
+    h.event(wheel(MouseWheelUnit::Point, -25.0, TouchPhase::Start));
+    let mut moved = scroll_over(h, 1);
+    for _ in 0..6 {
+        h.event(wheel(MouseWheelUnit::Point, -25.0, TouchPhase::Move));
+        moved += scroll_over(h, 1);
+    }
+    h.event(wheel(MouseWheelUnit::Point, 0.0, TouchPhase::End));
+    moved + scroll_over(h, 2)
+}
+
+/// The touchpad glide is Wayland's: macOS sends its own momentum and the web none (#531).
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn touchpad_swipe_glides_on_after_the_fingers_lift_and_stops() {
+    let mut h = harness_stepping(1.0 / 60.0, &[("layout", "continuous"), ("zoom", "300")]);
+    let swiped = swipe_and_lift(&mut h);
+    // The seven 25-point motions, 1:1 (#759).
+    assert!(swiped >= 174.0, "the swipe scrolls 1:1: moved {swiped}");
+    // 1500 points a second at the lift: about 190 points over the next 10 frames.
+    let glided = scroll_over(&mut h, 10);
+    assert!(glided > 100.0, "the page glides on after the lift: moved {glided} more");
+    let rest = scroll_over(&mut h, 180);
+    let drift = scroll_over(&mut h, 20);
+    assert!(drift.abs() < 0.5, "the glide slows to a stop: still drifting {drift}");
+    let total = swiped - 175.0 + glided + rest;
+    assert!(total > 400.0 && total < 600.0, "about the lift speed × 0.35 s: glided {total}");
+}
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn touching_the_touchpad_again_or_turning_animations_off_stops_the_glide() {
+    let mut h = harness_stepping(1.0 / 60.0, &[("layout", "continuous"), ("zoom", "300")]);
+    swipe_and_lift(&mut h);
+    assert!(scroll_over(&mut h, 3) > 30.0, "gliding");
+    h.event(wheel(MouseWheelUnit::Point, 0.0, TouchPhase::Start));
+    scroll_over(&mut h, 2);
+    let drift = scroll_over(&mut h, 20);
+    assert!(drift.abs() < 0.5, "fingers back down catch the page: drifted {drift}");
+
+    // A click (a pressed touchpad, or a tap with tap-to-click) catches it too.
+    let mut h = harness_stepping(1.0 / 60.0, &[("layout", "continuous"), ("zoom", "300")]);
+    swipe_and_lift(&mut h);
+    assert!(scroll_over(&mut h, 3) > 30.0, "gliding");
+    let at = h.state().views[0].viewport_rect().center();
+    h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    scroll_over(&mut h, 2);
+    let drift = scroll_over(&mut h, 20);
+    assert!(drift.abs() < 0.5, "a click catches the page: drifted {drift}");
+
+    // Animation effects off: the page stops with the fingers, as before #531.
+    let mut h = harness_stepping(1.0 / 60.0, &[("layout", "continuous"), ("zoom", "300")]);
+    h.state_mut().set_option("animation_effects", "off").unwrap();
+    let swiped = swipe_and_lift(&mut h);
+    assert!((swiped - 175.0).abs() < 1.0, "the swipe still scrolls 1:1: moved {swiped}");
+    let drift = scroll_over(&mut h, 20);
+    assert!(drift.abs() < 0.5, "no glide with animations off: drifted {drift}");
+}
+
 /// The 40 frames from one wheel notch on, with the system asking for no animations (Windows'
 /// Animation effects turned off) or not, and Preferences ▸ Animation effects as given: how far
 /// page 1 has moved up in each frame, or with ⌘/Ctrl held, the view's zoom.
