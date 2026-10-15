@@ -15,7 +15,10 @@ reconstructed from a glyph the PDF does not contain. **Load font…** imports an
 embeddable standalone `.ttf` or `.otf` face. **Installed fonts…** discovers eligible user-installed
 faces on request, off the UI thread; the document-font menu selects resources already on the
 page. Select **Keep source fonts** to preserve each run's original face. A matching full face
-completes its subsets automatically, including new Chinese characters. Choosing another face
+completes its subsets automatically, including new Chinese characters. When the PDF itself embeds
+the complete program of a paragraph's font (not a subset) and its licence allows editable
+embedding, a character the font's encoding can't show is drawn with that same program. A
+character no available face has is refused with an error that names it. Choosing another face
 is explicit. Fonts with restricted embedding, unsupported collections, excluded families or
 no open-licence declaration are refused. Interface fallback fonts are never exported.
 

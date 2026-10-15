@@ -384,6 +384,7 @@ pub(super) fn rewrite_styled_block(
     let mut substituted = None;
     let mut fallback_names: std::collections::BTreeMap<(String, char), String> = std::collections::BTreeMap::new();
     let mut full_faces: HashMap<String, String> = HashMap::new();
+    let mut programs: HashMap<String, Option<std::sync::Arc<Vec<u8>>>> = HashMap::new();
     for (range, index) in styled_spans {
         let source = lines.get(index).unwrap_or(first);
         for ch in draft.get(range).unwrap_or_default().chars() {
@@ -415,6 +416,28 @@ pub(super) fn rewrite_styled_block(
                         .get(name.as_bytes())
                         .and_then(|f| doc.dict(f))
                         .ok_or_else(|| EditError::Invalid("the full source font could not be loaded".into()))?;
+                    metrics.insert(name.clone(), Metrics::from_dict(doc, &font));
+                    full_faces.insert(key, name.clone());
+                    name
+                }
+            } else if let Some(bytes) = programs
+                .entry(source.font.clone())
+                .or_insert_with(|| source_program(doc, &fonts, &source.font).map(std::sync::Arc::new))
+                .clone()
+                .filter(|bytes| pdfcraft_fonts::embedding::covers(bytes, &s))
+            {
+                // The document's own complete program of this font has the glyph: draw it with
+                // that face rather than another family's fallback.
+                let key = format!("source {}", source.font);
+                if let Some(name) = full_faces.get(&key) {
+                    name.clone()
+                } else {
+                    let family = pdfcraft_fonts::embedding::names(&bytes).map_or_else(|_| source.base_font.clone(), |(family, _)| family);
+                    let name = pdfcraft_fonts::embedding::embed(doc, &mut fonts, &bytes, &family).map_err(EditError::Invalid)?;
+                    let font = fonts
+                        .get(name.as_bytes())
+                        .and_then(|f| doc.dict(f))
+                        .ok_or_else(|| EditError::Invalid("the source font could not be loaded".into()))?;
                     metrics.insert(name.clone(), Metrics::from_dict(doc, &font));
                     full_faces.insert(key, name.clone());
                     name

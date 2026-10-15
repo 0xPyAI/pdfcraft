@@ -3640,3 +3640,76 @@ fn kept_rows_stay_in_place_when_rows_wrap_or_move_with_quote_operators() {
     }
     assert!(lines_of(&doc).len() > 3, "the edited row wrapped: {text}");
 }
+
+/// A page whose `/F1` is Inter embedded as a simple WinAnsi TrueType font, under `base_font`.
+fn embedded_program_page(content: &str, base_font: &str) -> Document {
+    let mut doc = text_page(content);
+    let program = doc.add(Object::Stream(Stream::flate(Dict::new(), include_bytes!("../../../assets/fonts/Inter-Regular.ttf"))));
+    let mut descriptor = Dict::new();
+    descriptor.set(b"Type".to_vec(), Object::name("FontDescriptor"));
+    descriptor.set(b"FontName".to_vec(), Object::name(base_font));
+    descriptor.set(b"FontFile2".to_vec(), Object::Ref(program));
+    let mut font = Dict::new();
+    font.set(b"Type".to_vec(), Object::name("Font"));
+    font.set(b"Subtype".to_vec(), Object::name("TrueType"));
+    font.set(b"BaseFont".to_vec(), Object::name(base_font));
+    font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
+    font.set(b"FirstChar".to_vec(), Object::Int(32));
+    font.set(b"LastChar".to_vec(), Object::Int(126));
+    font.set(b"Widths".to_vec(), Object::Array((32..=126).map(|_| Object::Int(560)).collect()));
+    font.set(b"FontDescriptor".to_vec(), Object::Dict(descriptor));
+    doc.set(pdfcraft_cos::ObjRef::new(5, 0), Object::Dict(font));
+    reopen(&doc)
+}
+
+/// The font programs and subtypes of the page's font resources.
+fn page_font_programs(doc: &Document) -> Vec<(Vec<u8>, Option<Vec<u8>>)> {
+    let page = pdfcraft_model::pages(doc).remove(0);
+    let resources = page.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
+    let fonts = resources.get(b"Font").and_then(|f| doc.resolve(f).as_dict().cloned()).unwrap_or_default();
+    fonts
+        .iter()
+        .filter_map(|(_, f)| doc.resolve(f).as_dict().cloned())
+        .map(|f| (f.name(b"Subtype").unwrap_or_default().to_vec(), pdfcraft_fonts::pdf::embedded_sfnt(doc, &f)))
+        .collect()
+}
+
+#[test]
+fn a_new_character_comes_from_the_source_fonts_own_embedded_program() {
+    let inter = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+    for (content, from, to) in [
+        // One row (the single-style path) and a row of a two-row paragraph (the row editor's path).
+        ("BT /F1 12 Tf 72 700 Td (Stable text) Tj ET", "text", "tőxt"),
+        ("BT /F1 12 Tf 14 TL 72 700 Td (First row) Tj T* (Second row) Tj ET", "Second", "Sőcond"),
+    ] {
+        let mut doc = embedded_program_page(content, "Inter-Regular");
+        let block = text::text_blocks(&doc, 0).unwrap()[0].clone();
+        let draft = block.editor_text.replacen(from, to, 1);
+        let edit = text::rewrite_block(&mut doc, 0, 0, Some(&draft), &text::BlockStyle::default()).unwrap();
+        assert_eq!(edit.substituted, None, "{to}: no other family stands in");
+        let doc = reopen(&doc);
+        // The new character is its own run in the other resource, read back into the same word.
+        assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].editor_text, draft, "{to}");
+        let fonts = page_font_programs(&doc);
+        assert!(fonts.iter().all(|(subtype, _)| subtype != b"Type3"), "{to}: no fallback glyphs");
+        assert!(
+            fonts.iter().any(|(subtype, program)| subtype == b"Type0" && program.as_deref() == Some(inter.as_slice())),
+            "{to}: the source program draws it"
+        );
+    }
+}
+
+#[test]
+fn a_subset_program_is_not_trusted_for_new_characters_and_the_error_names_the_character() {
+    let mut doc = embedded_program_page("BT /F1 12 Tf 72 700 Td (Stable text) Tj ET", "ABCDEF+Inter-Regular");
+    let before = page_content_bytes(&doc, 0);
+    let result = text::rewrite_block(&mut doc, 0, 0, Some("Stable tőxt"), &text::BlockStyle::default());
+    if pdfcraft_fonts::document_japanese_font().is_some() {
+        eprintln!("built with craft-fonts: the fallback font draws the new character");
+        assert!(result.is_ok(), "{result:?}");
+        return;
+    }
+    let Err(EditError::Invalid(msg)) = result else { panic!("expected a clear error, got {result:?}") };
+    assert!(msg.contains("ő (U+0151)") && msg.contains("Load font") && !msg.contains("Japanese"), "{msg}");
+    assert_eq!(page_content_bytes(&doc, 0), before);
+}
