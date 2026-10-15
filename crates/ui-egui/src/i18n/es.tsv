@@ -1646,6 +1646,7 @@
 comment menu	Edit	Editar
 	Undo {action}	Deshacer {action}
 	Redo {action}	Rehacer {action}
+signature pad	Type	Escribir
 certificate	Subject	Titular
 action wizard	Start	Iniciar
 	Click to sort, drag to move the column. Drag its edge to resize it.	Haz clic para ordenar; arrastra para mover la columna. Arrastra su borde para cambiar el ancho.
@@ -2164,7 +2165,7 @@ action wizard	Start	Iniciar
 	Only continue if you trust this document. An address can carry information from the document, such as what you typed into its form.	Continúa solo si confías en este documento. Una dirección puede llevar información del documento, como lo que escribiste en su formulario.
 	Print single-sided. Keep the sheets in order, cut at the marks, then stack the piles left to right, top to bottom.	Imprime a una cara. Mantén las hojas en orden, corta por las marcas y apila los montones de izquierda a derecha y de arriba abajo.
 	For page sizes and margins.	Para tamaños de página y márgenes.
-	The PDF text fonts can't draw “{c}” ({code}). Choose supported text.	Las fuentes de texto PDF no pueden mostrar «{c}» ({code}). Elija texto compatible.
+	The PDF text fonts can't draw “{c}” ({code}). Choose supported text.	Las fuentes de texto PDF no pueden mostrar «{c}» ({code}). Elige texto compatible.
 	The standard fonts can't draw “{c}” ({code}). Only Western European characters can be added as text for now.	Las fuentes estándar no pueden mostrar «{c}» ({code}). Por ahora solo se pueden añadir como texto caracteres de Europa occidental.
 	This field's font can't draw “{c}” ({code}), so PdfCraft shows ? in its place. The value is saved, and other PDF viewers redraw the field from it.	La fuente de este campo no puede mostrar «{c}» ({code}), así que PdfCraft muestra ? en su lugar. El valor se guarda y los demás visores de PDF vuelven a dibujar el campo a partir de él.
 	The fonts PdfCraft writes with can't draw “{c}” ({code}), so it shows as ? in every PDF viewer. The text is saved.	Las fuentes con las que escribe PdfCraft no pueden mostrar «{c}» ({code}), así que aparece como ? en todos los visores de PDF. El texto se guarda.
@@ -2399,6 +2400,13 @@ key	Space	Espacio
 	Resize panel window	Cambiar tamaño de la ventana del panel
 	Tools	Herramientas
 	Inspector	Inspector
+
+# Architectural print controls (follow-up to #599).
+	PDF page: {size}	Página PDF: {size}
+	Match page at 100%	Ajustar el papel a la página al 100 %
+	PDF scale: {scale}%	Escala del PDF: {scale} %
+	Printer paper and scaling may differ. Check driver settings.	El papel y la escala de la impresora pueden variar. Revisa los ajustes del controlador.
+	Drawing scale changes. Use Actual size for full-scale plans.	La escala del dibujo cambia. Usa Tamaño real para los planos a escala.
 	Select page {label}	Seleccionar la página {label}
 	Rotate page {label} counterclockwise	Girar la página {label} a la izquierda
 	Rotate page {label} clockwise	Girar la página {label} a la derecha
@@ -2413,13 +2421,15 @@ animation effects	Off	Desactivados
 	Enhance camera image	Mejorar foto de cámara
 	Drag the corners onto the document's edges, then choose Enhance page.	Arrastra las esquinas hasta los bordes del documento y elige Mejorar página.
 	Enhance page	Mejorar página
+	Done adding text	Terminar de añadir texto
+	Discard this text (Esc)	Descartar este texto (Esc)
 	Certificate authority	Autoridad de certificación
 	End entity	Entidad final
 	Clean-up	Limpieza
 	Original	Original
 	Greyscale	Escala de grises
 	Black and white	Blanco y negro
-	This printer's driver doesn't take two-sided settings from other programs, so its own setting applies. Change it in Properties…	El controlador de esta impresora no acepta los ajustes de doble cara de otros programas, así que se aplica su propio ajuste. Cámbielo en Propiedades…
+	This printer's driver doesn't take two-sided settings from other programs, so its own setting applies. Change it in Properties…	El controlador de esta impresora no acepta los ajustes de doble cara de otros programas, así que se aplica su propio ajuste. Cámbialo en Propiedades…
 	Browser's print dialog	Diálogo de impresión del navegador
 	Copies, two-sided printing and colour are chosen in the browser's print dialog.	Las copias, la impresión a doble cara y el color se eligen en el diálogo de impresión del navegador.
 	Preparing {n} sheets for printing…	Preparando {n} hojas para imprimir…
@@ -2448,12 +2458,12 @@ animation effects	Off	Desactivados
 	no output folder was chosen	no se eligió ninguna carpeta de salida
 @plural	Downloaded {n} PDF|Downloaded {n} PDFs	Se descargó {n} PDF|Se descargaron {n} PDF
 	Scan	Escanear
-	Sign a sheet of white paper and take a photo of it in bright, even light (use the flash). Choose the photo or drop it here: PdfCraft finds the signature and removes the paper.	Firme en una hoja de papel blanco y hágale una foto con luz intensa y uniforme (use el flash). Elija la foto o suéltela aquí: PdfCraft encuentra la firma y elimina el papel.
+	Sign a sheet of white paper and take a photo of it in bright, even light (use the flash). Choose the photo or drop it here: PdfCraft finds the signature and removes the paper.	Firma en una hoja de papel blanco y hazle una foto con luz intensa y uniforme (usa el flash). Elige la foto o suéltala aquí: PdfCraft encuentra la firma y elimina el papel.
 	Choose photo…	Elegir foto…
 	No photo chosen	No se ha elegido ninguna foto
 	Photo	Foto
 	Ink sensitivity	Sensibilidad de la tinta
-	No signature was found in the frame. Move the frame over the signature or raise the ink sensitivity.	No se encontró ninguna firma en el marco. Mueva el marco sobre la firma o aumente la sensibilidad de la tinta.
+	No signature was found in the frame. Move the frame over the signature or raise the ink sensitivity.	No se encontró ninguna firma en el marco. Mueve el marco sobre la firma o aumenta la sensibilidad de la tinta.
 	Couldn't use the photo: {e}	No se puede usar la foto: {e}
 
 # PDF tab context menu (#1233)

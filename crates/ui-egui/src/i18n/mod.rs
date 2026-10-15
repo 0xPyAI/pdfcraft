@@ -1186,6 +1186,8 @@ mod tests {
         assert_eq!(tr(es, "Informe del usuario.pdf"), "Informe del usuario.pdf");
         assert_eq!(trn(es, 1, "{n} page", "{n} pages"), "1 página");
         assert_eq!(trn(es, 3, "{n} page", "{n} pages"), "3 páginas");
+        // The signature pad's Type is the verb (type your name), not the noun "Tipo".
+        assert_eq!(tr_ctx(es, "signature pad", "Type"), "Escribir");
         let mut app = crate::PdfCraftApp::default();
         app.set_option("language", "es").unwrap();
         assert_eq!(app.language, "es");
@@ -1200,6 +1202,9 @@ mod tests {
         let es = Lang::from_code("es").expect("es registered");
         for command in pdfcraft_engine::commands::COMMANDS {
             assert!(has(es, command.label), "missing command: {}", command.label);
+            if let Some(menu) = command.menu {
+                assert!(has(es, menu), "missing menu: {menu}");
+            }
         }
         for group in pdfcraft_engine::catalog::TOOL_GROUPS {
             assert!(has(es, group.label), "missing group: {}", group.label);
@@ -1210,6 +1215,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// New tl!("literal") labels must not silently fall back to English in Spanish.
+    #[test]
+    fn spanish_covers_ui_literals() {
+        let es = Lang::from_code("es").expect("es registered");
+        let literals = ui_literals();
+        assert!(literals.len() > 900, "source scan found only {} literals", literals.len());
+        let missing: Vec<_> = literals.iter().filter(|label| !has(es, label)).collect();
+        assert!(missing.is_empty(), "untranslated Spanish UI literals: {missing:#?}");
     }
 
     /// Spanish says everything the layers below word for themselves: what the accessibility
@@ -1306,8 +1321,9 @@ mod tests {
         let te = Lang::from_code("te").expect("te registered");
         assert_eq!(tr_ctx(te, "signature pad", "Type"), "టైప్ చేయి");
         assert_eq!(tr(te, "Type"), "రకం");
+        // A context no catalog defines, so the fallback stays tested as catalogs fill their gaps.
         let es = Lang::from_code("es").expect("es registered");
-        assert_eq!(tr_ctx(es, "signature pad", "Type"), tr(es, "Type"));
+        assert_eq!(tr_ctx(es, "no such context", "Type"), tr(es, "Type"));
     }
 
     /// Telugu translates every registered command and every All tools group, section and item.
