@@ -1472,6 +1472,38 @@ fn number_pages_like_acrobat() {
     assert!(d.get(d.root().unwrap()).as_dict().unwrap().get(b"PageLabels").is_none());
 }
 
+/// Deleting pages moves the label ranges with the pages they label (#2091): later ranges start that
+/// many pages earlier and keep numbering on, a range whose first page went starts on the next page
+/// left, and a range left with no pages gives way to the one after it.
+#[test]
+fn deleting_pages_keeps_the_label_ranges_on_their_pages() {
+    use crate::{LabelRange, LabelStyle::*};
+    let ten = || {
+        let mut d = doc_a();
+        for at in 3..10 {
+            crate::insert_blank_page(&mut d, at, 300.0, 400.0).unwrap();
+        }
+        let ranges = [
+            LabelRange { start: 0, style: LowerRoman, prefix: String::new(), first: 1 },
+            LabelRange { start: 3, style: Decimal, prefix: String::new(), first: 1 },
+            LabelRange { start: 7, style: Decimal, prefix: "A-".into(), first: 1 },
+        ];
+        crate::set_page_label_ranges(&mut d, &ranges).unwrap();
+        assert_eq!(crate::page_labels(&d).unwrap(), ["i", "ii", "iii", "1", "2", "3", "4", "A-1", "A-2", "A-3"]);
+        d
+    };
+    for (deleted, expected) in [
+        (&[4, 5][..], &["i", "ii", "iii", "1", "2", "A-1", "A-2", "A-3"][..]),
+        (&[3], &["i", "ii", "iii", "1", "2", "3", "A-1", "A-2", "A-3"]),
+        (&[3, 4, 5, 6], &["i", "ii", "iii", "A-1", "A-2", "A-3"]),
+    ] {
+        let mut d = ten();
+        crate::delete_pages(&mut d, deleted).unwrap();
+        assert_eq!(crate::page_labels(&d).unwrap(), expected, "after deleting {deleted:?}");
+        assert_eq!(crate::page_labels(&full_roundtrip(&d)).unwrap(), expected, "reopened after deleting {deleted:?}");
+    }
+}
+
 #[test]
 fn page_label_limits_reject_unsupported_edits_before_mutating() {
     use crate::LabelStyle::*;

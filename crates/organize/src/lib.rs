@@ -181,6 +181,7 @@ pub fn delete_pages(doc: &mut Document, indices: &[usize]) -> Result<(), Organiz
         return Err(OrganizeError::WouldRemoveAllPages);
     }
     rebuild(doc, &keep)?;
+    labels::drop_deleted_pages(doc, indices)?;
     // The deleted pages go for good: bookmarks, links and widgets that still point at one would
     // otherwise keep it, with its content, in the saved file. Their form widgets leave the form,
     // and bookmarks and links that went to them lose that destination.
