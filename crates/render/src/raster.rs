@@ -5178,6 +5178,194 @@ trailer << /Root 1 0 R >>
         }
     }
 
+    // Contributor-original classic-xref vector fixtures; no embedded or external assets.
+    fn raw_crop_unit_pdf(unit: f64, rotation: i32, crop: [f64; 4], marker: Option<[f64; 4]>) -> Vec<u8> {
+        let bounds = crop.map(|n| n.to_string()).join(" ");
+        let body = marker.map(|rect| format!("0 0 0 rg {} re f\n", rect.map(|n| n.to_string()).join(" "))).unwrap_or_default();
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [{bounds}] /CropBox [{bounds}] /UserUnit {unit} /Rotate {rotation} /Resources << >> /Contents 4 0 R >>"
+            ),
+            format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()),
+        ];
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, object) in objects.iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
+        for offset in offsets {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend_from_slice(format!("trailer << /Size 5 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
+        bytes
+    }
+
+    #[test]
+    fn raw_crop_user_unit_inspection_keeps_observed_dimensions() {
+        let bytes = raw_crop_unit_pdf(4096.0, 0, [0.0, 0.0, 0.1, 0.1], None);
+        let info = crate::inspect(Arc::new(bytes), None).expect("original valid raw-0.1 PDF");
+        assert_eq!(info.pages.len(), 1);
+        assert!(info.warnings.is_empty(), "{:?}", info.warnings);
+        let page = &info.pages[0];
+        assert!(
+            (page.width - 409.6).abs() < 0.0001 && (page.height - 409.6).abs() < 0.0001,
+            "raw 0.1 at UserUnit4096 is 409.6 points, got {} by {}",
+            page.width,
+            page.height
+        );
+    }
+
+    #[test]
+    fn raw_crop_unit_floor_corners_match_nonzero_origin_and_rotations() {
+        use hayro::hayro_interpret::TransformExt;
+
+        for (unit, width, height, dx, dy) in
+            [(1.0, 1.0, 1.0, 0.125, 0.25), (4096.0, 512.0, 1024.0, 512.0, 1024.0), (75000.0, 9375.0, 18750.0, 9375.0, 18750.0)]
+        {
+            for rotation in [0, 90, 180, 270] {
+                let bytes = raw_crop_unit_pdf(unit, rotation, [10.0, 20.0, 10.125, 20.25], None);
+                let info = crate::inspect(Arc::new(bytes.clone()), None).expect("original valid offset crop");
+                assert!(info.warnings.is_empty(), "{:?}", info.warnings);
+                let dimensions = if rotation % 180 == 0 { (width as f32, height as f32) } else { (height as f32, width as f32) };
+                assert_eq!((info.pages[0].width, info.pages[0].height), dimensions, "unit={unit}, rotation={rotation}");
+                let pdf = Pdf::new(Arc::new(bytes)).expect("same PDF parser");
+                let page = pdf.pages().first().expect("one page");
+                assert_eq!(page.base_dimensions(), ((width / unit) as f32, (height / unit) as f32));
+                let transform = page.initial_transform(true).to_kurbo();
+                let (origin, opposite) = match rotation {
+                    0 => ([0.0, height], [dx, height - dy]),
+                    90 => ([0.0, 0.0], [dy, dx]),
+                    180 => ([width, 0.0], [width - dx, dy]),
+                    _ => ([height, width], [height - dy, width - dx]),
+                };
+                for (point, expected) in [(kurbo::Point::new(10.0, 20.0), origin), (kurbo::Point::new(10.125, 20.25), opposite)] {
+                    let actual = transform * point;
+                    assert!(
+                        (actual.x - expected[0]).abs() < 1e-9 && (actual.y - expected[1]).abs() < 1e-9,
+                        "unit={unit}, rotation={rotation}, point={point:?}: {actual:?} != {expected:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn raw_crop_unit_floor_reciprocal_does_not_trigger_letter_fallback() {
+        for unit in [1.0, 41.0, 47.0] {
+            let bytes = raw_crop_unit_pdf(unit, 0, [0.0, 0.0, 0.01, 0.01], None);
+            let pdf = Pdf::new(Arc::new(bytes.clone())).expect("ordinary small crop");
+            let page = pdf.pages().first().expect("one page");
+            let (width, height) = page.base_dimensions();
+            // In f32, the nearest reciprocal of 41 or 47 multiplies back to 0.99999994.
+            assert!(
+                width * page.user_unit() >= 1.0 && height * page.user_unit() >= 1.0,
+                "unit={unit}: floor must not round below one physical point"
+            );
+            let info = crate::inspect(Arc::new(bytes), None).expect("inspect the same small crop");
+            let page = &info.pages[0];
+            assert!(
+                (1.0..=1.000001).contains(&page.width) && (1.0..=1.000001).contains(&page.height),
+                "unit={unit}: one-point floor must not become a Letter placeholder: {} by {}",
+                page.width,
+                page.height
+            );
+            assert!(info.warnings.is_empty(), "{:?}", info.warnings);
+        }
+    }
+
+    #[test]
+    fn raw_crop_unit_floor_preserves_nearly_zero_fallback() {
+        for unit in [1.0, 4096.0, 75000.0] {
+            for side in [0.0, 0.0001] {
+                let bytes = raw_crop_unit_pdf(unit, 0, [0.0, 0.0, side, side], None);
+                let pdf = Pdf::new(Arc::new(bytes)).expect("existing degenerate-page fallback");
+                let page = pdf.pages().first().expect("one page");
+                // Existing A4 raw fallback remains raw A4, then scales by the page unit.
+                let expected = (595.2755905511812_f64 as f32, 841.8897637795277_f64 as f32);
+                assert_eq!(page.base_dimensions(), expected, "unit={unit}, raw side={side}");
+                assert_eq!(page.render_dimensions(), (expected.0 * unit as f32, expected.1 * unit as f32));
+            }
+        }
+    }
+
+    fn raw_crop_ink(page: &RenderedPage) -> ([u32; 4], usize) {
+        let (mut left, mut top, mut right, mut bottom, mut count) = (page.width, page.height, 0, 0, 0);
+        for (i, pixel) in page.rgba.as_chunks::<4>().0.iter().enumerate() {
+            if pixel[0] < 128 && pixel[1] < 128 && pixel[2] < 128 {
+                let (x, y) = (i as u32 % page.width, i as u32 / page.width);
+                left = left.min(x);
+                top = top.min(y);
+                right = right.max(x + 1);
+                bottom = bottom.max(y + 1);
+                count += 1;
+            }
+        }
+        assert!(count > 0, "original vector marker must draw");
+        ([left, top, right, bottom], count)
+    }
+
+    #[test]
+    fn raw_crop_user_unit_vector_rasters_match_physical_controls() {
+        for (unit, scale, width, height, physical_width, physical_height, rects) in [
+            (
+                4096.0,
+                0.5,
+                256,
+                512,
+                512.0,
+                1024.0,
+                [[32.0, 320.0, 96.0, 448.0], [64.0, 32.0, 192.0, 96.0], [160.0, 64.0, 224.0, 192.0], [320.0, 160.0, 448.0, 224.0]],
+            ),
+            (
+                75000.0,
+                0.04,
+                375,
+                750,
+                9375.0,
+                18750.0,
+                [
+                    [46.875, 468.75, 140.625, 656.25],
+                    [93.75, 46.875, 281.25, 140.625],
+                    [234.375, 93.75, 328.125, 281.25],
+                    [468.75, 234.375, 656.25, 328.125],
+                ],
+            ),
+        ] {
+            for (index, rotation) in [0, 90, 180, 270].into_iter().enumerate() {
+                let raw_crop = [10.0, 20.0, 10.125, 20.25];
+                let raw_marker = [10.015625, 20.03125, 0.03125, 0.0625];
+                let control_crop = raw_crop.map(|n| n * unit);
+                let control_marker = raw_marker.map(|n| n * unit);
+                let physical = if rotation % 180 == 0 { (physical_width, physical_height) } else { (physical_height, physical_width) };
+                let pixels = if rotation % 180 == 0 { (width, height) } else { (height, width) };
+                let render = |bytes: Vec<u8>| {
+                    let info = crate::inspect(Arc::new(bytes.clone()), None).expect("bounded original vector PDF");
+                    assert_eq!((info.pages[0].width, info.pages[0].height), physical, "check dimensions before any raster allocation");
+                    let mut renderer = PageRenderer::new(Arc::new(bytes), RenderConfig::default());
+                    let page = renderer.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale, ..Default::default() });
+                    assert!(page.error.is_none(), "{:?}", page.error);
+                    assert_eq!((page.width, page.height), pixels);
+                    page
+                };
+                let high = render(raw_crop_unit_pdf(unit, rotation, raw_crop, Some(raw_marker)));
+                let control = render(raw_crop_unit_pdf(1.0, rotation, control_crop, Some(control_marker)));
+                let (bbox, count) = raw_crop_ink(&high);
+                for (actual, expected) in bbox.into_iter().zip(rects[index]) {
+                    assert!((f64::from(actual) - expected).abs() <= 1.0, "unit={unit}, rotation={rotation}: {bbox:?} != {:?}", rects[index]);
+                }
+                let (control_bbox, control_count) = raw_crop_ink(&control);
+                assert_eq!(bbox, control_bbox, "unit={unit}, rotation={rotation}: marker placement");
+                assert_eq!(count, control_count, "unit={unit}, rotation={rotation}: visible marker ink");
+                assert!(high.rgba == control.rgba, "unit={unit}, rotation={rotation}: physically equivalent crops render identically");
+            }
+        }
+    }
+
     /// A page's `/UserUnit` (the size of its unit in points) scales the page and everything on
     /// it, after the crop box and before `/Rotate`, as Acrobat shows such pages: with
     /// `/UserUnit 2`, scale 1 renders pixel for pixel what scale 2 renders without it. As in
