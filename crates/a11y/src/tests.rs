@@ -624,6 +624,62 @@ fn marking_decorative_survives_a_parent_tree_with_an_unpaired_key() {
     }
 }
 
+/// `figures_doc` with its property lists named in the page resources (one inline, one indirect)
+/// instead of written inline in the content.
+fn named_figures_doc() -> Document {
+    pdf(
+        &[
+            "<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 5 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /StructParents 0 \
+             /Resources << /XObject << /Im 10 0 R >> /Properties << /P0 << /MCID 0 >> /P1 11 0 R /Other << /Note (kept) >> >> >> >>"
+                .into(),
+            stream(
+                "/Figure /P0 BDC q 40 0 0 20 10 150 cm /Im Do Q EMC \
+                 /Photo /P1 BDC 100 100 50 30 re f EMC",
+            ),
+            "<< /Type /StructTreeRoot /K 6 0 R /ParentTree 9 0 R /RoleMap << /Photo /Figure >> >>".into(),
+            "<< /S /Document /P 5 0 R /K [7 0 R 8 0 R] >>".into(),
+            "<< /S /Figure /P 6 0 R /Pg 3 0 R /K 0 >>".into(),
+            "<< /S /Photo /P 6 0 R /Pg 3 0 R /Alt (A bar) /K 1 >>".into(),
+            "<< /Nums [0 [7 0 R 8 0 R]] >>".into(),
+            "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n\u{0}\nendstream"
+                .into(),
+            "<< /MCID 1 >>".into(),
+        ],
+        "",
+    )
+}
+
+#[test]
+fn named_property_lists_are_found_and_marked_decorative_like_inline_ones() {
+    let (mut inline, mut named) = (figures_doc(), named_figures_doc());
+    let place = |doc: &Document| figures(doc).into_iter().map(|f| (f.obj, f.page, f.alt, f.bbox)).collect::<Vec<_>>();
+    assert_eq!(place(&named), place(&inline), "both figures, placed where their content is drawn");
+    for doc in [&mut inline, &mut named] {
+        mark_decorative(doc, pdfcraft_cos::ObjRef::new(8, 0)).unwrap();
+        let left = figures(doc);
+        assert_eq!((left.len(), left[0].obj.num, left[0].bbox), (1, 7, Some([10.0, 150.0, 50.0, 170.0])));
+        let pages = pdfcraft_model::pages(doc);
+        let c = doc.resolve(pages[0].dict.get(b"Contents").unwrap());
+        let Object::Stream(c) = &*c else { panic!("one content stream") };
+        let text = String::from_utf8(c.decoded().unwrap()).unwrap();
+        assert!(text.contains("/Artifact BMC") && !text.contains("/P1") && !text.contains("/MCID 1"), "{text}");
+        assert!(text.contains("/Im Do"), "the drawing itself stays: {text}");
+        let nums = doc.get(pdfcraft_cos::ObjRef::new(9, 0)).as_dict().and_then(|d| d.get(b"Nums").cloned());
+        assert_eq!(
+            nums,
+            Some(Object::Array(vec![Object::Int(0), Object::Array(vec![Object::Ref(pdfcraft_cos::ObjRef::new(7, 0)), Object::Null])])),
+            "the parent tree no longer points MCID 1 at the removed figure"
+        );
+        let r = check(doc, &Options { rules: [Rule::FiguresAltText, Rule::TaggedContent].into(), pages: None });
+        assert_eq!(r.result(Rule::TaggedContent).unwrap().status, Status::Passed, "{:?}", r.results);
+    }
+    let props = pdfcraft_model::pages(&named)[0].dict.get(b"Resources").and_then(|r| named.resolve(r).as_dict().cloned());
+    let props = props.and_then(|r| r.get(b"Properties").and_then(|p| named.resolve(p).as_dict().cloned())).unwrap();
+    assert!(props.contains(b"P0") && props.contains(b"P1") && props.contains(b"Other"), "resources are left as they were");
+}
+
 fn ref_(n: u32) -> Option<pdfcraft_cos::ObjRef> {
     Some(pdfcraft_cos::ObjRef::new(n, 0))
 }

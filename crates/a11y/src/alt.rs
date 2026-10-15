@@ -140,6 +140,22 @@ fn mcids(d: &Dict) -> Vec<i64> {
     out
 }
 
+/// The page's named property lists (`/Resources /Properties`), which a `BDC` can name instead of
+/// writing its property list inline.
+fn page_properties(doc: &Document, page: &Dict) -> Dict {
+    let res = page.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
+    res.get(b"Properties").map(|p| doc.resolve(p)).and_then(|p| p.as_dict().cloned()).unwrap_or_default()
+}
+
+/// The marked-content id a `BDC` opens, whether its property list is inline or named in `props`.
+fn bdc_mcid(doc: &Document, props: &Dict, op: &pdfcraft_content::Op) -> Option<i64> {
+    match op.operands.get(1)? {
+        Object::Dict(d) => d.get(b"MCID").and_then(Object::as_int),
+        Object::Name(n) => props.get(n).map(|x| doc.resolve(x)).and_then(|x| x.as_dict().and_then(|d| d.get(b"MCID").and_then(Object::as_int))),
+        _ => None,
+    }
+}
+
 pub(crate) fn page_content(doc: &Document, page: &Dict) -> Vec<u8> {
     let Some(c) = page.get(b"Contents") else { return Vec::new() };
     match &*doc.resolve(c) {
@@ -170,6 +186,7 @@ fn union(a: Option<[f64; 4]>, b: [f64; 4]) -> [f64; 4] {
 fn content_bbox(doc: &Document, page: &Dict, ids: &HashSet<i64>) -> Option<[f64; 4]> {
     let res = page.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
     let xobjects = res.get(b"XObject").map(|x| doc.resolve(x)).and_then(|x| x.as_dict().cloned()).unwrap_or_default();
+    let props = page_properties(doc, page);
     let mut ctm = vec![Matrix([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])];
     let mut marks: Vec<bool> = Vec::new();
     let mut bbox = None;
@@ -190,9 +207,7 @@ fn content_bbox(doc: &Document, page: &Dict, ids: &HashSet<i64>) -> Option<[f64;
                 }
             }
             b"BMC" => marks.push(false),
-            b"BDC" => marks.push(
-                matches!(op.operands.get(1), Some(Object::Dict(d)) if d.get(b"MCID").and_then(Object::as_int).is_some_and(|n| ids.contains(&n))),
-            ),
+            b"BDC" => marks.push(bdc_mcid(doc, &props, &op).is_some_and(|n| ids.contains(&n))),
             b"EMC" => {
                 marks.pop();
             }
@@ -295,12 +310,11 @@ pub fn mark_decorative(doc: &mut Document, obj: ObjRef) -> Result<(), AltError> 
     let pages = pdfcraft_model::pages(doc);
     let pg = d.get(b"Pg").and_then(Object::as_ref).or_else(|| elements(doc).into_iter().find(|e| e.object == obj).and_then(|e| e.page));
     if let Some(page) = pg.and_then(|p| pages.iter().find(|x| x.obj == p)).filter(|_| !ids.is_empty()) {
+        let props = page_properties(doc, &page.dict);
         let mut ops = pdfcraft_content::parse(&page_content(doc, &page.dict)).ops;
         let mut changed = false;
         for op in ops.iter_mut() {
-            let ours = op.op == b"BDC"
-                && matches!(op.operands.get(1), Some(Object::Dict(m)) if m.get(b"MCID").and_then(Object::as_int).is_some_and(|n| ids.contains(&n)));
-            if ours {
+            if op.op == b"BDC" && bdc_mcid(doc, &props, op).is_some_and(|n| ids.contains(&n)) {
                 *op = pdfcraft_content::Op::new("BMC", vec![Object::name("Artifact")]);
                 changed = true;
             }
