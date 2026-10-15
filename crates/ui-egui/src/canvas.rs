@@ -4331,6 +4331,26 @@ fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
     });
 }
 
+/// Where a page of `page` size (points, as shown: after its rotation) is drawn in the grid cell
+/// `cell`: as large as the picture area allows and centred in it, so a landscape or rotated page
+/// fills the cell's width in its middle, as Acrobat draws it, instead of a small strip at the top.
+/// The picture area leaves room for the page number and actions below. Its sides narrow only when
+/// a picture that wide would reach the selection checkbox in the cell's corner.
+pub(crate) fn grid_page_rect(cell: Rect, page: Vec2) -> Rect {
+    let area = Rect::from_min_max(pos2(cell.left(), cell.top() + 16.0), pos2(cell.right(), cell.bottom() - 72.0));
+    // A page size from a damaged file can be zero, NaN or infinite; draw such a page square.
+    let side = |v: f32| if v.is_finite() { v.max(1.0) } else { 1.0 };
+    let (w, h) = (side(page.x), side(page.y));
+    let fit = |margin: f32| {
+        let s = ((area.width() - 2.0 * margin).max(1.0) / w).min(area.height().max(1.0) / h);
+        Rect::from_center_size(area.center(), vec2(w * s, h * s))
+    };
+    let wide = fit(16.0);
+    // The checkbox sits at (8, 8)-(28, 28) from the cell's corner; keep 4 px clear of it.
+    let checkbox = Rect::from_min_size(cell.min + vec2(8.0, 8.0), Vec2::splat(20.0)).expand(4.0);
+    if wide.intersects(checkbox) { fit(30.0) } else { wide }
+}
+
 /// The organize toolbar: page operations on the selection (Acrobat's Organize Pages bar).
 fn organize_toolbar(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool, unobstructed: bool, ui: &mut egui::Ui, t: &Tokens) {
     egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(16, 4)).show(ui, |ui| {
@@ -4572,9 +4592,8 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
                 }
                 let page_label = crate::i18n::fmt(tl!("Page {label}"), &[("label", &p.label)]);
                 resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, view.selected.contains(&i), page_label.clone()));
-                let s = ((cell.x - 60.0) / p.width.max(1.0)).min((cell.y - 88.0) / p.height.max(1.0));
-                let size = vec2(p.width * s, p.height * s);
-                let pr = Rect::from_center_size(pos2(c.center().x, c.top() + 16.0 + size.y / 2.0), size);
+                let pr = grid_page_rect(c, vec2(p.width, p.height));
+                let size = pr.size();
                 let selected = view.selected.contains(&i) || (view.selected.is_empty() && i == view.current);
                 if selected || resp.hovered() {
                     ui.painter().rect_filled(c.shrink(6.0), CornerRadius::same(8), if selected { t.accent_soft } else { t.hover });
@@ -4826,6 +4845,30 @@ mod tests {
     }
 
     use super::*;
+
+    /// A rotated (landscape) page is drawn as wide as the cell allows and centred in the picture
+    /// area, as Acrobat draws it, not as a small strip pinned to the top; a portrait page still
+    /// fills the area's height; neither covers the checkbox corner or the label below.
+    #[test]
+    fn grid_pages_are_centred_and_as_large_as_the_cell_allows() {
+        let cell = Rect::from_min_size(pos2(100.0, 50.0), vec2(190.0, 282.0));
+        let area = Rect::from_min_max(pos2(cell.left(), cell.top() + 16.0), pos2(cell.right(), cell.bottom() - 72.0));
+        let checkbox = Rect::from_min_size(cell.min + vec2(8.0, 8.0), Vec2::splat(20.0));
+        let landscape = grid_page_rect(cell, vec2(842.0, 595.0));
+        assert!((landscape.center().y - area.center().y).abs() < 0.01, "centred vertically: {landscape:?}");
+        assert!((landscape.center().x - cell.center().x).abs() < 0.01);
+        assert!((landscape.width() - (cell.width() - 32.0)).abs() < 0.01, "as wide as the cell allows: {landscape:?}");
+        assert!(!landscape.intersects(checkbox));
+        let portrait = grid_page_rect(cell, vec2(595.0, 842.0));
+        assert!(area.contains_rect(portrait), "inside the picture area: {portrait:?}");
+        assert!((portrait.center().y - area.center().y).abs() < 0.01);
+        assert!(portrait.left() >= checkbox.right(), "clear of the checkbox: {portrait:?}");
+        // Degenerate sizes still give a finite rectangle inside the cell.
+        for page in [vec2(0.0, 0.0), vec2(1e9, 1.0), vec2(1.0, 1e9), vec2(f32::NAN, 10.0), vec2(f32::INFINITY, 10.0)] {
+            let r = grid_page_rect(cell, page);
+            assert!(r.is_finite() && cell.contains_rect(r), "{page:?} -> {r:?}");
+        }
+    }
 
     fn annotation(fill_sign: bool) -> pdfcraft_render::Annotation {
         pdfcraft_render::Annotation {
