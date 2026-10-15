@@ -2286,3 +2286,7 @@ animation effects	Off	Выкл
 	Word counting stopped unexpectedly.	Подсчёт слов неожиданно остановился.
 	Word count…	Количество слов…
 @id	file.word_count	Количество слов…
+	Standard	Стандартные
+	Mobile	Мобильные устройства
+	Merge image fragments	Объединять фрагменты изображений
+	Optimizing… merging image fragments	Оптимизация… объединение фрагментов изображений

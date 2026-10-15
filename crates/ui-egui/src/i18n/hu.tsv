@@ -2372,3 +2372,7 @@ animation effects	Off	Ki
 	Word counting stopped unexpectedly.	A szavak számlálása váratlanul leállt.
 	Word count…	Szavak száma…
 @id	file.word_count	Szavak száma…
+	Standard	Normál
+	Mobile	Mobil
+	Merge image fragments	Képtöredékek egyesítése
+	Optimizing… merging image fragments	Optimalizálás… képtöredékek egyesítése

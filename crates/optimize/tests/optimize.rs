@@ -687,3 +687,137 @@ fn a_second_run_leaves_the_stripped_stream_alone() {
     assert_eq!(r.streams_compressed, 0);
     assert_eq!(stream(&doc, c), once);
 }
+
+/// A grey image `w` px wide and one row high, every pixel `v`; JPEG or Flate.
+fn strip(doc: &mut Document, w: u32, v: u8, jpeg: bool) -> ObjRef {
+    let mut d = Dict::new();
+    d.set(b"Type".to_vec(), Object::name("XObject"));
+    d.set(b"Subtype".to_vec(), Object::name("Image"));
+    d.set(b"Width".to_vec(), Object::Int(w as i64));
+    d.set(b"Height".to_vec(), Object::Int(1));
+    d.set(b"BitsPerComponent".to_vec(), Object::Int(8));
+    d.set(b"ColorSpace".to_vec(), Object::name("DeviceGray"));
+    let px = vec![v; w as usize];
+    let s = if jpeg {
+        let mut out = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 95).encode(&px, w, 1, image::ExtendedColorType::L8).unwrap();
+        d.set(b"Filter".to_vec(), Object::name("DCTDecode"));
+        Stream::from_raw(d, out)
+    } else {
+        Stream::flate(d, &px)
+    };
+    doc.add(Object::Stream(s))
+}
+
+/// A page drawn the way some PDF printers write a page picture: `rows` images one pixel row
+/// high, 1000 units wide, scaled into a 24 pt square (so 600 ppi across at 200 px). Row `r`
+/// from the top is grey `r`; `edit` changes the content of each row.
+fn printed_page(rows: usize, jpeg: impl Fn(usize) -> bool, edit: impl Fn(usize, String) -> String) -> (Document, Vec<ObjRef>) {
+    let mut doc = Document::new_empty();
+    let mut names = Vec::new();
+    let mut refs = Vec::new();
+    let mut content = String::from("q 0.024 0 0 0.024 0 0 cm\n");
+    for r in 0..rows {
+        let img = strip(&mut doc, 200, r as u8, jpeg(r));
+        refs.push(img);
+        let y = (rows - 1 - r) as f64;
+        content += &edit(r, format!("q 1000 0 0 1 0 {y} cm\n/R{r} Do\nQ\n"));
+        names.push(format!("R{r}"));
+    }
+    content += "Q\n";
+    let xo: Vec<(&str, ObjRef)> = names.iter().map(String::as_str).zip(refs.iter().copied()).collect();
+    let p = page(&mut doc, &xo, &content);
+    // No thumbnail: it would be the old content stream, which still names the strips.
+    doc.update_dict(p, |d| {
+        d.remove(b"Thumb");
+    })
+    .unwrap();
+    (doc, refs)
+}
+
+/// The images the first page's content stream draws, by name, with their streams.
+fn drawn_images(doc: &Document) -> Vec<Stream> {
+    let pages = pdfcraft_annot::page_refs(doc).unwrap();
+    let p = doc.get(pages[0]).as_dict().cloned().unwrap();
+    let res = doc.resolve(p.get(b"Resources").unwrap()).as_dict().cloned().unwrap();
+    let xo = doc.resolve(res.get(b"XObject").unwrap()).as_dict().cloned().unwrap();
+    let c = match &*doc.resolve(p.get(b"Contents").unwrap()) {
+        Object::Stream(s) => s.decoded().unwrap(),
+        _ => panic!("contents"),
+    };
+    pdfcraft_content::parse(&c)
+        .ops
+        .iter()
+        .filter(|o| o.is("Do"))
+        .map(|o| match &*doc.resolve(xo.get(o.name(0).unwrap()).unwrap()) {
+            Object::Stream(s) => s.clone(),
+            _ => panic!("image"),
+        })
+        .collect()
+}
+
+#[test]
+fn a_page_picture_printed_as_one_pixel_strips_is_merged_into_one_image() {
+    // 120 strips, every other one JPEG and half as wide (as one PDF printer writes them).
+    let (mut doc, _) = printed_page(120, |r| r % 2 == 1, |_, s| s);
+    let keep = Settings {
+        gray: ImageSettings { downsample: false, target_ppi: 150.0, above_ppi: 225.0, compression: Compression::Retain },
+        ..Settings::default()
+    };
+    let r = optimize(&mut doc, &keep).unwrap();
+    assert_eq!((r.merged_images, r.fragments_merged), (1, 120), "{r:?}");
+    let drawn = drawn_images(&doc);
+    assert_eq!(drawn.len(), 1, "one image instead of 120");
+    let img = &drawn[0];
+    assert_eq!((img.dict.int(b"Width"), img.dict.int(b"Height")), (Some(200), Some(120)), "the finest resolution both ways");
+    let px = img.decoded().unwrap();
+    // Each row is its strip's grey, top row first; JPEG rows within a few levels.
+    for (row, chunk) in px.chunks(200).enumerate() {
+        assert!(chunk.iter().all(|&v| (v as i32 - row as i32).abs() <= 3), "row {row}: {:?}", &chunk[..4]);
+    }
+    assert_eq!(r.unused_xobjects, 120, "the strips are dropped");
+}
+
+#[test]
+fn the_mobile_preset_makes_a_printed_page_small() {
+    use pdfcraft_optimize::Preset;
+    let (doc, _) = printed_page(200, |_| true, |_, s| s);
+    let bytes = |d: &Document| write_full(d, &SaveOptions::default()).unwrap().len();
+    let before = bytes(&doc);
+    let mut mobile = doc.clone();
+    let r = optimize(&mut mobile, &Preset::Mobile.settings()).unwrap();
+    assert_eq!((r.merged_images, r.images_resampled), (1, 1), "{r:?}");
+    let img = &drawn_images(&mobile)[0];
+    // 24 pt = 1/3 in at 96 ppi.
+    assert_eq!((img.dict.int(b"Width"), img.dict.int(b"Height")), (Some(32), Some(32)));
+    assert_eq!(img.dict.name(b"Filter"), Some(&b"DCTDecode"[..]));
+    assert!(bytes(&mobile) * 10 < before, "{} → {}", before, bytes(&mobile));
+    assert_eq!(Preset::of(&Preset::Mobile.settings()), Some(Preset::Mobile));
+    assert_eq!(Preset::from_name("mobile"), Some(Preset::Mobile));
+}
+
+#[test]
+fn images_that_do_not_tile_a_picture_are_left_alone() {
+    let unmerged = |doc: &mut Document, settings: &Settings| {
+        let r = optimize(doc, settings).unwrap();
+        assert_eq!(r.merged_images, 0, "{r:?}");
+    };
+    let all = Settings::default();
+    // A gap between two rows.
+    let (mut gap, _) =
+        printed_page(40, |_| false, |r, s| if r < 20 { s.replace(&format!(" 0 {} cm", 39 - r), &format!(" 0 {} cm", 41 - r)) } else { s });
+    let r = optimize(&mut gap, &all).unwrap();
+    assert_eq!((r.merged_images, r.fragments_merged), (2, 40), "one picture each side of the gap: {r:?}");
+    // Rotated rows.
+    let (mut turned, _) = printed_page(40, |_| false, |_, s| s.replace("q 1000 0 0 1", "q 0 1 -1000 0"));
+    unmerged(&mut turned, &all);
+    // Something else drawn between the rows.
+    let (mut between, _) = printed_page(40, |_| false, |r, s| if r == 10 { format!("0 0 10 10 re f\n{s}") } else { s });
+    let r = optimize(&mut between, &all).unwrap();
+    assert_eq!((r.merged_images, r.fragments_merged), (2, 40), "two runs, each side of the fill: {r:?}");
+    // Too few rows, and the option off.
+    let (mut few, _) = printed_page(3, |_| false, |_, s| s);
+    unmerged(&mut few, &all);
+    let (mut off, _) = printed_page(40, |_| false, |_, s| s);
+    unmerged(&mut off, &Settings { merge_fragments: false, ..Settings::default() });
+}

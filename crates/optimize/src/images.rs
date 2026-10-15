@@ -11,7 +11,7 @@ use crate::{Compression, ImageSettings, OptimizeError, Report, Settings, Stage};
 const MAX_PIXELS: u64 = 80_000_000;
 
 /// The resources of a page, inherited from the page tree if the page has none.
-fn page_resources(doc: &Document, page: ObjRef) -> Option<Dict> {
+pub(crate) fn page_resources(doc: &Document, page: ObjRef) -> Option<Dict> {
     let mut node = Some(page);
     for _ in 0..64 {
         let d = doc.get(node?).as_dict()?.clone();
@@ -23,7 +23,7 @@ fn page_resources(doc: &Document, page: ObjRef) -> Option<Dict> {
     None
 }
 
-fn content_bytes(doc: &Document, contents: &Object) -> Vec<u8> {
+pub(crate) fn content_bytes(doc: &Document, contents: &Object) -> Vec<u8> {
     match &*doc.resolve(contents) {
         Object::Stream(s) => s.decoded().unwrap_or_default(),
         Object::Array(a) => a
@@ -111,7 +111,7 @@ pub fn effective_resolutions(doc: &Document, pages: &[ObjRef]) -> HashMap<ObjRef
 }
 
 /// Colour components of a colour space PdfCraft resamples: gray (1) or RGB (3).
-fn components(doc: &Document, cs: &Object) -> Option<usize> {
+pub(crate) fn components(doc: &Document, cs: &Object) -> Option<usize> {
     let cs = doc.resolve(cs);
     match &*cs {
         Object::Name(n) => match n.as_slice() {
@@ -179,7 +179,7 @@ fn is_dct(s: &Stream) -> Option<bool> {
 }
 
 /// 8-bit samples of an image (`n` components), decoded.
-fn pixels(s: &Stream, n: usize) -> Option<Vec<u8>> {
+pub(crate) fn pixels(s: &Stream, n: usize) -> Option<Vec<u8>> {
     let (w, h) = (s.dict.int(b"Width")? as usize, s.dict.int(b"Height")? as usize);
     if is_dct(s)? {
         let img = image::load_from_memory_with_format(&s.raw, image::ImageFormat::Jpeg).ok()?;
@@ -192,7 +192,7 @@ fn pixels(s: &Stream, n: usize) -> Option<Vec<u8>> {
     }
 }
 
-fn resample(px: &[u8], n: usize, w: u32, h: u32, nw: u32, nh: u32) -> Option<Vec<u8>> {
+pub(crate) fn resample(px: &[u8], n: usize, w: u32, h: u32, nw: u32, nh: u32) -> Option<Vec<u8>> {
     use image::imageops::{FilterType, resize};
     Some(match n {
         1 => resize(&image::GrayImage::from_raw(w, h, px.to_vec())?, nw, nh, FilterType::CatmullRom).into_raw(),
@@ -206,6 +206,13 @@ fn jpeg(px: &[u8], n: usize, w: u32, h: u32, quality: u8) -> Option<Vec<u8>> {
     let ty = if n == 1 { image::ExtendedColorType::L8 } else { image::ExtendedColorType::Rgb8 };
     enc.encode(px, w, h, ty).ok()?;
     Some(out)
+}
+
+/// Whether [`pixels`] reads `s` as it is drawn: a codec it decodes and no decode array that
+/// changes anything. `None` when the colour space isn't grey or RGB.
+pub(crate) fn decodable(doc: &Document, s: &Stream) -> Option<bool> {
+    let n = components(doc, s.dict.get(b"ColorSpace")?)?;
+    Some(is_dct(s).is_some() && s.dict.get(b"Decode").is_none_or(|d| is_identity_decode(doc, d, n)))
 }
 
 /// Whether `decode` is the default decode array for `n` components ([0 1] each), which changes

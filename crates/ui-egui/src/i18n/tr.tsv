@@ -2369,3 +2369,7 @@ animation effects	Off	Kapalı
 	Word counting stopped unexpectedly.	Sözcük sayımı beklenmedik şekilde durdu.
 	Word count…	Sözcük sayısı…
 @id	file.word_count	Sözcük sayısı…
+	Standard	Standart
+	Mobile	Mobil
+	Merge image fragments	Görüntü parçalarını birleştir
+	Optimizing… merging image fragments	İyileştiriliyor… görüntü parçaları birleştiriliyor

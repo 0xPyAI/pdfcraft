@@ -212,6 +212,34 @@ fn the_pdf_optimizer_dialog_saves_an_optimized_copy() {
     assert_eq!(h.state().dialog, None);
 }
 
+#[test]
+fn the_pdf_optimizer_dialog_picks_a_preset() {
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+    use pdfcraft_engine::optimize::Preset;
+    let mut h = Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("notes.txt", None, b"lorem ipsum".to_vec()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("optimize.advanced"));
+    h.run_steps(2);
+    assert_eq!(Preset::of(&h.state().optimize_draft.settings), Some(Preset::Standard));
+    h.get_by_label("Merge image fragments");
+    h.get_by_value("Standard").click();
+    h.run_steps(4);
+    h.get_by_label("Mobile").click();
+    h.run_steps(2);
+    assert_eq!(h.state().optimize_draft.settings, Preset::Mobile.settings(), "Mobile chosen");
+    // Changing an option makes the settings custom.
+    h.get_by_label("Merge image fragments").click();
+    h.run_steps(2);
+    assert!(!h.state().optimize_draft.settings.merge_fragments);
+    h.get_by_value("Custom");
+}
+
 fn mixed_files(app: &PdfCraftApp) -> Vec<(String, Vec<u8>)> {
     let pdf = app.session.create_from_text("a", "from a pdf").unwrap();
     vec![

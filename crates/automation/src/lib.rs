@@ -995,11 +995,14 @@ impl Automation {
     }
 
     fn doc_optimize(&mut self, a: &Args) -> Result<Value> {
-        use pdfcraft_engine::optimize::{Compression, ImageSettings, Settings};
+        use pdfcraft_engine::optimize::{Compression, ImageSettings, Preset};
         let id = self.doc(a)?.id;
         let before = self.doc(a)?.bytes.len();
         let path = self.resolve(a.str("path")?, true)?;
-        let mut settings = Settings::default();
+        let mut settings = match a.opt_str("preset")? {
+            None => Preset::Standard.settings(),
+            Some(p) => Preset::from_name(p).ok_or_else(|| ToolError::InvalidArgs(format!("unknown preset {p:?} (standard, mobile)")))?.settings(),
+        };
         let images = |key: &str, base: ImageSettings| -> Result<ImageSettings> {
             let Some(v) = a.get(key) else { return Ok(base) };
             let mut s = base;
@@ -1027,6 +1030,7 @@ impl Automation {
         settings.color = images("color", settings.color)?;
         settings.gray = images("gray", settings.gray)?;
         for (key, flag) in [
+            ("merge_fragments", &mut settings.merge_fragments),
             ("discard_thumbnails", &mut settings.discard_thumbnails),
             ("discard_alternate_images", &mut settings.discard_alternate_images),
             ("discard_tags", &mut settings.discard_tags),
@@ -1059,6 +1063,8 @@ impl Automation {
             "path": path.to_string_lossy(),
             "bytes_before": before,
             "bytes_after": bytes.len(),
+            "merged_images": o.merged_images,
+            "fragments_merged": o.fragments_merged,
             "images": o.images,
             "images_resampled": o.images_resampled,
             "images_recompressed": o.images_recompressed,

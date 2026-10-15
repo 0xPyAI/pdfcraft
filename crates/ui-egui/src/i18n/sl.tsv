@@ -2378,3 +2378,7 @@ animation effects	Off	Izklopljeni
 	Word counting stopped unexpectedly.	Štetje besed se je nepričakovano ustavilo.
 	Word count…	Število besed…
 @id	file.word_count	Število besed…
+	Standard	Standardno
+	Mobile	Mobilna naprava
+	Merge image fragments	Združi delce slik
+	Optimizing… merging image fragments	Optimiziranje… združevanje delcev slik

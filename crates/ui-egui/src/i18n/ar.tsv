@@ -2394,3 +2394,7 @@ animation effects	Off	معطّلة
 	Word counting stopped unexpectedly.	توقف عد الكلمات بشكل غير متوقع.
 	Word count…	عدد الكلمات…
 @id	file.word_count	عدد الكلمات…
+	Standard	قياسي
+	Mobile	الهاتف المحمول
+	Merge image fragments	دمج أجزاء الصور
+	Optimizing… merging image fragments	جارٍ التحسين… دمج أجزاء الصور

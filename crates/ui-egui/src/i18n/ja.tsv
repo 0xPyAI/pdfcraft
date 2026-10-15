@@ -2373,3 +2373,7 @@ animation effects	Off	オフ
 	Word counting stopped unexpectedly.	単語の集計が予期せず停止しました。
 	Word count…	文字数と単語数…
 @id	file.word_count	文字数と単語数…
+	Standard	標準
+	Mobile	モバイル
+	Merge image fragments	画像の断片を結合
+	Optimizing… merging image fragments	最適化中… 画像の断片を結合しています

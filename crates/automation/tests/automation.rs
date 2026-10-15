@@ -4183,6 +4183,125 @@ fn optimizing_through_tools() {
     assert!(matches!(a.call("doc_optimize", &json!({ "doc": doc, "path": "x.pdf", "discard": ["everything"] })), Err(ToolError::InvalidArgs(_))));
 }
 
+/// A one-page PDF whose page picture is drawn as `rows` grey images one pixel row high, 600 px
+/// wide on a 72 pt square (600 ppi), as some PDF printers write it.
+fn printed_in_strips(rows: usize) -> Vec<u8> {
+    let mut objs: Vec<Vec<u8>> = vec![b"<< /Type /Catalog /Pages 2 0 R >>".to_vec()];
+    let names: String = (0..rows).map(|r| format!("/R{r} {} 0 R ", 5 + r)).collect();
+    objs.push(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec());
+    objs.push(format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] /Resources << /XObject << {names}>> >> /Contents 4 0 R >>").into_bytes());
+    let k = 72.0 / rows as f64;
+    let content: String = (0..rows)
+        .map(|r| {
+            format!(
+                "q 72 0 0 {k} 0 {} cm /R{r} Do Q
+",
+                (rows - 1 - r) as f64 * k
+            )
+        })
+        .collect();
+    objs.push(
+        format!(
+            "<< /Length {} >>
+stream
+{content}
+endstream",
+            content.len() + 1
+        )
+        .into_bytes(),
+    );
+    for r in 0..rows {
+        let px: Vec<u8> = (0..600).map(|x| ((x + r * 7) % 256) as u8).collect();
+        let mut o = format!(
+            "<< /Type /XObject /Subtype /Image /Width 600 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length {} >>
+stream
+",
+            px.len()
+        )
+        .into_bytes();
+        o.extend_from_slice(&px);
+        o.extend_from_slice(
+            b"
+endstream",
+        );
+        objs.push(o);
+    }
+    let mut out = b"%PDF-1.5
+"
+    .to_vec();
+    let mut offs = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offs.push(out.len());
+        out.extend_from_slice(
+            format!(
+                "{} 0 obj
+",
+                i + 1
+            )
+            .as_bytes(),
+        );
+        out.extend_from_slice(o);
+        out.extend_from_slice(
+            b"
+endobj
+",
+        );
+    }
+    let x = out.len();
+    out.extend_from_slice(
+        format!(
+            "xref
+0 {}
+0000000000 65535 f 
+",
+            objs.len() + 1
+        )
+        .as_bytes(),
+    );
+    for o in offs {
+        out.extend_from_slice(
+            format!(
+                "{o:010} 00000 n 
+"
+            )
+            .as_bytes(),
+        );
+    }
+    out.extend_from_slice(
+        format!(
+            "trailer
+<< /Size {} /Root 1 0 R >>
+startxref
+{x}
+%%EOF
+",
+            objs.len() + 1
+        )
+        .as_bytes(),
+    );
+    out
+}
+
+#[test]
+fn a_page_printed_in_strips_gets_small_through_tools() {
+    let dir = workdir("optimize-strips");
+    std::fs::write(dir.join("strips.pdf"), printed_in_strips(300)).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "strips.pdf" }))["doc"].as_u64().unwrap();
+    let r = ok(&mut a, "doc_optimize", json!({ "doc": doc, "path": "mobile.pdf", "preset": "mobile" }));
+    assert_eq!((r["merged_images"].as_u64(), r["fragments_merged"].as_u64(), r["unused_xobjects"].as_u64()), (Some(1), Some(300), Some(300)), "{r}");
+    assert!(r["bytes_after"].as_u64().unwrap() * 10 < r["bytes_before"].as_u64().unwrap(), "{r}");
+    // Reduce File Size merges too; with the option off, the strips stay.
+    let reduced = ok(&mut a, "doc_reduce", json!({ "doc": doc, "path": "reduced.pdf" }));
+    assert!(reduced["bytes_after"].as_u64().unwrap() * 10 < reduced["bytes_before"].as_u64().unwrap(), "{reduced}");
+    let off = ok(&mut a, "doc_optimize", json!({ "doc": doc, "path": "off.pdf", "merge_fragments": false }));
+    assert_eq!(off["merged_images"].as_u64(), Some(0), "{off}");
+    // The merged page opens and renders.
+    let mobile = ok(&mut a, "doc_open", json!({ "path": "mobile.pdf" }))["doc"].as_u64().unwrap();
+    assert!(a.call("page_render", &json!({ "doc": mobile, "page": 1, "dpi": 72 })).is_ok());
+    assert!(matches!(a.call("doc_optimize", &json!({ "doc": doc, "path": "x.pdf", "preset": "tiny" })), Err(ToolError::InvalidArgs(_))));
+}
+
 #[test]
 fn initial_view_through_tools() {
     let dir = workdir("initial-view");

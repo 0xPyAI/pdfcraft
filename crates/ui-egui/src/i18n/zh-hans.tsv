@@ -2337,3 +2337,7 @@ animation effects	Off	关
 	Word counting stopped unexpectedly.	字词统计意外停止。
 	Word count…	字词统计…
 @id	file.word_count	字词统计…
+	Standard	标准
+	Mobile	移动设备
+	Merge image fragments	合并图像碎片
+	Optimizing… merging image fragments	正在优化… 正在合并图像碎片

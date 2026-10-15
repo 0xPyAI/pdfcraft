@@ -2503,3 +2503,7 @@ animation effects	Off	Desactivados
 	Word counting stopped unexpectedly.	El recuento de palabras se detuvo inesperadamente.
 	Word count…	Recuento de palabras…
 @id	file.word_count	Recuento de palabras…
+	Standard	Estándar
+	Mobile	Móvil
+	Merge image fragments	Combinar fragmentos de imagen
+	Optimizing… merging image fragments	Optimizando… combinando fragmentos de imagen

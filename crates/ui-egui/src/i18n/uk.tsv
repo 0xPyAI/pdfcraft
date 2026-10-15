@@ -2395,3 +2395,7 @@ animation effects	Off	Вимкнено
 	Word counting stopped unexpectedly.	Підрахунок слів несподівано зупинився.
 	Word count…	Кількість слів…
 @id	file.word_count	Кількість слів…
+	Standard	Стандартні
+	Mobile	Мобільні пристрої
+	Merge image fragments	Об’єднувати фрагменти зображень
+	Optimizing… merging image fragments	Оптимізація… об’єднання фрагментів зображень

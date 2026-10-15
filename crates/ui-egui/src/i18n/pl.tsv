@@ -2353,3 +2353,7 @@ animation effects	Off	Wyłączone
 	Word counting stopped unexpectedly.	Liczenie słów zostało nieoczekiwanie przerwane.
 	Word count…	Liczba słów…
 @id	file.word_count	Liczba słów…
+	Standard	Standardowe
+	Mobile	Urządzenie mobilne
+	Merge image fragments	Scal fragmenty obrazów
+	Optimizing… merging image fragments	Optymalizacja… scalanie fragmentów obrazów

@@ -2383,3 +2383,7 @@ animation effects	Off	Ανενεργά
 	Word counting stopped unexpectedly.	Η καταμέτρηση λέξεων σταμάτησε απροσδόκητα.
 	Word count…	Καταμέτρηση λέξεων…
 @id	file.word_count	Καταμέτρηση λέξεων…
+	Standard	Τυπικές
+	Mobile	Κινητό
+	Merge image fragments	Συγχώνευση τμημάτων εικόνας
+	Optimizing… merging image fragments	Βελτιστοποίηση… συγχώνευση τμημάτων εικόνας

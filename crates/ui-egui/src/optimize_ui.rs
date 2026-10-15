@@ -8,7 +8,7 @@
 use std::sync::{Arc, Mutex};
 
 use egui::{Align, Layout};
-use pdfcraft_engine::optimize::{Compression, ImageSettings, QUALITIES, Settings};
+use pdfcraft_engine::optimize::{Compression, ImageSettings, Preset, QUALITIES, Settings};
 use pdfcraft_engine::optimizer::{OptimizeStage, Optimized};
 use pdfcraft_engine::{DocId, EditError, Hidden, OptimizeReport};
 
@@ -78,6 +78,7 @@ pub struct OptimizeRun {
 fn stage_label(stage: OptimizeStage) -> String {
     match stage {
         OptimizeStage::Discarding => tl!("Optimizing… removing user data").to_string(),
+        OptimizeStage::Fragments => tl!("Optimizing… merging image fragments").to_string(),
         OptimizeStage::Images { done, total } => crate::i18n::fmt(
             tl!("Optimizing… image {d} of {t}"),
             &[("d", &(done + 1).min(total.max(1)).to_string()), ("t", &total.max(1).to_string())],
@@ -157,6 +158,22 @@ fn discard_box(ui: &mut egui::Ui, list: &mut Vec<Hidden>, h: Hidden, label: &str
 pub(crate) fn body(ui: &mut egui::Ui, d: &mut OptimizeDraft, t: &Tokens) -> (bool, bool) {
     ui.label(egui::RichText::new(tl!("PDF Optimizer")).font(theme::semibold(18.0)));
     ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label(tl!("Settings"));
+        let name = |p: Preset| match p {
+            Preset::Standard => tl!("Standard"),
+            Preset::Mobile => tl!("Mobile"),
+        };
+        let current = Preset::of(&d.settings);
+        egui::ComboBox::from_id_salt("optimize-preset").selected_text(current.map_or(tl!("Custom"), name)).show_ui(ui, |ui| {
+            for p in Preset::ALL {
+                if ui.selectable_label(current == Some(p), name(p)).clicked() {
+                    d.settings = p.settings();
+                }
+            }
+        });
+    });
+    ui.add_space(6.0);
     ui.horizontal_wrapped(|ui| {
         for (tab, label) in [
             (OptimizeTab::Images, tl!("Images")),
@@ -174,6 +191,7 @@ pub(crate) fn body(ui: &mut egui::Ui, d: &mut OptimizeDraft, t: &Tokens) -> (boo
     let s = &mut d.settings;
     match d.tab {
         OptimizeTab::Images => {
+            ui.add(widgets::checkbox(&mut s.merge_fragments, tl!("Merge image fragments")));
             image_row(ui, "color", "Color Images", &mut s.color);
             image_row(ui, "gray", "Grayscale Images", &mut s.gray);
             ui.label(

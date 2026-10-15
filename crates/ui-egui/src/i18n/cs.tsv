@@ -2447,3 +2447,7 @@ animation effects	Off	Vypnuto
 	Word counting stopped unexpectedly.	Počítání slov se neočekávaně zastavilo.
 	Word count…	Počet slov…
 @id	file.word_count	Počet slov…
+	Standard	Standardní
+	Mobile	Mobilní zařízení
+	Merge image fragments	Sloučit fragmenty obrázků
+	Optimizing… merging image fragments	Optimalizace… slučování fragmentů obrázků

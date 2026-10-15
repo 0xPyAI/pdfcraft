@@ -2617,3 +2617,7 @@ key	Space	Tarpas
 	Word counting stopped unexpectedly.	Žodžių skaičiavimas netikėtai sustojo.
 	Word count…	Žodžių skaičius…
 @id	file.word_count	Žodžių skaičius…
+	Standard	Standartinis
+	Mobile	Mobilusis
+	Merge image fragments	Sujungti vaizdo fragmentus
+	Optimizing… merging image fragments	Optimizuojama… jungiami vaizdo fragmentai
