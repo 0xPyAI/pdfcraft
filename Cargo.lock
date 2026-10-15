@@ -1145,7 +1145,7 @@ dependencies = [
 [[package]]
 name = "craft-print"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=f03ec27ab2c405969428512178f746183cd55ca0#f03ec27ab2c405969428512178f746183cd55ca0"
+source = "git+https://github.com/storytold/craft-libs?rev=666c358065261a2816b376fa3bb10538dbf53040#666c358065261a2816b376fa3bb10538dbf53040"
 dependencies = [
  "miniz_oxide 0.8.9",
  "roxmltree",
@@ -3884,6 +3884,7 @@ dependencies = [
  "pdfcraft-engine",
  "pdfcraft-ui-egui",
  "pollster 1.0.1",
+ "raw-window-handle",
  "rustls-native-certs",
  "serde_json",
  "uds_windows",
@@ -3959,6 +3960,7 @@ dependencies = [
  "pdfcraft-automation",
  "pdfcraft-cos",
  "pdfcraft-engine",
+ "pdfcraft-platform",
  "pdfcraft-render",
  "rustix 1.1.5",
  "serde_json",
@@ -3983,6 +3985,8 @@ dependencies = [
  "hayro-syntax",
  "pdfcraft-crypt",
  "pdfcraft-filters",
+ "pdfcraft-oracle",
+ "pdfcraft-testkit",
  "proptest",
  "serde_json",
  "thiserror 2.0.21",
@@ -4065,6 +4069,7 @@ dependencies = [
  "pdfcraft-xfdf",
  "png 0.18.1",
  "thiserror 2.0.21",
+ "unicode-segmentation",
  "url",
 ]
 
@@ -4126,6 +4131,7 @@ dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
  "pdfcraft-model",
+ "pdfcraft-testkit",
  "serde",
  "thiserror 2.0.21",
 ]
@@ -4161,12 +4167,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdfcraft-oracle"
+version = "0.8.0"
+
+[[package]]
 name = "pdfcraft-organize"
 version = "0.8.0"
 dependencies = [
  "hayro-syntax",
  "pdfcraft-content",
  "pdfcraft-cos",
+ "pdfcraft-oracle",
  "thiserror 2.0.21",
 ]
 
@@ -4176,6 +4187,7 @@ version = "0.8.0"
 dependencies = [
  "async-channel",
  "futures-lite",
+ "rustix 1.1.5",
  "zbus",
 ]
 
@@ -4183,6 +4195,7 @@ dependencies = [
 name = "pdfcraft-preflight"
 version = "0.8.0"
 dependencies = [
+ "pdfcraft-content",
  "pdfcraft-cos",
  "pdfcraft-model",
 ]
@@ -4209,6 +4222,8 @@ dependencies = [
  "pdfcraft-fonts",
  "pdfcraft-forms",
  "pdfcraft-model",
+ "pdfcraft-testkit",
+ "pdfcraft-xfa",
  "thiserror 2.0.21",
 ]
 
@@ -4264,6 +4279,10 @@ dependencies = [
  "sha3",
  "thiserror 2.0.21",
 ]
+
+[[package]]
+name = "pdfcraft-testkit"
+version = "0.8.0"
 
 [[package]]
 name = "pdfcraft-ui-egui"
@@ -5398,9 +5417,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -6868,8 +6887,6 @@ dependencies = [
 [[package]]
 name = "vello_common"
 version = "0.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3361bff7f7d82c0c496b92048db83846691f0e844cc28dee92b1c824291b55ee"
 dependencies = [
  "bytemuck",
  "fearless_simd",
@@ -7946,6 +7963,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "lopdf",
+ "pdfcraft-cos",
+ "pdfcraft-oracle",
  "png 0.18.1",
  "serde",
  "serde_json",

@@ -36,6 +36,11 @@ fmv-macos-events = "=0.1.0"
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client"] }
 
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+# Whether the window is on Wayland, where it can't bring itself forward (src/single_instance.rs).
+# Already in the tree through winit and eframe.
+raw-window-handle = "0.6"
+
 [dev-dependencies]
 # Waits for wgpu's adapter, device and error-scope futures in tests (already in the tree through wgpu).
 pollster = "1.0"

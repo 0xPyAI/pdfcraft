@@ -3,8 +3,8 @@
 //! The embedded faces (Inter, egui's defaults, craft-fonts) come first in every family; this one
 //! only draws characters none of them has, such as an Arabic file name in a build without
 //! craft-fonts, or the Simplified Chinese interface in a build without a `Hans` face (#826). A
-//! second and a third installed face, [`devanagari_fallback`] and [`telugu_fallback`], draw Hindi
-//! and Telugu when one is installed. It is
+//! few more installed faces, [`devanagari_fallback`], [`telugu_fallback`], [`sinhala_fallback`]
+//! and [`tamil_fallback`], draw Hindi, Telugu, Sinhala and Tamil when one is installed. It is
 //! read at runtime and never embedded or shipped (AGENTS.md §1.4), and `PDFCRAFT_SYSTEM_FONTS=0`
 //! turns it off (published screenshots do).
 
@@ -25,6 +25,10 @@ const PROBE: char = '\u{0627}';
 const DEVANAGARI_PROBE: char = '\u{0915}';
 /// Telugu letter ka: the face must have it to cover Telugu.
 const TELUGU_PROBE: char = '\u{0C15}';
+/// Sinhala letter ka (ක): the face must have it to cover Sinhala.
+const SINHALA_PROBE: char = '\u{0D9A}';
+/// Tamil letter ka (க): the face must have it to cover Tamil.
+const TAMIL_PROBE: char = '\u{0B95}';
 /// 欢 (U+6B22): Simplified only, absent from the Japanese craft-fonts faces.
 const HANS_PROBE: char = '\u{6B22}';
 /// 說 (U+8AAA): Traditional only, absent from the Japanese craft-fonts faces.
@@ -80,6 +84,20 @@ pub fn devanagari_fallback() -> Option<Arc<FontData>> {
 pub fn telugu_fallback() -> Option<Arc<FontData>> {
     static CACHE: OnceLock<Option<Arc<FontData>>> = OnceLock::new();
     CACHE.get_or_init(|| script_fallback(&telugu_candidates(), TELUGU_PROBE)).clone()
+}
+
+/// The installed fallback face for Sinhala, read once. `None` when it is turned off or no
+/// candidate is installed; the interface then draws what the embedded faces can.
+pub fn sinhala_fallback() -> Option<Arc<FontData>> {
+    static CACHE: OnceLock<Option<Arc<FontData>>> = OnceLock::new();
+    CACHE.get_or_init(|| script_fallback(&sinhala_candidates(), SINHALA_PROBE)).clone()
+}
+
+/// The installed fallback face for Tamil, read once. `None` when it is turned off or no
+/// candidate is installed; the interface then draws what the embedded faces can.
+pub fn tamil_fallback() -> Option<Arc<FontData>> {
+    static CACHE: OnceLock<Option<Arc<FontData>>> = OnceLock::new();
+    CACHE.get_or_init(|| script_fallback(&tamil_candidates(), TAMIL_PROBE)).clone()
 }
 
 fn script_fallback(candidates: &[PathBuf], probe: char) -> Option<Arc<FontData>> {
@@ -151,6 +169,57 @@ fn telugu_candidates() -> Vec<PathBuf> {
             "lohit-telugu-fonts/Lohit-Telugu.ttf",
             "truetype/lohit-telugu/Lohit-Telugu.ttf",
             "truetype/fonts-telu-extra/Pothana2000.ttf",
+        ])
+    }
+}
+
+/// Well-known locations of Sinhala faces, best first. Nirmala UI has Sinhala from Windows 10;
+/// Iskoola Pota is the older Windows Sinhala face.
+fn sinhala_candidates() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        ["Nirmala.ttc", "Nirmala.ttf", "iskpota.ttf"].iter().map(|f| windows_fonts().join(f)).collect()
+    } else if cfg!(target_os = "macos") {
+        ["/System/Library/Fonts/Supplemental/Sinhala Sangam MN.ttc", "/System/Library/Fonts/Supplemental/Sinhala MN.ttc"]
+            .iter()
+            .map(PathBuf::from)
+            .collect()
+    } else {
+        unix_fonts(&[
+            "google-noto/NotoSansSinhalaUI-Regular.ttf",
+            "google-noto/NotoSansSinhala-Regular.ttf",
+            "google-noto-vf/NotoSansSinhala[wght].ttf",
+            "truetype/noto/NotoSansSinhala-Regular.ttf",
+            "truetype/noto/NotoSansSinhalaUI-Regular.ttf",
+            "noto/NotoSansSinhala-Regular.ttf",
+            "noto/NotoSansSinhalaUI-Regular.ttf",
+        ])
+    }
+}
+
+/// Well-known locations of Tamil faces, best first. Latha is the older Windows Tamil face.
+fn tamil_candidates() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        ["Nirmala.ttc", "Nirmala.ttf", "latha.ttf"].iter().map(|f| windows_fonts().join(f)).collect()
+    } else if cfg!(target_os = "macos") {
+        [
+            "/System/Library/Fonts/Supplemental/Tamil Sangam MN.ttc",
+            "/System/Library/Fonts/Supplemental/Tamil MN.ttc",
+            "/Library/Fonts/Arial Unicode.ttf",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect()
+    } else {
+        unix_fonts(&[
+            "google-noto/NotoSansTamilUI-Regular.ttf",
+            "google-noto/NotoSansTamil-Regular.ttf",
+            "google-noto-vf/NotoSansTamil[wght].ttf",
+            "truetype/noto/NotoSansTamil-Regular.ttf",
+            "truetype/noto/NotoSansTamilUI-Regular.ttf",
+            "noto/NotoSansTamil-Regular.ttf",
+            "noto/NotoSansTamilUI-Regular.ttf",
+            "lohit-tamil-fonts/Lohit-Tamil.ttf",
+            "truetype/lohit-tamil/Lohit-Tamil.ttf",
         ])
     }
 }
@@ -235,7 +304,7 @@ fn read(path: &Path, probe: char, max: u64) -> Option<Arc<FontData>> {
     let mut data = FontData::from_owned(bytes);
     data.index = index;
     log::info!("interface font fallback: {} (face {index})", path.display());
-    Some(Arc::new(data))
+    Some(Arc::new(crate::theme::on_interface_baseline(data)))
 }
 
 /// The first face of the file that parses and maps `c`. egui parses fonts with the same skrifa,
@@ -292,11 +361,13 @@ mod tests {
         assert!(script_fallback(&candidates, 'A').is_some());
         assert!(script_fallback(&candidates, TELUGU_PROBE).is_none());
         assert!(script_fallback(&candidates, DEVANAGARI_PROBE).is_none());
+        assert!(script_fallback(&candidates, SINHALA_PROBE).is_none());
+        assert!(script_fallback(&candidates, TAMIL_PROBE).is_none());
     }
 
     #[test]
     fn script_candidates_are_absolute_font_files() {
-        for list in [devanagari_candidates(), telugu_candidates()] {
+        for list in [devanagari_candidates(), telugu_candidates(), sinhala_candidates(), tamil_candidates()] {
             assert!(!list.is_empty());
             assert!(list.iter().all(|p| p.is_absolute() || cfg!(windows)), "{list:?}");
             assert!(list.iter().all(|p| p.extension().is_some_and(|e| e == "ttf" || e == "ttc")), "{list:?}");

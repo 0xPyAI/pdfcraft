@@ -38,6 +38,39 @@ pub fn fmt(v: f64) -> String {
     n(v)
 }
 
+/// The font size an auto-sized (`0 Tf`) text field uses for `text` in a `width` × `height` box
+/// (inside the padding), measured by `width_of(text, size)`: at most 12 pt and at least 4 pt.
+/// Single-line text shrinks until it fits the width; multiline text takes the largest size whose
+/// wrapped lines fit the height. The page appearance and the on-screen editor share this.
+pub fn auto_text_size(text: &str, width: f64, height: f64, multiline: bool, width_of: impl Fn(&str, f64) -> f64) -> f64 {
+    let wrap_width = if width.is_finite() { width.max(1.0) } else { 1.0 };
+    auto_text_size_by(
+        width,
+        height,
+        multiline,
+        |size| width_of(text, size),
+        |size| wrap_with(text, size, wrap_width, &width_of).len() as f64 * size * 1.15,
+    )
+}
+
+/// [`auto_text_size`] with the text measured by the caller: `line_width(size)` is its width on
+/// one line, `wrapped_height(size)` its height wrapped at `width`. The screen measures in its
+/// own font, whose widths and line breaks differ from the page's.
+pub fn auto_text_size_by(width: f64, height: f64, multiline: bool, line_width: impl Fn(f64) -> f64, wrapped_height: impl Fn(f64) -> f64) -> f64 {
+    let (width, height) = (if width.is_finite() { width.max(1.0) } else { 1.0 }, if height.is_finite() { height } else { 0.0 });
+    if multiline {
+        let mut size = 12.0;
+        // A NaN height from the measurer compares false, so it keeps the size it has.
+        while size > 4.0 && wrapped_height(size) > height {
+            size -= 0.5;
+        }
+        return size;
+    }
+    let size = (height / 1.15).clamp(4.0, 12.0);
+    let tw = line_width(size);
+    if tw.is_finite() && tw > width { (size * width / tw).max(4.0) } else { size }
+}
+
 /// `/MK /R` as a quadrant, or 0 when it is missing or not a multiple of 90.
 pub(crate) fn mk_rotation(doc: &Document, wd: &Dict) -> i64 {
     let Some(raw) = wd.get(b"MK") else { return 0 };
@@ -389,11 +422,7 @@ pub fn field_appearance_drawn(doc: &Document, f: &Field, w: &Widget, values: &[S
             let comb = f.has(flags::COMB) && !f.has(flags::MULTILINE) && !f.has(flags::PASSWORD) && f.max_len.is_some_and(|m| m > 0);
             if f.kind == FieldKind::Text && f.has(flags::MULTILINE) {
                 if size == 0.0 {
-                    // Auto size: the largest size (≤ 12) whose wrapped lines fit the height.
-                    size = 12.0;
-                    while size > 4.0 && wrap_with(&text, size, inner_w, width_of).len() as f64 * size * 1.15 > height - 2.0 * pad {
-                        size -= 0.5;
-                    }
+                    size = auto_text_size(&text, inner_w, height - 2.0 * pad, true, width_of);
                 }
                 let mut y = height - pad - size * 0.85;
                 for line in wrap_with(&text, size, inner_w, width_of) {
@@ -405,11 +434,12 @@ pub fn field_appearance_drawn(doc: &Document, f: &Field, w: &Widget, values: &[S
                 }
             } else {
                 if size == 0.0 {
-                    size = ((height - 2.0 * pad) / 1.15).clamp(4.0, 12.0);
-                    let tw = width_of(&text, size);
-                    if tw > inner_w && !comb {
-                        size = (size * inner_w / tw).max(4.0);
-                    }
+                    // Comb cells hold one character each, so only the height limits them.
+                    size = if comb {
+                        ((height - 2.0 * pad) / 1.15).clamp(4.0, 12.0)
+                    } else {
+                        auto_text_size(&text, inner_w, height - 2.0 * pad, false, width_of)
+                    };
                 }
                 // Centre Helvetica's ascent (0.718) and descent (0.207) vertically.
                 let y = (height - 0.925 * size) / 2.0 + 0.207 * size;

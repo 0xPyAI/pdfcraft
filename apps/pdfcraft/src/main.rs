@@ -213,9 +213,10 @@ fn main() -> eframe::Result {
             Err(e) => log::warn!("no log file: {e}"),
         }
     }
-    // Windows: a launch that only names files (an Outlook attachment, an Explorer double-click)
-    // hands them to the PdfCraft already running and exits (#282, #317). Any option means the
-    // caller wants this launch's own window.
+    // Windows, Linux and the BSDs: a launch that only names files (an Outlook attachment, an
+    // Explorer double-click, a file manager or `xdg-open`) hands them to the PdfCraft already
+    // running and exits (#282, #317, #1726). Any option means the caller wants this launch's own
+    // window.
     let may_hand_off = !new_window && !files.is_empty() && options.is_empty() && control_file.is_none() && !create_images;
     let instance = match single_instance::claim(&single_instance::absolute(&files), may_hand_off) {
         single_instance::Claim::HandedOff => return Ok(()),
@@ -332,6 +333,18 @@ struct Launch {
     window_controls: Option<pdfcraft_ui_egui::window_controls::Layout>,
 }
 
+/// Whether the window is a native Wayland one (not X11 or XWayland).
+#[cfg(all(unix, not(target_os = "macos")))]
+fn native_wayland(cc: &eframe::CreationContext<'_>) -> bool {
+    use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
+    cc.display_handle().is_ok_and(|handle| matches!(handle.as_raw(), RawDisplayHandle::Wayland(_)))
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+fn native_wayland(_: &eframe::CreationContext<'_>) -> bool {
+    false
+}
+
 fn app_creator<'a>(
     launch: Launch,
     started: Rc<Cell<bool>>,
@@ -368,7 +381,7 @@ fn app_creator<'a>(
             app.os_events = Some(apple_events.connect(&cc.egui_ctx));
         }
         if let Some(server) = instance {
-            app.os_events = Some(server.connect(&cc.egui_ctx));
+            app.os_events = Some(server.connect(&cc.egui_ctx, native_wayland(cc)));
         }
         if let Some(file) = &control_file {
             let client = app.attach_control(&cc.egui_ctx);

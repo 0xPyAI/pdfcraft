@@ -328,6 +328,7 @@
 	Split	Böl
 	More	Daha fazla
 	Set page boxes	Sayfa kutularını ayarla
+	Set page transitions	Sayfa geçişlerini ayarla
 	Page labels	Sayfa etiketleri
 	Page transitions	Sayfa geçişleri
 	Add comments	Yorum ekle
@@ -540,6 +541,7 @@
 	Remove unused objects and merge identical ones	Kullanılmayan nesneleri kaldır ve aynı olanları birleştir
 	Audit space usage…	Alan kullanımını denetle…
 	Space Audit	Alan Denetimi
+	What takes up the space in this file, by kind of content.	Bu dosyadaki alanı neyin kapladığı, içerik türüne göre.
 	Bytes	Bayt
 	Content Streams	İçerik Akışları
 	X Object Forms	XObject Formları
@@ -810,6 +812,12 @@
 	Windows store  ·  	Windows depolama alanı  ·  
 	Issued by: 	Veren: 
 	, Expires: 	, Son kullanma tarihi: 
+	Digitally signed by	Dijital olarak imzalayan
+	DN: 	DN: 
+	Reason: 	Neden: 
+	Location: 	Konum: 
+	Date: 	Tarih: 
+	The labels are in English: the signature's font can't draw them in this language.	Etiketler İngilizce: imzanın yazı tipi bu dilde onları çizemiyor.
 	No digital IDs yet.	Henüz dijital kimlik yok.
 	Configure New Digital ID	Yeni Dijital Kimlik Yapılandır
 	Remove "{name}" from this list? The file itself is not deleted.	"{name}" bu listeden kaldırılsın mı? Dosyanın kendisi silinmez.
@@ -1104,6 +1112,7 @@
 	Redaction code:	Karartma kodu:
 	Font:	Yazı tipi:
 	Font size:	Yazı tipi boyutu:
+	Font size	Yazı tipi boyutu
 	Auto-size text to fit redaction region	Metni karartma bölgesine sığacak şekilde otomatik boyutlandır
 	Font colour:	Yazı tipi rengi:
 	Repeat overlay text	Üst metni yinele
@@ -1244,6 +1253,7 @@
 	Copy text	Metni kopyala
 	Properties…	Özellikler…
 	Make Current Properties Default	Geçerli Özellikleri Varsayılan Yap
+	Make Properties Default	Özellikleri Varsayılan Yap
 	More options	Diğer seçenekler
 	Sort by	Sırala
 	Author	Yazar
@@ -1364,6 +1374,9 @@
 	Sort comments by:	Yorumları şuna göre sırala:
 	Create PDF Comment Summary	PDF Yorum Özeti Oluştur
 	Revert to the previously saved version of “{name}”? Changes since then can't be undone afterwards.	“{name}” belgesinin daha önce kaydedilmiş sürümüne geri dönülsün mü? O andan sonraki değişiklikler geri alınamaz.
+	Save over the changed file?	Değiştirilen dosyanın üzerine kaydedilsin mi?
+	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	“{name}” açıldıktan veya son kaydedildikten sonra diskte değişti. Şimdi kaydetmek o daha yeni sürümü bununla değiştirir.
+	Save anyway	Yine de kaydet
 	Number pages	Sayfaları numaralandır
 	Style	Stil
 	None (prefix only)	Yok (yalnızca önek)
@@ -2171,6 +2184,8 @@ key	Space	Boşluk
 
 # Printing and multi-object selection
 	Looking for printers…	Yazıcılar aranıyor…
+	Sending sheet {s} of {n} to {printer}…	{n} yapraktan {s}. yaprak {printer} yazıcısına gönderiliyor…
+	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Yazıcı bulunamadı. Yazıcının yüklü olduğunu ve yazdırma biriktiricisinin çalıştığını denetleyip Yazdır'ı yeniden açın.
 	Sending to {printer}…	{printer} yazıcısına gönderiliyor…
 	Column select	Sütun seçimi
 @plural	{n} object selected|{n} objects selected	{n} nesne seçildi
@@ -2257,10 +2272,10 @@ key	Space	Boşluk
 	Printer paper and scaling may differ. Check driver settings.	Yazıcı kâğıdı ve ölçekleme farklı olabilir. Sürücü ayarlarını kontrol edin.
 	Drawing scale changes. Use Actual size for full-scale plans.	Çizim ölçeği değişir. Tam ölçekli planlar için Gerçek boyutu kullanın.
 	Reload documents when their files change on disk	Diskteki dosyaları değiştiğinde belgeleri yeniden yükle
-	This file changed on disk. Reload it to see the new version; your unsaved changes will be lost.	Bu dosya diskte değişti. Yeni sürümü görmek için yeniden yükleyin; kaydedilmemiş değişiklikleriniz kaybolacak.
+	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Bu dosya diskte değişti. Yeniden yükle yeni sürümü gösterir ve kaydedilmemiş değişikliklerinizi atar; Kaydet onu bu sürümle değiştirir.
 	Reload	Yeniden yükle
 	Couldn't reload {name}: {e}	{name} yeniden yüklenemedi: {e}
-	Mouse wheel scroll speed	Fare tekerleği kaydırma hızı
+	Scroll speed (mouse wheel and arrow keys)	Kaydırma hızı (fare tekerleği ve ok tuşları)
 scroll speed	Slow	Yavaş
 scroll speed	Normal	Orta
 scroll speed	Fast	Hızlı
@@ -2346,10 +2361,55 @@ animation effects	Off	Kapalı
 # Absolute local GoToR confirmation (#1364).
 	Allow	İzin ver
 	Only allow this if you trust the source document.	Buna yalnızca kaynak belgeye güveniyorsanız izin verin.
+	Open in Full Screen mode?	Tam ekran modunda açılsın mı?
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	Bu belge tam ekran modunda açılmak istiyor: sayfa ekranı doldurur ve başka hiçbir şey görünmez. Çıkmak için istediğiniz zaman Esc tuşuna basın.
+	Full Screen	Tam ekran
+	Not now	Şimdi değil
 	Open this local PDF?	Bu yerel PDF açılsın mı?
 	This document is trying to open a local file:	Bu belge yerel bir dosya açmaya çalışıyor:
 	Move tag earlier	Etiketi daha erken taşı
 	Move tag later	Etiketi daha geç taşı
+	Mark as artifact	Yapıt olarak işaretle
+	Remove this leaf tag from reading order and mark its direct content as an artifact	Bu yaprak etiketini okuma sırasından kaldırın ve doğrudan içeriğini yapıt olarak işaretleyin
+	Mark content as artifact	İçeriği yapıt olarak işaretle
+	Word count	Sözcük sayısı
+	Current page only	Yalnızca geçerli sayfa
+	Exclude tagged tables	Etiketli tabloları hariç tut
+	Exclude tagged code blocks	Etiketli kod bloklarını hariç tut
+	Exclude image/OCR text	Görüntü/OCR metnini hariç tut
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	Hariç tutma işlemleri PDF etiketlerini kullanır. Etiketsiz tablolar ve kod sayılmaya devam eder. Görüntüleri hariç tutmak görünmez metni de kaldırır.
+	Words	Sözcükler
+	Characters	Karakterler
+	Characters without spaces	Boşluksuz karakterler
+	Pages counted	Sayılan sayfalar
+	Some pages contain no countable text. Scanned images need OCR first.	Bazı sayfalarda sayılabilecek metin yok. Taranmış görüntüler için önce OCR gerekir.
+	Some content could not be classified safely and was kept in the count.	Bazı içerikler güvenilir biçimde sınıflandırılamadığı için sayıma dahil edildi.
+	Counting words… {n} pages read	Sözcükler sayılıyor… {n} sayfa okundu
+	Word counting stopped unexpectedly.	Sözcük sayımı beklenmedik şekilde durdu.
+	Word count…	Sözcük sayısı…
+@id	file.word_count	Sözcük sayısı…
+	Standard	Standart
+	Mobile	Mobil
+	Merge image fragments	Görüntü parçalarını birleştir
+	Optimizing… merging image fragments	İyileştiriliyor… görüntü parçaları birleştiriliyor
+	Side by side	Yan yana
+	New file only	Yalnızca yeni dosya
+	Old file: {name}	Eski dosya: {name}
+	New file: {name}	Yeni dosya: {name}
+	Print as image	Resim olarak yazdır
+	Resolution:	Çözünürlük:
+	Use it when a printer skips text, shading or transparency. The print is no longer searchable text; with Print in grayscale, the pictures are grey.	Yazıcı metni, gölgelendirmeyi veya saydamlığı atladığında kullanın. Çıktı artık aranabilir metin değildir; gri tonlamalı yazdırmayla resimler gri olur.
+	Crop Image	Resmi kırp
+	Remove Crop	Kırpmayı kaldır
+	Trim the picture with its handles; Enter or Done applies	Resmi tutamaçlarıyla kırpın; Enter veya Bitti uygular
+	Redaction mark appearance	Karartma işareti görünümü
+	Outline colour:	Kenar rengi:
+	Fill colour:	Dolgu rengi:
+	Shown while the pointer is over a mark.	İşaretçi bir işaretin üzerindeyken gösterilir.
+	Opacity:	Opaklık:
+	Make properties default	Özellikleri varsayılan yap
+	Pages selected	Seçilen sayfalar
+	Page properties	Sayfa özellikleri
 	Attach a file…	Dosya ekle…
 	Delete attachment	Eki sil
 	Attaching files is not available on the web yet	Dosya eklemek web'de henüz kullanılamıyor

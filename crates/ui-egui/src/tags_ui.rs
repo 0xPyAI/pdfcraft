@@ -191,10 +191,14 @@ pub(crate) fn panel(ui: &mut Ui, t: &Tokens, doc: DocId, tags: &[TagInfo], state
             state.draft = Draft::from_tag(tag);
         }
     });
-    let (mut earlier, mut later) = (false, false);
+    let (mut earlier, mut later, mut artifact) = (false, false, false);
     ui.horizontal(|ui| {
         earlier = ui.add_enabled(can_edit && !dirty && before.is_some(), egui::Button::new(tl!("Move tag earlier"))).clicked();
         later = ui.add_enabled(can_edit && !dirty && after.is_some(), egui::Button::new(tl!("Move tag later"))).clicked();
+        artifact = ui
+            .add_enabled(can_edit && !dirty, egui::Button::new(tl!("Mark as artifact")))
+            .on_hover_text(tl!("Remove this leaf tag from reading order and mark its direct content as an artifact"))
+            .clicked();
     });
     (
         page,
@@ -204,6 +208,8 @@ pub(crate) fn panel(ui: &mut Ui, t: &Tokens, doc: DocId, tags: &[TagInfo], state
             before.map(|anchor| Edit::MoveTag { object: tag.object, anchor: anchor.object, placement: TagPlacement::Before })
         } else if later {
             after.map(|anchor| Edit::MoveTag { object: tag.object, anchor: anchor.object, placement: TagPlacement::After })
+        } else if artifact {
+            Some(Edit::MarkTagArtifact { object: tag.object })
         } else {
             None
         },

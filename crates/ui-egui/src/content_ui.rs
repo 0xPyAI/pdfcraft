@@ -12,7 +12,7 @@ use crate::theme::Tokens;
 use crate::widgets;
 
 /// The colour of the warning under text the standard fonts can't draw.
-const UNDRAWABLE: Color32 = Color32::from_rgb(0xD7, 0x37, 0x3F);
+pub(crate) const UNDRAWABLE: Color32 = Color32::from_rgb(0xD7, 0x37, 0x3F);
 
 /// The first character of a draft that can't be drawn, as the engine decides it (it refuses
 /// such text, #125): outside the standard fonts and not shaped with the Arabic face.
@@ -742,6 +742,11 @@ pub(crate) enum ImageAction {
     Replace,
 }
 
+// Lucide names a flip icon after the axis it draws, Acrobat names the flip after the direction the
+// picture moves: Flip horizontal (left and right swap) shows Lucide's vertical axis.
+const FLIP_HORIZONTAL_ICON: &str = "flip-vertical-2";
+const FLIP_VERTICAL_ICON: &str = "flip-horizontal-2";
+
 /// Edit image: rotate, flip, crop, replace (shown while an added image is selected).
 pub(crate) fn image_panel(ui: &mut egui::Ui, t: &Tokens, img: &pdfcraft_engine::AddedImage) -> Option<ImageAction> {
     let mut out = None;
@@ -763,11 +768,11 @@ pub(crate) fn image_panel(ui: &mut egui::Ui, t: &Tokens, img: &pdfcraft_engine::
             turn(&mut i, 3);
             out = Some(ImageAction::Update(AddedContent::Image(i.clone())));
         }
-        if crate::icons::button(ui, "flip-horizontal-2", 28.0, false, tl!("Flip horizontal")).clicked() {
+        if crate::icons::button(ui, FLIP_HORIZONTAL_ICON, 28.0, false, tl!("Flip horizontal")).clicked() {
             i.flip_h = !i.flip_h;
             out = Some(ImageAction::Update(AddedContent::Image(i.clone())));
         }
-        if crate::icons::button(ui, "flip-vertical-2", 28.0, false, tl!("Flip vertical")).clicked() {
+        if crate::icons::button(ui, FLIP_VERTICAL_ICON, 28.0, false, tl!("Flip vertical")).clicked() {
             i.flip_v = !i.flip_v;
             out = Some(ImageAction::Update(AddedContent::Image(i.clone())));
         }
@@ -794,4 +799,54 @@ pub(crate) fn image_panel(ui: &mut egui::Ui, t: &Tokens, img: &pdfcraft_engine::
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use egui_kittest::kittest::Queryable;
+
+    use super::*;
+
+    /// The image a flip button leaves behind, as the panel returns it.
+    fn flipped(tooltip: &str) -> pdfcraft_engine::AddedImage {
+        let img = pdfcraft_engine::AddedImage::new([0.0, 0.0, 100.0, 50.0], pdfcraft_cos::ObjRef::new(7, 0));
+        let mut fonts = false;
+        let mut h = egui_kittest::Harness::new_ui_state(
+            move |ui, out: &mut Option<pdfcraft_engine::AddedImage>| {
+                // The app's fonts (the semibold section title) take effect from the next frame.
+                if !fonts {
+                    ui.ctx().set_fonts(crate::theme::font_definitions());
+                    fonts = true;
+                    return;
+                }
+                let t = Tokens::get(ui.ctx());
+                if let Some(ImageAction::Update(AddedContent::Image(i))) = image_panel(ui, &t, &img) {
+                    *out = Some(i);
+                }
+            },
+            None,
+        );
+        h.run();
+        h.get_by_label(tooltip).click();
+        h.run();
+        h.state().clone().expect("the button updates the image")
+    }
+
+    #[test]
+    fn flip_buttons_show_the_mirror_axis_of_the_flip_they_make() {
+        // #1834: Acrobat's Flip horizontal swaps left and right across a vertical axis. Lucide names
+        // its flip icons after the axis drawn, so that is its flip-vertical-2.
+        let svg = |name: &str| {
+            let (_, bytes) = crate::icon_data::ICONS.iter().find(|(n, _)| *n == name).expect("bundled icon");
+            String::from_utf8_lossy(bytes).into_owned()
+        };
+        let (h, v) = (svg(FLIP_HORIZONTAL_ICON), svg(FLIP_VERTICAL_ICON));
+        assert!(h.contains("M12 2v2") && !h.contains("M4 12H2"), "Flip horizontal draws a vertical axis:\n{h}");
+        assert!(v.contains("M4 12H2") && !v.contains("M12 2v2"), "Flip vertical draws a horizontal axis:\n{v}");
+
+        let i = flipped("Flip horizontal");
+        assert!(i.flip_h && !i.flip_v, "Flip horizontal mirrors left and right");
+        let i = flipped("Flip vertical");
+        assert!(i.flip_v && !i.flip_h, "Flip vertical mirrors top and bottom");
+    }
 }

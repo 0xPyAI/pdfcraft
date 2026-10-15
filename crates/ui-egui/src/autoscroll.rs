@@ -1,6 +1,7 @@
 //! Middle-button scrolling for the document viewport: Linux latches auto-scroll, other
 //! platforms pan while the button is held. Either way the page tools never see the button,
-//! because egui's drag responses accept every pointer button.
+//! because egui's drag responses accept every pointer button. Also the edge scrolling of a
+//! text-selection drag.
 
 use egui::{Context, CursorIcon, Event, Key, PointerButton, Pos2, Stroke, Vec2, vec2};
 
@@ -187,6 +188,27 @@ impl AutoScroll {
     }
 }
 
+/// Within this distance of the viewport's top or bottom edge, a text-selection drag scrolls.
+const EDGE: f32 = 30.0;
+/// Points per second for each point the pointer is into the edge band or past the viewport.
+const EDGE_SPEED: f32 = 20.0;
+
+/// How far a selection drag scrolls this frame with the pointer at `y`, near or past the top or
+/// bottom of `viewport` (#1670); faster the farther it goes. egui's delta moves the content.
+pub(crate) fn edge_delta(y: f32, viewport: egui::Rect, dt: f32) -> f32 {
+    if !y.is_finite() || !dt.is_finite() || viewport.height() < 4.0 * EDGE {
+        return 0.0;
+    }
+    let distance = if y > viewport.bottom() - EDGE {
+        y - (viewport.bottom() - EDGE)
+    } else if y < viewport.top() + EDGE {
+        y - (viewport.top() + EDGE)
+    } else {
+        return 0.0;
+    };
+    -distance.clamp(-MAX_DISPLACEMENT, MAX_DISPLACEMENT) * EDGE_SPEED * dt.clamp(0.0, 0.05)
+}
+
 fn scroll_delta(displacement: f32, dt: f32) -> f32 {
     if !displacement.is_finite() || !dt.is_finite() {
         return 0.0;
@@ -279,6 +301,20 @@ mod tests {
             assert!(ctx.input(|i| i.key_pressed(Key::Escape)), "Escape must remain available to the existing shortcuts");
         });
         assert!(!scroll.escape(&ctx));
+    }
+
+    #[test]
+    fn edge_delta_scrolls_toward_the_edge_the_pointer_is_at() {
+        let viewport = egui::Rect::from_min_max(egui::pos2(0.0, 100.0), egui::pos2(400.0, 500.0));
+        assert_eq!(edge_delta(300.0, viewport, 0.016), 0.0, "nothing away from the edges");
+        assert!(edge_delta(495.0, viewport, 0.016) < 0.0, "the bottom edge moves the content up");
+        assert!(edge_delta(105.0, viewport, 0.016) > 0.0, "the top edge moves it down");
+        assert!(edge_delta(600.0, viewport, 0.016) < edge_delta(495.0, viewport, 0.016), "faster past the viewport");
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(edge_delta(invalid, viewport, 0.016), 0.0);
+            assert_eq!(edge_delta(495.0, viewport, invalid), 0.0);
+        }
+        assert!(edge_delta(f32::MAX, viewport, 0.016).is_finite());
     }
 
     #[test]

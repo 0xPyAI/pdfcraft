@@ -50,8 +50,12 @@ impl TextBackground {
         }
         let (Some((_, page, _)), Some(renderer)) = (self.key, self.renderer.as_ref()) else { return };
         let Some(p) = doc.info.pages.get(page) else { return };
+        // One raster stands in for the page's tiles while a paragraph is open, so everything
+        // around the editor is drawn from it: at the tiling threshold it stays sharp on a Retina
+        // display up to about 2.5x on a Letter or A4 page, where the backdrop side (2048) went
+        // soft past 1.2x.
         let max_side = ctx.input(|i| i.max_texture_side) as f32;
-        let scale = scale.min(crate::canvas::BASE_SIDE.min(max_side) / p.width.max(p.height).max(1.0));
+        let scale = scale.min(crate::canvas::TILE_THRESHOLD.min(max_side) / p.width.max(p.height).max(1.0));
         let tag = (scale * 1000.0) as u64;
         if self.tag != Some(tag) {
             renderer.set_queue(vec![pdfcraft_render::RenderRequest { page, scale, tag, ..Default::default() }]);
@@ -317,6 +321,175 @@ pub struct ImageSelection {
     pub index: usize,
     /// Dragging: the start point and, for a corner, the opposite corner (screen).
     drag: Option<(Pos2, Option<Pos2>)>,
+    /// Crop mode (Acrobat's crop handles): the box kept so far.
+    pub crop: Option<CropMode>,
+}
+
+/// Cropping a page image: the handles trim instead of resizing, the part that will go is
+/// dimmed, Enter or Done applies and Esc or Cancel leaves it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CropMode {
+    /// The box to keep (user space).
+    pub keep: [f64; 4],
+    /// A drag in progress: the grip (0–3 corners, 4–7 edges, 8 the inside), where it started
+    /// and the box then.
+    drag: Option<(usize, Pos2, [f64; 4])>,
+}
+
+impl CropMode {
+    pub fn new(keep: [f64; 4]) -> Self {
+        Self { keep, drag: None }
+    }
+}
+
+/// The screen boxes of the crop's eight handles: corners, then the top, right, bottom and left
+/// edge midpoints.
+fn crop_handles(k: Rect) -> [Pos2; 8] {
+    [k.left_top(), k.right_top(), k.left_bottom(), k.right_bottom(), k.center_top(), k.right_center(), k.center_bottom(), k.left_center()]
+}
+
+/// Crop mode for the selected image `i` whose visible frame is `b` (screen). Returns `true`
+/// (the pointer and keys are the crop's while it lasts).
+#[allow(clippy::too_many_arguments)]
+fn crop_input(
+    ui: &egui::Ui,
+    resp: &egui::Response,
+    xf: &PageXform,
+    page: usize,
+    info: &DocInfo,
+    view: &mut DocView,
+    i: usize,
+    b: Rect,
+    allow_interaction: bool,
+) -> bool {
+    let painter = ui.painter();
+    let Some(mode) = view.image_selection.as_mut().and_then(|s| s.crop.as_mut()) else { return false };
+    let hover_pos = ui.input(|inp| inp.pointer.hover_pos());
+    let keep_screen = |keep: [f64; 4]| xf.user_rect(info, page, keep.map(|v| v as f32)).intersect(b);
+    // A drag in progress moves a grip; the box stays inside the picture and at least 6 px.
+    if allow_interaction
+        && resp.drag_started()
+        && let Some(o) = ui.input(|inp| inp.pointer.press_origin())
+    {
+        let k = keep_screen(mode.keep);
+        let grip = crop_handles(k).iter().position(|h| h.distance(o) < 8.0).or_else(|| k.contains(o).then_some(8));
+        if let Some(g) = grip {
+            mode.drag = Some((g, o, mode.keep));
+        }
+    }
+    if let Some((grip, start, at_start)) = mode.drag
+        && let Some(p) = hover_pos
+    {
+        let d = p - start;
+        let k0 = keep_screen(at_start);
+        let (mut min, mut max) = (k0.min, k0.max);
+        match grip {
+            0 => {
+                min.x += d.x;
+                min.y += d.y;
+            }
+            1 => {
+                max.x += d.x;
+                min.y += d.y;
+            }
+            2 => {
+                min.x += d.x;
+                max.y += d.y;
+            }
+            3 => {
+                max.x += d.x;
+                max.y += d.y;
+            }
+            4 => min.y += d.y,
+            5 => max.x += d.x,
+            6 => max.y += d.y,
+            7 => min.x += d.x,
+            _ => {
+                let shift = egui::vec2(d.x.clamp(b.min.x - k0.min.x, b.max.x - k0.max.x), d.y.clamp(b.min.y - k0.min.y, b.max.y - k0.max.y));
+                min += shift;
+                max += shift;
+            }
+        }
+        let (min_w, min_h) = (6.0_f32.min(b.width()), 6.0_f32.min(b.height()));
+        min.x = min.x.clamp(b.min.x, b.max.x - min_w);
+        min.y = min.y.clamp(b.min.y, b.max.y - min_h);
+        max.x = max.x.clamp(min.x + min_w, b.max.x);
+        max.y = max.y.clamp(min.y + min_h, b.max.y);
+        mode.keep = user_box(xf, info, page, Rect::from_min_max(min, max));
+        if resp.drag_stopped() || !ui.input(|inp| inp.pointer.primary_down()) {
+            mode.drag = None;
+        }
+    }
+    let k = keep_screen(mode.keep);
+    // What goes is dimmed; what stays keeps its frame and handles.
+    let dim = Color32::from_black_alpha(96);
+    for r in [
+        Rect::from_min_max(b.min, Pos2::new(b.max.x, k.min.y)),
+        Rect::from_min_max(Pos2::new(b.min.x, k.max.y), b.max),
+        Rect::from_min_max(Pos2::new(b.min.x, k.min.y), Pos2::new(k.min.x, k.max.y)),
+        Rect::from_min_max(Pos2::new(k.max.x, k.min.y), Pos2::new(b.max.x, k.max.y)),
+    ] {
+        if r.is_positive() {
+            painter.rect_filled(r.intersect(xf.rect), CornerRadius::ZERO, dim);
+        }
+    }
+    painter.rect_stroke(k, CornerRadius::ZERO, Stroke::new(1.5, ACCENT), egui::StrokeKind::Outside);
+    for h in crop_handles(k) {
+        painter.rect(
+            Rect::from_center_size(h, egui::vec2(8.0, 8.0)),
+            CornerRadius::ZERO,
+            Color32::WHITE,
+            Stroke::new(1.0, ACCENT),
+            egui::StrokeKind::Middle,
+        );
+    }
+    // Done and Cancel, painted under the box (above it near the bottom of the view).
+    let font = egui::FontId::proportional(12.5);
+    let pill = |label: &str, right: f32, y: f32| -> Rect {
+        let w = painter.layout_no_wrap(label.to_string(), font.clone(), Color32::WHITE).size().x + 20.0;
+        Rect::from_min_size(Pos2::new(right - w, y), egui::vec2(w, 22.0))
+    };
+    let y = if k.max.y + 30.0 < xf.rect.max.y { k.max.y + 6.0 } else { k.min.y - 28.0 };
+    let done = pill(tl!("Done"), k.max.x, y);
+    let cancel = pill(tl!("Cancel"), done.min.x - 6.0, y);
+    let t = crate::theme::Tokens::get(ui.ctx());
+    painter.rect_filled(done, CornerRadius::same(11), ACCENT);
+    painter.text(done.center(), egui::Align2::CENTER_CENTER, tl!("Done"), font.clone(), Color32::WHITE);
+    painter.rect(cancel, CornerRadius::same(11), t.panel, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    painter.text(cancel.center(), egui::Align2::CENTER_CENTER, tl!("Cancel"), font, t.text);
+    if let Some(p) = hover_pos {
+        let icon = if let Some(g) = crop_handles(k).iter().position(|h| h.distance(p) < 8.0) {
+            match g {
+                0 | 3 => egui::CursorIcon::ResizeNwSe,
+                1 | 2 => egui::CursorIcon::ResizeNeSw,
+                4 | 6 => egui::CursorIcon::ResizeVertical,
+                _ => egui::CursorIcon::ResizeHorizontal,
+            }
+        } else if done.contains(p) || cancel.contains(p) {
+            egui::CursorIcon::PointingHand
+        } else if k.contains(p) {
+            egui::CursorIcon::Move
+        } else {
+            egui::CursorIcon::Default
+        };
+        ui.ctx().set_cursor_icon(icon);
+    }
+    let clicked = |r: Rect| allow_interaction && resp.clicked() && hover_pos.is_some_and(|p| r.contains(p));
+    let keys = |key: egui::Key| allow_interaction && ui.input(|inp| inp.key_pressed(key)) && !ui.ctx().egui_wants_keyboard_input();
+    if clicked(done) || keys(egui::Key::Enter) {
+        let keep = mode.keep;
+        if let Some(s) = view.image_selection.as_mut() {
+            s.crop = None;
+        }
+        if keep_screen(keep) != b {
+            view.pending_edit = Some(Edit::EditPageImage { page, index: i, change: pdfcraft_engine::ImageEdit::Crop(keep) });
+        }
+    } else if (clicked(cancel) || keys(egui::Key::Escape))
+        && let Some(s) = view.image_selection.as_mut()
+    {
+        s.crop = None;
+    }
+    true
 }
 
 impl ImageSelection {
@@ -362,6 +535,8 @@ pub struct BlockDrag {
 
 /// How far an edge grip reaches either side of a box's edge (screen pixels).
 const EDGE_REACH: f32 = 6.0;
+/// How far outside an open paragraph's frame the pointer still means the frame (screen pixels).
+const FRAME_REACH: f32 = 4.0;
 
 /// The rewrap handles drawn on a paragraph box's left and right edges (screen).
 fn width_handles(b: Rect) -> [Rect; 2] {
@@ -464,6 +639,9 @@ pub(crate) fn image_input(
     // The selected image: frame, corner handles, dragging.
     if let Some(i) = selected.filter(|i| boxes.get(*i).is_some_and(|b| b.is_positive())) {
         let b = boxes[i];
+        if view.image_selection.as_ref().is_some_and(|s| s.crop.is_some()) {
+            return crop_input(ui, resp, xf, page, info, view, i, b, allow_interaction);
+        }
         let corners = [b.left_top(), b.right_top(), b.left_bottom(), b.right_bottom()];
         let handles = |rect: Rect| {
             for c in [rect.left_top(), rect.right_top(), rect.left_bottom(), rect.right_bottom()] {
@@ -527,6 +705,28 @@ pub(crate) fn image_input(
             let target = Rect::from_min_max(preview.min + (raw.min - b.min) * factor, preview.min + (raw.max - b.min) * factor);
             let visible = preview.intersect(xf.rect);
             if visible.is_positive() {
+                // The pixels follow the frame: the page raster's picture of the image, stretched
+                // into the preview over a blank where it was. Re-rendering every frame of a drag
+                // would lag; the edit renders it properly on release.
+                if preview != b
+                    && let Some(tex) = view.page_raster(page)
+                {
+                    let clipped = painter.with_clip_rect(painter.clip_rect().intersect(xf.rect));
+                    clipped.rect_filled(b, CornerRadius::ZERO, Color32::WHITE);
+                    let mut mesh = egui::Mesh::with_texture(tex);
+                    for (from, to) in [
+                        (b.left_top(), preview.left_top()),
+                        (b.right_top(), preview.right_top()),
+                        (b.right_bottom(), preview.right_bottom()),
+                        (b.left_bottom(), preview.left_bottom()),
+                    ] {
+                        let (u, v) = xf.screen_to_norm(from);
+                        mesh.vertices.push(egui::epaint::Vertex { pos: to, uv: Pos2::new(u, v), color: Color32::WHITE });
+                    }
+                    mesh.add_triangle(0, 1, 2);
+                    mesh.add_triangle(0, 2, 3);
+                    clipped.add(egui::Shape::mesh(mesh));
+                }
                 painter.rect_filled(visible, CornerRadius::ZERO, ACCENT.gamma_multiply(0.04));
                 painter.rect_stroke(visible, CornerRadius::ZERO, Stroke::new(1.5, ACCENT), egui::StrokeKind::Outside);
                 handles(preview);
@@ -543,7 +743,7 @@ pub(crate) fn image_input(
             ui.ctx().set_cursor_icon(match opposite {
                 Some(fixed) if (start.x - fixed.x) * (start.y - fixed.y) < 0.0 => egui::CursorIcon::ResizeNeSw,
                 Some(_) => egui::CursorIcon::ResizeNwSe,
-                None => egui::CursorIcon::Grabbing,
+                None => egui::CursorIcon::Move,
             });
             return true;
         }
@@ -573,7 +773,7 @@ pub(crate) fn image_input(
         _ => egui::CursorIcon::PointingHand,
     });
     if resp.clicked() || resp.secondary_clicked() {
-        view.image_selection = Some(ImageSelection { page, index: hit, drag: None });
+        view.image_selection = Some(ImageSelection { page, index: hit, drag: None, crop: None });
     }
     if selected == Some(hit) {
         resp.context_menu(|ui| {
@@ -589,6 +789,21 @@ pub(crate) fn image_input(
                     view.pending_edit = change.map(|c| Edit::EditPageImage { page, index: hit, change: c });
                     ui.close();
                 }
+            }
+            // Crop: the handles trim instead of resizing until Done.
+            if ui.button(tl!("Crop Image")).clicked() {
+                if let (Some(s), Some(im)) = (view.image_selection.as_mut(), images.get(hit)) {
+                    s.crop = Some(CropMode::new(im.visible_rect.unwrap_or(im.rect)));
+                }
+                ui.close();
+            }
+            let cropped =
+                images.get(hit).is_some_and(|im| im.visible_rect.is_some_and(|v| v.iter().zip(im.rect.iter()).any(|(a, b)| (a - b).abs() > 0.01)));
+            if ui.add_enabled(cropped, egui::Button::new(tl!("Remove Crop"))).clicked() {
+                if let Some(im) = images.get(hit) {
+                    view.pending_edit = Some(Edit::EditPageImage { page, index: hit, change: E::Crop(im.rect) });
+                }
+                ui.close();
             }
             let raster = images.get(hit).is_some_and(|image| !image.is_form);
             if ui.add_enabled(raster, egui::Button::new(tl!("Replace Image…"))).clicked() {
@@ -619,6 +834,53 @@ pub(crate) fn image_input(
     true
 }
 
+/// Open `block` on `page` in the inline editor. The box's geometry and source are read from the
+/// `lines` handed in, so callers pass the document's current inventory.
+#[allow(clippy::too_many_arguments)]
+fn open_editor(
+    ui: &egui::Ui,
+    xf: &PageXform,
+    doc: &pdfcraft_engine::Document,
+    lines: &[pdfcraft_engine::TextBlock],
+    boxes: &[Rect],
+    page: usize,
+    block: usize,
+    view: &mut DocView,
+) {
+    view.pending_text_open = None;
+    let (Some(l), Some(b)) = (lines.get(block), boxes.get(block)) else { return };
+    view.image_selection = None;
+    let source_lines = doc.text_lines(page);
+    let text = l.editor_text.clone();
+    // Screen pixels per point, from the box's width.
+    let scale = (b.width() - 4.0) / ((l.rect[2] - l.rect[0]).max(1.0) as f32);
+    // How far the editor box may grow: a single-line paragraph's rewrite grows to the
+    // page's right edge, a multi-line paragraph rewraps to its own width.
+    let right = xf.rect.right().min(view.viewport_rect().right()) - 6.0;
+    let max_width = if l.rows.len() == 1 { (right - b.left()).max(b.width()) } else { b.width() };
+    view.line_editor = Some(LineEditor {
+        selection: None,
+        font_resource: None,
+        page,
+        block,
+        text: text.clone(),
+        original: text,
+        rect: *b,
+        source_rect: l.rect.map(|v| v as f32),
+        multiline: l.rows.len() > 1,
+        source: Some((l.clone(), source_lines)),
+        fonts: install_source_fonts(ui.ctx(), doc, page),
+        overflow: false,
+        max_width,
+        size: (l.size as f32 * scale).clamp(8.0, 72.0),
+        focus: true,
+        look: look_of(l),
+        look0: look_of(l),
+        extras: Extras::default(),
+        extras0: Extras::default(),
+    });
+}
+
 /// Lines and their screen boxes for a page; hover outlines, click opens the editor. Returns
 /// `true` when the pointer was used.
 #[allow(clippy::too_many_arguments)]
@@ -644,6 +906,15 @@ pub(crate) fn page_input(
         if active != Some(i) {
             painter.rect_stroke(*b, CornerRadius::same(2), Stroke::new(0.75, ACCENT.gamma_multiply(0.35)), egui::StrokeKind::Outside);
         }
+    }
+    // A box a switching click asked for opens now, once the edit queued with that click has
+    // applied and `lines`/`boxes` are the document's new inventory (#2022).
+    if allow_interaction
+        && active.is_none()
+        && let Some((open_page, block)) = view.pending_text_open
+        && open_page == page
+    {
+        open_editor(ui, xf, doc, lines, &boxes, page, block, view);
     }
     if !allow_interaction {
         return false;
@@ -672,7 +943,7 @@ pub(crate) fn page_input(
         if resizing {
             draw_handles(preview);
         }
-        ui.ctx().set_cursor_icon(if resizing { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::Grabbing });
+        ui.ctx().set_cursor_icon(if resizing { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::Move });
         if resp.drag_stopped() || !ui.input(|i| i.pointer.any_down()) {
             view.block_drag = None;
             let (from, to) = (user_box(xf, info, page, b), user_box(xf, info, page, preview));
@@ -720,39 +991,35 @@ pub(crate) fn page_input(
     if upright && active.is_none() {
         draw_handles(boxes[hit]);
     }
-    ui.ctx().set_cursor_icon(if on_edge { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::Text });
+    // A closed paragraph moves when dragged (the four-way arrow says so; a click still opens it
+    // for typing); an edge rewraps it. The open one takes the text cursor.
+    ui.ctx().set_cursor_icon(if on_edge {
+        egui::CursorIcon::ResizeHorizontal
+    } else if active.is_none() {
+        egui::CursorIcon::Move
+    } else {
+        egui::CursorIcon::Text
+    });
     if resp.clicked() {
         view.image_selection = None;
-        let l = &lines[hit];
-        let source_lines = doc.text_lines(page);
-        let text = l.editor_text.clone();
-        // Screen pixels per point, from the box's width.
-        let scale = (boxes[hit].width() - 4.0) / ((l.rect[2] - l.rect[0]).max(1.0) as f32);
-        // How far the editor box may grow: a single-line paragraph's rewrite grows to the
-        // page's right edge, a multi-line paragraph rewraps to its own width.
-        let right = xf.rect.right().min(view.viewport_rect().right()) - 6.0;
-        let max_width = if l.rows.len() == 1 { (right - boxes[hit].left()).max(boxes[hit].width()) } else { boxes[hit].width() };
-        view.line_editor = Some(LineEditor {
-            selection: None,
-            font_resource: None,
-            page,
-            block: hit,
-            text: text.clone(),
-            original: text,
-            rect: boxes[hit],
-            source_rect: l.rect.map(|v| v as f32),
-            multiline: l.rows.len() > 1,
-            source: Some((l.clone(), source_lines)),
-            fonts: install_source_fonts(ui.ctx(), doc, page),
-            overflow: false,
-            max_width,
-            size: (l.size as f32 * scale).clamp(8.0, 72.0),
-            focus: true,
-            look: look_of(l),
-            look0: look_of(l),
-            extras: Extras::default(),
-            extras0: Extras::default(),
-        });
+        // A click that moves the editor to another paragraph applies the open one first, so its
+        // typed text is not dropped with the switched-away editor (#2022). A click on the open
+        // box's own frame, which the editor's overlay does not cover, keeps it open instead.
+        if let Some(open) = view.line_editor.as_ref().filter(|e| e.has_changes()) {
+            if open.page == page && open.block == hit {
+                return true;
+            }
+            if let Some(old) = view.line_editor.take() {
+                let style = old.style();
+                if old.text != old.original || style != pdfcraft_engine::BlockStyle::default() {
+                    view.pending_edit = Some(Edit::EditTextBlock { page: old.page, block: old.block, text: old.text, style });
+                }
+            }
+            // The clicked box opens next frame, from the document with that edit applied.
+            view.pending_text_open = Some((page, hit));
+            return true;
+        }
+        open_editor(ui, xf, doc, lines, &boxes, page, hit, view);
     }
     true
 }
@@ -999,6 +1266,14 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
             // can differ from the PDF's. Keep every visible row inside the growing frame.
             let live = draft_rect.map_or(visible, |bounds| bounds.union(visible));
             ui.painter().rect_stroke(live.expand(2.0), CornerRadius::ZERO, Stroke::new(1.5, ACCENT), egui::StrokeKind::Outside);
+            // On the frame, a press takes hold of the box (a click selects it, a drag moves it):
+            // the pointer says so there, and reads as text inside.
+            if let Some(p) = ui.input(|i| i.pointer.hover_pos())
+                && live.expand(2.0 + FRAME_REACH).contains(p)
+                && !live.expand(2.0).contains(p)
+            {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
+            }
             // White, unless the text is too pale to read on white (white text from a coloured
             // banner, #913): then a dark box, with a caret that shows on it.
             let fill = if background_ready { Color32::TRANSPARENT } else { editor_fill(text_color) };
@@ -1053,16 +1328,21 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
     match done {
         Some(apply) => {
             let ed = view.line_editor.take()?;
-            let style = ed.style();
-            (apply && (ed.text != ed.original || style != pdfcraft_engine::BlockStyle::default())).then_some(Edit::EditTextBlock {
-                page: ed.page,
-                block: ed.block,
-                text: ed.text,
-                style,
-            })
+            if apply { finished_edit(ed) } else { None }
         }
         None => None,
     }
+}
+
+/// The edit a closed paragraph editor applies, or `None` when nothing in it changed.
+pub(crate) fn finished_edit(ed: LineEditor) -> Option<Edit> {
+    let style = ed.style();
+    (ed.text != ed.original || style != pdfcraft_engine::BlockStyle::default()).then_some(Edit::EditTextBlock {
+        page: ed.page,
+        block: ed.block,
+        text: ed.text,
+        style,
+    })
 }
 
 /// Caret colour that stays visible on a field filled with `fill`: black on light fills, white on dark ones.
@@ -1075,15 +1355,13 @@ pub(crate) fn caret_color_on(fill: Color32) -> Color32 {
 mod tests {
     use super::*;
 
-    #[test]
-    fn text_background_is_cached_without_editing_and_released_on_cancel() {
+    /// An app with one text document open, and an editor on its first paragraph.
+    fn preview_app() -> (crate::PdfCraftApp, LineEditor) {
         let mut app = crate::PdfCraftApp::new();
         let bytes = app.session.create_from_text("Preview", "Preview text").unwrap();
         app.open_bytes("preview.pdf", None, bytes.as_ref().clone()).unwrap();
         let doc = app.session.get(app.views[0].id).unwrap();
         let block = doc.text_blocks(0).remove(0);
-        let source = doc.bytes.clone();
-        let generation = doc.edit_generation();
         let ed = LineEditor {
             selection: None,
             font_resource: None,
@@ -1105,6 +1383,15 @@ mod tests {
             extras: Extras::default(),
             extras0: Extras::default(),
         };
+        (app, ed)
+    }
+
+    #[test]
+    fn text_background_is_cached_without_editing_and_released_on_cancel() {
+        let (app, ed) = preview_app();
+        let doc = app.session.get(app.views[0].id).unwrap();
+        let source = doc.bytes.clone();
+        let generation = doc.edit_generation();
         let ctx = egui::Context::default();
         let mut background = TextBackground::default();
         for _ in 0..100 {
@@ -1124,6 +1411,30 @@ mod tests {
         assert!(!doc.dirty && doc.can_undo().is_none());
         background.prepare(&ctx, doc, None, 1.0);
         assert!(background.texture.is_none() && background.renderer.is_none());
+    }
+
+    #[test]
+    fn the_editing_background_stays_sharp_on_a_zoomed_page() {
+        // While a paragraph is open, the page around it is drawn from this one raster: it is
+        // asked for at the tiling threshold, not the 2048-pixel backdrop side, which went soft
+        // beyond about 1.2x on a Retina display.
+        let (app, ed) = preview_app();
+        let doc = app.session.get(app.views[0].id).unwrap();
+        let page = &doc.info.pages[0];
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput { max_texture_side: Some(16384), ..Default::default() });
+        let mut background = TextBackground::default();
+        background.prepare(&ctx, doc, Some(&ed), 8.0);
+        let expected = 8.0f32.min(crate::canvas::TILE_THRESHOLD / page.width.max(page.height));
+        assert!(expected > crate::canvas::BASE_SIDE / page.width.max(page.height), "the test page needs the larger side");
+        assert_eq!(background.tag, Some((expected * 1000.0) as u64));
+        // A GPU that can't hold such a texture caps it.
+        ctx.end_pass().textures_delta.clear();
+        ctx.begin_pass(egui::RawInput { max_texture_side: Some(2048), ..Default::default() });
+        let mut small = TextBackground::default();
+        small.prepare(&ctx, doc, Some(&ed), 8.0);
+        assert_eq!(small.tag, Some(((2048.0 / page.width.max(page.height)) * 1000.0) as u64));
+        ctx.end_pass().textures_delta.clear();
     }
 
     #[test]

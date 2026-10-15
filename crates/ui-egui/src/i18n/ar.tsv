@@ -370,6 +370,7 @@
 	Split	تقسيم
 	More	المزيد
 	Set page boxes	ضبط مربعات الصفحة
+	Set page transitions	تعيين انتقالات الصفحات
 	Page labels	تسميات الصفحات
 	Page transitions	انتقالات الصفحات
 	Add comments	إضافة تعليقات
@@ -582,6 +583,7 @@
 	Remove unused objects and merge identical ones	إزالة الكائنات غير المستخدمة ودمج المتطابقة
 	Audit space usage…	تدقيق استخدام المساحة…
 	Space Audit	تدقيق المساحة
+	What takes up the space in this file, by kind of content.	ما الذي يشغل المساحة في هذا الملف، حسب نوع المحتوى.
 	Bytes	بايت
 	Content Streams	تدفقات المحتوى
 	X Object Forms	نماذج X Object
@@ -855,6 +857,12 @@
 	Windows store  ·  	مخزن Windows  ·  
 	Issued by: 	صادرة عن: 
 	, Expires: 	، تنتهي: 
+	Digitally signed by	موقع رقميا من
+	DN: 	DN: 
+	Reason: 	السبب: 
+	Location: 	الموقع: 
+	Date: 	التاريخ: 
+	The labels are in English: the signature's font can't draw them in this language.	التسميات بالإنجليزية: لا يستطيع خط التوقيع رسمها بهذه اللغة.
 	No digital IDs yet.	لا توجد معرّفات رقمية بعد.
 	Configure New Digital ID	إعداد معرّف رقمي جديد
 	Remove "{name}" from this list? The file itself is not deleted.	إزالة "{name}" من هذه القائمة؟ لن يُحذف الملف نفسه.
@@ -1146,6 +1154,7 @@
 	Redaction code:	رمز الحجب:
 	Font:	الخط:
 	Font size:	حجم الخط:
+	Font size	حجم الخط
 	Auto-size text to fit redaction region	تحجيم النص تلقائيًا ليلائم منطقة الحجب
 	Font colour:	لون الخط:
 	Repeat overlay text	تكرار نص التراكب
@@ -1286,6 +1295,7 @@
 	Copy text	نسخ النص
 	Properties…	خصائص…
 	Make Current Properties Default	جعل الخصائص الحالية افتراضية
+	Make Properties Default	جعل الخصائص افتراضية
 	More options	خيارات أخرى
 	Sort by	فرز حسب
 	Author	المؤلف
@@ -1407,6 +1417,9 @@
 	Sort comments by:	فرز التعليقات حسب:
 	Create PDF Comment Summary	إنشاء ملخص تعليقات PDF
 	Revert to the previously saved version of “{name}”? Changes since then can't be undone afterwards.	هل تريد الرجوع إلى آخر نسخة محفوظة من «{name}»؟ لا يمكن التراجع بعدها عن التغييرات التي أُجريت منذ ذلك الحين.
+	Save over the changed file?	الحفظ فوق الملف الذي تغيّر؟
+	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	تغيّر «{name}» على القرص بعد فتحه أو حفظه آخر مرة. الحفظ الآن يستبدل تلك النسخة الأحدث بهذه.
+	Save anyway	الحفظ على أي حال
 	Number pages	ترقيم الصفحات
 	Style	النمط
 	None (prefix only)	لا شيء (البادئة فقط)
@@ -1603,6 +1616,8 @@
 	Sent to {printer}	أُرسل إلى {printer}
 	Sent to {printer}: {msg}	أُرسل إلى {printer}: {msg}
 	Looking for printers…	جارٍ البحث عن الطابعات…
+	Sending sheet {s} of {n} to {printer}…	جارٍ إرسال الورقة {s} من {n} إلى {printer}…
+	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	لم يُعثر على أي طابعة. تحقّق من أن الطابعة مثبّتة وأن خدمة التخزين المؤقت للطباعة تعمل، ثم افتح «طباعة» مرة أخرى.
 	Sending to {printer}…	جارٍ الإرسال إلى {printer}…
 	Choose a folder for the searchable files	اختر مجلدًا للملفات القابلة للبحث
 	Files are combined from top to bottom. Leave Pages empty to take every page.	تُدمج الملفات من الأعلى إلى الأسفل. اترك «الصفحات» فارغًا لأخذ كل الصفحات.
@@ -2281,14 +2296,14 @@ key	Space	مسافة
 	Printer paper and scaling may differ. Check driver settings.	قد يختلف ورق الطابعة ومقياس الطباعة. تحقق من إعدادات برنامج التشغيل.
 	Drawing scale changes. Use Actual size for full-scale plans.	يتغير مقياس الرسم. استخدم الحجم الفعلي لطباعة المخططات بمقياسها الأصلي.
 	Reload documents when their files change on disk	إعادة تحميل المستندات عند تغيّر ملفاتها على القرص
-	This file changed on disk. Reload it to see the new version; your unsaved changes will be lost.	تغيّر هذا الملف على القرص. أعد تحميله لعرض النسخة الجديدة؛ ستفقد تغييراتك غير المحفوظة.
+	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	تغيّر هذا الملف على القرص. «إعادة التحميل» تعرض النسخة الجديدة وتُسقط تغييراتك غير المحفوظة؛ و«حفظ» يستبدلها بهذه النسخة.
 	Reload	إعادة تحميل
 	Couldn't reload {name}: {e}	تعذّرت إعادة تحميل {name}: {e}
 	Select page {label}	تحديد الصفحة {label}
 	Rotate page {label} counterclockwise	تدوير الصفحة {label} عكس اتجاه عقارب الساعة
 	Rotate page {label} clockwise	تدوير الصفحة {label} باتجاه عقارب الساعة
 	Delete page {label}	حذف الصفحة {label}
-	Mouse wheel scroll speed	سرعة التمرير بعجلة الماوس
+	Scroll speed (mouse wheel and arrow keys)	سرعة التمرير (عجلة الفأرة ومفاتيح الأسهم)
 scroll speed	Slow	بطيئة
 scroll speed	Normal	عادية
 scroll speed	Fast	سريعة
@@ -2371,10 +2386,55 @@ animation effects	Off	معطّلة
 # Absolute local GoToR confirmation (#1364).
 	Allow	السماح
 	Only allow this if you trust the source document.	لا تسمح بذلك إلا إذا كنت تثق بالمستند المصدر.
+	Open in Full Screen mode?	فتح في وضع ملء الشاشة؟
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	يطلب هذا المستند أن يُفتح في وضع ملء الشاشة: تملأ الصفحة الشاشة ولا يظهر شيء آخر. اضغط Esc في أي وقت للخروج منه.
+	Full Screen	ملء الشاشة
+	Not now	ليس الآن
 	Open this local PDF?	هل تريد فتح ملف PDF المحلي هذا؟
 	This document is trying to open a local file:	يحاول هذا المستند فتح ملف محلي:
 	Move tag earlier	نقل العلامة للأعلى
 	Move tag later	نقل العلامة للأسفل
+	Mark as artifact	وضع علامة كعنصر زخرفي
+	Remove this leaf tag from reading order and mark its direct content as an artifact	أزل هذه العلامة من ترتيب القراءة وضع علامة على محتواها المباشر كعنصر زخرفي
+	Mark content as artifact	وضع علامة على المحتوى كعنصر زخرفي
+	Word count	عدد الكلمات
+	Current page only	الصفحة الحالية فقط
+	Exclude tagged tables	استبعاد الجداول الموسومة
+	Exclude tagged code blocks	استبعاد كتل التعليمات البرمجية الموسومة
+	Exclude image/OCR text	استبعاد نص الصور والتعرف الضوئي على الحروف
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	تعتمد الاستثناءات على وسوم PDF. تبقى الجداول والتعليمات البرمجية غير الموسومة ضمن العدد. يستبعد خيار الصور النص غير المرئي أيضًا.
+	Words	الكلمات
+	Characters	الأحرف
+	Characters without spaces	الأحرف دون مسافات
+	Pages counted	الصفحات المحسوبة
+	Some pages contain no countable text. Scanned images need OCR first.	لا تحتوي بعض الصفحات على نص قابل للعد. تتطلب الصور الممسوحة ضوئيًا التعرف الضوئي على الحروف أولًا.
+	Some content could not be classified safely and was kept in the count.	تعذر تصنيف بعض المحتوى بشكل موثوق، لذا بقي ضمن العدد.
+	Counting words… {n} pages read	جارٍ عد الكلمات… تمت قراءة {n} من الصفحات
+	Word counting stopped unexpectedly.	توقف عد الكلمات بشكل غير متوقع.
+	Word count…	عدد الكلمات…
+@id	file.word_count	عدد الكلمات…
+	Standard	قياسي
+	Mobile	الهاتف المحمول
+	Merge image fragments	دمج أجزاء الصور
+	Optimizing… merging image fragments	جارٍ التحسين… دمج أجزاء الصور
+	Side by side	جنبًا إلى جنب
+	New file only	الملف الجديد فقط
+	Old file: {name}	الملف القديم: {name}
+	New file: {name}	الملف الجديد: {name}
+	Print as image	الطباعة كصورة
+	Resolution:	الدقة:
+	Use it when a printer skips text, shading or transparency. The print is no longer searchable text; with Print in grayscale, the pictures are grey.	استخدمه عندما تتجاهل الطابعة النص أو التظليل أو الشفافية. لا تعود المطبوعة نصًا قابلًا للبحث؛ ومع الطباعة بتدرج الرمادي تكون الصور رمادية.
+	Crop Image	قص الصورة
+	Remove Crop	إزالة القص
+	Trim the picture with its handles; Enter or Done applies	قص الصورة بمقابضها؛ يطبّق Enter أو تم
+	Redaction mark appearance	مظهر علامة الحجب
+	Outline colour:	لون الحد الخارجي:
+	Fill colour:	لون التعبئة:
+	Shown while the pointer is over a mark.	يظهر أثناء وجود المؤشر فوق علامة.
+	Opacity:	العتامة:
+	Make properties default	جعل الخصائص افتراضية
+	Pages selected	الصفحات المحددة
+	Page properties	خصائص الصفحة
 	Attach a file…	إرفاق ملف…
 	Delete attachment	حذف المرفق
 	Attaching files is not available on the web yet	إرفاق الملفات غير متاح على الويب بعد
