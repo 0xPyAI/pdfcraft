@@ -1173,6 +1173,49 @@ fn duplicating_a_field_across_pages_shares_its_value() {
     assert!(duplicate_field(&mut doc.clone(), &name, &[7]).is_err());
 }
 
+/// Fields with the same fully qualified name are one field (§12.7.3.1): a parent whose widgets are
+/// its kids, as Duplicate Across Pages writes it, and separate field dictionaries that repeat the
+/// same `/T`, as other writers do. Filling the name fills every one of them.
+#[test]
+fn fields_sharing_a_name_take_the_same_value() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >>".into(),                         // 1
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 600 800] >>".into(),   // 2
+        "<< /Type /Page /Parent 2 0 R /Annots [7 0 R 11 0 R] >>".into(),                    // 3
+        "<< /Type /Page /Parent 2 0 R /Annots [8 0 R 9 0 R 12 0 R] >>".into(),              // 4
+        "<< /Fields [6 0 R 9 0 R 11 0 R 12 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 10 0 R >> >> >>".into(), // 5
+        "<< /FT /Tx /T (ClientName) /Kids [7 0 R 8 0 R] >>".into(),                         // 6 parent
+        "<< /Type /Annot /Subtype /Widget /Parent 6 0 R /Rect [50 700 250 720] /P 3 0 R >>".into(), // 7 its widget, page 1
+        "<< /Type /Annot /Subtype /Widget /Parent 6 0 R /Rect [50 700 250 720] /P 4 0 R >>".into(), // 8 its widget, page 2
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (ClientName) /Rect [50 600 250 620] /P 4 0 R >>".into(), // 9 same name, own field
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(), // 10
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (Agree) /V /Off /AS /Off /Rect [300 700 315 715] /P 3 0 R /AP << /N << /Yes 13 0 R /Off 14 0 R >> >> >>".into(), // 11
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (Agree) /V /Off /AS /Off /Rect [300 700 315 715] /P 4 0 R /AP << /N << /Yes 13 0 R /Off 14 0 R >> >> >>".into(), // 12
+        "<< /Length 0 >>\nstream\n\nendstream".into(),                                      // 13
+        "<< /Length 0 >>\nstream\n\nendstream".into(),                                      // 14
+    ];
+    let mut doc = document(&objs);
+    set_value(&mut doc, "ClientName", &FieldValue::Text("Ada Lovelace".into())).unwrap();
+    set_value(&mut doc, "Agree", &FieldValue::Check(true)).unwrap();
+    let doc = reopen(&doc);
+    let v = |n: u32| doc.get(ObjRef { num: n, generation: 0 }).as_dict().unwrap().get(b"V").cloned();
+    let typed = Some(Object::String(PdfString::text("Ada Lovelace")));
+    assert_eq!((v(6), v(9)), (typed.clone(), typed), "the value sits on the parent and on the field that repeats its name");
+    assert_eq!((v(7), v(8)), (None, None), "the parent's widgets carry no value of their own");
+    let all = fields(&doc);
+    let named: Vec<&Field> = all.iter().filter(|f| f.name == "ClientName").collect();
+    let widgets: Vec<&Widget> = named.iter().flat_map(|f| &f.widgets).collect();
+    assert_eq!(widgets.iter().map(|w| w.obj.num).collect::<Vec<_>>(), [7, 8, 9]);
+    for w in widgets {
+        assert!(ap(&doc, w).contains("Ada Lovelace"), "widget {} shows the value", w.obj.num);
+    }
+    let agree: Vec<&Field> = all.iter().filter(|f| f.name == "Agree").collect();
+    assert_eq!(agree.len(), 2);
+    for f in agree {
+        assert_eq!((f.value.as_slice(), f.widgets[0].state.as_deref()), (&["Yes".to_string()][..], Some("Yes")), "check box {}", f.obj.num);
+    }
+}
+
 #[test]
 fn locked_fields_only_take_unlocking() {
     let mut doc = one_page();
