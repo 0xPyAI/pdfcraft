@@ -1285,6 +1285,42 @@ fn dragging_a_tab_moves_it_and_keeps_the_same_document_active() {
     }
 }
 
+/// Regression (#2225): the drop line in front of the first tab sat half a gap outside the
+/// scroll area's clip rect and was never visible.
+#[test]
+fn the_drop_line_shows_in_front_of_the_first_tab() {
+    use egui::accesskit::Role;
+    let mut h = three_tab_harness();
+    let first = h.get_by_role_and_label(Role::Tab, "first.pdf").rect();
+    // Pixels in the strip just left of the first tab that are strongly blue (the accent line).
+    let blue_left_of = |h: &mut Harness<'static, PdfCraftApp>, rect: egui::Rect| {
+        let image = h.render().unwrap();
+        let scale = image.width() as f32 / h.ctx.content_rect().width();
+        let x0 = ((rect.left() - 3.0) * scale).max(0.0) as u32;
+        let x1 = ((rect.left() + 1.0) * scale).max(0.0) as u32;
+        let (y0, y1) = ((rect.top() * scale) as u32, (rect.bottom() * scale) as u32);
+        let mut n = 0;
+        for y in y0..y1.min(image.height()) {
+            for x in x0..x1.min(image.width()) {
+                let p = image.get_pixel(x, y).0;
+                if p[2] > 150 && p[0] < 90 && p[1] < 140 {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    let before = blue_left_of(&mut h, first);
+    // last.pdf to the left of the first tab, released not yet.
+    let to = first.left_center() - egui::vec2(10.0, 0.0);
+    drag_named_tab(&mut h, "last.pdf", to, false);
+    let during = blue_left_of(&mut h, first);
+    assert!(during > before + 10, "no drop line left of the first tab ({before} -> {during})");
+    if let Ok(dir) = std::env::var("PDFCRAFT_TAB_SHOTS") {
+        h.render().unwrap().save(format!("{dir}/dragging-to-front.png")).unwrap();
+    }
+}
+
 #[test]
 fn a_tab_dropped_where_it_was_stays_and_a_click_still_selects_it() {
     let mut h = three_tab_harness();
