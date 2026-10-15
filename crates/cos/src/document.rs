@@ -851,9 +851,10 @@ impl Document {
         self.repair_log = Arc::new(log);
     }
 
-    /// `true` when there are unsaved edits.
+    /// `true` when there are unsaved edits. Removing an `/Encrypt` dictionary written inline in
+    /// the trailer (as MuPDF writes it) changes no object, and is an edit all the same.
     pub fn is_modified(&self) -> bool {
-        !self.overlay.is_empty()
+        !self.overlay.is_empty() || self.encryption_changed
     }
 
     /// Object numbers changed since the document was opened (or last saved).
