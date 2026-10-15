@@ -278,3 +278,26 @@ fn signature_contents_stay_unencrypted() {
         assert_eq!(string(2, b"Contents"), b"Private note", "{alg:?}");
     }
 }
+
+#[test]
+fn a_nonpositive_crypt_filter_length_reads_as_the_default_key_length() {
+    // A V4 crypt filter's /Length counts bytes (≤ 32) or bits. A zero or negative value is
+    // meaningless and is read as if absent (128 bits), not multiplied into an overflow (#1816).
+    let original = protect(Algorithm::Aes128, "", "owner", -1);
+    for length in [i64::MIN, i64::MIN / 8 - 1, i64::MIN / 8, -1, 0, 16, 128] {
+        let mut doc = Document::open(Arc::new(original.clone())).unwrap();
+        let encrypt = doc.trailer().reference(b"Encrypt").unwrap();
+        doc.update_dict(encrypt, |e| {
+            let Some(Object::Dict(cf)) = e.get(b"CF") else { panic!("no /CF") };
+            let Some(Object::Dict(std_cf)) = cf.get(b"StdCF") else { panic!("no /StdCF") };
+            let (mut cf, mut std_cf) = (cf.clone(), std_cf.clone());
+            std_cf.set(b"Length".to_vec(), Object::Int(length));
+            cf.set(b"StdCF".to_vec(), Object::Dict(std_cf));
+            e.set(b"CF".to_vec(), Object::Dict(cf));
+        })
+        .unwrap();
+        let saved = write_incremental(&doc, &SaveOptions::default()).unwrap();
+        let again = Document::open(Arc::new(saved)).unwrap();
+        assert_eq!(content(&again), SECRET, "/Length {length}");
+    }
+}
