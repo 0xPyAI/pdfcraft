@@ -4270,3 +4270,47 @@ fn private_new_chinese_keyboard_input_preserves_font_layout_and_saved_pixels() {
     assert_eq!(std::fs::read(path).unwrap(), original);
     println!("verified Chinese keyboard insertion/deletion and save/reopen rendering on {pages} pages");
 }
+
+/// Moving text shows the four-way arrow wherever a drag would move it (#1520 follow-up): over a
+/// closed paragraph, on the frame of an open one, and while dragging. Inside the open one the
+/// pointer reads as text; on a closed one's edge, as the rewrap handle.
+#[test]
+fn moving_text_offers_the_four_way_arrow() {
+    let mut h = harness(2, |_| {});
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let id = h.state().views[0].id;
+    let block = h.state().session.get(id).unwrap().text_blocks(0)[0].clone();
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = r.width() / 200.0;
+    let screen = |x: f64, y: f64| egui::pos2(r.left() + x as f32 * k, r.top() + (300.0 - y as f32) * k);
+    let centre = screen((block.rect[0] + block.rect[2]) / 2.0, (block.rect[1] + block.rect[3]) / 2.0);
+    let cursor_at = |h: &mut Harness<'static, PdfCraftApp>, at: egui::Pos2| {
+        h.hover_at(at);
+        h.run_steps(2);
+        h.output().platform_output.cursor_icon
+    };
+    // A closed paragraph: a drag moves it; its left edge rewraps it.
+    assert_eq!(cursor_at(&mut h, centre), egui::CursorIcon::Move);
+    assert_eq!(cursor_at(&mut h, screen(block.rect[0], (block.rect[1] + block.rect[3]) / 2.0)), egui::CursorIcon::ResizeHorizontal);
+    // While it is being dragged.
+    h.hover_at(centre);
+    h.run_steps(1);
+    h.drag_at(centre);
+    h.run_steps(1);
+    let mid = centre + egui::vec2(20.0 * k, 10.0 * k);
+    h.hover_at(mid);
+    h.run_steps(2);
+    assert_eq!(h.output().platform_output.cursor_icon, egui::CursorIcon::Move);
+    h.drop_at(mid);
+    h.run_steps(4);
+    let moved = h.state().session.get(id).unwrap().text_blocks(0)[0].clone();
+    assert!((moved.rect[0] - block.rect[0] - 20.0).abs() < 1.5, "{:?} → {:?}", block.rect, moved.rect);
+    // Open: text inside, the frame moves it.
+    let centre = screen((moved.rect[0] + moved.rect[2]) / 2.0, (moved.rect[1] + moved.rect[3]) / 2.0);
+    click_at(&mut h, centre);
+    assert!(h.state().views[0].line_editor.is_some());
+    assert_eq!(cursor_at(&mut h, centre), egui::CursorIcon::Text);
+    let frame = screen((moved.rect[0] + moved.rect[2]) / 2.0, moved.rect[3]) - egui::vec2(0.0, 4.0);
+    assert_eq!(cursor_at(&mut h, frame), egui::CursorIcon::Move);
+}

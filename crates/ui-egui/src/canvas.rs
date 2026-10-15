@@ -28,7 +28,7 @@ const GRID_TAG: u64 = 1 << 61;
 /// The tag of a raster that is out of date (shown until its replacement arrives).
 const STALE_TAG: u64 = u64::MAX;
 /// Pages whose raster would exceed this many device pixels on a side are drawn in tiles.
-const TILE_THRESHOLD: f32 = 4096.0;
+pub(crate) const TILE_THRESHOLD: f32 = 4096.0;
 /// Base device-pixel side of a page tile. The actual side grows with the zoom
 /// ([`tile_side`]), so a zoomed viewport is covered by a few tiles instead of many.
 const TILE: u32 = 1024;

@@ -50,8 +50,12 @@ impl TextBackground {
         }
         let (Some((_, page, _)), Some(renderer)) = (self.key, self.renderer.as_ref()) else { return };
         let Some(p) = doc.info.pages.get(page) else { return };
+        // One raster stands in for the page's tiles while a paragraph is open, so everything
+        // around the editor is drawn from it: at the tiling threshold it stays sharp on a Retina
+        // display up to about 2.5x on a Letter or A4 page, where the backdrop side (2048) went
+        // soft past 1.2x.
         let max_side = ctx.input(|i| i.max_texture_side) as f32;
-        let scale = scale.min(crate::canvas::BASE_SIDE.min(max_side) / p.width.max(p.height).max(1.0));
+        let scale = scale.min(crate::canvas::TILE_THRESHOLD.min(max_side) / p.width.max(p.height).max(1.0));
         let tag = (scale * 1000.0) as u64;
         if self.tag != Some(tag) {
             renderer.set_queue(vec![pdfcraft_render::RenderRequest { page, scale, tag, ..Default::default() }]);
@@ -362,6 +366,8 @@ pub struct BlockDrag {
 
 /// How far an edge grip reaches either side of a box's edge (screen pixels).
 const EDGE_REACH: f32 = 6.0;
+/// How far outside an open paragraph's frame the pointer still means the frame (screen pixels).
+const FRAME_REACH: f32 = 4.0;
 
 /// The rewrap handles drawn on a paragraph box's left and right edges (screen).
 fn width_handles(b: Rect) -> [Rect; 2] {
@@ -565,7 +571,7 @@ pub(crate) fn image_input(
             ui.ctx().set_cursor_icon(match opposite {
                 Some(fixed) if (start.x - fixed.x) * (start.y - fixed.y) < 0.0 => egui::CursorIcon::ResizeNeSw,
                 Some(_) => egui::CursorIcon::ResizeNwSe,
-                None => egui::CursorIcon::Grabbing,
+                None => egui::CursorIcon::Move,
             });
             return true;
         }
@@ -694,7 +700,7 @@ pub(crate) fn page_input(
         if resizing {
             draw_handles(preview);
         }
-        ui.ctx().set_cursor_icon(if resizing { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::Grabbing });
+        ui.ctx().set_cursor_icon(if resizing { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::Move });
         if resp.drag_stopped() || !ui.input(|i| i.pointer.any_down()) {
             view.block_drag = None;
             let (from, to) = (user_box(xf, info, page, b), user_box(xf, info, page, preview));
@@ -742,7 +748,15 @@ pub(crate) fn page_input(
     if upright && active.is_none() {
         draw_handles(boxes[hit]);
     }
-    ui.ctx().set_cursor_icon(if on_edge { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::Text });
+    // A closed paragraph moves when dragged (the four-way arrow says so; a click still opens it
+    // for typing); an edge rewraps it. The open one takes the text cursor.
+    ui.ctx().set_cursor_icon(if on_edge {
+        egui::CursorIcon::ResizeHorizontal
+    } else if active.is_none() {
+        egui::CursorIcon::Move
+    } else {
+        egui::CursorIcon::Text
+    });
     if resp.clicked() {
         view.image_selection = None;
         let l = &lines[hit];
@@ -1021,6 +1035,14 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
             // can differ from the PDF's. Keep every visible row inside the growing frame.
             let live = draft_rect.map_or(visible, |bounds| bounds.union(visible));
             ui.painter().rect_stroke(live.expand(2.0), CornerRadius::ZERO, Stroke::new(1.5, ACCENT), egui::StrokeKind::Outside);
+            // On the frame, a press takes hold of the box (a click selects it, a drag moves it):
+            // the pointer says so there, and reads as text inside.
+            if let Some(p) = ui.input(|i| i.pointer.hover_pos())
+                && live.expand(2.0 + FRAME_REACH).contains(p)
+                && !live.expand(2.0).contains(p)
+            {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
+            }
             // White, unless the text is too pale to read on white (white text from a coloured
             // banner, #913): then a dark box, with a caret that shows on it.
             let fill = if background_ready { Color32::TRANSPARENT } else { editor_fill(text_color) };
@@ -1097,15 +1119,13 @@ pub(crate) fn caret_color_on(fill: Color32) -> Color32 {
 mod tests {
     use super::*;
 
-    #[test]
-    fn text_background_is_cached_without_editing_and_released_on_cancel() {
+    /// An app with one text document open, and an editor on its first paragraph.
+    fn preview_app() -> (crate::PdfCraftApp, LineEditor) {
         let mut app = crate::PdfCraftApp::new();
         let bytes = app.session.create_from_text("Preview", "Preview text").unwrap();
         app.open_bytes("preview.pdf", None, bytes.as_ref().clone()).unwrap();
         let doc = app.session.get(app.views[0].id).unwrap();
         let block = doc.text_blocks(0).remove(0);
-        let source = doc.bytes.clone();
-        let generation = doc.edit_generation();
         let ed = LineEditor {
             selection: None,
             font_resource: None,
@@ -1127,6 +1147,15 @@ mod tests {
             extras: Extras::default(),
             extras0: Extras::default(),
         };
+        (app, ed)
+    }
+
+    #[test]
+    fn text_background_is_cached_without_editing_and_released_on_cancel() {
+        let (app, ed) = preview_app();
+        let doc = app.session.get(app.views[0].id).unwrap();
+        let source = doc.bytes.clone();
+        let generation = doc.edit_generation();
         let ctx = egui::Context::default();
         let mut background = TextBackground::default();
         for _ in 0..100 {
@@ -1146,6 +1175,30 @@ mod tests {
         assert!(!doc.dirty && doc.can_undo().is_none());
         background.prepare(&ctx, doc, None, 1.0);
         assert!(background.texture.is_none() && background.renderer.is_none());
+    }
+
+    #[test]
+    fn the_editing_background_stays_sharp_on_a_zoomed_page() {
+        // While a paragraph is open, the page around it is drawn from this one raster: it is
+        // asked for at the tiling threshold, not the 2048-pixel backdrop side, which went soft
+        // beyond about 1.2x on a Retina display.
+        let (app, ed) = preview_app();
+        let doc = app.session.get(app.views[0].id).unwrap();
+        let page = &doc.info.pages[0];
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput { max_texture_side: Some(16384), ..Default::default() });
+        let mut background = TextBackground::default();
+        background.prepare(&ctx, doc, Some(&ed), 8.0);
+        let expected = 8.0f32.min(crate::canvas::TILE_THRESHOLD / page.width.max(page.height));
+        assert!(expected > crate::canvas::BASE_SIDE / page.width.max(page.height), "the test page needs the larger side");
+        assert_eq!(background.tag, Some((expected * 1000.0) as u64));
+        // A GPU that can't hold such a texture caps it.
+        ctx.end_pass().textures_delta.clear();
+        ctx.begin_pass(egui::RawInput { max_texture_side: Some(2048), ..Default::default() });
+        let mut small = TextBackground::default();
+        small.prepare(&ctx, doc, Some(&ed), 8.0);
+        assert_eq!(small.tag, Some(((2048.0 / page.width.max(page.height)) * 1000.0) as u64));
+        ctx.end_pass().textures_delta.clear();
     }
 
     #[test]
