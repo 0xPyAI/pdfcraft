@@ -3463,6 +3463,27 @@ fn rich_region_edits_preserve_styles_positions_and_delete_all_runs_after_reopen(
     assert_eq!(text::text_blocks(&original, 0).unwrap().len(), 3);
 }
 
+/// Two edits applied together (heading and footer edited before leaving the editor, #2198): the
+/// runs between them are unchanged and keep their own styles instead of taking the heading's.
+#[test]
+fn unchanged_runs_between_two_edits_keep_their_styles() {
+    let original = mixed_region_page();
+    let look =
+        |doc: &Document| text::text_lines(doc, 0).unwrap().into_iter().map(|l| (l.text.trim().to_string(), l.base_font, l.color)).collect::<Vec<_>>();
+    let before = look(&original);
+    let block = text::text_blocks(&original, 0).unwrap()[1].clone();
+    let mut doc = original.clone();
+    let draft = block.editor_text.replace("About", "About us").replace("footer", "footnote");
+    text::replace_block(&mut doc, 0, 1, &draft).unwrap();
+    let after = look(&reopen(&doc));
+    let style = |lines: &[(String, String, [f64; 3])], word: &str| lines.iter().find(|l| l.0 == word).map(|l| (l.1.clone(), l.2));
+    for word in ["Plain", "bold", "text."] {
+        assert_eq!(style(&after, word), style(&before, word), "{word:?} keeps its own style; lines after the edit: {after:?}");
+    }
+    assert_eq!(style(&after, "About us"), style(&before, "About"));
+    assert_eq!(style(&after, "Italic footnote"), style(&before, "Italic footer"));
+}
+
 #[test]
 fn disjoint_style_ranges_preserve_unselected_runs_and_validate_utf8_atomically() {
     let mut doc = mixed_region_page();

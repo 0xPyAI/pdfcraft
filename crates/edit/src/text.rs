@@ -270,17 +270,17 @@ pub struct TextBlock {
 }
 
 impl TextBlock {
-    /// Preserve styles outside the changed range; inserted characters inherit the surrounding
-    /// source run. Byte ranges are always UTF-8 boundaries. Linear time, including large edits.
+    /// Preserve styles outside the changed ranges; inserted characters inherit the surrounding
+    /// source run. The texts are aligned word by word, so words left untouched between two edits
+    /// keep their own runs (#2198); past [`MAX_CHANGED_WORDS`] the draft counts as one change.
+    /// Byte ranges are always UTF-8 boundaries. Linear time, including large edits.
     pub fn edited_spans(&self, draft: &str) -> Vec<(std::ops::Range<usize>, usize)> {
         if self.editor_text.len() > 4_000_000 || draft.len() > 4_000_000 {
             return vec![(0..draft.len(), self.lines.first().copied().unwrap_or(0))];
         }
         let old: Vec<_> = self.editor_text.chars().collect();
         let new: Vec<_> = draft.char_indices().collect();
-        let prefix = old.iter().zip(&new).take_while(|(a, (_, b))| *a == b).count();
-        let suffix =
-            old.iter().rev().zip(new.iter().rev()).take(old.len().min(new.len()).saturating_sub(prefix)).take_while(|(a, (_, b))| *a == b).count();
+        let chars: Vec<_> = new.iter().map(|(_, c)| *c).collect();
         let mut original = Vec::with_capacity(old.len());
         let mut span = 0;
         for (byte, _) in self.editor_text.char_indices() {
@@ -289,17 +289,36 @@ impl TextBlock {
             }
             original.push(self.spans.get(span).or_else(|| self.spans.last()).map_or(0, |(_, i)| *i));
         }
-        let inherited = original.get(prefix.saturating_sub(1)).or_else(|| original.get(prefix)).copied().unwrap_or(0);
+        let mut sources = Vec::with_capacity(new.len());
+        let slices = |text: &[char]| words(text).into_iter().map(|w| text.get(w).unwrap_or_default().to_vec()).collect::<Vec<_>>();
+        let (old_words, new_words) = (slices(&old), slices(&chars));
+        match edit_script(&old_words, &new_words, MAX_CHANGED_WORDS) {
+            Some(script) => {
+                // `(o, n)`: where the current change starts in the old and new text; `(x, y)`: where it ends.
+                let ((mut o, mut n), (mut x, mut y)) = ((0, 0), (0, 0));
+                let (mut a, mut b) = (old_words.iter(), new_words.iter());
+                for step in script {
+                    match step {
+                        Step::Keep => {
+                            replaced(&original, o, old.get(o..x).unwrap_or_default(), chars.get(n..y).unwrap_or_default(), &mut sources);
+                            let len = a.next().map_or(0, Vec::len);
+                            b.next();
+                            sources.extend(original.get(x..x.saturating_add(len)).unwrap_or_default());
+                            (x, y) = (x.saturating_add(len), y.saturating_add(len));
+                            (o, n) = (x, y);
+                        }
+                        Step::Delete => x = x.saturating_add(a.next().map_or(0, Vec::len)),
+                        Step::Insert => y = y.saturating_add(b.next().map_or(0, Vec::len)),
+                    }
+                }
+                replaced(&original, o, old.get(o..x).unwrap_or_default(), chars.get(n..y).unwrap_or_default(), &mut sources);
+            }
+            None => replaced(&original, 0, &old, &chars, &mut sources),
+        }
+        let fallback = original.first().copied().unwrap_or(0);
         let mut result: Vec<(std::ops::Range<usize>, usize)> = Vec::new();
         for (i, (byte, ch)) in new.iter().enumerate() {
-            let source = if i < prefix {
-                original.get(i).copied()
-            } else if i >= new.len().saturating_sub(suffix) {
-                original.get(old.len().saturating_sub(new.len() - i)).copied()
-            } else {
-                Some(inherited)
-            }
-            .unwrap_or(inherited);
+            let source = sources.get(i).copied().unwrap_or(fallback);
             let end = byte.saturating_add(ch.len_utf8());
             if let Some((range, _)) = result.last_mut().filter(|(_, prev)| *prev == source) {
                 range.end = end;
@@ -308,6 +327,108 @@ impl TextBlock {
             }
         }
         result
+    }
+}
+
+/// Changed words [`TextBlock::edited_spans`] aligns before it treats the draft as one change.
+/// Myers' diff costs O((N + M) · D), so bounding D keeps it linear.
+const MAX_CHANGED_WORDS: usize = 64;
+
+/// `text` split into words, each with the whitespace after it, as char ranges.
+fn words(text: &[char]) -> Vec<std::ops::Range<usize>> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (i, pair) in text.windows(2).enumerate() {
+        if let [a, b] = pair
+            && a.is_whitespace()
+            && !b.is_whitespace()
+        {
+            out.push(start..i + 1);
+            start = i + 1;
+        }
+    }
+    if start < text.len() {
+        out.push(start..text.len());
+    }
+    out
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Step {
+    Keep,
+    Delete,
+    Insert,
+}
+
+/// Myers' shortest edit script from `a` to `b`, or `None` when it takes more than `max` steps.
+fn edit_script<T: PartialEq>(a: &[T], b: &[T], max: usize) -> Option<Vec<Step>> {
+    let (n, m) = (a.len() as isize, b.len() as isize);
+    let max = max.min(a.len().saturating_add(b.len())) as isize;
+    // Furthest x reached on each diagonal k = x - y, stored at k + max + 1.
+    let at = |v: &[isize], k: isize| usize::try_from(k + max + 1).ok().and_then(|i| v.get(i).copied()).unwrap_or(0);
+    let mut v = vec![0isize; (2 * max + 3) as usize];
+    let mut trace = Vec::new();
+    for d in 0..=max {
+        trace.push(v.clone());
+        for k in (-d..=d).step_by(2) {
+            let down = k == -d || (k != d && at(&v, k - 1) < at(&v, k + 1));
+            let mut x = if down { at(&v, k + 1) } else { at(&v, k - 1) + 1 };
+            let mut y = x - k;
+            while x < n && y < m && a.get(x as usize) == b.get(y as usize) {
+                x += 1;
+                y += 1;
+            }
+            if let Some(slot) = usize::try_from(k + max + 1).ok().and_then(|i| v.get_mut(i)) {
+                *slot = x;
+            }
+            if x >= n && y >= m {
+                return Some(backtrack(&trace, n, m, max));
+            }
+        }
+    }
+    None
+}
+
+/// Walk Myers' saved frontiers back from the end to the edit script.
+fn backtrack(trace: &[Vec<isize>], n: isize, m: isize, max: isize) -> Vec<Step> {
+    let at = |v: &[isize], k: isize| usize::try_from(k + max + 1).ok().and_then(|i| v.get(i).copied()).unwrap_or(0);
+    let mut steps = Vec::new();
+    let (mut x, mut y) = (n, m);
+    for (d, v) in trace.iter().enumerate().rev() {
+        let (d, k) = (d as isize, x - y);
+        let prev_k = if k == -d || (k != d && at(v, k - 1) < at(v, k + 1)) { k + 1 } else { k - 1 };
+        let prev_x = at(v, prev_k);
+        let prev_y = prev_x - prev_k;
+        while x > prev_x && y > prev_y {
+            steps.push(Step::Keep);
+            x -= 1;
+            y -= 1;
+        }
+        if d > 0 {
+            steps.push(if x == prev_x { Step::Insert } else { Step::Delete });
+        }
+        (x, y) = (prev_x, prev_y);
+    }
+    steps.reverse();
+    steps
+}
+
+/// `old`, at char `at` of the source, became `new`: characters kept at either end keep their
+/// runs, and the rest inherit the run just before the change (or the first one it replaces).
+fn replaced(original: &[usize], at: usize, old: &[char], new: &[char], out: &mut Vec<usize>) {
+    let prefix = old.iter().zip(new).take_while(|(a, b)| a == b).count();
+    let suffix = old.iter().rev().zip(new.iter().rev()).take(old.len().min(new.len()).saturating_sub(prefix)).take_while(|(a, b)| a == b).count();
+    let start = at.saturating_add(prefix);
+    let inherited = start.checked_sub(1).and_then(|i| original.get(i)).or_else(|| original.get(start)).copied().unwrap_or(0);
+    for i in 0..new.len() {
+        let source = if i < prefix {
+            original.get(at.saturating_add(i)).copied()
+        } else if i >= new.len().saturating_sub(suffix) {
+            original.get(at.saturating_add(old.len()).saturating_sub(new.len() - i)).copied()
+        } else {
+            Some(inherited)
+        };
+        out.push(source.unwrap_or(inherited));
     }
 }
 
