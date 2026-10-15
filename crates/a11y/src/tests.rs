@@ -607,6 +607,23 @@ fn marking_a_leaf_tag_as_an_artifact_preserves_appearance_and_structure_integrit
     assert_eq!(mark_tag_artifact(&mut doc, pdfcraft_cos::ObjRef::new(7, 0)), Err(ArtifactError::NotATag(7)));
 }
 
+#[test]
+fn marking_decorative_survives_a_parent_tree_with_an_unpaired_key() {
+    // A trailing key without a value, matching the page's StructParents (#1809), and the same
+    // with no valid pair at all.
+    let tree = |nums: &str| pdf(&[format!("<< /Nums {nums} >>")], "").get(pdfcraft_cos::ObjRef::new(1, 0)).as_ref().clone();
+    for (nums, cleared) in [("[0 [7 0 R 8 0 R] 0]", "[0 [null 8 0 R] 0]"), ("[0]", "[0]")] {
+        let mut doc = figures_doc();
+        let pt = pdfcraft_cos::ObjRef::new(9, 0);
+        doc.set(pt, tree(nums));
+        let f = figures(&doc);
+        mark_decorative(&mut doc, f[0].obj).unwrap();
+        assert_eq!(figures(&doc).len(), 1, "{nums}");
+        // The pair is cleared and the unpaired key is kept as it was.
+        assert_eq!(*doc.get(pt), tree(cleared), "{nums}");
+    }
+}
+
 fn ref_(n: u32) -> Option<pdfcraft_cos::ObjRef> {
     Some(pdfcraft_cos::ObjRef::new(n, 0))
 }

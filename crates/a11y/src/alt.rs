@@ -414,12 +414,11 @@ fn clear_parent_tree(doc: &mut Document, key: i64, obj: ObjRef) -> Result<(), Al
     let Some(pt) = tree_root(doc).and_then(|r| r.get(b"ParentTree").and_then(Object::as_ref)) else { return Ok(()) };
     let Some(nums) = doc.get(pt).as_dict().and_then(|d| d.get(b"Nums").and_then(|n| n.as_array().cloned())) else { return Ok(()) };
     let mut nums = nums;
-    for pair in nums.chunks_mut(2) {
-        if pair[0].as_int() == Some(key) {
-            match &pair[1] {
-                Object::Array(a) => {
-                    pair[1] = Object::Array(a.iter().map(|x| if x.as_ref() == Some(obj) { Object::Null } else { x.clone() }).collect())
-                }
+    // Whole pairs only: a trailing key without a value maps nothing, so it is left as it is.
+    for [k, v] in nums.as_chunks_mut::<2>().0 {
+        if k.as_int() == Some(key) {
+            match &*v {
+                Object::Array(a) => *v = Object::Array(a.iter().map(|x| if x.as_ref() == Some(obj) { Object::Null } else { x.clone() }).collect()),
                 Object::Ref(r) => {
                     if let Some(a) = doc.get(*r).as_array().cloned() {
                         let a: Vec<Object> = a.iter().map(|x| if x.as_ref() == Some(obj) { Object::Null } else { x.clone() }).collect();
