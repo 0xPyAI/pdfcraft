@@ -27,6 +27,31 @@ pub enum AltError {
     Cos(#[from] pdfcraft_cos::CosError),
 }
 
+/// Why a structure tag cannot safely become an artifact.
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum ArtifactError {
+    #[error("the document has no tags")]
+    Untagged,
+    #[error("object {0} is not a reachable indirect structure tag")]
+    NotATag(u32),
+    #[error("the tag has child structure elements; mark a leaf tag instead")]
+    HasChildren,
+    #[error("the tag has no direct marked content")]
+    NoMarkedContent,
+    #[error("the tag has no page")]
+    NoPage,
+    #[error("the tag's marked content was not found on its page")]
+    ContentNotFound,
+    #[error("the tag has no removable structure-tree parent")]
+    NoParent,
+    #[error("the parent must list the tag exactly once")]
+    AmbiguousParent,
+    #[error("couldn't update the parent tree: {0}")]
+    ParentTree(String),
+    #[error(transparent)]
+    Cos(#[from] pdfcraft_cos::CosError),
+}
+
 pub(crate) fn tree_root(doc: &Document) -> Option<Dict> {
     let cat = doc.root().and_then(|r| doc.get(r).as_dict().cloned())?;
     cat.get(b"StructTreeRoot").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned())
@@ -302,6 +327,85 @@ pub fn mark_decorative(doc: &mut Document, obj: ObjRef) -> Result<(), AltError> 
             doc.update_dict(parent, |p| p.set(b"K".to_vec(), k))?;
         }
     }
+    Ok(())
+}
+
+/// Mark a leaf structure tag's directly owned marked content as an artifact.
+///
+/// This deliberately refuses a tag with child structure elements. Converting a parent would
+/// otherwise silently discard semantic descendants. The visible page content is preserved: each
+/// matching marked-content sequence changes from `BDC` with an MCID to `/Artifact BMC`.
+pub fn mark_tag_artifact(doc: &mut Document, obj: ObjRef) -> Result<(), ArtifactError> {
+    tree_root(doc).ok_or(ArtifactError::Untagged)?;
+    let elements = elements(doc);
+    let Some(element) = elements.iter().find(|e| e.object == obj) else { return Err(ArtifactError::NotATag(obj.num)) };
+    if has_child_structure(doc, &element.dict) {
+        return Err(ArtifactError::HasChildren);
+    }
+    let ids: HashSet<i64> = mcids(&element.dict).into_iter().collect();
+    if ids.is_empty() {
+        return Err(ArtifactError::NoMarkedContent);
+    }
+    let pages = pdfcraft_model::pages(doc);
+    let page_ref = element.page.ok_or(ArtifactError::NoPage)?;
+    let page = pages.iter().find(|page| page.obj == page_ref).ok_or(ArtifactError::NoPage)?;
+    let mut ops = pdfcraft_content::parse(&page_content(doc, &page.dict)).ops;
+    let mut found = HashSet::new();
+    for op in &mut ops {
+        let id = (op.op == b"BDC")
+            .then(|| match op.operands.get(1) {
+                Some(Object::Dict(mark)) => mark.get(b"MCID").and_then(Object::as_int),
+                _ => None,
+            })
+            .flatten()
+            .filter(|id| ids.contains(id));
+        if let Some(id) = id {
+            *op = pdfcraft_content::Op::new("BMC", vec![Object::name("Artifact")]);
+            found.insert(id);
+        }
+    }
+    if found != ids {
+        return Err(ArtifactError::ContentNotFound);
+    }
+    let stream = doc.add(Object::Stream(Stream::flate(Dict::new(), &pdfcraft_content::serialize_ops(&ops))));
+    doc.update_dict(page.obj, |p| p.set(b"Contents".to_vec(), Object::Ref(stream)))?;
+    if let Some(key) = page.dict.get(b"StructParents").and_then(Object::as_int) {
+        clear_parent_tree(doc, key, obj).map_err(|e| ArtifactError::ParentTree(e.to_string()))?;
+    }
+    let parent = element.dict.get(b"P").and_then(Object::as_ref).ok_or(ArtifactError::NoParent)?;
+    remove_from_parent(doc, parent, obj)?;
+    // Keep the retired object valid if another object holds an out-of-tree reference to it.
+    doc.update_dict(obj, |d| {
+        d.remove(b"P");
+    })?;
+    Ok(())
+}
+
+fn has_child_structure(doc: &Document, tag: &Dict) -> bool {
+    fn child(doc: &Document, item: &Object) -> bool {
+        match item {
+            Object::Array(items) => items.iter().any(|item| child(doc, item)),
+            Object::Ref(r) => doc.get(*r).as_dict().is_some_and(|d| d.contains(b"S")),
+            Object::Dict(d) => d.contains(b"S"),
+            _ => false,
+        }
+    }
+    tag.get(b"K").is_some_and(|items| child(doc, items))
+}
+
+fn remove_from_parent(doc: &mut Document, parent: ObjRef, obj: ObjRef) -> Result<(), ArtifactError> {
+    let kids = doc.get(parent).as_dict().and_then(|p| p.get(b"K").cloned()).ok_or(ArtifactError::NoParent)?;
+    let replacement = match kids {
+        Object::Array(items) => {
+            if items.iter().filter(|item| item.as_ref() == Some(obj)).count() != 1 {
+                return Err(ArtifactError::AmbiguousParent);
+            }
+            Object::Array(items.into_iter().filter(|item| item.as_ref() != Some(obj)).collect())
+        }
+        Object::Ref(r) if r == obj => Object::Array(Vec::new()),
+        _ => return Err(ArtifactError::NoParent),
+    };
+    doc.update_dict(parent, |p| p.set(b"K".to_vec(), replacement))?;
     Ok(())
 }
 

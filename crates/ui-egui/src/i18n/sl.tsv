@@ -2359,3 +2359,6 @@ animation effects	Off	Izklopljeni
 	This document is trying to open a local file:	Ta dokument poskuša odpreti lokalno datoteko:
 	Move tag earlier	Premakni oznako prej
 	Move tag later	Premakni oznako pozneje
+	Mark as artifact	Označi kot artefakt
+	Remove this leaf tag from reading order and mark its direct content as an artifact	Odstranite to listno oznako iz vrstnega reda branja in označite njeno neposredno vsebino kot artefakt
+	Mark content as artifact	Označi vsebino kot artefakt

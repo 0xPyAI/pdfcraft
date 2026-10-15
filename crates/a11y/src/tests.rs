@@ -591,6 +591,22 @@ fn setting_alt_text_and_marking_decorative() {
     assert!(text.contains("/Artifact BMC") && !text.contains("/MCID 0"), "{text}");
 }
 
+#[test]
+fn marking_a_leaf_tag_as_an_artifact_preserves_appearance_and_structure_integrity() {
+    let mut doc = figures_doc();
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    mark_tag_artifact(&mut doc, pdfcraft_cos::ObjRef::new(7, 0)).unwrap();
+    assert_eq!(tags(&doc).into_iter().map(|tag| tag.object.num).collect::<Vec<_>>(), [6, 8]);
+    let c = doc.resolve(doc.get(page).as_dict().unwrap().get(b"Contents").unwrap());
+    let pdfcraft_cos::Object::Stream(c) = &*c else { panic!("one content stream") };
+    let text = String::from_utf8(c.decoded().unwrap()).unwrap();
+    assert!(text.contains("/Artifact BMC") && !text.contains("/MCID 0"), "{text}");
+    let report = check(&doc, &Options { rules: [Rule::TaggedContent, Rule::FiguresAltText].into(), pages: None });
+    assert_eq!(failed(&report), Vec::<Rule>::new(), "{:?}", report.results);
+    assert_eq!(mark_tag_artifact(&mut doc, pdfcraft_cos::ObjRef::new(6, 0)), Err(ArtifactError::HasChildren));
+    assert_eq!(mark_tag_artifact(&mut doc, pdfcraft_cos::ObjRef::new(7, 0)), Err(ArtifactError::NotATag(7)));
+}
+
 fn ref_(n: u32) -> Option<pdfcraft_cos::ObjRef> {
     Some(pdfcraft_cos::ObjRef::new(n, 0))
 }

@@ -338,6 +338,27 @@ fn tags_panel_moves_a_tag_within_its_siblings() {
 }
 
 #[test]
+fn tags_panel_marks_a_leaf_tag_as_an_artifact() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("figures.pdf", None, FIGURES.to_vec()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("a11y.tags"));
+    h.run_steps(2);
+    h.get_by_label("Figure · 7").click();
+    h.run_steps(1);
+    h.get_by_label("Mark as artifact").click();
+    h.run_steps(3);
+    let s = h.state();
+    let doc = s.session.get(s.views[0].id).unwrap();
+    assert_eq!(doc.tags().into_iter().map(|tag| tag.object.num).collect::<Vec<_>>(), [6, 8]);
+    assert_eq!(doc.can_undo(), Some("Mark content as artifact"));
+}
+
+#[test]
 fn checker_finding_opens_its_structure_tag() {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
