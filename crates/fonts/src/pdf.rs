@@ -61,6 +61,9 @@ pub struct Metrics {
     code_len: usize,
     /// Valid single-character explicit mappings, preindexed once for large full CJK fonts.
     explicit_reverse: HashMap<char, u32>,
+    /// Subset CIDFontType2 only: one bit per CID (below 65 536) whose glyph has an outline in the
+    /// embedded program. See [`cids_with_outlines`].
+    outlined_cids: Vec<u64>,
 }
 
 fn nums(doc: &Document, o: Option<&Object>) -> Vec<f64> {
@@ -127,6 +130,38 @@ pub fn embedded_sfnt(doc: &Document, font: &Dict) -> Option<Vec<u8>> {
         }
     }
     None
+}
+
+/// The CIDs (below 65 536) of a Type 0 font over an embedded TrueType program whose glyph has
+/// outline data, through `/CIDToGIDMap`; empty when the program or the map can't be read.
+/// Subsetters keep glyph ids and empty the glyphs they drop, so an empty glyph is a missing one.
+fn cids_with_outlines(doc: &Document, font: &Dict) -> Vec<u64> {
+    use skrifa::raw::TableProvider as _;
+    let Some(descendant) = dict(doc, font.get(b"DescendantFonts").and_then(|o| doc.resolve(o).as_array().and_then(|a| a.first()).cloned()).as_ref())
+    else {
+        return Vec::new();
+    };
+    let Some(program) = dict(doc, descendant.get(b"FontDescriptor")).and_then(|d| d.get(b"FontFile2").cloned()) else { return Vec::new() };
+    let program = doc.resolve(&program);
+    let Object::Stream(stream) = program.as_ref() else { return Vec::new() };
+    let Ok(bytes) = stream.decoded_within(16 << 20) else { return Vec::new() };
+    let Some(loca) = skrifa::FontRef::from_index(&bytes, 0).ok().and_then(|face| face.loca(None).ok()) else { return Vec::new() };
+    let outlined = |gid: u32| loca.get_raw(gid as usize).zip(loca.get_raw(gid as usize + 1)).is_some_and(|(start, end)| end > start);
+    match descendant.get(b"CIDToGIDMap").map(|o| doc.resolve(o)).as_deref() {
+        None | Some(Object::Name(_)) => bit_set_below_64k((0..loca.len().min(0x1_0000) as u32).filter(|&gid| outlined(gid))),
+        Some(Object::Stream(map)) => {
+            let Ok(map) = map.decoded_within(1 << 17) else { return Vec::new() };
+            bit_set_below_64k(
+                map.as_chunks::<2>()
+                    .0
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, gid)| outlined(u32::from(u16::from_be_bytes(**gid))))
+                    .map(|(cid, _)| cid as u32),
+            )
+        }
+        Some(_) => Vec::new(),
+    }
 }
 
 /// Replace an existing cmap directory entry with a bounded Unicode format-12 table.
@@ -538,6 +573,7 @@ impl Metrics {
             visual_order: false,
             code_len: 1,
             explicit_reverse: (32..127u8).map(|c| (char::from(c), u32::from(c))).collect(),
+            outlined_cids: Vec::new(),
         }
     }
 
@@ -558,6 +594,9 @@ impl Metrics {
         m.bold |= bold;
         m.italic |= italic;
         m.base_font = base;
+        if m.composite && m.subset {
+            m.outlined_cids = cids_with_outlines(doc, font);
+        }
         m.code_len = match &m.codes {
             Codes::One => 1,
             Codes::Two => 2,
@@ -752,7 +791,12 @@ impl Metrics {
     fn has_glyph(&self, code: u32) -> bool {
         if self.composite {
             let cid = self.cid(code);
-            return self.cid_widths.contains_key(&cid) || self.cid_ranges.iter().any(|(a, b, _)| cid >= *a && cid <= *b) || !self.subset;
+            // A CID /W leaves out takes /DW, and Skia (Chrome) leaves out every CID of that width: for
+            // those, only the subset's program says whether the glyph is there.
+            return self.cid_widths.contains_key(&cid)
+                || self.cid_ranges.iter().any(|(a, b, _)| cid >= *a && cid <= *b)
+                || !self.subset
+                || self.outlined_cids.get(cid as usize / 64).is_some_and(|w| (*w >> (cid % 64)) & 1 == 1);
         }
         match code.checked_sub(self.first).and_then(|i| self.widths.get(i as usize)) {
             Some(w) => *w > 0.0 || code == 32,

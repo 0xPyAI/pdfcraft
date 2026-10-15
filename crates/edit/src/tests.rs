@@ -1405,6 +1405,74 @@ fn a_subset_without_a_space_glyph_keeps_its_font_when_editing_words() {
     }
 }
 
+/// A Chrome (Skia) style subset: Type0/Identity-H over a TrueType program, CID = glyph id.
+/// `/W` lists most used glyphs, writes 0 for some it dropped, and leaves `a` and `y` to `/DW`;
+/// `z` has a ToUnicode entry but no glyph in the program (its CID is past the last glyph).
+fn skia_subset_page() -> Document {
+    // Inter's glyph ids: P 375, o 790, l 736, a 507, n 773, d 597, G 141, e 614, r 852, m 766, y 998, space 1777.
+    let mut doc = text_page(
+        "BT /F3 12 Tf 72 700 Td <0177031602E001FB03050255> Tj ET \
+         BT /F3 12 Tf 72 650 Td <008D0266035402FE01FB030503E606F101FB0305025506F102FE031603540266> Tj ET",
+    );
+    let program = doc.add(Object::Stream(Stream::flate(Dict::new(), include_bytes!("../../../assets/fonts/Inter-Regular.ttf"))));
+    let unicode = doc.add(Object::Stream(Stream::flate(
+        Dict::new(),
+        b"1 begincodespacerange <0000> <FFFF> endcodespacerange 13 beginbfchar <0177> <0050> <0316> <006F> <02E0> <006C> \
+          <01FB> <0061> <0305> <006E> <0255> <0064> <008D> <0047> <0266> <0065> <0354> <0072> <02FE> <006D> <03E6> <0079> \
+          <06F1> <0020> <1000> <007A> endbfchar",
+    )));
+    let widths: Vec<Object> = [(0x8D, 746), (0x177, 639), (0x255, 612), (0x266, 583), (0x2E0, 242), (0x2FE, 876), (0x305, 591), (0x316, 600)]
+        .into_iter()
+        .chain([(0x354, 376), (0x355, 0), (0x356, 0), (0x6F1, 281)])
+        .flat_map(|(cid, width)| [Object::Int(cid), Object::Array(vec![Object::Int(width)])])
+        .collect();
+    let descriptor = Dict::from_iter([
+        (b"Type".to_vec(), Object::name("FontDescriptor")),
+        (b"FontName".to_vec(), Object::name("BAAAAA+SampleSans")),
+        (b"Flags".to_vec(), Object::Int(32)),
+        (b"FontFile2".to_vec(), Object::Ref(program)),
+    ]);
+    let cid_font = Dict::from_iter([
+        (b"Type".to_vec(), Object::name("Font")),
+        (b"Subtype".to_vec(), Object::name("CIDFontType2")),
+        (b"BaseFont".to_vec(), Object::name("BAAAAA+SampleSans")),
+        (b"CIDToGIDMap".to_vec(), Object::name("Identity")),
+        (b"DW".to_vec(), Object::Int(562)),
+        (b"W".to_vec(), Object::Array(widths)),
+        (b"FontDescriptor".to_vec(), Object::Dict(descriptor)),
+    ]);
+    let font = Dict::from_iter([
+        (b"Type".to_vec(), Object::name("Font")),
+        (b"Subtype".to_vec(), Object::name("Type0")),
+        (b"BaseFont".to_vec(), Object::name("BAAAAA+SampleSans")),
+        (b"Encoding".to_vec(), Object::name("Identity-H")),
+        (b"DescendantFonts".to_vec(), Object::Array(vec![Object::Dict(cid_font)])),
+        (b"ToUnicode".to_vec(), Object::Ref(unicode)),
+    ]);
+    let p = pdfcraft_model::pages(&doc)[0].obj;
+    let fonts = Dict::from_iter([(b"F3".to_vec(), Object::Dict(font))]);
+    doc.update_dict(p, |d| d.set(b"Resources".to_vec(), Object::Dict(Dict::from_iter([(b"Font".to_vec(), Object::Dict(fonts))])))).unwrap();
+    doc
+}
+
+#[test]
+fn a_subset_keeps_its_font_for_glyphs_left_to_the_default_width() {
+    let doc = skia_subset_page();
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["Poland", "Germany and more"]);
+    // Deleting words only, and replacing a word with one drawn elsewhere on the page (`y` and `a`
+    // have no /W entry): every glyph is in the subset, so the font stays.
+    for (block, text) in [(1, "Germany"), (0, "Germany")] {
+        let mut doc = doc.clone();
+        assert_eq!(text::replace_block(&mut doc, 0, block, text).unwrap().substituted, None, "{text}");
+        let lines = text::text_lines(&reopen(&doc), 0).unwrap();
+        assert_eq!(lines.iter().find(|l| l.text == text).unwrap().font, "F3");
+    }
+    // `z` maps to a CID the program has no glyph for: that still needs another font.
+    let mut doc = doc.clone();
+    assert!(text::replace_block(&mut doc, 0, 0, "Graz").unwrap().substituted.is_some());
+}
+
 #[test]
 fn spaces_in_another_subset_do_not_split_a_line() {
     let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Hello) Tj /F2 12 Tf ( ) Tj /F1 12 Tf (world) Tj ET");
