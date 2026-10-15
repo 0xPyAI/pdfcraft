@@ -2308,9 +2308,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // When not scrolling continuously, only one row is shown at a time: the current page, or the
     // current two-page spread (with the cover rule). These indices drive paging, which pages are
     // drawn, and the content height (#752). Empty for a document with no pages.
-    let row: Vec<usize> = if rects.is_empty() {
-        Vec::new()
-    } else {
+    let shown_row = |view: &DocView| -> Vec<usize> {
+        if rects.is_empty() {
+            return Vec::new();
+        }
         let last = rects.len() - 1;
         let cur = view.current.min(last);
         match view.layout {
@@ -2322,6 +2323,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             }
         }
     };
+    let row = shown_row(view);
     let middle_gesture = view.auto_scroll.blocks_input();
     // Not scrolling: when the whole page or spread fits, the wheel would do nothing, so it turns
     // pages instead; zoomed in far enough to pan, it pans, and at the edge it turns the page on
@@ -2422,6 +2424,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if view.fling.gliding() {
         ui.ctx().request_repaint();
     }
+    // The wheel may have turned the page above: draw the row it turned to. Measured from the old
+    // row, the jump to the new page scrolled both out of view, a blank frame on every turn forward.
+    let row = shown_row(view);
     let visible_pages: Vec<usize> = if view.continuous { (0..rects.len()).collect() } else { row.clone() };
     let (y_shift, content_h) = if view.continuous {
         (0.0, rects.iter().map(|r| r.bottom()).reduce(f32::max).map(|bottom| bottom + MARGIN).unwrap_or(0.0))
@@ -2461,9 +2466,6 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         let r = rects[page.min(rects.len() - 1)];
         let point = pos2(r.left() + fx * r.width(), r.top() - y_shift + fy * r.height());
         scroll = scroll.scroll_offset(vec2((point.x - rel.x).max(0.0), (point.y - rel.y).max(0.0)));
-    } else if edge_turned {
-        // The row above was laid out for the page before the turn: place the new one next frame.
-        ui.ctx().request_repaint();
     } else if let Some((page, frac)) = view.goto.take() {
         let page = page.min(rects.len() - 1);
         let r = rects[page];
@@ -3481,6 +3483,26 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     view.last_scroll = scroll_offset;
     let pan_held = now_settle < view.pan_hold_until;
     let (mut wanted, visible_now) = out.inner;
+    // Single-page and two-page views draw only the current row, so the next one was first asked
+    // for on the turn and showed blank paper until it rendered. Prefetch the rows either side,
+    // as continuous scrolling does for the pages just off screen.
+    if !view.continuous
+        && let (Some(&first), Some(&last)) = (visible_pages.first(), visible_pages.last())
+    {
+        let n = if view.layout == PageLayout::Single { 1 } else { 2 };
+        let max_side = ui.ctx().input(|inp| inp.max_texture_side) as f32;
+        for i in (last.saturating_add(1)..=last.saturating_add(n)).chain(first.saturating_sub(n)..first) {
+            let Some(p) = info.pages.get(i).filter(|_| !view.errors.contains_key(&i)) else { continue };
+            // As drawn: the whole page at this scale, or the backdrop of a tiled page.
+            let side = p.width.max(p.height).max(1.0);
+            wanted.push(if side * scale > TILE_THRESHOLD.min(max_side) {
+                let bs = BASE_SIDE.min(max_side) / side;
+                (i, bs, scale_tag(bs), None)
+            } else {
+                (i, scale, tag, None)
+            });
+        }
+    }
     let cur = view.current;
     wanted.sort_by_key(|w| (!visible_now.contains(&w.0), w.0.abs_diff(cur), w.3.is_some()));
     // Tiles of far-away pages are useless: free them. Tiles of an earlier zoom stay for a page
