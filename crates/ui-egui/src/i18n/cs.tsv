@@ -2285,7 +2285,7 @@ certificate	Subject	Subjekt
 
 # Digital ID errors, the Signatures panel and the certificate viewer.
 	Enter a name.	Zadejte jméno.
-	The password must have at least 6 characters.	Heslo musí mít alespoň 6 znaků.
+	The password must have at least 8 characters.	Heslo musí mít alespoň 8 znaků.
 	The passwords do not match.	Hesla se neshodují.
 	There is no folder to save the digital ID in.	Není k dispozici složka, do které by se digitální ID uložilo.
 	The password is incorrect.	Heslo není správné.

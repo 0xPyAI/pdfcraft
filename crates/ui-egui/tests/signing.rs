@@ -109,7 +109,7 @@ fn drawing_a_signature_creating_an_id_signing_and_trusting() {
     h.run_steps(1);
     field(&h, "Name").type_text("Grace Hopper");
     h.state_mut().sign_draft.as_mut().unwrap().new_id.key = 3;
-    for (label, text) in [("Password", "secret1"), ("Confirm Password", "secret1")] {
+    for (label, text) in [("Password", "secret12"), ("Confirm Password", "secret12")] {
         field(&h, label).click();
         h.run_steps(1);
         field(&h, label).type_text(text);
@@ -131,7 +131,7 @@ fn drawing_a_signature_creating_an_id_signing_and_trusting() {
     h.get_by_label("Sign").click();
     h.run_steps(3);
     h.get_by_label("The password is incorrect.");
-    h.state_mut().sign_draft.as_mut().unwrap().password = "secret1".into();
+    h.state_mut().sign_draft.as_mut().unwrap().password = "secret12".into();
     field(&h, "Reason").click();
     h.run_steps(1);
     field(&h, "Reason").type_text("I approve");

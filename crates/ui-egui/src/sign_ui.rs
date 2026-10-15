@@ -357,8 +357,10 @@ impl PdfCraftApp {
         if d.name.trim().is_empty() {
             return Err("Enter a name.".into());
         }
-        if d.password.chars().count() < 6 {
-            return Err("The password must have at least 6 characters.".into());
+        // The message is a catalogue key, so it spells the number out; keep the two in step.
+        const _: () = assert!(sign::pkcs12::MIN_PASSWORD_CHARS == 8);
+        if d.password.chars().count() < sign::pkcs12::MIN_PASSWORD_CHARS {
+            return Err("The password must have at least 8 characters.".into());
         }
         if d.password != d.confirm {
             return Err("The passwords do not match.".into());
@@ -1416,7 +1418,7 @@ mod tests {
         // P-256 keeps the test fast.
         let key = KEY_ALGORITHMS.iter().position(|k| k.1 == "p256").unwrap();
         draft.new_id =
-            NewIdDraft { name: "Grace Hopper".into(), key, password: "secret1".into(), confirm: "secret1".into(), ..NewIdDraft::default() };
+            NewIdDraft { name: "Grace Hopper".into(), key, password: "secret12".into(), confirm: "secret12".into(), ..NewIdDraft::default() };
         app.sign_draft = Some(draft);
         let i = app.create_digital_id()?;
         Ok(PathBuf::from(&app.digital_ids[i].path))
@@ -1433,7 +1435,7 @@ mod tests {
         let saved = create_in(&dir).unwrap();
         assert_eq!(saved, dir.join("Grace Hopper 3.p12"));
         assert_eq!(std::fs::read_to_string(dir.join("victim.txt")).unwrap(), "keep me");
-        assert!(sign::pkcs12::open(&std::fs::read(&saved).unwrap(), "secret1").is_ok());
+        assert!(sign::pkcs12::open(&std::fs::read(&saved).unwrap(), "secret12").is_ok());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

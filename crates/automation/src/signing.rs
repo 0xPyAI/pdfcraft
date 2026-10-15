@@ -145,8 +145,8 @@ impl Automation {
             return Err(bad("name must not be empty"));
         }
         let password = a.str("password")?;
-        if password.chars().count() < 6 {
-            return Err(bad("the password must have at least 6 characters"));
+        if password.chars().count() < sign::pkcs12::MIN_PASSWORD_CHARS {
+            return Err(bad(format!("the password must have at least {} characters", sign::pkcs12::MIN_PASSWORD_CHARS)));
         }
         let path = self.resolve(a.str("path")?, true)?;
         let key = match a.opt_str("key")?.unwrap_or("rsa2048") {

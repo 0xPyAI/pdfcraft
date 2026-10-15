@@ -1703,7 +1703,7 @@
 	The font {} isn't embedded	Šriftas {} neįdėtas
 	The metadata doesn't identify the file as {}	Metaduomenys nenurodo, kad failas atitinka {}
 	The password is incorrect.	Slaptažodis netinkamas.
-	The password must have at least 6 characters.	Slaptažodį turi sudaryti bent 6 simboliai.
+	The password must have at least 8 characters.	Slaptažodį turi sudaryti bent 8 simboliai.
 	The passwords do not match.	Slaptažodžiai nesutampa.
 	The security settings don't allow screen readers to read the text	Saugos nuostatos neleidžia ekrano skaitymo programoms skaityti teksto
 	The signature algorithm and the SignerInfo's digest algorithm name different hashes; the signature was made with the SignerInfo's.	Parašo algoritmas ir „SignerInfo“ santraukos algoritmas nurodo skirtingas maišos funkcijas; pasirašyta naudojant „SignerInfo“ nurodytą funkciją.

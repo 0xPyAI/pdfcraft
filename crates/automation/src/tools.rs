@@ -677,7 +677,7 @@ pub fn tools() -> Vec<ToolDef> {
                 "country": { "type": "string", "description": "Two-letter country code." },
                 "key": { "type": "string", "enum": ["rsa2048", "rsa3072", "rsa4096", "p256"] },
                 "years": { "type": "integer", "minimum": 1, "maximum": 50 },
-                "password": { "type": "string", "minLength": 6 },
+                "password": { "type": "string", "minLength": pdfcraft_engine::sign::pkcs12::MIN_PASSWORD_CHARS },
                 "path": { "type": "string", "description": "The .p12 file to write." },
             }),
             &["name", "password", "path"],
