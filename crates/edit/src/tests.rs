@@ -3443,3 +3443,49 @@ fn an_items_measured_face_is_the_face_it_is_written_as() {
     let courier = |italic| Family::Courier.width("Anna", 12.0, false, italic);
     assert_eq!(courier(false), courier(true));
 }
+
+#[test]
+fn page_marks_and_added_content_preserve_fractional_user_unit_matrices() {
+    for rotation in [0, 90] {
+        let mut doc = fixture();
+        let page = pdfcraft_model::pages(&doc)[2].obj;
+        doc.update_dict(page, |d| {
+            let bounds = Object::Array([0.0, 0.0, 0.1, 0.1].into_iter().map(Object::Real).collect());
+            d.set(b"MediaBox".to_vec(), bounds.clone());
+            d.set(b"CropBox".to_vec(), bounds);
+            d.set(b"UserUnit".to_vec(), Object::Int(4096));
+            d.set(b"Rotate".to_vec(), Object::Int(rotation));
+        })
+        .unwrap();
+        let mut hf = HeaderFooter::default();
+        hf.text[0] = "Matrix header".into();
+        add_header_footer(&mut doc, &[2], &hf, false, &cx()).unwrap();
+        let text = AddedText { rect: [72.0, 100.0, 200.0, 144.0], text: "Matrix text".into(), size: 12.0, ..AddedText::default() };
+        add_content(&mut doc, 2, &Content::Text(text)).unwrap();
+        let saved = reopen(&doc);
+        let contents = streams(&saved, 2);
+        for marker in ["/PCMark /HeaderFooter", "(Matrix text) Tj"] {
+            let matching: Vec<_> = contents.iter().filter(|s| s.contains(marker)).collect();
+            assert_eq!(matching.len(), 1, "{contents:?}");
+            let stream = matching[0];
+            let parsed = pdfcraft_content::parse(stream.as_bytes());
+            assert_eq!(parsed.skipped, 0);
+            let cm = parsed.ops.iter().find(|op| op.is("cm")).unwrap();
+            assert_eq!(cm.operands.len(), 6);
+            assert!(!stream[cm.span.clone()].contains('e') && !stream[cm.span.clone()].contains('E'), "PDF numbers cannot use exponents");
+            let matrix = cm.nums::<6>().unwrap();
+            let expected = if rotation == 0 {
+                [0.000244140625, 0.0, 0.0, 0.000244140625, 0.0, 0.0]
+            } else {
+                [0.0, 0.000244140625, -0.000244140625, 0.0, 0.1, 0.0]
+            };
+            assert_eq!(matrix, expected, "rotation={rotation}, stream={stream}");
+            // A fixed physical display point must remain at its intended raw page position.
+            let raw = [matrix[0] * 72.0 + matrix[2] * 144.0 + matrix[4], matrix[1] * 72.0 + matrix[3] * 144.0 + matrix[5]];
+            let expected_raw = if rotation == 0 { [0.017578125, 0.03515625] } else { [0.06484375, 0.017578125] };
+            for (actual, expected) in raw.into_iter().zip(expected_raw) {
+                assert!((actual - expected).abs() < 1e-12);
+            }
+        }
+    }
+}

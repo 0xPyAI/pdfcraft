@@ -643,3 +643,52 @@ fn paper_matching_accepts_rounded_metric_sizes_but_not_custom_or_invalid_sizes()
         assert_eq!(matching_paper(size), None);
     }
 }
+
+#[test]
+fn imposed_pages_preserve_large_user_unit_matrices() {
+    let (unit, mode) = (75000.0, SizeMode::Fit);
+    let mut doc = fixture(1);
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    doc.update_dict(page, |d| d.set(b"UserUnit".to_vec(), Object::Real(unit))).unwrap();
+    let out = impose(&doc, &Settings { content: Content::Document, ..settings(vec![0], Layout::Size(mode)) }).unwrap();
+    let printed = Document::open(Arc::new(out)).unwrap();
+    let page = &pdfcraft_model::pages(&printed)[0];
+    let contents = printed.resolve(page.dict.get(b"Contents").unwrap());
+    let Object::Stream(stream) = &*contents else { panic!("sheet content") };
+    let bytes = stream.decoded().unwrap();
+    let parsed = pdfcraft_content::parse(&bytes);
+    assert_eq!(parsed.skipped, 0);
+    let cms: Vec<_> = parsed.ops.iter().filter(|op| op.is("cm")).collect();
+    assert_eq!(cms.len(), 2, "placement and source-to-display matrices");
+    let normalized = f64::from(unit as f32);
+    let scale = if mode == SizeMode::Actual { 1.0 } else { 756.0 / (300.0 * normalized) };
+    let expected = [
+        [scale, 0.0, 0.0, scale, 306.0 - 100.0 * normalized * scale, 396.0 - 150.0 * normalized * scale],
+        [normalized, 0.0, 0.0, normalized, 0.0, 0.0],
+    ];
+    for (cm, expected) in cms.iter().zip(expected) {
+        assert_eq!(cm.operands.len(), 6);
+        assert!(!bytes[cm.span.clone()].contains(&b'e') && !bytes[cm.span.clone()].contains(&b'E'));
+        for (actual, expected) in cm.nums::<6>().unwrap().into_iter().zip(expected) {
+            assert!((actual - expected).abs() <= 1e-12 * expected.abs(), "unit={unit}: {actual} != {expected}");
+        }
+    }
+    let clip = parsed.ops.iter().find(|op| op.is("re")).unwrap();
+    assert_eq!(clip.operands.len(), 4);
+    let rect = clip.nums::<4>().unwrap();
+    assert_eq!(rect, [0.0, 0.0, 200.0 * normalized, 300.0 * normalized]);
+    assert!(rect[2] > 0.0 && rect[3] > 0.0, "the clip must retain the visible page");
+    let clip_tokens = std::str::from_utf8(&bytes[clip.span.clone()]).unwrap();
+    assert!(clip_tokens.split_whitespace().take(4).all(|token| !token.contains('e') && !token.contains('E')));
+    let apply = |m: [f64; 6], p: [f64; 2]| [m[0] * p[0] + m[2] * p[1] + m[4], m[1] * p[0] + m[3] * p[1] + m[5]];
+    let to_sheet = |p| apply(cms[0].nums::<6>().unwrap(), apply(cms[1].nums::<6>().unwrap(), p));
+    let mut anchors = vec![([100.0, 150.0], [306.0, 396.0])];
+    if mode == SizeMode::Fit {
+        anchors.extend([([0.0, 0.0], [54.0, 18.0]), ([200.0, 300.0], [558.0, 774.0])]);
+    }
+    for (raw, expected) in anchors {
+        for (actual, expected) in to_sheet(raw).into_iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-9, "unit={unit}: {actual} != {expected}");
+        }
+    }
+}

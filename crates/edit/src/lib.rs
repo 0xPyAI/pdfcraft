@@ -172,6 +172,13 @@ pub struct Context {
     pub date: (i64, u32, u32),
 }
 
+// Model-derived transforms can contain tiny scale factors; retain their PDF decimal precision.
+fn matrix_number(value: f64) -> String {
+    let mut bytes = Vec::new();
+    pdfcraft_cos::serialize(&Object::Real(value), &mut bytes);
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
 fn n(v: f64) -> String {
     let s = format!("{:.3}", if v.abs() < 5e-4 { 0.0 } else { v });
     let s = s.trim_end_matches('0').trim_end_matches('.');
@@ -365,12 +372,12 @@ fn begin(kind: MarkKind, subtype: &str, matrix: [f64; 6]) -> String {
     format!(
         "q\n/Artifact <</Type /Pagination /Subtype /{subtype} /PCMark /{}>> BDC\n{} {} {} {} {} {} cm\n",
         kind.tag(),
-        n(matrix[0]),
-        n(matrix[1]),
-        n(matrix[2]),
-        n(matrix[3]),
-        n(matrix[4]),
-        n(matrix[5])
+        matrix_number(matrix[0]),
+        matrix_number(matrix[1]),
+        matrix_number(matrix[2]),
+        matrix_number(matrix[3]),
+        matrix_number(matrix[4]),
+        matrix_number(matrix[5])
     )
 }
 

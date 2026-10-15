@@ -506,6 +506,13 @@ pub fn layout(sizes: &[(f64, f64)], settings: &Settings) -> Result<Vec<Sheet>, P
     Ok(sheets)
 }
 
+// Model-derived transforms and clipping bounds need their full PDF decimal precision.
+fn geometry_number(value: f64) -> String {
+    let mut bytes = Vec::new();
+    pdfcraft_cos::serialize(&Object::Real(value), &mut bytes);
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
 fn n(v: f64) -> String {
     let s = format!("{v:.4}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
@@ -669,22 +676,22 @@ pub fn impose(src: &Document, settings: &Settings) -> Result<Vec<u8>, PrintError
             let [x0, y0, x1, y1] = pl.clip;
             c.push_str(&format!(
                 "q {} {} {} {} {} {} cm {} {} {} {} re W n {} {} {} {} {} {} cm /{name} Do Q\n",
-                n(a),
-                n(b),
-                n(cc),
-                n(d),
-                n(e),
-                n(f),
-                n(x0),
-                n(y0),
-                n(x1 - x0),
-                n(y1 - y0),
-                n(ua),
-                n(ub),
-                n(uc),
-                n(ud),
-                n(ue),
-                n(uf)
+                geometry_number(a),
+                geometry_number(b),
+                geometry_number(cc),
+                geometry_number(d),
+                geometry_number(e),
+                geometry_number(f),
+                geometry_number(x0),
+                geometry_number(y0),
+                geometry_number(x1 - x0),
+                geometry_number(y1 - y0),
+                geometry_number(ua),
+                geometry_number(ub),
+                geometry_number(uc),
+                geometry_number(ud),
+                geometry_number(ue),
+                geometry_number(uf)
             ));
         }
         if !sheet.borders.is_empty() || !sheet.lines.is_empty() {
