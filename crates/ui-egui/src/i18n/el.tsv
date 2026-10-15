@@ -1619,6 +1619,8 @@
 	Switch to List view to change the pages it takes.	Μεταβείτε στην προβολή λίστας για να αλλάξετε ποιες σελίδες θα συμπεριληφθούν.
 	Expand all	Ανάπτυξη όλων
 	Collapse all	Σύμπτυξη όλων
+	Collapse all pages	Σύμπτυξη όλων των σελίδων
+	Expand all pages	Ανάπτυξη όλων των σελίδων
 	Remove {n} pages	Αφαίρεση {n} σελίδων
 	Add an image field	Προσθήκη πεδίου εικόνας
 	Add a date field	Προσθήκη πεδίου ημερομηνίας

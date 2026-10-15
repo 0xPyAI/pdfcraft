@@ -2397,6 +2397,8 @@ key	Space	Espacio
 	Switch to List view to change the pages it takes.	Cambia a la vista de lista para cambiar las páginas que se incluyen.
 	Expand all	Expandir todo
 	Collapse all	Contraer todo
+	Collapse all pages	Contraer todas las páginas
+	Expand all pages	Expandir todas las páginas
 	Remove page	Quitar página
 	Remove {n} pages	Quitar {n} páginas
 

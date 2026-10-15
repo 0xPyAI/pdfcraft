@@ -2261,6 +2261,8 @@ key	Space	Leertaste
 	Switch to List view to change the pages it takes.	Wechsle zur Listenansicht, um die übernommenen Seiten zu ändern.
 	Expand all	Alle ausklappen
 	Collapse all	Alle einklappen
+	Collapse all pages	Alle Seiten einklappen
+	Expand all pages	Alle Seiten ausklappen
 	Remove page	Seite entfernen
 	Remove {n} pages	{n} Seiten entfernen
 

@@ -2215,6 +2215,8 @@ key	Space	Boşluk
 	Some bookmarks are not shown here: the panel lists a limited number, nested a limited depth.	Bazı yer imleri burada gösterilmiyor: panel sınırlı sayıda ve sınırlı derinlikte listeler.
 	Expand all	Tümünü genişlet
 	Collapse all	Tümünü daralt
+	Collapse all pages	Tüm sayfaları daralt
+	Expand all pages	Tüm sayfaları genişlet
 	Remove page	Sayfayı kaldır
 	Remove {n} pages	{n} sayfayı kaldır
 

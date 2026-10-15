@@ -2280,6 +2280,8 @@ key	Space	Пробіл
 	Switch to List view to change the pages it takes.	Перейдіть до вигляду списком, щоб змінити, які сторінки взяти.
 	Expand all	Розгорнути всі
 	Collapse all	Згорнути всі
+	Collapse all pages	Згорнути всі сторінки
+	Expand all pages	Розгорнути всі сторінки
 	Remove page	Видалити сторінку
 	Remove {n} pages	Видалити сторінки: {n}
 

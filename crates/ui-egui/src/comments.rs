@@ -481,6 +481,8 @@ pub struct CommentView {
     pub hidden_checks: Vec<String>,
     /// How the panel orders comments.
     pub sort: SortBy,
+    /// Pages whose group is folded in the panel (when sorted by page).
+    pub collapsed_pages: Vec<usize>,
     /// Comment Properties was asked for from the panel: (page, index).
     pub props_request: Option<(usize, usize)>,
     /// Make Current Properties Default was asked for: (page, index).

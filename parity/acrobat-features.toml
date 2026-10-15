@@ -3553,8 +3553,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["comment.list"]
 tools = ["comment_list"]
-evidence = ["crates/ui-egui/tests/ui.rs::opening_a_pdf_shows_comments_and_bookmarks", "crates/ui-egui/tests/comments.rs::the_panel_posts_comments_and_replies"]
-notes = "cards grouped by page with replies, status badges, selection, reply box and an Add a comment box"
+evidence = ["crates/ui-egui/tests/ui.rs::opening_a_pdf_shows_comments_and_bookmarks", "crates/ui-egui/tests/comments.rs::the_panel_posts_comments_and_replies", "crates/ui-egui/tests/comments.rs::page_groups_collapse_and_expand"]
+notes = "cards grouped by page with replies, status badges, selection, reply box and an Add a comment box; page groups fold and unfold from their chevron or with Collapse/Expand all pages in the panel's \"…\" menu (a comment selected on a folded page opens its group). Groups by author, type or colour don't fold yet"
 
 [[feature]]
 id = "comment.appearance-generation"

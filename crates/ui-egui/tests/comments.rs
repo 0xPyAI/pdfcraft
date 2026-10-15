@@ -735,6 +735,61 @@ fn the_panel_filters_and_sorts() {
     assert_eq!(h.query_all_by_label("Oval").count(), ovals + 1, "a group header was added");
 }
 
+/// #1554: a page group's chevron folds that page's cards away and back, and the choice holds.
+#[test]
+fn page_groups_collapse_and_expand() {
+    let mut h = harness(|app| app.set_option("panel", "comments").unwrap());
+    for (page, text) in [(0, "First page note"), (1, "Second page note")] {
+        let shape = pdfcraft_engine::Shape::Note { at: [100.0, 100.0], icon: pdfcraft_engine::NoteIcon::Comment };
+        h.state_mut().apply_edit(pdfcraft_engine::Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
+            page,
+            style: pdfcraft_engine::Style::default_for(&shape),
+            shape,
+            contents: text.into(),
+            author: "Tester".into(),
+        }));
+    }
+    h.state_mut().views[0].comments.selected = None;
+    h.run_steps(3);
+    let shown = |h: &Harness<'static, PdfCraftApp>, text: &str| h.query_all_by_label_contains(text).count() > 0;
+    assert!(shown(&h, "First page note") && shown(&h, "Second page note"));
+    assert_eq!(h.query_all_by_label("Collapse").count(), 2, "one chevron per page group");
+
+    h.query_all_by_label("Collapse").next().unwrap().click();
+    h.run_steps(3);
+    assert!(!shown(&h, "First page note"), "page 1's card is folded away");
+    assert!(shown(&h, "Second page note"), "page 2 stays open");
+    h.run_steps(5);
+    assert!(!shown(&h, "First page note"), "the group stays folded on later frames");
+
+    h.get_by_label("Expand").click();
+    h.run_steps(3);
+    assert!(shown(&h, "First page note"), "page 1's card is back");
+
+    // Selecting a comment on a folded page opens its group so the card can be shown.
+    h.query_all_by_label("Collapse").next().unwrap().click();
+    h.run_steps(3);
+    assert!(!shown(&h, "First page note"));
+    h.state_mut().views[0].comments.selected = Some((0, 0));
+    h.state_mut().views[0].comments.reveal = true;
+    h.run_steps(3);
+    assert!(shown(&h, "First page note"), "the selected comment's group opened");
+
+    // "…" ▸ Collapse all pages, then Expand all pages.
+    h.state_mut().views[0].comments.selected = None;
+    h.get_by_label("More options").click();
+    h.run_steps(2);
+    h.get_by_label("Collapse all pages").click();
+    h.run_steps(3);
+    assert!(!shown(&h, "First page note") && !shown(&h, "Second page note"), "every page is folded");
+    assert_eq!(h.query_all_by_label("Expand").count(), 2);
+    h.get_by_label("More options").click();
+    h.run_steps(2);
+    h.get_by_label("Expand all pages").click();
+    h.run_steps(3);
+    assert!(shown(&h, "First page note") && shown(&h, "Second page note"), "every page is open again");
+}
+
 #[test]
 fn comments_take_checkmarks_lock_hide_and_summarize() {
     let mut h = harness(|app| {

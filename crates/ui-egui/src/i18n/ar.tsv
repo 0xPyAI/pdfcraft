@@ -2279,6 +2279,8 @@ key	Space	مسافة
 	Switch to List view to change the pages it takes.	انتقل إلى عرض القائمة لتغيير الصفحات التي يأخذها.
 	Expand all	توسيع الكل
 	Collapse all	طي الكل
+	Collapse all pages	طي كل الصفحات
+	Expand all pages	توسيع كل الصفحات
 	Remove page	إزالة الصفحة
 	Remove {n} pages	إزالة {n} صفحات
 

@@ -2258,6 +2258,8 @@ key	Space	Espaço
 	Switch to List view to change the pages it takes.	Mude para a exibição em lista para alterar as páginas incluídas.
 	Expand all	Expandir tudo
 	Collapse all	Recolher tudo
+	Collapse all pages	Recolher todas as páginas
+	Expand all pages	Expandir todas as páginas
 	Remove page	Remover página
 	Remove {n} pages	Remover {n} páginas
 

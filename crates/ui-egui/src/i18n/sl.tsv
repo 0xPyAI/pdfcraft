@@ -2192,6 +2192,8 @@ signature pad	Type	Vtipkaj
 	Auto follows the system's text size. Pages always render at the display's full resolution.	Samodejno sledi velikosti besedila v sistemu. Strani se vedno izrišejo v polni ločljivosti zaslona.
 	Check the pages	Preveri strani
 	Collapse all	Strni vse
+	Collapse all pages	Strni vse strani
+	Expand all pages	Razširi vse strani
 	Column select	Izbira stolpcev
 	Drag the selection to move it. Esc clears the selection.	Povlecite izbor, da ga premaknete. Esc počisti izbor.
 	Expand all	Razširi vse
