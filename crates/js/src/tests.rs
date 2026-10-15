@@ -693,6 +693,20 @@ mod formcalc {
     }
 
     #[test]
+    fn date2num_rejects_days_past_the_end_of_the_month() {
+        assert_eq!(calc(r#"Date2Num("2023-02-30")"#), "0");
+        assert_eq!(calc(r#"Date2Num("31/04/2024", "DD/MM/YYYY")"#), "0");
+        assert_eq!(calc(r#"Date2Num("2023-02-29")"#), "0");
+        assert_eq!(calc(r#"Date2Num("1900-02-29")"#), "0");
+        assert_eq!(calc(r#"Parse("YYYY-MM-DD", "2023-02-30") == null"#), "1");
+        // Valid month ends still work.
+        assert_eq!(calc(r#"Date2Num("2024-02-29")"#), "45350");
+        assert_eq!(calc(r#"Date2Num("2000-02-29") <> 0"#), "1");
+        assert_eq!(calc(r#"Date2Num("2024-04-30") <> 0"#), "1");
+        assert_eq!(calc(r#"Date2Num("2024-12-31") <> 0"#), "1");
+    }
+
+    #[test]
     fn control_flow_variables_and_functions_work() {
         assert_eq!(calc("var x = 3\nif (x > 2) then 10 elseif (x > 1) then 20 else 30 endif"), "10");
         // An assignment is an expression: its value is the script's result.
