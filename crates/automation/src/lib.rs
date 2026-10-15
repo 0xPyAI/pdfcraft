@@ -37,6 +37,7 @@ use pdfcraft_platform::staging::{StagingName, staging_suffixes};
 use pdfcraft_render::{PageRenderer, PageText, RenderConfig, RenderRequest, RequestKind};
 use serde_json::{Value, json};
 
+pub use pdfcraft_render::Pixels;
 pub use tools::{ToolDef, tools};
 
 /// One piece of a tool's result.
@@ -1780,6 +1781,27 @@ impl Automation {
         }
         let data = encode_png(out.width, out.height, &out.rgba)?;
         Ok(Content::Png { data, width: out.width, height: out.height })
+    }
+
+    /// A page as RGBA pixels, without encoding a PNG. `page` is 1-based and `scale` is pixels
+    /// per point (1.0 = 72 dpi). For an embedder that paints the result straight onto a canvas:
+    /// the `page_render` tool only returns PNG, and encoding one to decode it again is wasted
+    /// work on every scroll. It uses the same renderer, and the same per-document cache, as
+    /// `page_render`.
+    pub fn render_pixels(&mut self, doc: u64, page: usize, scale: f32) -> Result<(u32, u32, pdfcraft_render::Pixels)> {
+        if !(scale.is_finite() && scale > 0.0 && scale <= (MAX_DPI / 72.0) as f32) {
+            return Err(ToolError::InvalidArgs(format!("scale must be between 0 and {}", MAX_DPI / 72.0)));
+        }
+        let id = DocId(doc);
+        let n = self.session.get(id).ok_or_else(|| failed(format!("no open document with id {doc} (see doc_list)")))?.info.pages.len();
+        if page < 1 || page > n {
+            return Err(ToolError::InvalidArgs(format!("page {page} is out of range: the document has {n} pages")));
+        }
+        let out = self.renderer(id)?.render(RenderRequest { page: page - 1, kind: RequestKind::Pixels, tile: None, scale, tag: 0, preview: false });
+        if let Some(e) = out.error {
+            return Err(failed(format!("page {page} could not be rendered: {e}")));
+        }
+        Ok((out.width, out.height, out.rgba))
     }
 
     fn page(&self, a: &Args) -> Result<usize> {

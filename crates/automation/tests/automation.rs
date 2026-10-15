@@ -245,6 +245,30 @@ fn autotag_preview_proposes_text_without_changing_the_pdf() {
 }
 
 #[test]
+fn render_pixels_agrees_with_page_render_and_skips_the_png() {
+    let dir = workdir("render-pixels");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+
+    let (width, height, pixels) = a.render_pixels(doc, 1, 1.0).unwrap();
+    let png = a.call("page_render", &json!({ "doc": doc, "page": 1, "dpi": 72 })).unwrap();
+    let Content::Png { width: png_width, height: png_height, .. } = png[0] else { panic!("expected an image") };
+    assert_eq!((width, height), (png_width, png_height), "scale 1.0 is 72 dpi, like the tool");
+    assert_eq!(pixels.as_ref().len(), width as usize * height as usize * 4, "RGBA, four bytes a pixel");
+    assert!(pixels.as_ref().as_chunks::<4>().0.iter().any(|p| p[..3] != [255, 255, 255]), "the page text is drawn, not a blank sheet");
+
+    let (double_width, _, _) = a.render_pixels(doc, 1, 2.0).unwrap();
+    assert_eq!(double_width, width * 2, "the scale is pixels per point");
+
+    for scale in [0.0_f32, -1.0, f32::NAN, f32::INFINITY, 1.0e6] {
+        assert!(matches!(a.render_pixels(doc, 1, scale), Err(ToolError::InvalidArgs(_))), "scale {scale} must be refused");
+    }
+    assert!(matches!(a.render_pixels(doc, 0, 1.0), Err(ToolError::InvalidArgs(_))), "pages are 1-based");
+    assert!(matches!(a.render_pixels(doc, 99, 1.0), Err(ToolError::InvalidArgs(_))), "a page past the end");
+    assert!(matches!(a.render_pixels(9_999, 1, 1.0), Err(ToolError::Failed(_))), "a document that is not open");
+}
+
+#[test]
 fn autotag_apply_writes_reviewable_tags_and_survives_save_reopen() {
     let dir = workdir("autotag-apply");
     let mut a = auto(&dir);
