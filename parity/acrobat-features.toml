@@ -8903,8 +8903,8 @@ milestone = "M12"
 status = "partial"
 commands = ["a11y.tags"]
 tools = ["accessibility_tags"]
-evidence = ["crates/ui-egui/tests/accessibility.rs::tags_panel_edits_a_tag_property_and_undoes_it", "crates/ui-egui/tests/accessibility.rs::checker_finding_opens_its_structure_tag"]
-notes = "The right-side Tags panel lists reachable indirect tags as a collapsible hierarchy, filters by type or title with ancestors, navigates to their page and edits properties. Checker findings linked to indirect tags open the matching tag without losing unsaved edits. Inline tags, adding/deleting tags, artifact marking and finding content remain planned in #982."
+evidence = ["crates/ui-egui/tests/accessibility.rs::tags_panel_edits_a_tag_property_and_undoes_it", "crates/ui-egui/tests/accessibility.rs::checker_finding_opens_its_structure_tag", "crates/automation/tests/automation.rs::structure_tags_are_listed_a_page_at_a_time"]
+notes = "The right-side Tags panel lists reachable indirect tags as a collapsible hierarchy, filters by type or title with ancestors, navigates to their page and edits properties. accessibility_tags lists them a page at a time (offset, limit, next) and can keep only some types, pages or depths. Checker findings linked to indirect tags open the matching tag without losing unsaved edits. Inline tags, adding/deleting tags, artifact marking and finding content remain planned in #982."
 
 [[feature]]
 id = "a11y.tag-properties"

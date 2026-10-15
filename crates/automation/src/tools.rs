@@ -992,10 +992,20 @@ pub fn tools() -> Vec<ToolDef> {
         t("accessibility_set_alt", "Set alternate text", "Set a figure's alternate text (alt; empty or omitted clears it), or mark it decorative (decorative: true: its content becomes an artifact and the figure leaves the tags). figure is a number from accessibility_figures. Returns the figures. Undoable.")
             .cmd("a11y.alt_text")
             .with(schema(json!({ "doc": doc(), "figure": { "type": "integer", "minimum": 1 }, "alt": { "type": "string" }, "decorative": { "type": "boolean" } }), &["doc", "figure"])),
-        t("accessibility_tags", "List structure tags", "List reachable indirect structure tags in document order with PDF object number, generation, nearest indirect parent, depth, page, type, title, actual text, alternate text and language. Inline tag dictionaries have no stable object reference and are not listed.")
+        t("accessibility_tags", "List structure tags", "List reachable indirect structure tags in document order with PDF object number, generation, nearest indirect parent, depth, page, type, title, actual text, alternate text and language, one page at a time: count is how many tags match, next the offset of the following page (null at the end). types, pages and max_depth keep only some tags. Inline tag dictionaries have no stable object reference and are not listed.")
             .ro()
             .cmd("a11y.tags")
-            .with(schema(json!({ "doc": doc() }), &["doc"])),
+            .with(schema(
+                json!({
+                    "doc": doc(),
+                    "offset": { "type": "integer", "minimum": 0, "description": "Where the page starts, counted from 0 (the previous page's next)" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Tags in the page (default 200)" },
+                    "types": { "type": "array", "items": { "type": "string" }, "description": "Only tags of these types, as listed in type (such as H1, H2, Table)" },
+                    "pages": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "description": "Only tags on these pages" },
+                    "max_depth": { "type": "integer", "minimum": 0, "description": "Only tags at most this deep (0 = top level)" }
+                }),
+                &["doc"],
+            )),
         t("accessibility_set_tag_property", "Edit tag property", "Set or clear one property of a reachable indirect structure tag. Use object and generation from accessibility_tags. Properties: type, title, actual_text, alternate_text, language. Empty or omitted value clears text properties; type requires a nonempty PDF name. Undoable.")
             .with(schema(json!({
                 "doc": doc(), "object": { "type": "integer", "minimum": 1 },

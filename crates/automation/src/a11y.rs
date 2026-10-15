@@ -202,6 +202,10 @@ fn review_html(record: &Value) -> Result<String> {
     Ok(html)
 }
 
+/// Tags in one page of `accessibility_tags`, by default and at most.
+const TAG_PAGE: usize = 200;
+const MAX_TAG_PAGE: usize = 1000;
+
 impl Automation {
     pub(crate) fn accessibility_autotag_apply(&mut self, a: &Args) -> Result<Value> {
         let id = self.doc(a)?.id;
@@ -441,11 +445,39 @@ impl Automation {
         self.accessibility_figures(a)
     }
 
+    /// The structure tags, one page at a time (`offset`, `limit`), optionally only some types, pages
+    /// (1-based) or depths. `count` is how many match; `next` is where the following page starts.
     pub(crate) fn accessibility_tags(&self, a: &Args) -> Result<Value> {
-        let tags: Vec<Value> = self
+        let offset = usize::try_from(a.opt_int("offset")?.unwrap_or(0)).map_err(|_| ToolError::InvalidArgs("offset must be 0 or more".into()))?;
+        let limit = a.opt_int("limit")?.unwrap_or(TAG_PAGE as i64);
+        let limit = usize::try_from(limit)
+            .ok()
+            .filter(|l| (1..=MAX_TAG_PAGE).contains(l))
+            .ok_or_else(|| ToolError::InvalidArgs(format!("limit must be from 1 to {MAX_TAG_PAGE}")))?;
+        let types: Option<Vec<&str>> = a.get("types").map(|_| a.strs("types")).transpose()?;
+        let pages: Option<Vec<usize>> = a
+            .opt_ints("pages")?
+            .map(|p| p.into_iter().map(|n| usize::try_from(n).ok().filter(|n| *n >= 1).map(|n| n - 1)).collect::<Option<Vec<_>>>())
+            .map(|p| p.ok_or_else(|| ToolError::InvalidArgs("pages must be 1-based page numbers".into())))
+            .transpose()?;
+        let max_depth = a
+            .opt_int("max_depth")?
+            .map(|d| usize::try_from(d).map_err(|_| ToolError::InvalidArgs("max_depth must be 0 or more".into())))
+            .transpose()?;
+        let matching: Vec<_> = self
             .doc(a)?
             .tags()
             .into_iter()
+            .filter(|t| types.as_ref().is_none_or(|ty| ty.contains(&t.kind.as_str())))
+            .filter(|t| pages.as_ref().is_none_or(|p| t.page.is_some_and(|page| p.contains(&page))))
+            .filter(|t| max_depth.is_none_or(|d| t.depth <= d))
+            .collect();
+        let count = matching.len();
+        let next = offset.checked_add(limit).filter(|n| *n < count);
+        let tags: Vec<Value> = matching
+            .into_iter()
+            .skip(offset)
+            .take(limit)
             .map(|t| {
                 json!({
                     "object": t.object.num, "generation": t.object.generation, "type": t.kind,
@@ -455,7 +487,7 @@ impl Automation {
                 })
             })
             .collect();
-        Ok(json!({ "count": tags.len(), "tags": tags }))
+        Ok(json!({ "count": count, "tags": tags, "next": next }))
     }
 
     pub(crate) fn accessibility_set_tag_property(&mut self, a: &Args) -> Result<Value> {
