@@ -18,6 +18,10 @@ let report = import(&mut doc, &bytes)?;                 // XFDF, FDF, XML, CSV o
 - **Form data**: Acrobat's XML (`xfdf:original` keeps names that aren't XML names), CSV and
   tab-delimited text (a row of names, a row of values).
 
+CSV export and spreadsheet merging quote tabs, and import distinguishes quoted tabs from TSV
+delimiters without changing field identities. Automatic detection of externally authored, ambiguous
+tables remains heuristic. Formula-cell policy and tab-delimited export are unchanged.
+
 Import replaces comments with the same `/NM` (and drops the replaced comment's pop-up), draws
 appearances PdfCraft can draw, and sets values through the form's own checks (formats,
 validation, recalculation); read-only fields take imported values, as in Acrobat. XML is read
