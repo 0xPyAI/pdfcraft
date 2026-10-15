@@ -2221,6 +2221,72 @@ fn replacing_a_line_keeps_a_distinct_nearby_line() {
 }
 
 #[test]
+fn editing_text_keeps_an_overlapping_watermark_and_covered_paragraphs() {
+    let listed = |doc: &Document| text::text_lines(doc, 0).unwrap().into_iter().map(|l| l.text).collect::<Vec<_>>();
+    // #1756: a rotated watermark's bounding box covers the middle of the page, and a body line
+    // whose baseline happens to sit near the watermark's starting y is still unrelated text.
+    for rotation in [35.0, 45.0, 0.0] {
+        let mut base = text_page("BT /F1 14 Tf 60 700 Td (Heading) Tj ET");
+        add_watermark(
+            &mut base,
+            &[0],
+            &Watermark { text: "TEST WATERMARK".into(), font_size: 48.0, rotation, opacity: 0.25, ..Watermark::default() },
+            false,
+        )
+        .unwrap();
+        let wm_y = text::text_lines(&base, 0).unwrap().into_iter().find(|l| l.text == "TEST WATERMARK").unwrap().origin_baseline();
+        let mut doc = text_page(&format!("BT /F1 14 Tf 1 0 0 1 60 {wm_y:.2} Tm (Body paragraph one with several words here) Tj ET"));
+        add_watermark(
+            &mut doc,
+            &[0],
+            &Watermark { text: "TEST WATERMARK".into(), font_size: 48.0, rotation, opacity: 0.25, ..Watermark::default() },
+            false,
+        )
+        .unwrap();
+        let line_idx = text::text_lines(&doc, 0).unwrap().iter().position(|l| l.text.starts_with("Body")).unwrap();
+        let mut line_edited = doc.clone();
+        text::replace_line(&mut line_edited, 0, line_idx, "Edited body line").unwrap();
+        assert_eq!(listed(&reopen(&line_edited)), ["Edited body line", "TEST WATERMARK"], "rotation {rotation}");
+
+        let block_idx = text::text_blocks(&doc, 0).unwrap().iter().position(|b| b.text.starts_with("Body")).unwrap();
+        let mut preview = doc.clone();
+        text::clear_block(&mut preview, 0, block_idx).unwrap();
+        assert_eq!(listed(&preview), ["TEST WATERMARK"], "clear_block keeps the watermark at rotation {rotation}");
+
+        text::rewrite_block(&mut doc, 0, block_idx, Some("Edited body paragraph"), &text::BlockStyle::default()).unwrap();
+        assert_eq!(listed(&reopen(&doc)), ["Edited body paragraph", "TEST WATERMARK"], "rotation {rotation}");
+    }
+
+    // #1368: dragging one paragraph onto another paragraph's baseline and moving it on again
+    // leaves the covered paragraph intact.
+    let mut doc = text_page("BT /F1 12 Tf 72 700 Td (First paragraph) Tj ET BT /F1 12 Tf 72 600 Td (Second paragraph) Tj ET");
+    text::rewrite_block(&mut doc, 0, 0, None, &text::BlockStyle { offset: Some([0.0, -100.0]), ..Default::default() }).unwrap();
+    let second = text::text_blocks(&doc, 0).unwrap().iter().position(|b| b.text == "Second paragraph");
+    assert!(second.is_some(), "the covered paragraph stays on the page: {:?}", listed(&doc));
+    let first = text::text_blocks(&doc, 0).unwrap().iter().position(|b| b.text == "First paragraph").unwrap();
+    text::rewrite_block(&mut doc, 0, first, None, &text::BlockStyle { offset: Some([0.0, -100.0]), ..Default::default() }).unwrap();
+    assert_eq!(listed(&reopen(&doc)), ["First paragraph", "Second paragraph"]);
+
+    // Even when a large horizontal watermark shows the same word as a body line at the same y,
+    // or a rotated 12 pt line crosses a horizontal 12 pt line of the same word at the same origin,
+    // editing one keeps the other.
+    let mut same_word = text_page("BT /F1 12 Tf 1 0 0 1 200 400 Tm (DRAFT) Tj ET BT /F1 48 Tf 1 0 0 1 150 400 Tm (DRAFT) Tj ET");
+    text::replace_line(&mut same_word, 0, 0, "FINAL").unwrap();
+    let after = text::text_lines(&reopen(&same_word), 0).unwrap();
+    assert_eq!(after.iter().map(|l| (&l.text[..], l.size as i32)).collect::<Vec<_>>(), [("FINAL", 12), ("DRAFT", 48)]);
+
+    let mut crossed = text_page("BT /F1 12 Tf 1 0 0 1 100 500 Tm (Crossed) Tj ET BT /F1 12 Tf 0.707 0.707 -0.707 0.707 100 500 Tm (Crossed) Tj ET");
+    text::replace_line(&mut crossed, 0, 0, "Horizontal").unwrap();
+    assert_eq!(listed(&reopen(&crossed)), ["Horizontal", "Crossed"]);
+
+    // An invisible OCR text layer (`3 Tr`) on the same baseline and size as a visible line is
+    // still removed when the visible line is edited, even if OCR misread a letter.
+    let mut ocr = text_page("BT /F1 12 Tf 0 Tr 1 0 0 1 72 700 Tm (Hello world) Tj ET BT /F1 12 Tf 3 Tr 1 0 0 1 72 700 Tm (Rello world) Tj ET");
+    text::replace_line(&mut ocr, 0, 0, "Goodbye world").unwrap();
+    assert_eq!(listed(&reopen(&ocr)), ["Goodbye world"]);
+}
+
+#[test]
 fn paragraphs_move_and_rewrap_to_a_new_width() {
     let para = "BT /F1 10 Tf 12 TL 100 700 Td (One two three four five six seven) Tj T* (eight nine ten eleven twelve) Tj ET";
     let close = |a: f64, b: f64| (a - b).abs() < 0.5;
