@@ -118,11 +118,14 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 let Some((_, id)) = app.active_ids() else { return };
                 let Some(doc) = app.session.get(id) else { return };
                 let i = &doc.info;
+                // Description shows plain values among text fields; they start where the fields' text does.
+                let editable_info = tab == PropsTab::Description && doc.allows_modification() && app.props_draft.is_some();
+                let inset = if editable_info { widgets::FIELD_TEXT_INSET } else { 0.0 };
                 let row = |ui: &mut egui::Ui, k: &str, v: String| {
                     // Row labels are UI chrome; values are document data and stay as they are.
                     ui.label(egui::RichText::new(tl!(k)).color(t.text_muted));
-                    ui.scope(|ui| {
-                        ui.set_max_width(420.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(inset);
                         ui.add(
                             egui::Label::new(if v.is_empty() { egui::RichText::new("—").color(t.text_faint) } else { egui::RichText::new(v) }).wrap(),
                         );
@@ -134,11 +137,14 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                         PropsTab::Description => {
                             row(ui, "File", crate::bidi::visual(&doc.name).into_owned());
                             match app.props_draft.as_mut() {
-                                Some((_, draft)) if doc.allows_modification() => {
+                                Some((_, draft)) if editable_info => {
                                     for (k, v) in INFO_KEYS.iter().zip(draft.iter_mut()) {
                                         let l = ui.label(egui::RichText::new(tl!(k)).color(t.text_muted));
-                                        ui.add(widgets::line(v).desired_width(420.0).background_color(t.field).id_salt(("info", *k)))
-                                            .labelled_by(l.id);
+                                        // Subject and Keywords are often a sentence or a list: they wrap and grow
+                                        // instead of hiding most of the value past the field's edge.
+                                        let field =
+                                            if matches!(*k, "Subject" | "Keywords") { widgets::block(v).desired_rows(1) } else { widgets::line(v) };
+                                        ui.add(field.desired_width(f32::INFINITY).background_color(t.field).id_salt(("info", *k))).labelled_by(l.id);
                                         ui.end_row();
                                     }
                                 }

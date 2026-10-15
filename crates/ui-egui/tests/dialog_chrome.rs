@@ -6,11 +6,17 @@ use egui_kittest::kittest::Queryable;
 use pdfcraft_ui_egui::PdfCraftApp;
 
 fn fixture() -> Vec<u8> {
-    let objs = [
+    fixture_with_info(None)
+}
+
+/// A one-page file, with `info` as its document information dictionary when given.
+fn fixture_with_info(info: Option<&str>) -> Vec<u8> {
+    let mut objs = vec![
         "<< /Type /Catalog /Pages 2 0 R >>",
         "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>",
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] >>",
     ];
+    objs.extend(info);
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();
     for (i, o) in objs.iter().enumerate() {
@@ -22,7 +28,8 @@ fn fixture() -> Vec<u8> {
     for o in offsets {
         out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
     }
-    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    let info = if info.is_some() { " /Info 4 0 R" } else { "" };
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R{info} >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
     out
 }
 
@@ -95,4 +102,30 @@ fn document_properties_long_filename_does_not_overflow_card() {
     h.run_steps(4);
     let card = card(&h, "dialog");
     assert!(card.width() <= 700.0, "dialog card should not blow out horizontally on long filename, width was: {}", card.width());
+}
+
+#[test]
+fn document_properties_values_line_up_and_long_fields_wrap() {
+    let info = "<< /Title (Showcase) /Subject (A specimen document exercising typography, world scripts, vector art, forms and annotations) /Creator (demo-pdf) >>";
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("doc.pdf", None, fixture_with_info(Some(info))).unwrap();
+        app.set_option("dialog", "properties").unwrap();
+        app
+    });
+    h.run_steps(4);
+    let card = card(&h, "dialog");
+    let title = h.get_by_role_and_label(Role::TextInput, "Title").rect();
+    // The fields reach the card's padding instead of stopping short of it.
+    assert!(card.right() - title.right() <= 24.0, "title field {title:?} in {card:?}");
+    // Plain values start where the fields' text does.
+    for value in ["doc.pdf", "demo-pdf"] {
+        // The file name is also the document tab's label.
+        let v = h.query_all_by_label(value).map(|n| n.rect()).find(|r| card.contains_rect(*r)).unwrap_or_else(|| panic!("{value} in the dialog"));
+        assert!((v.left() - (title.left() + 10.0)).abs() <= 1.0, "{value} at {v:?}, title field {title:?}");
+    }
+    // A long subject wraps onto a second line rather than running past the field's edge.
+    let subject = h.get_by_role_and_label(Role::MultilineTextInput, "Subject").rect();
+    assert!(subject.height() > title.height() + 8.0, "subject field {subject:?}, title field {title:?}");
 }
