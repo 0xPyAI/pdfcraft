@@ -41,13 +41,8 @@ fn harness_with(pdf: Vec<u8>, setup: impl FnOnce(&mut PdfCraftApp) + 'static) ->
         setup(&mut app);
         app
     });
-    for _ in 0..200 {
-        h.run_steps(2);
-        if !h.state().render_pending() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    // Wait for the text layer itself (#1277), not for a fixed second.
+    crate::support::wait_until(&mut h, "the page's text layer", |app| app.views[0].glyph_screen_pos(0, 5).is_some() && !app.render_pending());
     let at = h.state().views[0].glyph_screen_pos(0, 5).expect("text layer loaded");
     h.hover_at(at);
     h.run_steps(1);
@@ -94,16 +89,12 @@ fn quick_clicks_with_the_highlighter_mark_only_the_word() {
         }
     }
     h.run_steps(3);
-    // Under load the mark can land a few frames later; wait for it (egui's clock is fixed per
-    // frame, so waiting can't turn the clicks into a different run).
-    for _ in 0..200 {
-        let app = h.state();
-        if app.session.get(app.views[0].id).is_some_and(|d| !d.info.annotations.is_empty()) && !app.render_pending() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-        h.run_steps(1);
-    }
+    // Under load the mark can land later; wait for it (egui's clock is fixed per frame, so
+    // waiting can't turn the clicks into a different run). By state, not for a fixed second
+    // (#1277).
+    crate::support::wait_until(&mut h, "the highlight and the page after it", |app| {
+        app.session.get(app.views[0].id).is_some_and(|d| !d.info.annotations.is_empty()) && !app.render_pending()
+    });
     let app = h.state();
     let doc = app.session.get(app.views[0].id).unwrap();
     let marks: Vec<(&str, usize)> = doc.info.annotations.iter().map(|a| (a.subtype.as_str(), a.quads.len())).collect();
