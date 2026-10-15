@@ -237,13 +237,14 @@ impl Default for Settings {
 }
 
 /// Common paper sizes (points, portrait).
-pub const PAPERS: [(&str, (f64, f64)); 18] = [
+pub const PAPERS: [(&str, (f64, f64)); 19] = [
     ("US Letter", (612.0, 792.0)),
     ("US Legal", (612.0, 1008.0)),
     ("Tabloid", (792.0, 1224.0)),
     ("A3", (841.89, 1190.55)),
     ("A4", (595.28, 841.89)),
     ("A5", (419.53, 595.28)),
+    ("A6", (297.64, 419.53)),
     ("ARCH A (9 x 12 in)", (648.0, 864.0)),
     ("ARCH B (12 x 18 in)", (864.0, 1296.0)),
     ("ARCH C (18 x 24 in)", (1296.0, 1728.0)),

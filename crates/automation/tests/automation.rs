@@ -5661,6 +5661,7 @@ fn architectural_and_iso_papers_through_tools() {
         ("A2", 420.0 * mm, 594.0 * mm),
         ("A1", 594.0 * mm, 841.0 * mm),
         ("A0", 841.0 * mm, 1189.0 * mm),
+        ("A6", 105.0 * mm, 148.0 * mm),
         ("Letter", 612.0, 792.0),
         ("US Legal", 612.0, 1008.0),
         ("Tabloid", 792.0, 1224.0),
