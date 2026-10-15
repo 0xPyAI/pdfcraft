@@ -56,7 +56,7 @@ const AR_DAYS: [&str; 7] = ["الأحد", "الاثنين", "الثلاثاء", 
 
 /// The languages month and weekday names can be written in (Preferences ▸ Date format ▸ Language):
 /// the interface languages, in the same order and with the same names.
-pub static DATE_LANGUAGES: [DateLanguage; 22] = [
+pub static DATE_LANGUAGES: [DateLanguage; 23] = [
     DateLanguage {
         code: "en",
         name: "English",
@@ -359,6 +359,44 @@ pub static DATE_LANGUAGES: [DateLanguage; 22] = [
         months_short: ["saus.", "vas.", "kov.", "bal.", "geg.", "birž.", "liep.", "rugpj.", "rugs.", "spal.", "lapkr.", "gruod."],
         days: ["sekmadienis", "pirmadienis", "antradienis", "trečiadienis", "ketvirtadienis", "penktadienis", "šeštadienis"],
         days_short: ["sk", "pr", "an", "tr", "kt", "pn", "št"],
+    },
+    // Vietnamese: numeric month forms (`tháng 1` with a day, `Tháng 1` standing alone).
+    // Fill & Sign still refuses any format whose final text fails the existing WinAnsi check
+    // (for example weekday names); `dd.mm.yyyy` remains writable.
+    DateLanguage {
+        code: "vi",
+        name: "Tiếng Việt",
+        months: [
+            "Tháng 1",
+            "Tháng 2",
+            "Tháng 3",
+            "Tháng 4",
+            "Tháng 5",
+            "Tháng 6",
+            "Tháng 7",
+            "Tháng 8",
+            "Tháng 9",
+            "Tháng 10",
+            "Tháng 11",
+            "Tháng 12",
+        ],
+        months_with_day: Some([
+            "tháng 1",
+            "tháng 2",
+            "tháng 3",
+            "tháng 4",
+            "tháng 5",
+            "tháng 6",
+            "tháng 7",
+            "tháng 8",
+            "tháng 9",
+            "tháng 10",
+            "tháng 11",
+            "tháng 12",
+        ]),
+        months_short: ["Thg 1", "Thg 2", "Thg 3", "Thg 4", "Thg 5", "Thg 6", "Thg 7", "Thg 8", "Thg 9", "Thg 10", "Thg 11", "Thg 12"],
+        days: ["Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"],
+        days_short: ["CN", "T2", "T3", "T4", "T5", "T6", "T7"],
     },
 ];
 
@@ -681,6 +719,25 @@ mod tests {
         assert_eq!(s.today_text_for_pdf(None, None).as_deref(), Ok("martedì 14 novembre"), "Italian names and accents can be written into a PDF");
         s.set_date_language(None).unwrap();
         assert_eq!(s.date_language(), None);
+    }
+
+    #[test]
+    fn vietnamese_month_and_weekday_names() {
+        let mut s = Session::new().with_clock(|| 1_700_000_000);
+        s.set_date_language(Some("vi")).unwrap();
+        assert_eq!(s.date_language(), Some("vi"));
+        s.set_date_format("d mmmm yyyy").unwrap();
+        assert_eq!(s.today_text(None, None).as_deref(), Ok("14 tháng 11 2023"));
+        s.set_date_format("mmmm yyyy").unwrap();
+        assert_eq!(s.today_text(None, None).as_deref(), Ok("Tháng 11 2023"));
+        s.set_date_format("ddd, d mmm").unwrap();
+        assert_eq!(s.today_text(None, None).as_deref(), Ok("T3, 14 Thg 11"));
+        // Encoding follows the spelled text: `14 tháng 11 2023` is WinAnsi-representable;
+        // a weekday name such as `Thứ Ba` is not, so Fill & Sign refuses that format.
+        assert_eq!(s.today_text_for_pdf(Some("d mmmm yyyy"), Some("vi")).as_deref(), Ok("14 tháng 11 2023"));
+        let e = s.today_text_for_pdf(Some("dddd d mmmm yyyy"), Some("vi")).unwrap_err();
+        assert!(e.contains("can't be written into the PDF yet") && e.contains("dd.mm.yyyy"), "{e}");
+        assert!(s.today_text_for_pdf(Some("dd.mm.yyyy"), Some("vi")).is_ok());
     }
 
     #[test]
