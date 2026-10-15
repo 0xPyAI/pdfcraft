@@ -16,6 +16,8 @@ use hayro::hayro_interpret::{
 use kurbo::{Affine, BezPath, Rect, Shape};
 use std::collections::HashMap;
 
+mod search;
+
 /// One glyph on the page.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextGlyph {
@@ -102,47 +104,7 @@ impl PageText {
 
     /// Search with Acrobat's find options, returning at most `limit` glyph ranges.
     pub fn find_opts_limited(&self, needle: &str, case_sensitive: bool, whole_words: bool, limit: usize) -> Vec<std::ops::Range<usize>> {
-        if limit == 0 {
-            return Vec::new();
-        }
-        let fold = |s: &str| if case_sensitive { s.to_string() } else { fold_case(s) };
-        let needle: Vec<char> = fold(needle).split_whitespace().collect::<Vec<_>>().join(" ").chars().collect();
-        if needle.is_empty() {
-            return Vec::new();
-        }
-        // Flatten to chars with the glyph index each char came from.
-        let mut chars: Vec<(char, usize)> = Vec::new();
-        for (i, g) in self.glyphs.iter().enumerate() {
-            if i > 0 && (self.space_before[i] || self.line_of[i] != self.line_of[i - 1]) && chars.last().is_some_and(|c| c.0 != ' ') {
-                chars.push((' ', i));
-            }
-            for c in fold(&g.text).chars() {
-                let c = if c.is_whitespace() { ' ' } else { c };
-                // The query collapses a run of whitespace to one space, so collapse the page too.
-                if c == ' ' && chars.last().is_some_and(|k| k.0 == ' ') {
-                    continue;
-                }
-                chars.push((c, i));
-            }
-        }
-        let word = |k: Option<&(char, usize)>| k.is_some_and(|c| c.0.is_alphanumeric());
-        let mut out = Vec::new();
-        let mut i = 0;
-        while i + needle.len() <= chars.len() {
-            let bounded = !whole_words || (!word(i.checked_sub(1).and_then(|p| chars.get(p))) && !word(chars.get(i + needle.len())));
-            if bounded && chars[i..i + needle.len()].iter().map(|c| c.0).eq(needle.iter().copied()) {
-                let start = chars[i].1;
-                let end = chars[i + needle.len() - 1].1 + 1;
-                out.push(start..end);
-                if out.len() == limit {
-                    break;
-                }
-                i += needle.len();
-            } else {
-                i += 1;
-            }
-        }
-        out
+        search::find(self, needle, case_sensitive, whole_words, limit)
     }
 
     /// Glyph ranges of the matches a character matcher finds in the page text (words and lines
