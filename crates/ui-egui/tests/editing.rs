@@ -2483,6 +2483,51 @@ fn switching_from_a_narrow_editor_keeps_one_frame_and_a_wide_heading_on_one_line
     assert!(!dirty(&h));
 }
 
+/// #2022: clicking straight into another text box while one is open for typing must apply the
+/// open paragraph first; the typed text used to be dropped with the editor that switched away.
+#[test]
+fn switching_straight_to_another_box_applies_the_open_paragraph() {
+    let bytes = source_font_fixture_with_text("BT /F1 24 Tf 20 220 Td (Top) Tj ET BT /F2 24 Tf 20 120 Td (Bottom) Tj ET");
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("boxes.pdf", None, bytes).expect("opens");
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = r.width() / 300.0;
+    let mut blocks = {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().text_blocks(0)
+    };
+    blocks.sort_by(|a, b| b.rect[1].partial_cmp(&a.rect[1]).unwrap_or(std::cmp::Ordering::Equal));
+    assert_eq!(blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["Top", "Bottom"], "two editable boxes");
+    let center = |b: &pdfcraft_engine::TextBlock| {
+        egui::pos2(r.left() + ((b.rect[0] + b.rect[2]) / 2.0) as f32 * k, r.top() + (300.0 - (b.rect[1] + b.rect[3]) / 2.0) as f32 * k)
+    };
+    // Open the top box and type into it.
+    click_at(&mut h, center(&blocks[0]));
+    let ed = h.state().views[0].line_editor.clone().expect("the top box opens for typing");
+    assert_eq!(ed.text, "Top");
+    h.state_mut().views[0].line_editor.as_mut().unwrap().text = "Top edited".into();
+    h.run_steps(1);
+    // Click straight into the bottom box: the open paragraph is applied, and the bottom box opens.
+    click_at(&mut h, center(&blocks[1]));
+    let s = h.state();
+    let doc = s.session.get(s.views[0].id).unwrap();
+    assert_eq!(
+        doc.text_blocks(0).iter().map(|b| b.text.clone()).collect::<Vec<_>>(),
+        ["Top edited", "Bottom"],
+        "the typed text is applied, not dropped"
+    );
+    assert_eq!(doc.can_undo(), Some("Edit text"));
+    let ed = s.views[0].line_editor.clone().expect("the bottom box is now open");
+    assert_eq!(ed.text, "Bottom");
+}
+
 #[test]
 fn editing_existing_text_in_place() {
     let mut h = harness(1, |_| {});

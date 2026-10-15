@@ -834,6 +834,53 @@ pub(crate) fn image_input(
     true
 }
 
+/// Open `block` on `page` in the inline editor. The box's geometry and source are read from the
+/// `lines` handed in, so callers pass the document's current inventory.
+#[allow(clippy::too_many_arguments)]
+fn open_editor(
+    ui: &egui::Ui,
+    xf: &PageXform,
+    doc: &pdfcraft_engine::Document,
+    lines: &[pdfcraft_engine::TextBlock],
+    boxes: &[Rect],
+    page: usize,
+    block: usize,
+    view: &mut DocView,
+) {
+    view.pending_text_open = None;
+    let (Some(l), Some(b)) = (lines.get(block), boxes.get(block)) else { return };
+    view.image_selection = None;
+    let source_lines = doc.text_lines(page);
+    let text = l.editor_text.clone();
+    // Screen pixels per point, from the box's width.
+    let scale = (b.width() - 4.0) / ((l.rect[2] - l.rect[0]).max(1.0) as f32);
+    // How far the editor box may grow: a single-line paragraph's rewrite grows to the
+    // page's right edge, a multi-line paragraph rewraps to its own width.
+    let right = xf.rect.right().min(view.viewport_rect().right()) - 6.0;
+    let max_width = if l.rows.len() == 1 { (right - b.left()).max(b.width()) } else { b.width() };
+    view.line_editor = Some(LineEditor {
+        selection: None,
+        font_resource: None,
+        page,
+        block,
+        text: text.clone(),
+        original: text,
+        rect: *b,
+        source_rect: l.rect.map(|v| v as f32),
+        multiline: l.rows.len() > 1,
+        source: Some((l.clone(), source_lines)),
+        fonts: install_source_fonts(ui.ctx(), doc, page),
+        overflow: false,
+        max_width,
+        size: (l.size as f32 * scale).clamp(8.0, 72.0),
+        focus: true,
+        look: look_of(l),
+        look0: look_of(l),
+        extras: Extras::default(),
+        extras0: Extras::default(),
+    });
+}
+
 /// Lines and their screen boxes for a page; hover outlines, click opens the editor. Returns
 /// `true` when the pointer was used.
 #[allow(clippy::too_many_arguments)]
@@ -859,6 +906,15 @@ pub(crate) fn page_input(
         if active != Some(i) {
             painter.rect_stroke(*b, CornerRadius::same(2), Stroke::new(0.75, ACCENT.gamma_multiply(0.35)), egui::StrokeKind::Outside);
         }
+    }
+    // A box a switching click asked for opens now, once the edit queued with that click has
+    // applied and `lines`/`boxes` are the document's new inventory (#2022).
+    if allow_interaction
+        && active.is_none()
+        && let Some((open_page, block)) = view.pending_text_open
+        && open_page == page
+    {
+        open_editor(ui, xf, doc, lines, &boxes, page, block, view);
     }
     if !allow_interaction {
         return false;
@@ -946,36 +1002,24 @@ pub(crate) fn page_input(
     });
     if resp.clicked() {
         view.image_selection = None;
-        let l = &lines[hit];
-        let source_lines = doc.text_lines(page);
-        let text = l.editor_text.clone();
-        // Screen pixels per point, from the box's width.
-        let scale = (boxes[hit].width() - 4.0) / ((l.rect[2] - l.rect[0]).max(1.0) as f32);
-        // How far the editor box may grow: a single-line paragraph's rewrite grows to the
-        // page's right edge, a multi-line paragraph rewraps to its own width.
-        let right = xf.rect.right().min(view.viewport_rect().right()) - 6.0;
-        let max_width = if l.rows.len() == 1 { (right - boxes[hit].left()).max(boxes[hit].width()) } else { boxes[hit].width() };
-        view.line_editor = Some(LineEditor {
-            selection: None,
-            font_resource: None,
-            page,
-            block: hit,
-            text: text.clone(),
-            original: text,
-            rect: boxes[hit],
-            source_rect: l.rect.map(|v| v as f32),
-            multiline: l.rows.len() > 1,
-            source: Some((l.clone(), source_lines)),
-            fonts: install_source_fonts(ui.ctx(), doc, page),
-            overflow: false,
-            max_width,
-            size: (l.size as f32 * scale).clamp(8.0, 72.0),
-            focus: true,
-            look: look_of(l),
-            look0: look_of(l),
-            extras: Extras::default(),
-            extras0: Extras::default(),
-        });
+        // A click that moves the editor to another paragraph applies the open one first, so its
+        // typed text is not dropped with the switched-away editor (#2022). A click on the open
+        // box's own frame, which the editor's overlay does not cover, keeps it open instead.
+        if let Some(open) = view.line_editor.as_ref().filter(|e| e.has_changes()) {
+            if open.page == page && open.block == hit {
+                return true;
+            }
+            if let Some(old) = view.line_editor.take() {
+                let style = old.style();
+                if old.text != old.original || style != pdfcraft_engine::BlockStyle::default() {
+                    view.pending_edit = Some(Edit::EditTextBlock { page: old.page, block: old.block, text: old.text, style });
+                }
+            }
+            // The clicked box opens next frame, from the document with that edit applied.
+            view.pending_text_open = Some((page, hit));
+            return true;
+        }
+        open_editor(ui, xf, doc, lines, &boxes, page, hit, view);
     }
     true
 }

@@ -410,6 +410,9 @@ pub struct DocView {
     /// line being edited.
     pub(crate) edit_lines: HashMap<usize, (u64, Vec<pdfcraft_engine::TextBlock>)>,
     pub line_editor: Option<crate::edit_text_ui::LineEditor>,
+    /// The box a click switched to while another paragraph was being edited: it opens once the
+    /// queued edit has applied, so its index and geometry come from the document it now is (#2022).
+    pub(crate) pending_text_open: Option<(usize, usize)>,
     pub(crate) text_background: crate::edit_text_ui::TextBackground,
     pub(crate) move_background: crate::content_ui::MoveBackground,
     /// Edit text & images: the images per page (by document generation), and the selected one.
@@ -664,6 +667,7 @@ impl DocView {
             pending_edit: None,
             edit_lines: HashMap::new(),
             line_editor: None,
+            pending_text_open: None,
             text_background: Default::default(),
             move_background: Default::default(),
             edit_images: HashMap::new(),
