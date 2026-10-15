@@ -3742,3 +3742,25 @@ fn draft_layout_matches_the_paragraph_an_applied_edit_draws() {
         assert_eq!(layout.source_rect, source.rect);
     }
 }
+
+#[test]
+fn japanese_paragraphs_wrap_between_characters_without_closing_marks_at_a_row_start() {
+    if pdfcraft_fonts::document_japanese_font().is_none() {
+        eprintln!("skipping the Japanese wrapping checks: built without craft-fonts (set CRAFT_FONTS_DIR)");
+        return;
+    }
+    let text = "日本語の文章は単語の間に空白がないので、どの文字の間でも行を折り返せます。ただし「句読点」や小さい「っ」は行頭に来ません。";
+    // One paragraph (the single-style path), and a heading row before it (the row editor's path).
+    for draft in [text.to_string(), format!("見出し\n{text}")] {
+        let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Placeholder text) Tj ET");
+        text::rewrite_block(&mut doc, 0, 0, Some(&draft), &text::BlockStyle { width: Some(120.0), ..Default::default() }).unwrap();
+        let block = text::text_blocks(&reopen(&doc), 0).unwrap().remove(0);
+        let rows: Vec<&str> = block.editor_text.split('\n').collect();
+        assert!(rows.len() > 4, "{rows:?}");
+        assert_eq!(rows.concat(), draft.replace('\n', ""), "no space is added between the pieces");
+        assert!(block.rect[2] - block.rect[0] <= 120.5, "{:?} {rows:?}", block.rect);
+        for row in &rows {
+            assert!(!row.starts_with(['、', '。', '」', 'っ']) && !row.ends_with('「'), "{row:?} in {rows:?}");
+        }
+    }
+}

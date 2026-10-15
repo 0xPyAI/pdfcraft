@@ -31,6 +31,13 @@ this works only when that build input actually contains the full face. This chan
 add a font binary or change the release font pin. Fonts shared by releases belong in
 `storytold/craft-fonts` under the repository's asset rules.
 
+Rewrapped Chinese and Japanese text, which has no spaces between words, may break between any
+two characters. A row never begins with closing punctuation, a closing bracket or quote, a small
+kana or the prolonged sound mark, and never ends with an opening bracket or quote or a currency
+sign before an amount: the line-start and line-end rules of JIS X 4051, as in Unicode line
+breaking (UAX #14). Latin words inside such text are not split. Korean and Thai still break only
+at spaces.
+
 Select text within the editor before changing size, colour, font, underline or spacing to
 format that selection. Automation supports up to 1024 disjoint UTF-8 byte ranges with the
 same properties; invalid or overlapping ranges fail atomically. Untouched source formatting

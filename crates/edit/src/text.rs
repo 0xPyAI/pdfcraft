@@ -1652,17 +1652,24 @@ fn paragraph_separator(c: char) -> bool {
     c.is_whitespace() && c != '\u{3000}'
 }
 
-/// Greedy word wrapping to `width` with `advance` giving a string's width.
+/// Greedy word wrapping to `width` with `advance` giving a string's width. A row may also end
+/// inside a word of Chinese or Japanese text ([`crate::linebreak`]); those pieces join without a space.
 fn wrap(text: &str, width: f64, advance: impl Fn(&str) -> f64) -> Vec<String> {
     let mut out = Vec::new();
     let mut line = String::new();
     for word in text.split(paragraph_separator).filter(|word| !word.is_empty()) {
-        let candidate = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
-        if !line.is_empty() && advance(&candidate) > width {
-            out.push(std::mem::take(&mut line));
-            line = word.to_string();
-        } else {
-            line = candidate;
+        for (i, piece) in crate::linebreak::pieces(word).into_iter().enumerate() {
+            let candidate = match (line.is_empty(), i) {
+                (true, _) => piece.to_string(),
+                (false, 0) => format!("{line} {piece}"),
+                (false, _) => format!("{line}{piece}"),
+            };
+            if !line.is_empty() && advance(&candidate) > width {
+                out.push(std::mem::take(&mut line));
+                line = piece.to_string();
+            } else {
+                line = candidate;
+            }
         }
     }
     if !line.is_empty() || out.is_empty() {
@@ -2258,6 +2265,17 @@ mod tests {
         assert_eq!(wrap("A\u{a0}B C", 3.0, width), ["A B", "C"]);
         assert_eq!(wrap("A\u{2028}B C", 3.0, width), ["A B", "C"]);
         assert_eq!(wrap(" \tA  B\r\nC ", 3.0, width), ["A B", "C"]);
+    }
+
+    #[test]
+    fn japanese_text_wraps_between_characters_but_not_before_closing_marks() {
+        let width = |s: &str| s.chars().count() as f64;
+        assert_eq!(wrap("日本語の文章です。", 3.0, width), ["日本語", "の文章", "です。"]);
+        // The comma can't begin a row, so the character before it moves down with it.
+        assert_eq!(wrap("あいう、えお", 3.0, width), ["あい", "う、え", "お"]);
+        // Pieces of one word join without a space; separate words keep theirs.
+        assert_eq!(wrap("Edit PDFを編集", 6.0, width), ["Edit", "PDFを編集"]);
+        assert_eq!(wrap("一行目　二行目", 4.0, width), ["一行目　", "二行目"]);
     }
 
     #[test]

@@ -571,7 +571,11 @@ pub(super) fn rewrite_styled_block(
         }
         let mut end = at + 1;
         if !item.0.is_whitespace() {
-            while chars.get(end).is_some_and(|c| !c.0.is_whitespace()) {
+            // A word ends at a space, or where Chinese or Japanese text may break between characters.
+            while let (Some(before), Some(c)) = (chars.get(end - 1), chars.get(end))
+                && !c.0.is_whitespace()
+                && !crate::linebreak::between(before.0, c.0)
+            {
                 end += 1;
             }
         }
