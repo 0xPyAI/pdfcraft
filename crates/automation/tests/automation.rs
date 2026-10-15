@@ -6276,3 +6276,21 @@ fn doc_print_as_image() {
         other => panic!("{other:?}"),
     }
 }
+
+/// Without a root, `write_output` still writes through a staging file (#2166): the folder is
+/// made, nothing is left beside the file, and a folder at the path is refused.
+#[test]
+fn a_root_less_write_output_is_atomic_too() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-automation-rootless-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let free = Automation::new();
+    let target = dir.join("new").join("page.png");
+    let written = free.write_output(&target.to_string_lossy(), &[1, 2, 3]).unwrap();
+    assert_eq!(written, target);
+    assert_eq!(std::fs::read(&target).unwrap(), [1, 2, 3]);
+    let names: Vec<_> = std::fs::read_dir(dir.join("new")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, ["page.png"], "no staging file left beside it");
+    let e = free.write_output(&dir.join("new").to_string_lossy(), &[4]).unwrap_err();
+    assert!(matches!(&e, ToolError::Failed(m) if m.contains("is a folder")), "{e:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

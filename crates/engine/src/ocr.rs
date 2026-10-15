@@ -248,7 +248,10 @@ pub fn recognize_file(
     if s.apply_ocr(id, &pages).map_err(|e| e.to_string())? == 0 {
         return Ok(FileResult { bytes, pages });
     }
-    Ok(FileResult { bytes: s.save_bytes(id).map_err(|e| e.to_string())?, pages })
+    // Checked like a save before the caller writes it (#2166).
+    let bytes = s.save_bytes(id).map_err(|e| e.to_string())?;
+    s.check_save(id, &bytes).map_err(|e| e.to_string())?;
+    Ok(FileResult { bytes, pages })
 }
 
 #[cfg(test)]

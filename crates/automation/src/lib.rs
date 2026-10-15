@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use pdfcraft_engine::{CombineSource, DocId, Document, Edit, Session, commands};
-use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes};
+use pdfcraft_platform::staging::{StagingName, staging_suffixes};
 use pdfcraft_render::{PageRenderer, PageText, RenderConfig, RenderRequest, RequestKind};
 use serde_json::{Value, json};
 
@@ -146,14 +146,16 @@ impl Automation {
 
     /// Save `bytes` that a caller writes on the session's behalf, such as `pdfcraft-cli run`
     /// saving a rendered page. With a root, it is confined like a tool's own output (a relative
-    /// path resolves inside it) and written atomically. Without one, the path is written as
-    /// given, so `/dev/stdout` and the like still work. Returns where the file went.
+    /// path resolves inside it). Written atomically either way (#2166), except to something
+    /// that is not a regular file, such as `/dev/stdout` or a pipe, which is written as given.
+    /// Returns where the file went.
     pub fn write_output(&self, path: &str, bytes: &[u8]) -> Result<PathBuf> {
         let target = self.resolve(path, true)?;
-        if self.root.is_some() {
-            write_atomic(&target, bytes)?;
-        } else {
+        let special = self.root.is_none() && std::fs::metadata(&target).is_ok_and(|m| !m.is_file() && !m.is_dir());
+        if special {
             std::fs::write(&target, bytes).map_err(|e| failed(format!("{path}: {e}")))?;
+        } else {
+            write_atomic(&target, bytes)?;
         }
         Ok(target)
     }
@@ -2440,32 +2442,20 @@ fn write_atomic_synced(
     suffixes: impl IntoIterator<Item = u64>,
     sync: impl FnOnce(&std::fs::File) -> std::io::Result<()>,
 ) -> Result<()> {
-    use std::io::Write;
     // A folder can't be replaced, and staging beside it could land outside the root: "." names
     // the root itself, whose parent isn't ours to write in.
     if path.is_dir() {
         return Err(failed(format!("{}: is a folder, not a file", path.display())));
     }
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let name = path.file_name().ok_or_else(|| failed(format!("{}: not a file path", path.display())))?;
+    path.file_name().ok_or_else(|| failed(format!("{}: not a file path", path.display())))?;
     std::fs::create_dir_all(dir).map_err(|e| failed(format!("{}: {e}", dir.display())))?;
-    let (tmp, file) =
-        create_staging(dir, &name.to_string_lossy(), StagingName::SuffixThenTag, suffixes).map_err(|e| failed(format!("{}: {e}", dir.display())))?;
-    // Closed at the end of the block, before the rename.
-    let written = {
-        let mut file = file;
-        // Surface delayed writeback failures before replacing the destination or marking
-        // a document clean. The handle is closed before rename (required on Windows).
-        file.write_all(bytes).and_then(|()| sync(&file))
-    };
-    if let Err(e) = written {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(failed(format!("{}: {e}", tmp.display())));
-    }
-    std::fs::rename(&tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        failed(format!("{}: {e}", path.display()))
-    })
+    // The writer itself is the platform crate's, shared with the desktop app and the CLI
+    // (#2166): the staging file is written, flushed (delayed writeback failures surface before
+    // the destination is replaced or a document marked clean), closed and renamed; a failure at
+    // any step removes it and leaves the destination as it was.
+    pdfcraft_platform::staging::write_atomically_with(path, bytes, StagingName::SuffixThenTag, suffixes, sync)
+        .map_err(|e| failed(format!("{}: {e}", path.display())))
 }
 
 #[cfg(test)]

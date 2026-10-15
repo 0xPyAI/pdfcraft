@@ -346,8 +346,8 @@ milestone = "M1"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/cos/tests/encryption.rs::qpdf_agrees", "crates/cos/tests/writer.rs::qpdf_accepts_object_stream_output"]
-notes = "qpdf is installed on the Linux CI runner and PDFCRAFT_ORACLES_REQUIRED makes its absence a failure, so these run on every CI run rather than skipping; on a machine without qpdf they skip with a notice (crates/oracle)"
+evidence = ["crates/cos/tests/encryption.rs::qpdf_agrees", "crates/cos/tests/writer.rs::qpdf_accepts_object_stream_output", "crates/platform/src/staging.rs::an_atomic_write_replaces_the_target_only_when_complete", "apps/pdfcraft-cli/tests/edit.rs::editing_in_place_leaves_a_valid_file_and_no_staging_file", "crates/automation/tests/automation.rs::a_root_less_write_output_is_atomic_too"]
+notes = "qpdf is installed on the Linux CI runner and PDFCRAFT_ORACLES_REQUIRED makes its absence a failure, so these run on every CI run rather than skipping; on a machine without qpdf they skip with a notice (crates/oracle). Every PDF leaves the engine checked (it reopens with its pages): saves, new files from Combine/Extract/Split/Create, signed, timestamped and LTV-embedded files, OCR batch output; and every writer goes through one staging-file writer (the desktop app, the tools with or without --root, the CLI), so a failed write never leaves a truncated file (#1698, #2166)"
 
 [[feature]]
 id = "core.deterministic-save"

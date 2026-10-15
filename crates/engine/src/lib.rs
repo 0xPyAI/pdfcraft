@@ -4352,7 +4352,7 @@ impl Session {
         let mut cuts = Vec::new();
         let mut used = 0usize;
         for p in 0..n {
-            let size = self.write_new(&pdfcraft_organize::extract_pages(src, &[p])?)?.len();
+            let size = self.write_unchecked(&pdfcraft_organize::extract_pages(src, &[p])?)?.len();
             if used > 0 && used + size > max_bytes {
                 cuts.push(p);
                 used = 0;
@@ -4450,7 +4450,18 @@ impl Session {
         doc.editor.as_ref().map(|e| &e.cos).ok_or_else(|| EditError::ReadOnly(doc.read_only_reason.clone().unwrap_or_default()))
     }
 
+    /// A new file (Combine, Extract, Split, Create) as bytes, checked like a save before anyone
+    /// writes it (#1698, #2166): it reopens, and shows the pages it was built from.
     fn write_new(&self, doc: &pdfcraft_cos::Document) -> Result<Arc<Vec<u8>>, EditError> {
+        let bytes = self.write_unchecked(doc)?;
+        let expected = pdfcraft_organize::page_count(doc)?;
+        pdfcraft_cos::Document::open(bytes.clone()).map_err(|e| EditError::Reopen(e.to_string()))?;
+        pdfcraft_render::check_pages(bytes.clone(), None, expected).map_err(|e| EditError::Reopen(e.to_string()))?;
+        Ok(bytes)
+    }
+
+    /// [`Self::write_new`] without the check, for bytes nobody writes: measuring a part's size.
+    fn write_unchecked(&self, doc: &pdfcraft_cos::Document) -> Result<Arc<Vec<u8>>, EditError> {
         let opts = SaveOptions { mod_date: self.now().map(pdfcraft_cos::pdf_date), ..SaveOptions::default() };
         write_full(doc, &opts).map(Arc::new).map_err(|e| EditError::Write(e.to_string()))
     }
@@ -4606,7 +4617,10 @@ impl Session {
         if opts.date.is_empty() {
             opts.date = self.signing_date();
         }
-        Ok(Arc::new(pdfcraft_sign::sign_with_timestamp(&editor.cos, id, &opts, tsa)?))
+        let signed = Arc::new(pdfcraft_sign::sign_with_timestamp(&editor.cos, id, &opts, tsa)?);
+        // Checked like a save before anyone writes it (#2166).
+        self.check_save(doc, &signed)?;
+        Ok(signed)
     }
 
     /// Append a standalone document timestamp (RFC 3161, `/ETSI.RFC3161`) covering the file's
@@ -4615,7 +4629,9 @@ impl Session {
         let d = self.get(doc).ok_or(EditError::NoDocument)?;
         let editor = d.editor.as_ref().ok_or_else(|| EditError::ReadOnly(d.read_only_reason.clone().unwrap_or_default()))?;
         let date = if date.is_empty() { self.signing_date() } else { date };
-        Ok(Arc::new(pdfcraft_sign::timestamp_document(&editor.cos, tsa, &date)?))
+        let stamped = Arc::new(pdfcraft_sign::timestamp_document(&editor.cos, tsa, &date)?);
+        self.check_save(doc, &stamped)?;
+        Ok(stamped)
     }
 
     /// Embed revocation evidence into the catalog's `/DSS` with `/VRI` entries per signature
@@ -4623,7 +4639,9 @@ impl Session {
     pub fn embed_ltv(&self, doc: DocId, evidence: &pdfcraft_sign::dss::Evidence) -> Result<Arc<Vec<u8>>, EditError> {
         let d = self.get(doc).ok_or(EditError::NoDocument)?;
         let editor = d.editor.as_ref().ok_or_else(|| EditError::ReadOnly(d.read_only_reason.clone().unwrap_or_default()))?;
-        Ok(Arc::new(pdfcraft_sign::dss::embed(&editor.cos, evidence)?))
+        let embedded = Arc::new(pdfcraft_sign::dss::embed(&editor.cos, evidence)?);
+        self.check_save(doc, &embedded)?;
+        Ok(embedded)
     }
 
     /// Record that the signed file `bytes` was saved (to `path`): like [`Session::mark_saved`],

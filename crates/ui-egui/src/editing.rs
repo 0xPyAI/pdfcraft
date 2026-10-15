@@ -2,7 +2,7 @@
 //! "save changes?" prompt when closing a tab or quitting with unsaved edits.
 
 use pdfcraft_engine::Edit;
-use pdfcraft_platform::staging::{StagingName, create_staging, staging_suffixes};
+use pdfcraft_platform::staging::{StagingName, staging_suffixes};
 
 use crate::PdfCraftApp;
 
@@ -944,48 +944,15 @@ fn write_atomically_with(path: &str, bytes: &[u8], suffixes: impl IntoIterator<I
 }
 
 /// [`write_atomically_with`], flushing the staging file with `sync_all` (the standard library's
-/// in the app, a failing one in tests).
+/// in the app, a failing one in tests). The writer itself is the platform crate's, shared with
+/// the tools and the CLI (#2166); the desktop app keeps its staging-name form.
 fn write_atomically_syncing(
     path: &str,
     bytes: &[u8],
     suffixes: impl IntoIterator<Item = u64>,
     sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>,
 ) -> std::io::Result<()> {
-    use std::io::Write;
-    let target = std::path::Path::new(path);
-    let dir = target.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
-    let name = target.file_name().and_then(|n| n.to_str()).unwrap_or("save");
-    let (tmp, f) = create_staging(dir, name, StagingName::TagThenSuffix, suffixes)?;
-    let result = (|| {
-        // Closed at the end of the block, before the rename.
-        {
-            let mut f = f;
-            f.write_all(bytes)?;
-            sync_staged(&f, sync_all)?;
-        }
-        std::fs::rename(&tmp, target)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result
-}
-
-/// Flush the staging file to the disk before it replaces the original. On macOS `sync_all` asks
-/// for a full flush (`F_FULLFSYNC`), which SMB and FUSE volumes, such as a mounted Cryptomator
-/// vault, refuse as unsupported: there a plain `fsync` is the strongest flush the volume offers.
-/// Any other failure still fails the save.
-fn sync_staged(f: &std::fs::File, sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>) -> std::io::Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        use rustix::io::Errno;
-        match sync_all(f) {
-            Err(e) if matches!(Errno::from_io_error(&e), Some(Errno::NOTSUP | Errno::NOTTY)) => Ok(rustix::fs::fsync(f)?),
-            other => other,
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    sync_all(f)
+    pdfcraft_platform::staging::write_atomically_with(std::path::Path::new(path), bytes, StagingName::TagThenSuffix, suffixes, sync_all)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
