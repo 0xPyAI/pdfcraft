@@ -247,6 +247,17 @@ update the numbers.
   every appearance we *do* draw: over the same 250 files, shown gives mean 2.16% / p90 5.35% / 25
   files within 0.1%, hidden gives 2.18% / 5.55% / 22, with `annotation-tx3.pdf` jumping to 45.64%.
   The biases nearly cancel; `--hide-annotations` tells the two apart for one file at a time.
+- **The text score was blind to reading order (2026-10-15).** Word F1 is a bag of words, so a page
+  emitted back to front scores a perfect 1.000 — and reading order is most of what text extraction
+  has left to get wrong (#2387, #2586). `cargo xtask text-oracle` now reports a second score: the
+  longest common subsequence of the two word sequences over the longer one, both cut to 3,000
+  words. The hole was not hypothetical. Measuring #2431, a change that moves text and alters
+  nothing else, **word F1 called 26 of the 29 files whose output changed identical**, where the
+  order score separated 18 improvements from 6 regressions and named their shape: forms, where a
+  checkbox's number was parted from its label (`prefilled_f1040.pdf` 0.672 → 0.481). Read it as a
+  disagreement, like the pixel score: the same split scored as a win on one file and a loss on
+  another purely because `pdftotext` makes it in one place and not the other. The corpus-wide
+  first reading has not been taken yet.
 - **Evidence:** text extraction (word-F1 0.98 against `pdftotext`) and now rendering (above); qpdf
   checks written output on every CI run since `PDFCRAFT_ORACLES_REQUIRED`. Acrobat captures must
   stay local in `plan/acrobat/` (clean-room, `AGENTS.md` §1.1).
