@@ -608,6 +608,30 @@ fn choices_accept_exports_or_display_text() {
 }
 
 #[test]
+fn multiselect_choice_indices_are_sorted_without_reordering_values() {
+    let mut forward_appearance = None;
+    for values in [["Ham", "Olives"], ["Olives", "Ham"]] {
+        let mut doc = fixture();
+        let chosen: Vec<String> = values.iter().map(|value| (*value).into()).collect();
+        set_value(&mut doc, "toppings", &FieldValue::Choice(chosen.clone())).unwrap();
+        let doc = reopen(&doc);
+        let all = fields(&doc);
+        let list = field(&all, "toppings");
+        assert_eq!(list.value, chosen, "saving preserves the caller's /V order");
+        let object = doc.get(list.obj);
+        let indices = object.as_dict().unwrap().get(b"I").unwrap().as_array().unwrap();
+        assert_eq!(indices.iter().map(|index| index.as_int().unwrap()).collect::<Vec<_>>(), [1, 2], "saved option indices are ascending");
+        let appearance = ap(&doc, &list.widgets[0]);
+        assert_eq!(appearance.matches("0.6 0.75 0.86 rg").count(), 2, "both selected rows stay highlighted");
+        if let Some(forward) = &forward_appearance {
+            assert_eq!(&appearance, forward, "the same selected rows have the same appearance in either selection order");
+        } else {
+            forward_appearance = Some(appearance);
+        }
+    }
+}
+
+#[test]
 fn errors_are_specific_and_change_nothing() {
     let mut doc = fixture();
     assert_eq!(set_value(&mut doc, "nope", &FieldValue::Text("x".into())), Err(FormError::NoSuchField("nope".into())));

@@ -1007,8 +1007,11 @@ fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scripts: &mut 
                     }
                 }
             }
-            let indices: Vec<Object> =
+            let mut indices: Vec<Object> =
                 exports.iter().filter_map(|e| f.options.iter().position(|(x, _)| x == e)).map(|i| Object::Int(i as i64)).collect();
+            // /I lists option indices in ascending order; /V keeps the caller's value order.
+            // Every entry above is an integer, so this sorts by its numeric option index.
+            indices.sort_unstable_by_key(Object::as_int);
             doc.update_dict(f.obj, |d| {
                 match exports.as_slice() {
                     [] => {

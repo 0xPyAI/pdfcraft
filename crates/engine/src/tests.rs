@@ -1812,6 +1812,34 @@ fn form_refresh_keeps_first_value_when_field_names_repeat() {
 }
 
 #[test]
+fn multiselect_choice_indices_stay_sorted_through_engine_save_and_reopen() {
+    let (mut s, id) = session_with(1);
+    s.apply(
+        id,
+        Edit::AddField {
+            page: 0,
+            rect: [20.0, 180.0, 180.0, 240.0],
+            kind: NewField::List { options: vec!["Cheese".into(), "Ham".into(), "Olives".into()], multi: true },
+            name: Some("toppings".into()),
+        },
+    )
+    .unwrap();
+    let chosen = vec!["Olives".to_string(), "Ham".to_string()];
+    s.apply(id, Edit::SetFieldValue { name: "toppings".into(), value: FieldValue::Choice(chosen.clone()) }).unwrap();
+    assert_eq!(s.get(id).unwrap().form[0].value, chosen, "the live engine keeps selection order");
+    let saved = s.save_bytes(id).unwrap();
+    let cos = pdfcraft_cos::Document::open(saved.clone()).unwrap();
+    let all = pdfcraft_forms::fields(&cos);
+    let list = all.iter().find(|field| field.name == "toppings").unwrap();
+    let object = cos.get(list.obj);
+    let indices = object.as_dict().unwrap().get(b"I").unwrap().as_array().unwrap();
+    assert_eq!(indices.iter().map(|index| index.as_int().unwrap()).collect::<Vec<_>>(), [1, 2]);
+    assert_eq!(list.value, chosen, "sorted /I does not reorder /V");
+    let reopened = s.open("reopened.pdf", None, saved, None).unwrap();
+    assert_eq!(s.get(reopened).unwrap().form[0].value, chosen, "reopening keeps selection order");
+}
+
+#[test]
 fn preparing_a_form_adds_renames_and_deletes_fields() {
     let (mut s, id) = session_with(1);
     assert!(s.get(id).unwrap().form.is_empty());
