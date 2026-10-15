@@ -984,11 +984,19 @@ impl<'a> Inspector<'a> {
         for (start, d) in ranges {
             let first = d.get(b"St").ok().and_then(|o| self.resolve(o).as_i64().ok()).unwrap_or(1).max(1) as u64;
             let prefix = match d.get(b"P").ok().map(|o| self.resolve(o)) {
-                Some(Object::String(raw, _) | Object::Name(raw)) => {
+                Some(Object::String(raw, _)) => {
                     if raw.len() > MAX_PREFIX_BYTES {
                         return Err("a raw prefix exceeds 2050 bytes");
                     }
-                    self.text(d, b"P").unwrap_or_default()
+                    // A label prefix is literal text, not trimmed document metadata.
+                    text_string(raw).trim_matches('\0').to_string()
+                }
+                Some(Object::Name(raw)) => {
+                    if raw.len() > MAX_PREFIX_BYTES {
+                        return Err("a raw prefix exceeds 2050 bytes");
+                    }
+                    // Retain the existing name compatibility and boundary-NUL handling.
+                    String::from_utf8_lossy(raw).trim_matches('\0').to_string()
                 }
                 _ => String::new(),
             };
@@ -1938,6 +1946,78 @@ mod tests {
         assert_eq!(info.warnings.len(), 1, "{:?}", info.warnings);
         assert!(info.warnings[0].contains("Page labels"), "{:?}", info.warnings);
         assert!(info.warnings[0].contains("physical page numbers"), "{:?}", info.warnings);
+    }
+
+    // Contributor-original, blank three-page PDFs. The public importer reads both labels and metadata.
+    fn page_prefix_space_pdf(prefix: Vec<u8>, decimal: bool, indirect: bool) -> Vec<u8> {
+        use lopdf::dictionary;
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let kids: Vec<Object> = (0..3)
+            .map(|_| {
+                doc.add_object(dictionary! {
+                    "Type" => "Page",
+                    "Parent" => pages_id,
+                    "MediaBox" => vec![0.into(), 0.into(), 200.into(), 300.into()],
+                    "Resources" => Dictionary::new(),
+                })
+                .into()
+            })
+            .collect();
+        doc.objects.insert(pages_id, dictionary! { "Type" => "Pages", "Kids" => kids, "Count" => 3 }.into());
+        let prefix = Object::String(prefix, lopdf::StringFormat::Hexadecimal);
+        let prefix = if indirect { Object::Reference(doc.add_object(prefix)) } else { prefix };
+        let mut label = Dictionary::new();
+        label.set("P", prefix);
+        if decimal {
+            label.set("S", Object::Name(b"D".to_vec()));
+        }
+        let labels = dictionary! { "Nums" => vec![Object::Integer(0), Object::Dictionary(label)] };
+        let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id, "PageLabels" => labels });
+        let info_id = doc.add_object(dictionary! { "Title" => Object::string_literal("  Metadata title  ") });
+        doc.trailer.set("Root", catalog_id);
+        doc.trailer.set("Info", info_id);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("write original page-prefix fixture");
+        bytes
+    }
+
+    #[test]
+    fn page_label_prefix_spaces_survive_public_inspection() {
+        let mut utf16 = vec![0xfe, 0xff];
+        utf16.extend(" Ω ".encode_utf16().flat_map(u16::to_be_bytes));
+        for (raw, prefix, decimal, indirect) in [
+            (b" leading".to_vec(), " leading", true, false),
+            (b"trailing ".to_vec(), "trailing ", true, false),
+            (b" both ".to_vec(), " both ", false, false),
+            (b" ".to_vec(), " ", false, false),
+            (b" Caf\xe9 ".to_vec(), " Café ", true, false),
+            (utf16.clone(), " Ω ", true, false),
+            (utf16, " Ω ", false, true),
+            (Vec::new(), "", true, false),
+            (Vec::new(), "", false, false),
+        ] {
+            let bytes = page_prefix_space_pdf(raw, decimal, indirect);
+            let info = inspect(Arc::new(bytes), None).expect("public import of original page-prefix fixture");
+            let expected: Vec<String> = (1..=3)
+                .map(|n| {
+                    if decimal {
+                        format!("{prefix}{n}")
+                    } else if prefix.is_empty() {
+                        n.to_string()
+                    } else {
+                        prefix.to_owned()
+                    }
+                })
+                .collect();
+            assert_eq!(
+                info.pages.iter().map(|p| p.label.clone()).collect::<Vec<_>>(),
+                expected,
+                "{prefix:?}, decimal={decimal}, indirect={indirect}"
+            );
+            assert!(info.warnings.is_empty(), "{:?}", info.warnings);
+            assert_eq!(info.title.as_deref(), Some("Metadata title"), "page-prefix decoding must not change metadata normalization");
+        }
     }
 
     #[test]
