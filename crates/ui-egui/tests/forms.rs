@@ -123,6 +123,45 @@ fn tabbing_into_a_filled_field_selects_it_so_typing_replaces() {
 }
 
 #[test]
+fn dragging_over_another_fields_text_focuses_it_and_selects_from_the_press() {
+    // Issue #2213: with the caret in one field, a drag over another field's text selected
+    // nothing; the field opened only on a click.
+    let mut h = harness();
+    click_field(&mut h, "name", 0);
+    h.event(egui::Event::Text("Ada Lovelace".into()));
+    h.run_steps(1);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    click_field(&mut h, "city", 0);
+    assert_eq!(h.state().views[0].forms.focus.as_ref().map(|f| f.name.as_str()), Some("city"));
+    let (rect, id) = {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f = doc.form.iter().find(|f| f.name == "name").unwrap();
+        let rect = pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen");
+        (rect, egui::Id::new(("form-field", s.views[0].id.0, "name", 0usize)))
+    };
+    // From inside the first word to past the end of the text.
+    let (from, to) = (egui::pos2(rect.left() + 30.0, rect.center().y), egui::pos2(rect.right() - 8.0, rect.center().y));
+    h.hover_at(from);
+    h.run_steps(1);
+    h.drag_at(from);
+    h.run_steps(1);
+    for k in 1..=4 {
+        h.hover_at(from.lerp(to, k as f32 / 4.0));
+        h.run_steps(1);
+    }
+    h.drop_at(to);
+    h.run_steps(3);
+    assert_eq!(h.state().views[0].forms.focus.as_ref().map(|f| f.name.as_str()), Some("name"), "the press moved the focus");
+    let n = "Ada Lovelace".chars().count();
+    let range = egui::TextEdit::load_state(&h.ctx, id).and_then(|s| s.cursor.char_range()).expect("a selection in the field");
+    // "Ad|a": not the caret at the end that a newly focused editor gets on its own.
+    assert_eq!(range.secondary.index.0, 2, "anchored where the drag started: {range:?}");
+    assert_eq!(range.primary.index.0, n, "and extended to where it ended: {range:?}");
+}
+
+#[test]
 fn date_fields_offer_a_calendar() {
     use egui_kittest::kittest::Queryable;
     let mut h = harness();
@@ -393,6 +432,52 @@ fn validated_form() -> Vec<u8> {
         "<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>",
         "<< /Type /Annot /Subtype /Widget /FT /Tx /T (qty) /V (4) /Rect [20 350 280 372] /P 3 0 R /F 4 /AA << /V << /S /JavaScript /JS (if (event.value > 100) { app.alert('At most 100'); event.rc = false; }) >> >> >>",
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    ])
+}
+
+#[test]
+fn pressing_another_text_field_validates_the_refused_value_once() {
+    // The press commits `qty`; its release must not commit (and alert) a second time.
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("order.pdf", None, validated_form_with_note()).unwrap();
+        app.set_option("left", "closed").unwrap();
+        app.set_option("zoom", "150").unwrap();
+        app
+    });
+    h.run_steps(6);
+    click_field(&mut h, "qty", 0);
+    h.event(egui::Event::Text("500".into()));
+    h.run_steps(2);
+    let p = {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f = doc.form.iter().find(|f| f.name == "note").unwrap();
+        pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen").center()
+    };
+    h.hover_at(p);
+    h.run_steps(1);
+    h.drag_at(p);
+    h.run_steps(2);
+    assert!(h.state().toast.is_some(), "the press committed 4500 and the script refused it");
+    h.state_mut().toast = None;
+    h.drop_at(p);
+    h.run_steps(3);
+    assert_eq!(h.state().toast, None, "the release did not validate it again");
+    let focus = h.state().views[0].forms.focus.clone().expect("the refused field stays open");
+    assert_eq!((focus.name.as_str(), focus.text.as_str()), ("qty", "4500"));
+}
+
+/// `validated_form` plus a plain text field, `note`, under `qty`.
+fn validated_form_with_note() -> Vec<u8> {
+    pdf_from_objects(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 6 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >> >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>",
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 6 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (qty) /V (4) /Rect [20 350 280 372] /P 3 0 R /F 4 /AA << /V << /S /JavaScript /JS (if (event.value > 100) { app.alert('At most 100'); event.rc = false; }) >> >> >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (note) /Rect [20 300 280 322] /P 3 0 R /F 4 >>",
     ])
 }
 

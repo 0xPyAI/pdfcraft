@@ -31,6 +31,9 @@ pub struct Focus {
     pub request_focus: bool,
     /// Select the whole value when the editor opens (entered with Tab), so typing replaces it.
     pub select_all: bool,
+    /// Where the press that opened the editor landed: the editor puts its caret there and takes
+    /// over the drag, so press-and-drag selects text in a field that was not focused (#2213).
+    pub press: Option<egui::Pos2>,
     /// Date fields: the month the calendar shows (year, month 1–12), and where it was drawn.
     pub calendar: Option<(i32, u32)>,
     pub calendar_rect: Option<egui::Rect>,
@@ -42,6 +45,10 @@ pub struct FormView {
     /// The draft whose edit is queued (`DocView::pending_edit`): if the field refuses the value,
     /// the editor reopens with it rather than losing the typing.
     pub(crate) committed: Option<Focus>,
+    /// A press on a text field committed the field before it (#2213). Until the button is
+    /// released, that field losing focus to the same gesture must not commit it again: a
+    /// refused value would be validated (and alerted) twice.
+    pub(crate) pressed: bool,
     /// Fields modified by the user whose appearance stream has not been rasterized by the render worker yet.
     /// Tracked as (field_name, page_index) so committed edits stay immediately visible without flicker.
     pub unbaked: HashSet<(String, usize)>,
@@ -79,6 +86,7 @@ fn open_focus(f: &FormField, widget: usize) -> Focus {
         picked: f.value.clone(),
         request_focus: true,
         select_all: false,
+        press: None,
         calendar: None,
         calendar_rect: None,
     }
@@ -128,6 +136,14 @@ pub(crate) fn page_input(
         (true, FormFieldKind::Text) => egui::CursorIcon::Text,
         _ => egui::CursorIcon::PointingHand,
     });
+    // A text field opens on the press rather than the click, so a drag that starts on it
+    // selects its text (#2213).
+    let pressed = f.kind == FormFieldKind::Text && usable && resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed());
+    if pressed && view.forms.focus.as_ref().is_none_or(|x| x.name != f.name || x.widget != wi) {
+        commit(view, form);
+        view.forms.focus = Some(Focus { press: Some(p), ..open_focus(f, wi) });
+        view.forms.pressed = true;
+    }
     if !resp.clicked() {
         return if resp.is_pointer_button_down_on() { FieldPointer::Owned } else { FieldPointer::Over };
     }
@@ -153,6 +169,16 @@ pub(crate) fn page_input(
             let value = if f.value.first() == on.as_ref() && !f.has(field_flags::NO_TOGGLE_TO_OFF) { None } else { on };
             if value.as_ref() != f.value.first() {
                 view.pending_edit = Some(Edit::SetFieldValue { name: f.name.clone(), value: FieldValue::Radio(value) });
+            }
+        }
+        // The press already committed the previous field and opened this one (above), unless
+        // press and release came in one frame. Committing again would re-run a validation that
+        // refused the value on the press.
+        FormFieldKind::Text if !ui.input(|i| i.pointer.primary_pressed()) => {
+            // An editor opened by the press cannot be hit until a frame has laid it out: the
+            // release lands on the page and would take its focus away.
+            if let Some(x) = view.forms.focus.as_mut().filter(|x| x.name == f.name && x.widget == wi) {
+                x.request_focus = true;
             }
         }
         FormFieldKind::Text | FormFieldKind::Combo | FormFieldKind::List => {
@@ -372,6 +398,10 @@ fn paint_unbaked_widget(painter: &egui::Painter, xf: &PageXform, f: &FormField, 
 
 /// The in-place editor or option list for the focused field. Returns an edit to apply.
 pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, form: &[FormField], today: (i64, u32, u32)) -> Option<Edit> {
+    let pressed = view.forms.pressed;
+    if !ctx.input(|i| i.pointer.primary_down()) {
+        view.forms.pressed = false;
+    }
     let focus = view.forms.focus.clone()?;
     let Some(f) = form.iter().find(|f| f.name == focus.name) else {
         view.forms.focus = None;
@@ -413,7 +443,24 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
                 if multiline {
                     te = te.desired_rows(((rect.height() / (font * 1.3)).floor() as usize).max(1));
                 }
-                let r = ui.add_sized(rect.size(), te);
+                let mut laid_out = None;
+                let r = ui.add_sized(rect.size(), |ui: &mut egui::Ui| {
+                    let out = te.show(ui);
+                    laid_out = Some((out.galley, out.galley_pos));
+                    out.response.response
+                });
+                if let Some(press) = fx.press.take()
+                    && let Some((galley, pos)) = laid_out
+                    && let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), r.id)
+                {
+                    // The press went to the page, not to this editor, which did not exist yet.
+                    let at = galley.cursor_from_pos(press - pos + vec2(galley.rect.left(), 0.0));
+                    st.cursor.set_char_range(Some(egui::text::CCursorRange::one(at)));
+                    st.store(ui.ctx(), r.id);
+                    if ui.input(|i| i.pointer.primary_down()) {
+                        ui.ctx().set_dragged_id(r.id);
+                    }
+                }
                 if fx.request_focus {
                     r.request_focus();
                     fx.request_focus = false;
@@ -435,8 +482,13 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
                     && (!multiline || !enter)
                     && !fx.calendar_rect.is_some_and(|c| ui.input(|i| i.pointer.interact_pos().is_some_and(|p| c.contains(p))))
                 {
-                    // Enter in a single-line field, or clicking elsewhere, commits.
-                    commit(view, form);
+                    if pressed {
+                        // The field reopened with a refused value; keep it open and focused.
+                        fx.request_focus = true;
+                    } else {
+                        // Enter in a single-line field, or clicking elsewhere, commits.
+                        commit(view, form);
+                    }
                 }
             });
             // Date fields: a calendar under the field (Acrobat's date picker).
