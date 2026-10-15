@@ -44,7 +44,7 @@ pub use signature_image::{ImageSignaturePreview, SignatureImage};
 pub use signature_scan::{PhotoRect, ScanError, SignaturePhoto, Turn};
 pub use text_preview::TextEditPreview;
 
-pub use pdfcraft_organize::{BoxSpec, FieldConflicts, PageBox, SplitBy, split_ranges};
+pub use pdfcraft_organize::{BoxSpec, FieldConflicts, PageBox, SplitBy, Transition, TransitionSpec, split_ranges};
 
 /// One file produced by a split: (1-based first page, last page, PDF bytes).
 pub use pdfcraft_organize::LabelStyle;
@@ -1155,6 +1155,12 @@ pub enum Edit {
         which: PageBox,
         spec: BoxSpec,
     },
+    /// Set or remove the page transition and display time of pages (ISO 32000-2 §12.4.4),
+    /// Organize ▸ Page Transitions.
+    SetTransition {
+        pages: Vec<usize>,
+        spec: TransitionSpec,
+    },
     SetInfo {
         key: String,
         value: String,
@@ -1662,6 +1668,7 @@ pub const EDIT_LABELS: &[&str] = &[
     "Crop page",
     "Crop pages",
     "Set page boxes",
+    "Set page transitions",
     "Change Title",
     "Change Author",
     "Change Subject",
@@ -1797,6 +1804,7 @@ impl Edit {
             Edit::ReplacePages { pages, .. } => plural("Replace page", "Replace pages", pages.len()),
             Edit::SetPageBox { pages, which: PageBox::Crop, .. } => plural("Crop page", "Crop pages", pages.len()),
             Edit::SetPageBox { .. } => Label::of("Set page boxes"),
+            Edit::SetTransition { .. } => Label::of("Set page transitions"),
             // The four `/Info` keys PdfCraft itself offers get a wording of their own, so each can
             // be said in another language; any other key is the document's and goes in as it stands.
             Edit::SetInfo { key, .. } => match key.as_str() {
@@ -1966,6 +1974,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         | Edit::DuplicatePages { .. }
         | Edit::ReplacePages { .. }
         | Edit::SetPageBox { .. }
+        | Edit::SetTransition { .. }
         | Edit::InsertPagesFrom { .. }
         // "Assemble the document: insert, rotate or delete pages and create bookmarks" (Table 22).
         | Edit::AddBookmark { .. }
@@ -2180,6 +2189,7 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
             pdfcraft_organize::replace_pages(doc, pages, &src, src_pages)?;
         }
         Edit::SetPageBox { pages, which, spec } => pdfcraft_organize::set_page_box(doc, pages, *which, *spec)?,
+        Edit::SetTransition { pages, spec } => pdfcraft_organize::set_transition(doc, pages, spec)?,
         Edit::InsertPagesFrom { name, bytes, pages, at, field_conflicts } => {
             let src = open_source(name, bytes)?;
             let pages = match pages {

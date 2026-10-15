@@ -825,6 +825,26 @@ pub fn tools() -> Vec<ToolDef> {
             .cmd("page.duplicate")
             .with(schema(json!({ "doc": doc(), "pages": pages("to duplicate") }), &["doc", "pages"])),
         t(
+            "page_transition_set",
+            "Set page transitions",
+            "Set or remove the transition and display time pages play in a full-screen presentation (ISO 32000-2 §12.4.4; Acrobat's Organize ▸ Page Transitions). style: Split, Blinds, Box, Wipe, Dissolve, Glitter, R (replace, no effect), Fly, Push, Cover, Uncover or Fade, or none to remove the transition; duration in seconds (default 1); dimension horizontal/vertical (Split, Blinds); motion inward/outward (Split, Box, Fly); direction 0, 90, 180, 270, 315 or none (Wipe, Glitter, Fly, Cover, Uncover, Push); scale and opaque for Fly. display: seconds the page stays before advancing; left out, the page waits for the presenter. doc_info lists the result under transitions.",
+        )
+        .with(schema(
+            json!({
+                "doc": doc(),
+                "pages": pages("to change (default: all)"),
+                "style": { "type": "string", "enum": ["none", "Split", "Blinds", "Box", "Wipe", "Dissolve", "Glitter", "R", "Fly", "Push", "Cover", "Uncover", "Fade"] },
+                "duration": { "type": "number", "minimum": 0 },
+                "dimension": { "type": "string", "enum": ["horizontal", "vertical"] },
+                "motion": { "type": "string", "enum": ["inward", "outward"] },
+                "direction": { "description": "0, 90, 180, 270, 315 or \"none\"" },
+                "scale": { "type": "number", "exclusiveMinimum": 0 },
+                "opaque": { "type": "boolean" },
+                "display": { "type": "number", "minimum": 0 },
+            }),
+            &["doc"],
+        )),
+        t(
             "page_set_box",
             "Set page boxes / crop",
             "Set a page box (crop by default; also trim, bleed, art, media) on pages: either margins in points from the media box [left, bottom, right, top], or an absolute rect in points from the top-left of the displayed page. Omit both to reset the box to its default. Undoable.",

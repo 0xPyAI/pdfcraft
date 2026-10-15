@@ -20,6 +20,7 @@ mod labels;
 mod outline;
 mod pdfx;
 mod prune;
+mod transition;
 pub mod view;
 mod xmp;
 
@@ -35,6 +36,7 @@ pub use outline::{
     Bookmark, BookmarkPage, OutlineEntry, OutlineError, add_bookmark, add_bookmark_tree, bookmark_page, bookmarks, delete_bookmark, move_bookmark,
     rename_bookmark, set_bookmark_open, set_bookmark_page, top_level_bookmarks,
 };
+pub use transition::{TRANSITION_DIRECTIONS, TRANSITION_STYLES, Transition, TransitionSpec, set_transition};
 pub use view::{InitialView, displays_doc_title, initial_view, set_initial_view};
 
 #[derive(Debug, thiserror::Error, PartialEq)]

@@ -154,6 +154,66 @@ fn doc_info_lists_page_transitions_and_display_times() {
     );
 }
 
+/// Page transitions through the tools: set on chosen pages, written to the file as `/Trans` and
+/// `/Dur`, removed again, bad values refused, and one undo step. (Read through `pdfcraft_cos`,
+/// so this does not lean on `doc_info` listing them.)
+#[test]
+fn page_transitions_are_set_and_removed_through_the_tools() {
+    use pdfcraft_cos::Object;
+    /// `key` of 0-based `page` in the saved file `name`, resolved.
+    fn entry(dir: &Path, name: &str, page: usize, key: &[u8]) -> Option<Object> {
+        let d = pdfcraft_cos::Document::open(std::sync::Arc::new(std::fs::read(dir.join(name)).ok()?)).ok()?;
+        let root = d.root()?;
+        let pages = d.get(root).as_dict()?.reference(b"Pages")?;
+        let kids = d.get(pages).as_dict()?.get(b"Kids")?.clone();
+        let kid = d.resolve(&kids).as_array()?.get(page)?.clone();
+        let o = d.resolve(&kid).as_dict()?.get(key)?.clone();
+        Some((*d.resolve(&o)).clone())
+    }
+    let dir = workdir("transitions-set");
+    std::fs::write(dir.join("a.pdf"), fixture(3)).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_transition_set", json!({ "doc": doc, "pages": [2, 3], "style": "Wipe", "duration": 2, "direction": 270, "display": 5 }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "out/t1.pdf" }));
+    let t = entry(&dir, "out/t1.pdf", 1, b"Trans").expect("/Trans on page 2");
+    let t = t.as_dict().expect("a dictionary");
+    assert_eq!(
+        (t.name(b"S"), t.get(b"D").and_then(Object::as_f64), t.get(b"Di").and_then(Object::as_f64)),
+        (Some(&b"Wipe"[..]), Some(2.0), Some(270.0)),
+        "{t:?}"
+    );
+    assert_eq!(entry(&dir, "out/t1.pdf", 1, b"Dur").and_then(|o| o.as_f64()), Some(5.0));
+    assert!(entry(&dir, "out/t1.pdf", 2, b"Trans").is_some(), "page 3 too");
+    assert!(entry(&dir, "out/t1.pdf", 0, b"Trans").is_none() && entry(&dir, "out/t1.pdf", 0, b"Dur").is_none(), "page 1 was not asked for");
+    ok(
+        &mut a,
+        "page_transition_set",
+        json!({ "doc": doc, "pages": [3], "style": "Fly", "motion": "outward", "direction": "none", "scale": 0.5, "opaque": true }),
+    );
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "out/t2.pdf" }));
+    let t = entry(&dir, "out/t2.pdf", 2, b"Trans").expect("/Trans on page 3");
+    let t = t.as_dict().expect("a dictionary");
+    assert_eq!(
+        (t.name(b"S"), t.name(b"M"), t.name(b"Di"), t.get(b"SS").and_then(Object::as_f64), t.get(b"B")),
+        (Some(&b"Fly"[..]), Some(&b"O"[..]), Some(&b"None"[..]), Some(0.5), Some(&Object::Bool(true))),
+        "{t:?}"
+    );
+    assert!(entry(&dir, "out/t2.pdf", 2, b"Dur").is_none(), "display time left out removes /Dur");
+    assert!(a.call("page_transition_set", &json!({ "doc": doc, "style": "Swirl" })).is_err(), "an unknown style is refused");
+    assert!(a.call("page_transition_set", &json!({ "doc": doc, "style": "Wipe", "direction": 45 })).is_err());
+    assert!(a.call("page_transition_set", &json!({ "doc": doc, "pages": [9], "style": "Fade" })).is_err(), "no such page");
+    ok(&mut a, "page_transition_set", json!({ "doc": doc, "style": "none" }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "out/t3.pdf" }));
+    assert!((0..3).all(|p| entry(&dir, "out/t3.pdf", p, b"Trans").is_none() && entry(&dir, "out/t3.pdf", p, b"Dur").is_none()), "all removed");
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "out/t4.pdf" }));
+    assert!(
+        entry(&dir, "out/t4.pdf", 1, b"Trans").is_some() && entry(&dir, "out/t4.pdf", 2, b"Trans").is_some(),
+        "one undo step brings both pages back"
+    );
+}
+
 #[test]
 fn autotag_preview_proposes_text_without_changing_the_pdf() {
     let dir = workdir("autotag-preview");

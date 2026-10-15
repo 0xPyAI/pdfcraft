@@ -267,6 +267,56 @@ fn document_info_edits_round_trip_with_unicode() {
     assert_eq!(info(&doc, "Producer"), None);
 }
 
+/// Page transitions (§12.4.4): written as `/Trans` and `/Dur` with only the entries the style
+/// reads and that differ from the defaults, removed again, checked before any page changes, and
+/// kept through a save.
+#[test]
+fn page_transitions_are_set_removed_and_checked() {
+    let mut doc = open(fixture());
+    let wipe = Transition { duration: 2.5, direction: Some(270), ..Transition::new("Wipe") };
+    set_transition(&mut doc, &[0, 2], &TransitionSpec { transition: Some(wipe), display: Some(5.0) }).unwrap();
+    let d = page_dict(&doc, 0);
+    let t = d.get(b"Trans").and_then(|o| o.as_dict()).expect("/Trans").clone();
+    assert_eq!(t.name(b"Type"), Some(&b"Trans"[..]));
+    assert_eq!(t.name(b"S"), Some(&b"Wipe"[..]));
+    assert_eq!(t.get(b"D"), Some(&Object::Real(2.5)));
+    assert_eq!(t.get(b"Di"), Some(&Object::Int(270)));
+    assert!(
+        t.get(b"Dm").is_none() && t.get(b"M").is_none() && t.get(b"SS").is_none() && t.get(b"B").is_none(),
+        "entries Wipe does not read stay out: {t:?}"
+    );
+    assert_eq!(d.get(b"Dur"), Some(&Object::Real(5.0)));
+    assert!(page_dict(&doc, 1).get(b"Trans").is_none(), "page 2 was not asked for");
+    // Fly with everything non-default; the defaults themselves are not written.
+    let fly = Transition { style: "Fly".into(), duration: 1.0, horizontal: false, inward: false, direction: None, scale: 0.5, opaque: true };
+    set_transition(&mut doc, &[1], &TransitionSpec { transition: Some(fly), display: None }).unwrap();
+    let t = page_dict(&doc, 1).get(b"Trans").and_then(|o| o.as_dict()).expect("/Trans").clone();
+    assert_eq!((t.name(b"S"), t.name(b"M"), t.name(b"Di")), (Some(&b"Fly"[..]), Some(&b"O"[..]), Some(&b"None"[..])));
+    assert_eq!((t.get(b"SS"), t.get(b"B")), (Some(&Object::Real(0.5)), Some(&Object::Bool(true))));
+    assert!(t.get(b"D").is_none() && t.get(b"Dm").is_none(), "{t:?}");
+    // Removed again.
+    set_transition(&mut doc, &[0], &TransitionSpec { transition: None, display: None }).unwrap();
+    let d = page_dict(&doc, 0);
+    assert!(d.get(b"Trans").is_none() && d.get(b"Dur").is_none());
+    // Checked before anything changes.
+    for (what, spec) in [
+        ("style", TransitionSpec { transition: Some(Transition::new("Swirl")), display: None }),
+        ("direction", TransitionSpec { transition: Some(Transition { direction: Some(45), ..Transition::new("Wipe") }), display: None }),
+        ("duration", TransitionSpec { transition: Some(Transition { duration: -1.0, ..Transition::new("Fade") }), display: None }),
+        ("scale", TransitionSpec { transition: Some(Transition { scale: 0.0, ..Transition::new("Fly") }), display: None }),
+        ("display", TransitionSpec { transition: None, display: Some(f32::NAN) }),
+    ] {
+        assert!(set_transition(&mut doc, &[2], &spec).is_err(), "{what} must be refused");
+    }
+    assert!(set_transition(&mut doc, &[7], &TransitionSpec { transition: None, display: None }).is_err(), "no such page");
+    let t = page_dict(&doc, 2).get(b"Trans").and_then(|o| o.as_dict()).expect("page 3 unchanged").clone();
+    assert_eq!(t.name(b"S"), Some(&b"Wipe"[..]));
+    // Kept through a save.
+    let doc = save_and_reopen(&doc);
+    // (A whole number of seconds may come back as an integer: the writer's choice.)
+    assert_eq!(page_dict(&doc, 2).get(b"Dur").and_then(Object::as_f64), Some(5.0));
+}
+
 /// A one-page document whose catalog has `xmp` as its (Flate-compressed) XMP packet, and the
 /// same title and author in `/Info`, as LibreOffice writes them.
 fn doc_with_xmp(xmp: &[u8]) -> Document {

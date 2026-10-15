@@ -353,6 +353,7 @@ impl Automation {
                 self.apply(&a, Edit::DuplicatePages { pages })?
             }
             "page_set_box" => self.page_set_box(&a)?,
+            "page_transition_set" => self.page_transition_set(&a)?,
             "doc_create" => self.doc_create(&a)?,
             "xfa_to_static" => self.apply(&a, Edit::XfaToStatic)?,
             "doc_flatten" => {
@@ -1295,6 +1296,58 @@ impl Automation {
         let name = a.opt_str("name")?.map(str::to_owned).unwrap_or(name);
         let id = self.session.open_new(name, bytes).map_err(failed)?;
         Ok(summary(self.session.get(id).ok_or_else(|| failed("the document vanished"))?))
+    }
+
+    fn page_transition_set(&mut self, a: &Args) -> Result<Value> {
+        use pdfcraft_engine::{Transition, TransitionSpec};
+        let n = self.doc(a)?.info.pages.len();
+        let pages = match a.opt_ints("pages")? {
+            Some(_) => self.pages(a, "pages")?,
+            None => (0..n).collect(),
+        };
+        let transition = match a.opt_str("style")? {
+            None | Some("none") => None,
+            Some(style) => {
+                let mut t = Transition::new(style);
+                if let Some(d) = a.opt_num("duration")? {
+                    t.duration = d as f32;
+                }
+                if let Some(dm) = a.opt_str("dimension")? {
+                    t.horizontal = match dm {
+                        "horizontal" => true,
+                        "vertical" => false,
+                        other => return Err(ToolError::InvalidArgs(format!("dimension must be horizontal or vertical, not {other:?}"))),
+                    };
+                }
+                if let Some(m) = a.opt_str("motion")? {
+                    t.inward = match m {
+                        "inward" => true,
+                        "outward" => false,
+                        other => return Err(ToolError::InvalidArgs(format!("motion must be inward or outward, not {other:?}"))),
+                    };
+                }
+                match a.get("direction") {
+                    None => {}
+                    Some(Value::String(s)) if s == "none" => t.direction = None,
+                    Some(v) => {
+                        t.direction = Some(
+                            v.as_u64()
+                                .and_then(|d| u16::try_from(d).ok())
+                                .ok_or_else(|| ToolError::InvalidArgs("direction must be 0, 90, 180, 270, 315 or \"none\"".into()))?,
+                        );
+                    }
+                }
+                if let Some(s) = a.opt_num("scale")? {
+                    t.scale = s as f32;
+                }
+                if let Some(b) = a.opt_bool("opaque")? {
+                    t.opaque = b;
+                }
+                Some(t)
+            }
+        };
+        let display = a.opt_num("display")?.map(|s| s as f32);
+        self.apply(a, Edit::SetTransition { pages, spec: TransitionSpec { transition, display } })
     }
 
     fn page_set_box(&mut self, a: &Args) -> Result<Value> {
