@@ -2356,6 +2356,10 @@ animation effects	Off	Өшірулі
 # Absolute local GoToR confirmation (#1364).
 	Allow	Рұқсат беру
 	Only allow this if you trust the source document.	Бастапқы құжатқа сенсеңіз ғана рұқсат беріңіз.
+	Open in Full Screen mode?	Толық экран режимінде ашу керек пе?
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	Бұл құжат толық экран режимінде ашылуды сұрайды: бет экранды толтырады және басқа ештеңе көрсетілмейді. Шығу үшін кез келген уақытта Esc басыңыз.
+	Full Screen	Толық экран
+	Not now	Қазір емес
 	Open this local PDF?	Осы жергілікті PDF файлын ашу керек пе?
 	This document is trying to open a local file:	Бұл құжат жергілікті файлды ашуға әрекеттеніп жатыр:
 	Move tag earlier	Тегті ертерек жылжыту

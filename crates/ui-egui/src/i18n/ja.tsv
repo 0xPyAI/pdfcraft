@@ -2358,6 +2358,10 @@ animation effects	Off	オフ
 # Absolute local GoToR confirmation (#1364).
 	Allow	許可
 	Only allow this if you trust the source document.	元の文書を信頼できる場合にのみ許可してください。
+	Open in Full Screen mode?	フルスクリーンモードで開きますか？
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	この文書はフルスクリーンモードで開くよう求めています。ページが画面全体を占め、他には何も表示されません。Esc キーでいつでも終了できます。
+	Full Screen	フルスクリーン
+	Not now	今はしない
 	Open this local PDF?	このローカルPDFを開きますか？
 	This document is trying to open a local file:	この文書はローカルファイルを開こうとしています：
 	Move tag earlier	タグを前へ移動

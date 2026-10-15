@@ -192,6 +192,35 @@ fn read_mode_rail_buttons_open_their_panels() {
     h.get_by_label("Alpha section");
 }
 
+/// A document that asks to open in Full Screen mode (`/PageMode /FullScreen`) is asked about
+/// first, as in Acrobat: "Not now" leaves the window as it is, "Full Screen" enters it.
+#[test]
+fn a_document_asking_for_full_screen_is_asked_about_first() {
+    let deck = || String::from_utf8(FIXTURE.to_vec()).unwrap().replace("/Outlines 6 0 R", "/Outlines 6 0 R /PageMode /FullScreen").into_bytes();
+    let mut h = harness(move |app| app.open_bytes("deck.pdf", None, deck()).expect("opens"));
+    h.run_steps(3);
+    assert!(!h.state().full_screen, "nothing happens before the answer");
+    h.get_by_label("Open in Full Screen mode?");
+    h.get_by_label("Not now").click();
+    h.run_steps(3);
+    assert!(!h.state().full_screen);
+    assert!(h.query_by_label("Open in Full Screen mode?").is_none() && h.state().pending_full_screen.is_none());
+    // Asked again for the next such document; Full Screen enters it.
+    let again = String::from_utf8(FIXTURE.to_vec()).unwrap().replace("/Outlines 6 0 R", "/Outlines 6 0 R /PageMode /FullScreen").into_bytes();
+    h.state_mut().open_bytes("deck2.pdf", None, again).expect("opens");
+    h.run_steps(3);
+    h.get_by_label("Full Screen").click();
+    h.run_steps(3);
+    assert!(h.state().full_screen, "Full Screen enters it");
+    assert!(h.state().pending_full_screen.is_none());
+    // A plain document asks nothing.
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    h.state_mut().open_bytes("plain.pdf", None, FIXTURE.to_vec()).expect("opens");
+    h.run_steps(3);
+    assert!(h.query_by_label("Open in Full Screen mode?").is_none() && !h.state().full_screen);
+}
+
 /// Switching to Read mode closes the open pane, and switching back reopens it.
 #[test]
 fn read_mode_closes_the_panes_and_leaving_it_brings_them_back() {

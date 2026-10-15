@@ -2432,6 +2432,10 @@ animation effects	Off	Vypnuto
 # Absolute local GoToR confirmation (#1364).
 	Allow	Povolit
 	Only allow this if you trust the source document.	Povolte tuto akci pouze v případě, že důvěřujete zdrojovému dokumentu.
+	Open in Full Screen mode?	Otevřít v režimu celé obrazovky?
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	Tento dokument žádá o otevření v režimu celé obrazovky: stránka vyplní obrazovku a nic jiného se nezobrazí. Stisknutím Esc jej kdykoli opustíte.
+	Full Screen	Celá obrazovka
+	Not now	Teď ne
 	Open this local PDF?	Otevřít tento místní soubor PDF?
 	This document is trying to open a local file:	Tento dokument se pokouší otevřít místní soubor:
 	Move tag earlier	Přesunout značku dříve

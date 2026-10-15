@@ -2322,6 +2322,10 @@ animation effects	Off	关
 # Absolute local GoToR confirmation (#1364).
 	Allow	允许
 	Only allow this if you trust the source document.	仅在您信任源文档时才允许此操作。
+	Open in Full Screen mode?	以全屏模式打开？
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	此文档要求以全屏模式打开：页面充满屏幕，不显示其他内容。随时按 Esc 即可退出。
+	Full Screen	全屏
+	Not now	暂不
 	Open this local PDF?	是否打开此本地 PDF？
 	This document is trying to open a local file:	此文档正尝试打开本地文件：
 	Move tag earlier	将标签前移

@@ -3475,8 +3475,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["file.properties"]
 tools = ["doc_initial_view"]
-evidence = ["crates/organize/src/tests.rs::initial_view_round_trips_and_keeps_scripts", "crates/ui-egui/tests/viewer.rs::initial_view_is_edited_and_honoured_on_open", "crates/automation/tests/automation.rs::initial_view_through_tools"]
-notes = "navigation panel, layout, magnification, page, window and interface options; honoured on open; script open actions kept"
+evidence = ["crates/ui-egui/tests/ui.rs::a_document_asking_for_full_screen_is_asked_about_first", "crates/organize/src/tests.rs::initial_view_round_trips_and_keeps_scripts", "crates/ui-egui/tests/viewer.rs::initial_view_is_edited_and_honoured_on_open", "crates/automation/tests/automation.rs::initial_view_through_tools"]
+notes = "navigation panel, layout, magnification, page, window and interface options; honoured on open; script open actions kept. Open in Full Screen mode (/PageMode /FullScreen) asks first (Full Screen / Not now), as Acrobat does, instead of taking the screen. Missing: Acrobat's Full Screen preference to turn that alert off and its \"remember my choice for this document\" (misc.prefs-full-screen)"
 
 [[feature]]
 id = "organize.custom-properties"

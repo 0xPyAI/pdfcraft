@@ -2379,6 +2379,10 @@ animation effects	Off	معطّلة
 # Absolute local GoToR confirmation (#1364).
 	Allow	السماح
 	Only allow this if you trust the source document.	لا تسمح بذلك إلا إذا كنت تثق بالمستند المصدر.
+	Open in Full Screen mode?	فتح في وضع ملء الشاشة؟
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	يطلب هذا المستند أن يُفتح في وضع ملء الشاشة: تملأ الصفحة الشاشة ولا يظهر شيء آخر. اضغط Esc في أي وقت للخروج منه.
+	Full Screen	ملء الشاشة
+	Not now	ليس الآن
 	Open this local PDF?	هل تريد فتح ملف PDF المحلي هذا؟
 	This document is trying to open a local file:	يحاول هذا المستند فتح ملف محلي:
 	Move tag earlier	نقل العلامة للأعلى

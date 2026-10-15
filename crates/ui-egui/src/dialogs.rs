@@ -20,6 +20,7 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     save_prompt(app, ctx);
     link_prompt(app, ctx);
     remote_link_prompt(app, ctx);
+    full_screen_prompt(app, ctx);
     crate::updates::dialog(app, ctx);
     if app.dialog != Some(Dialog::WordCount) {
         app.word_count_draft.cancel();
@@ -1529,6 +1530,48 @@ fn link_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
     }
     if let Some(open) = choice {
         app.resolve_pending_link(open);
+    }
+}
+
+/// A document that asks to open in Full Screen mode (`/PageMode /FullScreen`) is asked about
+/// first, as Acrobat does: full screen hides every control, so it is the person's choice.
+fn full_screen_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
+    let Some(id) = app.pending_full_screen else { return };
+    // The document was closed before an answer: nothing to ask any more.
+    if app.session.get(id).is_none() {
+        app.pending_full_screen = None;
+        return;
+    }
+    let t = Tokens::get(ctx);
+    let mut choice = None;
+    let modal = widgets::show_modal(ctx, "full_screen_prompt", |ui| {
+        ui.set_width(460.0);
+        ui.horizontal(|ui| {
+            ui.add(crate::icons::image("maximize", 22.0, t.accent));
+            ui.label(egui::RichText::new(tl!("Open in Full Screen mode?")).font(theme::semibold(16.0)));
+        });
+        ui.add_space(6.0);
+        ui.add(
+            egui::Label::new(tl!(
+                "This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it."
+            ))
+            .wrap(),
+        );
+        ui.add_space(14.0);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if widgets::pill_button(ui, tl!("Not now"), true).clicked() {
+                choice = Some(false);
+            }
+            if widgets::pill_button(ui, tl!("Full Screen"), false).clicked() {
+                choice = Some(true);
+            }
+        });
+    });
+    if choice.is_none() && modal.should_close() {
+        choice = Some(false);
+    }
+    if let Some(allow) = choice {
+        app.resolve_full_screen_prompt(ctx, allow);
     }
 }
 

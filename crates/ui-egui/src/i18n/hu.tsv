@@ -2357,6 +2357,10 @@ animation effects	Off	Ki
 # Absolute local GoToR confirmation (#1364).
 	Allow	Engedélyezés
 	Only allow this if you trust the source document.	Csak akkor engedélyezze ezt, ha megbízik a forrásdokumentumban.
+	Open in Full Screen mode?	Megnyitás teljes képernyős módban?
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	Ez a dokumentum teljes képernyős módban kér megnyitást: az oldal kitölti a képernyőt, és semmi más nem látszik. Az Esc billentyűvel bármikor kiléphet.
+	Full Screen	Teljes képernyő
+	Not now	Most nem
 	Open this local PDF?	Megnyitja ezt a helyi PDF-fájlt?
 	This document is trying to open a local file:	Ez a dokumentum egy helyi fájlt próbál megnyitni:
 	Move tag earlier	Címke korábbra helyezése

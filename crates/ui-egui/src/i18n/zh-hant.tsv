@@ -2233,6 +2233,10 @@ animation effects	Off	關
 # Absolute local GoToR confirmation (#1364).
 	Allow	允許
 	Only allow this if you trust the source document.	只有在您信任來源文件時，才允許此操作。
+	Open in Full Screen mode?	要以全螢幕模式開啟嗎？
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	這份文件要求以全螢幕模式開啟：頁面佔滿整個螢幕，不顯示其他東西。隨時按 Esc 即可離開。
+	Full Screen	全螢幕
+	Not now	暫時不要
 	Open this local PDF?	要開啟此本機 PDF 嗎？
 	This document is trying to open a local file:	此文件正嘗試開啟本機檔案：
 	Move tag earlier	將標記前移

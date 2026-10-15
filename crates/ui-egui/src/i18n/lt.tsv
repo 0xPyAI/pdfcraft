@@ -2602,6 +2602,10 @@ key	Space	Tarpas
 # Absolute local GoToR confirmation (#1364).
 	Allow	Leisti
 	Only allow this if you trust the source document.	Leiskite tai tik tuo atveju, jei pasitikite pirminiu dokumentu.
+	Open in Full Screen mode?	Atidaryti viso ekrano režimu?
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	Šis dokumentas prašo būti atidarytas viso ekrano režimu: puslapis užpildo ekraną ir daugiau niekas nerodoma. Norėdami išeiti, bet kada paspauskite Esc.
+	Full Screen	Visas ekranas
+	Not now	Ne dabar
 	Open this local PDF?	Atverti šį vietinį PDF failą?
 	This document is trying to open a local file:	Šis dokumentas bando atverti vietinį failą:
 	Move tag earlier	Perkelti žymą anksčiau

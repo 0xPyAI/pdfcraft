@@ -2271,6 +2271,10 @@ animation effects	Off	Выкл
 # Absolute local GoToR confirmation (#1364).
 	Allow	Разрешить
 	Only allow this if you trust the source document.	Разрешите это действие, только если доверяете исходному документу.
+	Open in Full Screen mode?	Открыть в полноэкранном режиме?
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	Этот документ просит открыть его в полноэкранном режиме: страница занимает весь экран, и больше ничего не отображается. Нажмите Esc в любой момент, чтобы выйти.
+	Full Screen	Полный экран
+	Not now	Не сейчас
 	Open this local PDF?	Открыть этот локальный PDF?
 	This document is trying to open a local file:	Этот документ пытается открыть локальный файл:
 	Move tag earlier	Переместить тег раньше

@@ -2368,6 +2368,10 @@ animation effects	Off	Ανενεργά
 # Absolute local GoToR confirmation (#1364).
 	Allow	Να επιτραπεί
 	Only allow this if you trust the source document.	Επιτρέψτε το μόνο αν εμπιστεύεστε το έγγραφο προέλευσης.
+	Open in Full Screen mode?	Άνοιγμα σε λειτουργία πλήρους οθόνης;
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	Αυτό το έγγραφο ζητά να ανοίξει σε λειτουργία πλήρους οθόνης: η σελίδα γεμίζει την οθόνη και τίποτα άλλο δεν εμφανίζεται. Πατήστε Esc οποιαδήποτε στιγμή για έξοδο.
+	Full Screen	Πλήρης οθόνη
+	Not now	Όχι τώρα
 	Open this local PDF?	Να ανοίξει αυτό το τοπικό PDF;
 	This document is trying to open a local file:	Αυτό το έγγραφο προσπαθεί να ανοίξει ένα τοπικό αρχείο:
 	Move tag earlier	Μετακίνηση ετικέτας νωρίτερα

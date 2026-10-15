@@ -2354,6 +2354,10 @@ animation effects	Off	Kapalı
 # Absolute local GoToR confirmation (#1364).
 	Allow	İzin ver
 	Only allow this if you trust the source document.	Buna yalnızca kaynak belgeye güveniyorsanız izin verin.
+	Open in Full Screen mode?	Tam ekran modunda açılsın mı?
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	Bu belge tam ekran modunda açılmak istiyor: sayfa ekranı doldurur ve başka hiçbir şey görünmez. Çıkmak için istediğiniz zaman Esc tuşuna basın.
+	Full Screen	Tam ekran
+	Not now	Şimdi değil
 	Open this local PDF?	Bu yerel PDF açılsın mı?
 	This document is trying to open a local file:	Bu belge yerel bir dosya açmaya çalışıyor:
 	Move tag earlier	Etiketi daha erken taşı

@@ -2359,6 +2359,10 @@ animation effects	Off	Aus
 # Absolute local GoToR confirmation (#1364).
 	Allow	Zulassen
 	Only allow this if you trust the source document.	Lassen Sie dies nur zu, wenn Sie dem Quelldokument vertrauen.
+	Open in Full Screen mode?	Im Vollbildmodus öffnen?
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	Dieses Dokument möchte im Vollbildmodus geöffnet werden: Die Seite füllt den Bildschirm, sonst wird nichts angezeigt. Mit Esc verlassen Sie ihn jederzeit.
+	Full Screen	Vollbild
+	Not now	Jetzt nicht
 	Open this local PDF?	Diese lokale PDF-Datei öffnen?
 	This document is trying to open a local file:	Dieses Dokument versucht, eine lokale Datei zu öffnen:
 	Move tag earlier	Tag früher verschieben
