@@ -488,6 +488,117 @@ fn sticky_note_composer_posts_and_returns_to_select() {
     assert_eq!(comments(&h).len(), 1);
 }
 
+/// The rectangle of the comment whose text starts with `text`.
+fn rect_of(h: &Harness<'static, PdfCraftApp>, text: &str) -> [f32; 4] {
+    let c = comments(h);
+    c.iter().find(|a| a.contents.as_deref().is_some_and(|t| t.starts_with(text))).unwrap_or_else(|| panic!("no comment {text:?}: {c:?}")).rect
+}
+
+/// Post `text` in the open text box composer.
+fn post_text(h: &mut Harness<'static, PdfCraftApp>, text: &str) {
+    field(h, "Type text").type_text(text);
+    h.run_steps(2);
+    h.get_by_label("Post").click();
+    h.run_steps(3);
+}
+
+fn near(r: [f32; 4], want: [f32; 4]) -> bool {
+    r.iter().zip(want).all(|(a, b)| (a - b).abs() < 1.5)
+}
+
+/// #2669: a drag with Add a text box draws the box at that size, and the text wraps inside it;
+/// a click (or a drag of a few pixels) still makes a box sized to its text.
+#[test]
+fn a_text_box_is_sized_by_dragging() {
+    let mut h = harness(|app| app.set_option("quick", "freetext").unwrap());
+    let (from, to) = (at(&h, 40.0, 150.0), at(&h, 200.0, 100.0));
+    h.hover_at(from);
+    h.run_steps(1);
+    h.drag_at(from);
+    h.run_steps(1);
+    h.hover_at(to);
+    h.run_steps(2);
+    assert!(
+        matches!(&h.state().views[0].comments.gesture, Some(pdfcraft_ui_egui::comments::Gesture::Draw { points, .. }) if points.len() == 2),
+        "the box shows while it is dragged"
+    );
+    h.drop_at(to);
+    h.run_steps(3);
+    post_text(&mut h, "Drawn");
+    let r = rect_of(&h, "Drawn");
+    assert!(near(r, [40.0, 100.0, 200.0, 150.0]), "{r:?}");
+
+    // Too much text for the drawn box: it keeps its width and grows down, moving up so that it
+    // stays on the page (whose bottom is at 0).
+    h.state_mut().set_option("quick", "freetext").unwrap();
+    drag_pt(&mut h, (20.0, 80.0), (120.0, 70.0));
+    post_text(&mut h, &"word ".repeat(20));
+    let r = rect_of(&h, "word word");
+    assert!((r[0] - 20.0).abs() < 1.5 && (r[2] - 120.0).abs() < 1.5 && r[1].abs() < 0.5 && r[3] > 90.0, "{r:?}");
+
+    // More text than the page can hold: the box keeps the drawn size and the text is clipped.
+    h.state_mut().set_option("quick", "freetext").unwrap();
+    drag_pt(&mut h, (150.0, 190.0), (250.0, 180.0));
+    post_text(&mut h, &"longerwords ".repeat(16));
+    let r = rect_of(&h, "longerwords");
+    assert!(near(r, [150.0, 180.0, 250.0, 190.0]), "{r:?}");
+
+    // Drags of two and four pixels are clicks: the box fits its text.
+    let fitted = pdfcraft_ui_egui::comments::text_box_rect([0.0, 0.0], "Hi", 12.0, 0);
+    for (text, x, d) in [("Hi", 200.0, 2.0), ("Hi again", 270.0, 4.0)] {
+        h.state_mut().set_option("quick", "freetext").unwrap();
+        let p = at(&h, x, 40.0);
+        drag(&mut h, p, p + egui::vec2(d, d));
+        post_text(&mut h, text);
+        let r = rect_of(&h, text).map(f64::from);
+        let fitted = if text == "Hi" { fitted } else { pdfcraft_ui_egui::comments::text_box_rect([0.0, 0.0], text, 12.0, 0) };
+        assert!((r[2] - r[0] - (fitted[2] - fitted[0])).abs() < 1.0 && (r[3] - r[1] - (fitted[3] - fitted[1])).abs() < 1.0, "{text}: {r:?}");
+    }
+}
+
+/// #2669: with the view turned (View > Rotate View) the box lands where it was drawn, not
+/// transposed or scaled by the turned page's other side.
+#[test]
+fn a_dragged_text_box_follows_a_rotated_view() {
+    for rotation in [90u16, 270] {
+        let mut h = harness(|app| app.set_option("quick", "freetext").unwrap());
+        while h.state().views[0].rotation != rotation {
+            h.state_mut().views[0].rotate_view(true);
+        }
+        h.state_mut().set_option("zoom", "150").unwrap();
+        h.run_steps(3);
+        settle(&mut h);
+        let screen = |h: &Harness<'static, PdfCraftApp>, x: f32, y: f32| {
+            let r = h.state().views[0].page_screen_rect(0).expect("page 1 on screen");
+            let (u, v) = (x / 300.0, (200.0 - y) / 200.0);
+            let (a, b) = if rotation == 90 { (1.0 - v, u) } else { (v, 1.0 - u) };
+            pos2(r.left() + a * r.width(), r.top() + b * r.height())
+        };
+        let (from, to) = (screen(&h, 40.0, 150.0), screen(&h, 200.0, 100.0));
+        drag(&mut h, from, to);
+        post_text(&mut h, "Turned");
+        let r = rect_of(&h, "Turned");
+        assert!(near(r, [40.0, 100.0, 200.0, 150.0]), "view turned {rotation}: {r:?}");
+    }
+}
+
+/// #2669: the text of a drawn box wraps inside its border, as its appearance draws it, so a thick
+/// border does not cut off the last line.
+#[test]
+fn a_dragged_text_box_wraps_inside_its_border() {
+    use pdfcraft_ui_egui::comments::CommentTool;
+    let mut h = harness(|app| {
+        app.set_option("quick", "freetext").unwrap();
+        app.comment_prefs.set_width(CommentTool::TextBox, 3.0);
+    });
+    // Wide enough for "word word" inside a 2 pt padding, not inside 2 + 3 pt.
+    let w = pdfcraft_engine::annot_text::text_width("word word", 12.0) as f32 + 6.0;
+    drag_pt(&mut h, (20.0, 190.0), (20.0 + w, 180.0));
+    post_text(&mut h, "word word");
+    let r = rect_of(&h, "word word");
+    assert!((r[3] - r[1] - (2.0 * 14.4 + 2.0 * 5.0 + 2.0)).abs() < 1.0, "two lines inside the border: {r:?}");
+}
+
 #[test]
 fn comments_are_selected_moved_and_deleted_with_the_select_tool() {
     let mut h = harness(|app| app.set_option("quick", "square").unwrap());

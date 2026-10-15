@@ -385,7 +385,11 @@ pub enum Gesture {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ComposerKind {
     Note,
-    TextBox,
+    /// A text box; `size` is the box dragged out (displayed width and height, in user space
+    /// units), `None` after a click: then the box fits its text.
+    TextBox {
+        size: Option<[f64; 2]>,
+    },
     /// A callout whose arrow touches `point`; the composer's anchor is the text box's top-left.
     Callout {
         point: [f64; 2],
@@ -928,11 +932,43 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, cx: &PageCx<'_>, 
             if over_page {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
             }
+            // A text box also takes a drag, as in Acrobat: the box is drawn at that size and its
+            // text wraps inside it (#2669).
+            if tool == CommentTool::TextBox {
+                if resp.drag_started()
+                    && pressed_here
+                    && let Some(o) = origin
+                {
+                    cv.gesture = Some(Gesture::Draw { page: cx.page, tool, points: vec![cx.to_user(o)] });
+                    cv.selected = None;
+                }
+                if let Some(Gesture::Draw { page, points, .. }) = cv.gesture.as_mut()
+                    && *page == cx.page
+                    && let Some(p) = pointer
+                {
+                    points.truncate(1);
+                    points.push(cx.to_user(clamp_to(page_rect, p)));
+                }
+                if resp.drag_stopped()
+                    && let Some(Gesture::Draw { page, points, .. }) = cv.gesture.clone()
+                    && page == cx.page
+                {
+                    cv.gesture = None;
+                    if let (Some(first), Some(last)) = (points.first(), points.last()) {
+                        let r = Rect::from_two_pos(cx.to_screen(*first), cx.to_screen(*last));
+                        // A drag of a few pixels is a click: the box fits its text.
+                        let drawn =
+                            (r.width() >= 6.0 && r.height() >= 6.0).then(|| cx.info.pages.get(page)).flatten().map(|p| drawn_box(p, *first, *last));
+                        let (at, size) = drawn.map_or((*first, None), |(at, size)| (at, Some(size)));
+                        cv.composer = Some(Composer { page, at, kind: ComposerKind::TextBox { size }, text: String::new(), focus: true });
+                    }
+                }
+            }
             if resp.clicked()
                 && over_page
                 && let Some(p) = pointer
             {
-                let kind = if tool == CommentTool::Note { ComposerKind::Note } else { ComposerKind::TextBox };
+                let kind = if tool == CommentTool::Note { ComposerKind::Note } else { ComposerKind::TextBox { size: None } };
                 cv.composer = Some(Composer { page: cx.page, at: cx.to_user(p), kind, text: String::new(), focus: true });
                 cv.selected = None;
             }
@@ -1274,6 +1310,9 @@ fn paint_draw(painter: &egui::Painter, cx: &PageCx<'_>, tool: &CommentTool, poin
                     painter.circle_stroke(*first, 5.0, Stroke::new(1.0, SELECT_BLUE));
                 }
             }
+            CommentTool::TextBox if pts.len() == 2 => {
+                painter.rect_stroke(Rect::from_two_pos(pts[0], pts[1]), CornerRadius::ZERO, Stroke::new(1.0, SELECT_BLUE), egui::StrokeKind::Inside);
+            }
             CommentTool::Callout if pts.len() == 2 => {
                 painter.line_segment([pts[0], pts[1]], stroke);
                 painter.rect_stroke(Rect::from_min_size(pts[1], vec2(160.0, 40.0) * zoom), CornerRadius::ZERO, stroke, egui::StrokeKind::Inside);
@@ -1352,7 +1391,7 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
     let c = view.comments.composer.as_mut()?;
     let title = match c.kind {
         ComposerKind::Note => "Sticky note",
-        ComposerKind::TextBox => "Text box",
+        ComposerKind::TextBox { .. } => "Text box",
         ComposerKind::Callout { .. } => "Callout",
         ComposerKind::Caret { .. } => "Inserted text",
         ComposerKind::Replace => "Replacement text",
@@ -1368,7 +1407,7 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
             });
             ui.add_space(6.0);
             let hint = match c.kind {
-                ComposerKind::TextBox | ComposerKind::Callout { .. } => tl!("Type text"),
+                ComposerKind::TextBox { .. } | ComposerKind::Callout { .. } => tl!("Type text"),
                 ComposerKind::Caret { .. } => tl!("Text to insert"),
                 ComposerKind::Replace => tl!("Replacement text"),
                 _ => tl!("Add a comment"),
@@ -1419,14 +1458,15 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
             view.comments.tool_done = true;
             Some(new_comment(&cx, CommentTool::Note, Shape::Note { at: c.at, icon: NoteIcon::Comment }, text))
         }
-        ComposerKind::TextBox => {
+        ComposerKind::TextBox { size } => {
             view.comments.tool_done = true;
-            Some(new_comment(
-                &cx,
-                CommentTool::TextBox,
-                Shape::TextBox { rect: text_box_rect(c.at, &text, 12.0, page_rotation(info, page)), font_size: 12.0 },
-                text,
-            ))
+            let rotation = page_rotation(info, page);
+            let border = prefs.style(CommentTool::TextBox).width;
+            let rect = match (size, info.pages.get(page)) {
+                (Some(size), Some(p)) => drawn_text_box_rect(p, c.at, size, &text, 12.0, border),
+                _ => text_box_rect(c.at, &text, 12.0, rotation),
+            };
+            Some(new_comment(&cx, CommentTool::TextBox, Shape::TextBox { rect, font_size: 12.0 }, text))
         }
         ComposerKind::Callout { point } => {
             view.comments.tool_done = true;
@@ -1546,6 +1586,32 @@ pub fn text_box_rect(at: [f64; 2], text: &str, size: f64, rotation: i64) -> [f64
     let lines = wrap(text, size, w - 2.0 * pad).len().max(1);
     let h = lines as f64 * size * 1.2 + 2.0 * pad + 2.0;
     pdfcraft_engine::text_box_at(rotation, at, w, h).unwrap_or([at[0], at[1] - h, at[0] + w, at[1]])
+}
+
+/// The box dragged between user-space points `a` and `b`: its displayed top-left corner (user
+/// space) and its displayed width and height. Measured in the page's view space, so the view's
+/// own rotation and zoom (View > Rotate View) do not turn or scale it.
+fn drawn_box(page: &PageInfo, a: [f64; 2], b: [f64; 2]) -> ([f64; 2], [f64; 2]) {
+    let (a, b) = (page.user_to_view(a[0] as f32, a[1] as f32), page.user_to_view(b[0] as f32, b[1] as f32));
+    let at = page.view_to_user(a[0].min(b[0]), a[1].min(b[1]));
+    ([f64::from(at[0]), f64::from(at[1])], [f64::from((a[0] - b[0]).abs()), f64::from((a[1] - b[1]).abs())])
+}
+
+/// A text box dragged out `size` (displayed width and height) from its displayed top-left corner
+/// `at`, with a border `border` wide: the text wraps to its width inside the border, as its
+/// appearance lays it out. When the text needs more lines the box grows down, and moves up to stay
+/// on the page; text that cannot fit even so keeps the drawn height and is clipped.
+pub fn drawn_text_box_rect(page: &PageInfo, at: [f64; 2], size: [f64; 2], text: &str, font_size: f64, border: f64) -> [f64; 4] {
+    use pdfcraft_engine::annot_text::wrap;
+    let pad = 2.0 + border.max(0.0);
+    let [w, drawn] = size;
+    let lines = wrap(text, font_size, (w - 2.0 * pad).max(1.0)).len().max(1);
+    let needed = lines as f64 * font_size * 1.2 + 2.0 * pad + 2.0;
+    let [vx, vy] = page.user_to_view(at[0] as f32, at[1] as f32).map(f64::from);
+    let bottom = f64::from(page.height);
+    let (top, h) = if needed <= drawn || needed > bottom { (vy, drawn) } else { (vy.min(bottom - needed).max(0.0), needed) };
+    let at = page.view_to_user(vx as f32, top as f32).map(f64::from);
+    pdfcraft_engine::text_box_at(i64::from(page.rotation), at, w, h).unwrap_or([at[0], at[1] - h, at[0] + w, at[1]])
 }
 
 /// The `/Rotate` of `page` (0 when it is unknown).
