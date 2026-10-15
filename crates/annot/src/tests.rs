@@ -1326,4 +1326,4 @@ fn text_box_font_size_changes_the_da_and_grows_the_box() {
         assert!(set_font_size(&mut doc, 0, i, 12.0, &meta("")).is_err());
         assert_eq!(props(&doc, 0, i).unwrap().font_size, None);
     }
-               }
+}
