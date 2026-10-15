@@ -22,6 +22,7 @@
 	Auto follows the system's text size. Pages always render at the display's full resolution.	В режиме «Авто» используется размер текста из настроек системы. Страницы всегда отображаются в полном разрешении экрана.
 	Identity	Идентификация
 	Name on new comments	Имя в новых комментариях
+	Hide hover previews for highlights without comment text	Скрывать всплывающий просмотр для выделений без текста комментария
 	Open…	Открыть…
 	Open Recent	Открыть недавние
 	Clear Recent Files	Очистить недавние файлы

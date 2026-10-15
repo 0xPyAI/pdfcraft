@@ -32,6 +32,7 @@
 	Auto follows the system's text size. Pages always render at the display's full resolution.	Автоматичний режим використовує розмір тексту із системних налаштувань. Сторінки завжди відображаються в повній роздільній здатності екрана.
 	Identity	Особисті дані
 	Name on new comments	Ім’я в нових коментарях
+	Hide hover previews for highlights without comment text	Приховувати спливний перегляд для виділень без тексту коментаря
 	Open…	Відкрити…
 	Open Recent	Відкрити нещодавні
 	Pin folder to Home…	Закріпити теку на головній…

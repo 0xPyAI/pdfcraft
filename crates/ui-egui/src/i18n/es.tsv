@@ -23,6 +23,7 @@
 	Auto follows the system's text size. Pages always render at the display's full resolution.	Automático sigue el tamaño del texto del sistema. Las páginas siempre se muestran con la resolución completa de la pantalla.
 	Identity	Identidad
 	Name on new comments	Nombre en los comentarios nuevos
+	Hide hover previews for highlights without comment text	Ocultar las vistas previas al pasar el puntero en resaltados sin texto de comentario
 	Open…	Abrir…
 	Open Recent	Abrir recientes
 	Clear Recent Files	Borrar archivos recientes

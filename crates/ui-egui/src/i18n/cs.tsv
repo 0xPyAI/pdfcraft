@@ -40,6 +40,7 @@
 	Auto follows the system's text size. Pages always render at the display's full resolution.	Automaticky se řídí velikostí textu v systému. Stránky se vždy vykreslují v plném rozlišení displeje.
 	Identity	Identita
 	Name on new comments	Jméno autora nových komentářů
+	Hide hover previews for highlights without comment text	Skrýt náhledy při najetí u zvýraznění bez textu komentáře
 	Enable Acrobat JavaScript	Povolit Acrobat JavaScript
 	OK	OK
 	Open…	Otevřít…

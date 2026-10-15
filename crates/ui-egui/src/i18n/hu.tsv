@@ -23,6 +23,7 @@
 	Auto follows the system's text size. Pages always render at the display's full resolution.	Az Automatikus beállítás a rendszer szövegméretét követi. Az oldalak mindig a kijelző teljes felbontásában jelennek meg.
 	Identity	Személyazonosság
 	Name on new comments	Név az új megjegyzéseken
+	Hide hover previews for highlights without comment text	Megjegyzésszöveg nélküli kiemelések előnézetének elrejtése rámutatáskor
 	Open…	Megnyitás…
 	New blank PDF	Új üres PDF
 	Create PDF from file…	PDF létrehozása fájlból…

@@ -27,6 +27,7 @@ comment menu	Edit	సవరించు
 	Auto follows the system's text size. Pages always render at the display's full resolution.	ఆటో సిస్టమ్ టెక్స్ట్ పరిమాణాన్ని అనుసరిస్తుంది. పేజీలు ఎల్లప్పుడూ డిస్‌ప్లే పూర్తి రిజల్యూషన్‌లో చూపబడతాయి.
 	Identity	గుర్తింపు
 	Name on new comments	కొత్త వ్యాఖ్యలపై చూపే పేరు
+	Hide hover previews for highlights without comment text	వ్యాఖ్య వచనం లేని హైలైట్‌లకు హోవర్ ప్రివ్యూలను దాచు
 	Open…	తెరువు…
 	New blank PDF	కొత్త ఖాళీ PDF
 	Create PDF from file…	ఫైల్ నుండి PDF సృష్టించు…

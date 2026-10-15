@@ -250,6 +250,8 @@ pub struct CommentPrefs {
     pub pinned: bool,
     /// The tool each flyout group shows (the last one used).
     pub group_tool: [CommentTool; 3],
+    /// Hide hover previews on highlight annotations when they contain no comment text beyond the author.
+    pub hide_empty_highlight_hover: bool,
 }
 
 impl Default for CommentPrefs {
@@ -259,6 +261,7 @@ impl Default for CommentPrefs {
             styles: ALL.iter().map(|t| (*t, Style::default_for(&t.sample()))).collect(),
             pinned: false,
             group_tool: [CommentTool::Note, CommentTool::Highlight, CommentTool::Ink],
+            hide_empty_highlight_hover: false,
         }
     }
 }

@@ -1245,6 +1245,37 @@ fn hovering_a_comment_shows_its_author_and_text() {
 }
 
 #[test]
+fn preference_hides_author_only_highlight_hover_previews() {
+    // A highlight annotation with author Ada and empty contents over the first page.
+    let pdf = String::from_utf8_lossy(TEXT_FIXTURE).replace("/Contents 5 0 R /Resources", "/Contents 5 0 R /Annots [8 0 R] /Resources").replace(
+        "trailer",
+        "8 0 obj << /Type /Annot /Subtype /Highlight /Rect [50 50 150 120] /C [1 1 0] /T (Ada) /QuadPoints [50 120 150 120 50 50 150 50] >> endobj\ntrailer",
+    );
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("highlight_hover.pdf", None, pdf.into_bytes()).expect("opens");
+        app.set_option("left", "closed").unwrap();
+        app.set_option("panel", "none").unwrap();
+        app
+    });
+    h.run_steps(4);
+    settle(&mut h);
+
+    let p = at(&h, 100.0, 85.0);
+    // By default, author-only hover is shown.
+    h.hover_at(p);
+    h.run_steps(3);
+    h.get_by_label("Ada");
+
+    // Enabling preference hides author-only highlight hover.
+    h.state_mut().set_option("hide-empty-highlight-hover", "true").unwrap();
+    h.hover_at(p);
+    h.run_steps(3);
+    assert!(h.query_by_label("Ada").is_none(), "author-only hover must be suppressed");
+}
+
+#[test]
 fn the_squiggly_tool_marks_selected_text() {
     let mut h = harness(|_| {});
     h.state_mut().views[0].select_text(0, 4, 8);

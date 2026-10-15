@@ -2277,6 +2277,8 @@ impl PdfCraftApp {
         });
         // Set apart: one more key inside the macro above passes serde_json's recursion limit.
         v["redact_prefs"] = self.redact_defaults.to_json();
+        // Set outside json! above, which is at serde_json's macro recursion limit.
+        v["hide_empty_highlight_hover"] = serde_json::Value::Bool(self.comment_prefs.hide_empty_highlight_hover);
         v.to_string()
     }
 
@@ -2377,6 +2379,9 @@ impl PdfCraftApp {
         // name is cut to a sane length.
         if let Some(author) = v["author"].as_str().map(str::trim).filter(|a| !a.is_empty()) {
             self.comment_prefs.author = author.chars().take(MAX_AUTHOR_CHARS).collect();
+        }
+        if let Some(hide) = v["hide_empty_highlight_hover"].as_bool() {
+            self.comment_prefs.hide_empty_highlight_hover = hide;
         }
         // Per-tool comment styles (#340): each field goes through its clamping setter, so a
         // malformed or hostile entry is clamped or ignored rather than trusted.
@@ -2687,6 +2692,13 @@ impl PdfCraftApp {
                 };
             }
             ("author", _) => self.comment_prefs.author = value.to_string(),
+            ("hide-empty-highlight-hover", _) => {
+                self.comment_prefs.hide_empty_highlight_hover = match value {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err("hide-empty-highlight-hover must be true or false".into()),
+                };
+            }
             ("ui-scale", _) => self.ui_scale = ui_scale::parse(value)?,
             ("system-title-bar", _) => {
                 self.system_title_bar = match value {
