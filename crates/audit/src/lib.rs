@@ -9,12 +9,13 @@
 //! unreadable (WCAG contrast below 3.0). Page backgrounds, table shading and highlight
 //! marks are therefore not flagged.
 //!
-//! Detection limits (documented, not hidden): only `re` rectangles closed by a fill operator
-//! are considered — arbitrary filled paths, shadings and patterns are not; a rectangle drawn
-//! with a translucent ExtGState (`/ca < 1`) is not flagged; annotation rectangles are compared
-//! in unrotated user space, so pages with `/Rotate` may misalign; covers inside form XObjects
-//! are found, but only text drawn directly in the page content is checked under them, so text
-//! inside a form XObject is not audited.
+//! Detection limits (documented, not hidden): `re` rectangles and single closed `m`/`l`
+//! subpaths whose four corners form an axis-aligned rectangle in user space (#1510) are
+//! considered when closed by a fill operator — other filled paths, shadings and patterns are
+//! not; a rectangle drawn with a translucent ExtGState (`/ca < 1`) is not flagged; annotation
+//! rectangles are compared in unrotated user space, so pages with `/Rotate` may misalign;
+//! covers inside form XObjects are found, but only text drawn directly in the page content
+//! is checked under them, so text inside a form XObject is not audited.
 //!
 //! The audit fails closed: any content that cannot be read (an undecodable content stream,
 //! malformed annotations, form XObjects nested deeper than 32 or in a cycle) is an error, never
@@ -40,6 +41,11 @@ pub enum FindingKind {
 }
 
 impl FindingKind {
+    /// The stable machine-readable ID for this finding class.
+    ///
+    /// These strings are the crate's public vocabulary: they appear in CLI output and are
+    /// the IDs a future machine-readable format would serialize. Do not rename them;
+    /// add a new variant instead.
     pub fn id(self) -> &'static str {
         match self {
             FindingKind::CoveredText => "covered-text",
@@ -54,9 +60,11 @@ pub struct AuditFinding {
     /// 0-based page index.
     pub page: usize,
     pub kind: FindingKind,
-    /// The covering rectangle (or the mark's rectangle), in page user space.
+    /// The covering rectangle (or the mark's rectangle), in page user space, normalized so
+    /// `rect[0] <= rect[2]` and `rect[1] <= rect[3]`.
     pub rect: [f64; 4],
-    /// The extractable text the cover hides (possibly empty when nothing decodable remains).
+    /// The extractable text the cover hides, lines joined with single spaces and trimmed.
+    /// Possibly empty when nothing decodable remains under the cover.
     pub covered_text: String,
 }
 

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use pdfcraft_cos::Document;
 
-use crate::{FindingKind, audit_redactions};
+use crate::{AuditFinding, FindingKind, audit_redactions};
 
 /// Minimal PDF assembler: objects are numbered 1..=n in order.
 struct Builder {
@@ -280,4 +280,93 @@ fn non_rectangular_path_is_not_a_cover() {
         let findings = audit_redactions(&open(one_page(&content, ""))).expect("audit must run");
         assert!(findings.is_empty(), "{:?}: {findings:?}", String::from_utf8_lossy(cover));
     }
+}
+
+#[test]
+fn finding_kind_ids_are_stable() {
+    // The string IDs are the crate's public vocabulary (CLI output, future machine-readable
+    // formats). They must not change; add a variant instead of renaming.
+    assert_eq!(FindingKind::CoveredText.id(), "covered-text");
+    assert_eq!(FindingKind::UnappliedMark.id(), "unapplied-mark");
+}
+
+#[test]
+fn covered_text_finding_is_fully_determined() {
+    // Golden test: the whole finding, not just its presence, is pinned.
+    let content = b"BT /F1 24 Tf 100 700 Td (SECRET DATA 123) Tj ET\n0 g\n100 688 220 32 re f\n";
+    let findings = audit_redactions(&open(one_page(content, ""))).expect("audit must run");
+    assert_eq!(
+        findings,
+        vec![AuditFinding {
+            page: 0,
+            kind: FindingKind::CoveredText,
+            rect: [100.0, 688.0, 320.0, 720.0],
+            covered_text: "SECRET DATA 123".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn unapplied_mark_finding_is_fully_determined() {
+    // Golden test for the second finding class, with its exact mark rectangle.
+    let content = b"BT /F1 24 Tf 100 700 Td (DO NOT SHARE) Tj ET\n";
+    let page_extra = "/Annots [6 0 R]";
+    let mut b = Builder::new();
+    b.add("<< /Type /Catalog /Pages 2 0 R >>");
+    b.add("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    b.add(&format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> {page_extra} >>"));
+    b.add_stream(content);
+    b.add(FONT);
+    b.add("<< /Type /Annot /Subtype /Redact /Rect [95 685 305 725] /C [1 0 0] >>");
+    let findings = audit_redactions(&open(b.build())).expect("audit must run");
+    assert_eq!(
+        findings,
+        vec![AuditFinding { page: 0, kind: FindingKind::UnappliedMark, rect: [95.0, 685.0, 305.0, 725.0], covered_text: "DO NOT SHARE".to_string() }]
+    );
+}
+
+/// A page whose content draws a chain of `n` nested form XObjects. The innermost form draws
+/// nothing, so a successful audit reports no findings.
+fn nested_forms(n: usize) -> Vec<u8> {
+    let mut b = Builder::new();
+    b.add("<< /Type /Catalog /Pages 2 0 R >>");
+    b.add("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    // Object 3: page; object 4: content; objects 5..5+n: the form chain.
+    b.add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /XObject << /F1 5 0 R >> >> >>");
+    b.add_stream(b"/F1 Do");
+    for i in 1..=n {
+        let obj = 4 + i;
+        if i < n {
+            let next = obj + 1;
+            let name = format!("/F{}", i + 1);
+            b.add_stream_with(
+                format!("/{name} Do", name = &name[1..]).as_bytes(),
+                &format!(
+                    "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /XObject << /F{i} {next} 0 R >> >>",
+                    i = i + 1,
+                    next = next
+                ),
+            );
+        } else {
+            b.add_stream_with(b"q Q", "/Type /XObject /Subtype /Form /BBox [0 0 612 792]");
+        }
+        debug_assert_eq!(b.objects.len(), obj);
+    }
+    b.build()
+}
+
+#[test]
+fn forms_nested_at_depth_limit_audit_clean() {
+    // 32 nested forms is the deepest walk the audit follows: it must succeed and report
+    // the page clean rather than fail.
+    let findings = audit_redactions(&open(nested_forms(32))).expect("audit must run");
+    assert!(findings.is_empty(), "{findings:?}");
+}
+
+#[test]
+fn forms_nested_past_depth_limit_fail_closed() {
+    // The 33rd nesting level cannot be followed: the audit fails rather than report the
+    // page clean with a possible cover left unseen.
+    let result = audit_redactions(&open(nested_forms(33)));
+    assert!(matches!(result, Err(crate::AuditError::TooDeep)), "{result:?}");
 }
