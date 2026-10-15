@@ -858,11 +858,11 @@ impl crate::PdfCraftApp {
 
     /// ⌘V / Ctrl+V with a picture on the system clipboard (a screenshot, a picture copied in a
     /// browser) places it on the current page, as Add Image does.
-    /// Organize Pages keeps ⌘V for pages, and text fields for text.
+    /// Organize Pages keeps ⌘V for pages, Prepare Form for fields, and text fields for text.
     pub(crate) fn paste_image_key(&mut self, i: usize, ctx: &egui::Context, pasted: bool) {
         let free = self.dialog.is_none() && !self.palette_open && !ctx.egui_wants_keyboard_input();
         let Some(view) = self.views.get(i) else { return };
-        if !pasted || !free || view.organize || view.forms.focus.is_some() {
+        if !pasted || !free || view.organize || view.forms.focus.is_some() || self.is_preparing() {
             return;
         }
         let clip = match self.clipboard_override.clone() {

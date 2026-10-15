@@ -328,6 +328,15 @@ fn a_picture_on_the_clipboard_is_pasted_onto_the_page() {
     h.event(v(false, egui::Modifiers::COMMAND));
     h.run_steps(3);
     assert_eq!(images(&h), 2, "Organize Pages pastes pages");
+    h.state_mut().views[0].organize = false;
+    h.run_steps(3);
+    // Prepare Form keeps ⌘V for form fields.
+    assert!(h.state_mut().execute("form.prepare"));
+    h.run_steps(3);
+    assert!(h.state().is_preparing());
+    h.event(v(false, egui::Modifiers::COMMAND));
+    h.run_steps(3);
+    assert_eq!(images(&h), 2, "Prepare Form pastes fields");
 }
 
 /// #125: text the standard fonts can't draw stays in the editor with a warning instead of being
