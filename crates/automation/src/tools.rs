@@ -229,7 +229,7 @@ pub fn tools() -> Vec<ToolDef> {
                 json!({ "doc": doc(), "at": { "type": "integer", "minimum": 1 }, "width": { "type": "number", "description": "Points." }, "height": { "type": "number", "description": "Points." } }),
                 &["doc", "at"],
             )),
-        t("page_insert_file", "Insert pages from a file", "Insert pages of another PDF so the first becomes page `at`. Undoable.")
+        t("page_insert_file", "Insert pages from a file", "Insert pages of another PDF so the first becomes page `at`. Its bookmarks come along, collapsed under one bookmark named after the file, placed among the document's bookmarks where the pages went. Undoable.")
             .cmd("page.insert")
             .with(schema(json!({ "doc": doc(), "path": { "type": "string" }, "at": { "type": "integer", "minimum": 1 }, "pages": pages("of the source file (default: all)") }), &["doc", "path", "at"])),
         t("page_extract", "Extract pages", "Copy pages into a new PDF (links, bookmarks, fields and layers that belong to them come along). separate: true writes each page as its own file into out_dir; delete: true removes the pages from this document afterwards (undoable).")

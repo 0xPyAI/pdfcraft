@@ -345,7 +345,7 @@ fn resolve_path(doc: &Document, path: &[usize]) -> Result<(ObjRef, ObjRef)> {
 }
 
 /// The object that holds children at `parent_path` (`[]` = the outline root, created if needed).
-fn container(doc: &mut Document, parent_path: &[usize]) -> Result<ObjRef> {
+pub(crate) fn container(doc: &mut Document, parent_path: &[usize]) -> Result<ObjRef> {
     if parent_path.is_empty() {
         if let Some(r) = outline_root(doc) {
             return Ok(r);
@@ -373,6 +373,27 @@ fn put(doc: &mut Document, r: ObjRef, key: &[u8], value: Option<Object>) -> Resu
         }
     })?;
     Ok(())
+}
+
+/// The children of `parent` (an item or the outline root), in order. Cycle-safe.
+pub(crate) fn children(doc: &Document, parent: ObjRef) -> Vec<ObjRef> {
+    children_of(doc, parent, &mut HashSet::from([parent]))
+}
+
+/// [`relink`] `kids` under `parent`, then recompute every `/Count`.
+pub(crate) fn relink_and_recount(doc: &mut Document, parent: ObjRef, kids: &[ObjRef]) -> Result<()> {
+    relink(doc, parent, kids)?;
+    recount(doc)
+}
+
+impl From<OutlineError> for OrganizeError {
+    fn from(e: OutlineError) -> Self {
+        match e {
+            OutlineError::Organize(e) => e,
+            OutlineError::Cos(e) => OrganizeError::Cos(e),
+            other => OrganizeError::Invalid(other.to_string()),
+        }
+    }
 }
 
 /// Make `kids` the children of `parent`, in order: rewires `/Parent`, `/Prev`, `/Next`,

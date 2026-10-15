@@ -257,6 +257,54 @@ pub fn import_pages_with(
     Ok(ImportOutcome { pages: imported.pages, renamed_fields: imported.renamed_fields })
 }
 
+/// Insert Pages from File: [`import_pages_with`], and the inserted file's bookmarks come along
+/// under one new bookmark titled `title` (the file's name) at its first inserted page, as Combine
+/// Files does for each file. That bookmark goes among the top-level bookmarks where the pages went:
+/// before the first one that points after them. Bookmarks to pages left out lose their destination;
+/// a file without bookmarks adds none.
+pub fn insert_file_pages(
+    dst: &mut Document,
+    src: &Document,
+    title: &str,
+    src_pages: &[usize],
+    at: usize,
+    conflicts: FieldConflicts,
+) -> Result<ImportOutcome, OrganizeError> {
+    let first_new = dst.object_numbers().last().map_or(1, |n| n + 1);
+    let imported = import_pages_mapped(dst, src, src_pages, at, conflicts)?;
+    let created: Vec<ObjRef> = dst.object_numbers().into_iter().filter(|n| *n >= first_new).map(|n| ObjRef::new(n, dst.generation(n))).collect();
+    crate::dedupe::dedupe_resources(dst, &created, true);
+    let outline = source_outline(src, imported.page_map);
+    if let Some(first) = imported.pages.first()
+        && !outline.is_empty()
+    {
+        let after = at.min(crate::page_count(dst)?.saturating_sub(imported.pages.len())).saturating_add(imported.pages.len());
+        insert_file_bookmark(dst, &Mark { title: title.to_string(), page: *first, outline }, after)?;
+    }
+    Ok(ImportOutcome { pages: imported.pages, renamed_fields: imported.renamed_fields })
+}
+
+/// Add `mark` (a file's bookmark holding its own, collapsed) to the top level of `doc`'s outline,
+/// before the first top-level bookmark that points at page `after` (0-based) or later.
+fn insert_file_bookmark(doc: &mut Document, mark: &Mark, after: usize) -> Result<(), OrganizeError> {
+    let index = crate::outline::top_level_bookmarks(doc).iter().position(|b| b.page.is_some_and(|p| p >= after));
+    let root = crate::outline::container(doc, &[])?;
+    let item = doc.add(Object::Null);
+    let mut d = Dict::new();
+    d.set(b"Title".to_vec(), Object::String(pdfcraft_cos::PdfString::text(&mark.title)));
+    d.set(b"Dest".to_vec(), Object::Array(vec![Object::Ref(mark.page), Object::name("Fit")]));
+    if let Some((f, l, n)) = write_outline_level(doc, item, &mark.outline)? {
+        d.set(b"First".to_vec(), Object::Ref(f));
+        d.set(b"Last".to_vec(), Object::Ref(l));
+        d.set(b"Count".to_vec(), Object::Int(-(n as i64))); // collapsed
+    }
+    doc.set(item, Object::Dict(d));
+    let mut top = crate::outline::children(doc, root);
+    top.insert(index.unwrap_or(top.len()).min(top.len()), item);
+    crate::outline::relink_and_recount(doc, root, &top)?;
+    Ok(())
+}
+
 /// Copy pages `src_pages` (0-based, in the given order) of `src` into `dst`, inserting them at
 /// position `at`. Returns the new page references in order.
 ///

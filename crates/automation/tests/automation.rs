@@ -2923,6 +2923,28 @@ fn flattening_through_tools() {
     assert!(matches!(a.call("doc_flatten", &json!({ "doc": doc, "comments": false, "fields": false })), Err(ToolError::InvalidArgs(_))));
 }
 
+/// Inserting a file's pages brings its bookmarks too, under one named after the file, at the
+/// pages' place among the document's own bookmarks.
+#[test]
+fn inserting_a_file_brings_its_bookmarks() {
+    let dir = workdir("insert-bookmarks");
+    let mut a = auto(&dir);
+    let annex = ok(&mut a, "doc_open", json!({ "path": "b.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "bookmark_add", json!({ "doc": annex, "title": "Annex intro", "page": 1 }));
+    ok(&mut a, "bookmark_add", json!({ "doc": annex, "title": "Annex table", "page": 2 }));
+    ok(&mut a, "doc_save", json!({ "doc": annex, "path": "annex.pdf" }));
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "bookmark_add", json!({ "doc": doc, "title": "Guide start", "page": 1 }));
+    ok(&mut a, "bookmark_add", json!({ "doc": doc, "title": "Guide end", "page": 3 }));
+    ok(&mut a, "page_insert_file", json!({ "doc": doc, "path": "annex.pdf", "at": 2 }));
+    let list = ok(&mut a, "bookmark_list", json!({ "doc": doc }));
+    let top: Vec<(&str, Value)> = list["bookmarks"].as_array().unwrap().iter().map(|b| (b["title"].as_str().unwrap(), b["page"].clone())).collect();
+    assert_eq!(top, [("Guide start", json!(1)), ("annex", json!(2)), ("Guide end", json!(5))], "{list}");
+    let kids: Vec<(&str, Value)> =
+        list["bookmarks"][1]["children"].as_array().unwrap().iter().map(|b| (b["title"].as_str().unwrap(), b["page"].clone())).collect();
+    assert_eq!(kids, [("Annex intro", json!(2)), ("Annex table", json!(3))], "{list}");
+}
+
 #[test]
 fn replacing_pages_through_tools() {
     let dir = workdir("replace");

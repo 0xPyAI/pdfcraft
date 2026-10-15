@@ -2162,7 +2162,9 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
                 Some(p) => p.clone(),
                 None => (0..pdfcraft_organize::page_count(&src)?).collect(),
             };
-            let outcome = pdfcraft_organize::import_pages_with(doc, &src, &pages, *at, *field_conflicts)?;
+            // The file's bookmarks come along under one named after it, as in Combine Files.
+            let title = std::path::Path::new(name).file_stem().map_or_else(|| name.clone(), |s| s.to_string_lossy().into_owned());
+            let outcome = pdfcraft_organize::insert_file_pages(doc, &src, &title, &pages, *at, *field_conflicts)?;
             cx.renamed_fields = outcome.renamed_fields;
         }
         Edit::AddBookmark { parent, index, title, page } => {

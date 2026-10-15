@@ -2704,8 +2704,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["page.insert"]
 tools = ["page_insert_file"]
-evidence = ["crates/organize/src/tests.rs::inserting_pages_from_another_file_is_an_incremental_edit", "crates/ui-egui/tests/editing.rs::inserting_a_file_goes_after_the_selection_and_undoes", "crates/ui-egui/tests/editing.rs::plus_between_pages_inserts_picked_files_there_in_order"]
-notes = "After the selection (toolbar, File menu) or at any gap of the page grid (a + between pages and at both ends); several files at once, in order; images and .txt files are converted first; the inserted pages end up selected. The page_insert_file tool takes PDFs only. Missing: choosing which pages of the file to insert in the app."
+evidence = ["crates/organize/src/tests.rs::inserting_pages_from_another_file_is_an_incremental_edit", "crates/organize/src/tests.rs::inserting_a_file_brings_its_bookmarks_under_one_named_after_it", "crates/automation/tests/automation.rs::inserting_a_file_brings_its_bookmarks", "crates/ui-egui/tests/editing.rs::inserting_a_file_goes_after_the_selection_and_undoes", "crates/ui-egui/tests/editing.rs::plus_between_pages_inserts_picked_files_there_in_order"]
+notes = "After the selection (toolbar, File menu) or at any gap of the page grid (a + between pages and at both ends); several files at once, in order; images and .txt files are converted first; the inserted pages end up selected. The file's bookmarks come along, collapsed under one named after the file, placed among the document's bookmarks where the pages went (as Combine does per file). The page_insert_file tool takes PDFs only. Missing: choosing which pages of the file to insert in the app; the file's tags (structure tree) are not merged."
 
 [[feature]]
 id = "organize.insert-from-clipboard"

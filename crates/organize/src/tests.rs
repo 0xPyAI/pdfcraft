@@ -1052,6 +1052,36 @@ fn combine_nests_source_bookmarks_and_keeps_attachments() {
     assert_eq!(keys, ["notes.txt", "notes.txt (2)"]);
 }
 
+/// Insert Pages from File brings the inserted file's bookmarks along (they used to be dropped),
+/// collapsed under one bookmark named after the file at its first inserted page, placed among the
+/// host's bookmarks where the pages went. Destinations follow the copies; named ones are resolved.
+#[test]
+fn inserting_a_file_brings_its_bookmarks_under_one_named_after_it() {
+    let mut host = open(fixture());
+    add_bookmark(&mut host, &[], 0, "Start", 0).unwrap();
+    add_bookmark(&mut host, &[], 1, "End", 2).unwrap();
+    insert_file_pages(&mut host, &doc_c(), "annex", &[0, 1], 1, FieldConflicts::Rename).unwrap();
+    let host = save_and_reopen(&host);
+    assert_eq!(labels(&host), ["Page 1", "C1", "C2", "Page 2", "Page 3"]);
+    let marks = bookmarks(&host);
+    assert_eq!(titles(&marks), ["Start", "annex[Chapter one[Section]]", "End"]);
+    let page_of = |title: &str| marks.iter().find(|b| b.title == title).and_then(|b| b.page);
+    assert_eq!((page_of("annex"), page_of("Chapter one"), page_of("Section"), page_of("End")), (Some(1), Some(1), Some(2), Some(4)));
+    assert!(!marks.iter().find(|b| b.title == "annex").unwrap().open, "the file's bookmarks start collapsed");
+    // Inserted last, after every bookmark; only the pages chosen keep a destination.
+    let mut host = open(fixture());
+    add_bookmark(&mut host, &[], 0, "Start", 0).unwrap();
+    insert_file_pages(&mut host, &doc_c(), "annex", &[0], 9, FieldConflicts::Rename).unwrap();
+    let marks = bookmarks(&host);
+    assert_eq!(titles(&marks), ["Start", "annex[Chapter one[Section]]"]);
+    assert_eq!(marks.iter().find(|b| b.title == "Section").unwrap().page, None, "its page was left out");
+    // A file without bookmarks adds none, and a host without an outline gets one only when needed.
+    let mut host = open(fixture());
+    insert_file_pages(&mut host, &doc_b(), "plain", &[0], 0, FieldConflicts::Rename).unwrap();
+    assert!(bookmarks(&host).is_empty());
+    assert!(!catalog(&host).contains(b"Outlines"));
+}
+
 #[test]
 fn combine_and_insert_share_identical_resources() {
     let a = doc_a();
