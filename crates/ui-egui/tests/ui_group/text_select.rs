@@ -267,3 +267,50 @@ fn a_selection_drag_keeps_scrolling_over_the_gap_and_the_next_page() {
     h.run_steps(2);
     assert_eq!(h.state().views[0].selected_text(), Some(held), "releasing keeps the selection");
 }
+
+/// One 300×600 page with a line of Helvetica text at its top and another at its bottom.
+fn tall_page() -> Vec<u8> {
+    let content = "BT /F1 14 Tf 20 570 Td (Top line) Tj 0 -550 Td (Bottom line) Tj ET";
+    format!(
+        "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 600] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+        content.len()
+    )
+    .into_bytes()
+}
+
+/// Issue #1670: holding a selection drag at the bottom edge of the view scrolls it, and the
+/// selection follows the pointer down to text that was off screen.
+#[test]
+fn a_selection_drag_held_at_the_bottom_edge_scrolls_the_view() {
+    let (mut h, _) = harness_with(tall_page(), |app| {
+        app.set_option("layout", "continuous").unwrap();
+        app.set_option("zoom", "200").unwrap();
+    });
+    let view = &h.state().views[0];
+    let viewport = view.viewport_rect();
+    assert!(view.page_screen_rect(0).expect("page on screen").bottom() > viewport.bottom() + 100.0, "the page must not fit");
+    // "Top" (glyphs 0..=2).
+    let (from, to) = (view.glyph_screen_pos(0, 0).expect("glyph on screen"), view.glyph_screen_pos(0, 2).expect("glyph on screen"));
+    press_and_move(&mut h, from, to);
+    assert_eq!(h.state().views[0].selected_text().as_deref(), Some("Top"));
+    let edge = egui::pos2(to.x, viewport.bottom() - 2.0);
+    let before = page_top(&h, 0);
+    h.hover_at(edge);
+    h.run_steps(120);
+    assert!(page_top(&h, 0) < before - 100.0, "the view scrolls while the pointer rests at its edge ({before} -> {})", page_top(&h, 0));
+    let held = h.state().views[0].selected_text().expect("still selected");
+    // The pointer stays above the "t" of "Top", so the selection ends at the "t" of "Bottom".
+    assert_eq!(held, "Top line\nBot", "the selection reaches the bottom line");
+    h.event(Event::PointerButton { pos: edge, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].selected_text(), Some(held), "releasing keeps the selection");
+}
