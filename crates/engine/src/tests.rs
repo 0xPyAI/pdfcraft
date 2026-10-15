@@ -1803,6 +1803,31 @@ fn redaction_marks_apply_for_good_and_undo() {
 }
 
 #[test]
+fn oversized_redaction_overlay_preserves_the_document_and_undo() {
+    let (mut s, id) = session_with(1);
+    let shape = Shape::Redact {
+        quads: vec![pdfcraft_annot::rect_quad([0.0, 0.0, 16000.0, 1600.0])],
+        overlay: "X".into(),
+        look: pdfcraft_annot::OverlayLook { size: 2.0, repeat: true, ..Default::default() },
+    };
+    s.apply(
+        id,
+        Edit::AddAnnotation(NewAnnotation { page: 0, style: Style::default_for(&shape), shape, contents: String::new(), author: "Tester".into() }),
+    )
+    .unwrap();
+    let before = s.get(id).unwrap().bytes.clone();
+    assert!(matches!(s.apply(id, Edit::ApplyRedactions { pages: None }), Err(EditError::Redact(pdfcraft_redact::RedactError::OverlayLimit))));
+    let doc = s.get(id).unwrap();
+    assert_eq!(doc.bytes, before);
+    assert_eq!(doc.redaction_marks(), 1);
+    assert_eq!(doc.can_undo(), Some("Add redaction mark"));
+    assert_eq!(page_texts(&s, id), ["Page 1"]);
+    s.undo(id).unwrap();
+    assert_eq!(s.get(id).unwrap().redaction_marks(), 0);
+    assert_eq!(page_texts(&s, id), ["Page 1"]);
+}
+
+#[test]
 fn printing_lays_out_sheets_that_render() {
     let (s, id) = session_with(5);
     let settings = print::Settings {

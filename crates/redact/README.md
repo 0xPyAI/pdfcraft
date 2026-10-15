@@ -34,6 +34,13 @@ A verification pass re-reads each redacted page and fails the operation if any g
 image is still under an area. Content that can't be decoded makes the operation fail rather than
 leave it unredacted.
 
+Before changing any page, `apply` prepares the redaction appearances with a shared 8 MiB
+budget for their uncompressed PDF content across the selected pages. It bounds repeated-text
+counts and working line buffers before allocating them, and measures and encodes each repeated
+line once. Invalid or excessive appearances return `RedactError::OverlayLimit` without changing
+the document. Reduce the marked area, disable repeated text, or apply fewer pages at a time.
+This limits appearance generation; it is not a limit on the input PDF or the whole process's memory.
+
 Structure cleanup resolves named MCIDs and indirect content references. Form content
 references are updated to the cleaned copy; unchanged sibling descriptions remain.
 

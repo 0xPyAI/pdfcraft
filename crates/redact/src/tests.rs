@@ -685,6 +685,141 @@ fn overlay_text_takes_its_font_size_colour_alignment_and_repeats() {
     assert!(fonts.contains(b"PCCour") && !fonts.contains(b"PCTimes"));
 }
 
+fn repeated_overlay_document(width: f64, height: f64, repeat: bool) -> Document {
+    pdf(vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Annots [5 0 R] >>".to_vec(),
+        stream("", b"0 0 20 20 re f"),
+        format!("<< /Type /Annot /Subtype /Redact /Rect [0 0 {width} {height}] /IC [0 0 0] /OverlayText (X) /DA (/Helv 2 Tf) /Repeat {repeat} >>")
+            .into_bytes(),
+    ])
+}
+
+#[test]
+fn oversized_repeated_overlay_is_refused_before_changing_the_document() {
+    // About 11 MiB of generated content before the fix; a bounded reproduction, not an OOM test.
+    let mut doc = repeated_overlay_document(16000.0, 1600.0, true);
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    assert_eq!(apply(&mut doc, None), Err(RedactError::OverlayLimit));
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    assert_eq!(marks(&doc).len(), 1);
+    let mut single = repeated_overlay_document(16000.0, 1600.0, false);
+    apply(&mut single, None).unwrap();
+    assert_eq!(content(&reopen(&single), 0).matches("(X) Tj").count(), 1);
+}
+
+#[test]
+fn overlay_budget_is_shared_by_pages_and_respects_the_page_selection() {
+    let mut doc = repeated_overlay_document(8000.0, 800.0, true);
+    let page = (*doc.get(ObjRef::new(3, 0))).clone();
+    let mut kids = vec![Object::Ref(ObjRef::new(3, 0))];
+    for _ in 0..2 {
+        let mut page = page.as_dict().unwrap().clone();
+        let annotation = doc.add((*doc.get(ObjRef::new(5, 0))).clone());
+        page.set(b"Annots".to_vec(), Object::Array(vec![Object::Ref(annotation)]));
+        kids.push(Object::Ref(doc.add(Object::Dict(page))));
+    }
+    doc.update_dict(ObjRef::new(2, 0), |d| {
+        d.set(b"Kids".to_vec(), Object::Array(kids));
+        d.set(b"Count".to_vec(), Object::Int(3));
+    })
+    .unwrap();
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    // Each appearance fits on its own; their sum exceeds the operation's budget.
+    assert_eq!(apply(&mut doc, None), Err(RedactError::OverlayLimit));
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before);
+    assert_eq!(marks(&doc).len(), 3);
+    apply(&mut doc, Some(&[1])).unwrap();
+    assert_eq!(marks(&doc).iter().map(|m| m.page).collect::<Vec<_>>(), [0, 2]);
+}
+
+#[test]
+fn grouped_marks_keep_overlay_order_and_ignore_duplicate_page_selections() {
+    let mut doc = repeated_overlay_document(60.0, 30.0, false);
+    let page = doc.get(ObjRef::new(3, 0)).as_dict().unwrap().clone();
+    let original_mark = (*doc.get(ObjRef::new(5, 0))).clone();
+    let mut kids = vec![Object::Ref(ObjRef::new(3, 0))];
+    for _ in 0..2 {
+        let mut copy = page.clone();
+        let mark = doc.add(original_mark.clone());
+        copy.set(b"Annots".to_vec(), Object::Array(vec![Object::Ref(mark)]));
+        kids.push(Object::Ref(doc.add(Object::Dict(copy))));
+    }
+    doc.update_dict(ObjRef::new(2, 0), |d| {
+        d.set(b"Kids".to_vec(), Object::Array(kids));
+        d.set(b"Count".to_vec(), Object::Int(3));
+    })
+    .unwrap();
+    let mut second = original_mark.as_dict().unwrap().clone();
+    second.set(b"OverlayText".to_vec(), Object::String(pdfcraft_cos::PdfString::literal(b"Y".to_vec())));
+    let second = doc.add(Object::Dict(second));
+    doc.update_dict(ObjRef::new(3, 0), |d| {
+        d.set(b"Annots".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(5, 0)), Object::Ref(second)]));
+    })
+    .unwrap();
+    let untouched = content(&doc, 1);
+    let report = apply(&mut doc, Some(&[2, 0, 2])).unwrap();
+    assert_eq!((report.pages, report.marks), (2, 3));
+    let saved = reopen(&doc);
+    assert_eq!(marks(&saved).iter().map(|m| m.page).collect::<Vec<_>>(), [1]);
+    assert_eq!(content(&saved, 1), untouched);
+    let first = content(&saved, 0);
+    assert!(first.find("(X) Tj").unwrap() < first.find("(Y) Tj").unwrap());
+    assert_eq!(content(&saved, 2).matches("(X) Tj").count(), 1);
+}
+
+#[test]
+fn overlay_extreme_counts_and_invalid_geometry_are_refused_without_large_allocations() {
+    let doc = repeated_overlay_document(20.0, 10.0, true);
+    let original = marks(&doc).remove(0);
+    for rect in [[0.0, 0.0, 1e100, 10.0], [0.0, 0.0, 20.0, 1e100], [-f64::MAX, 0.0, f64::MAX, 10.0], [0.0, 0.0, f64::NAN, 10.0]] {
+        let mut mark = original.clone();
+        mark.rects = vec![rect];
+        let mut remaining = overlay::MAX_BYTES;
+        assert_eq!(overlay::content(&[&mark], &mut remaining), Err(RedactError::OverlayLimit));
+    }
+}
+
+#[test]
+fn repeated_overlay_keeps_its_exact_appearance_and_counts_escaped_bytes() {
+    let doc = repeated_overlay_document(20.0, 10.0, true);
+    let mut mark = marks(&doc).remove(0);
+    let expected = b"q 0 0 0 rg\n0 0 20 10 re f\nQ\nq 0 0 20 10 re W n BT 1 0 0 rg /PCHelv 2 Tf 1 0 0 1 1.773 7.9 Tm (X X X X X X X X X) Tj 1 0 0 1 1.773 5.5 Tm (X X X X X X X X X) Tj 1 0 0 1 1.773 3.1 Tm (X X X X X X X X X) Tj 1 0 0 1 1.773 0.7 Tm (X X X X X X X X X) Tj ET Q\n";
+    let mut remaining = expected.len();
+    assert_eq!(overlay::content(&[&mark], &mut remaining).unwrap(), expected);
+    assert_eq!(remaining, 0);
+    mark.overlay = "é(\\)".into();
+    let mut remaining = overlay::MAX_BYTES;
+    let encoded = overlay::content(&[&mark], &mut remaining).unwrap();
+    let escaped = b"\xe9\\(\\\\\\)";
+    assert!(encoded.windows(escaped.len()).any(|w| w == escaped));
+    assert_eq!(overlay::MAX_BYTES - remaining, encoded.len());
+    let mut too_small = encoded.len() - 1;
+    assert_eq!(overlay::content(&[&mark], &mut too_small), Err(RedactError::OverlayLimit));
+}
+
+#[test]
+#[ignore = "manual overlay timing probe"]
+fn repeated_overlay_timing_probe() {
+    use std::hash::{Hash, Hasher};
+    for (w, h) in [(20.0, 10.0), (2000.0, 200.0), (4000.0, 400.0), (8000.0, 800.0)] {
+        let doc = repeated_overlay_document(w, h, true);
+        let marks = marks(&doc);
+        let refs: Vec<_> = marks.iter().collect();
+        let start = std::time::Instant::now();
+        let mut bytes = Vec::new();
+        for _ in 0..20 {
+            let mut remaining = overlay::MAX_BYTES;
+            bytes = std::hint::black_box(overlay::content(std::hint::black_box(&refs), &mut remaining).unwrap());
+        }
+        let elapsed = start.elapsed().as_secs_f64() * 1000.0 / 20.0;
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        bytes.hash(&mut hash);
+        println!("{w}x{h}: bytes={} hash={} ms={elapsed:.3}", bytes.len(), hash.finish());
+    }
+}
+
 /// Overlay text the standard fonts can't draw: refused when it is marked, and for a mark another
 /// program made, refused when it is applied, before anything is redacted, rather than burnt into
 /// the page as `?`.
