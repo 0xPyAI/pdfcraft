@@ -711,11 +711,10 @@ fn an_in_place_save_reports_a_required_rewrite_as_not_incremental() {
     }
 }
 
-/// Issue #1698: a save whose bytes don't reopen is refused before it touches the file. The
-/// catalog's `/Pages` is not a page tree, so the reader finds the page by scanning, while a
-/// full rewrite keeps only what the catalog reaches and drops it.
+/// #1664 repairs the missing page tree on open. The former #1698 failure fixture now
+/// saves successfully, keeping its page and pixels through a full rewrite.
 #[test]
-fn a_save_that_does_not_reopen_leaves_the_file_as_it_was() {
+fn a_recovered_page_tree_survives_a_full_save() {
     let dir = workdir("save-verify-before-write");
     let objs: [&[u8]; 4] = [
         b"<< /Type /Catalog /Pages 3 0 R >>",
@@ -743,10 +742,19 @@ fn a_save_that_does_not_reopen_leaves_the_file_as_it_was() {
     let opened = ok(&mut a, "doc_open", json!({ "path": "damaged.pdf" }));
     assert_eq!(opened["pages"], 1, "{opened}");
     let doc = opened["doc"].as_u64().unwrap();
-    let e = err(&mut a, "doc_save", json!({ "doc": doc, "full": true }));
-    assert!(e.to_string().contains("could not be reopened"), "{e}");
+    let (width, height, pixels) = a.render_pixels(doc, 1, 1.0).unwrap();
+    assert!(pixels.as_ref().as_chunks::<4>().0.iter().any(|p| p[..3] != [255, 255, 255]), "the original page is not blank");
+    let saved = ok(&mut a, "doc_save", json!({ "doc": doc, "full": true }));
+    assert_eq!(saved["document"]["dirty"], false);
     let on_disk = std::fs::read(dir.join("damaged.pdf")).unwrap();
-    assert!(on_disk == original, "the file was replaced by {} bytes that don't reopen", on_disk.len());
+    assert_ne!(on_disk, original, "a full save writes the repaired page tree");
+    let mut reopened = auto(&dir);
+    let opened = ok(&mut reopened, "doc_open", json!({ "path": "damaged.pdf" }));
+    assert_eq!(opened["pages"], 1);
+    let again = opened["doc"].as_u64().unwrap();
+    let (new_width, new_height, new_pixels) = reopened.render_pixels(again, 1, 1.0).unwrap();
+    assert_eq!((new_width, new_height), (width, height));
+    assert_eq!(new_pixels.as_ref(), pixels.as_ref(), "saving must preserve the recovered page's drawing");
 }
 
 /// organize.field-name-conflicts: combining files whose forms share a field name keeps the
@@ -4527,11 +4535,11 @@ fn signature_appearances(path: &Path) -> String {
 fn signing_with_translated_labels_through_tools() {
     let dir = workdir("signing-labels");
     let mut a = auto(&dir);
-    ok(&mut a, "sign_id_create", json!({ "name": "Ada Lovelace", "key": "p256", "password": "secret1", "path": "ada.p12" }));
+    ok(&mut a, "sign_id_create", json!({ "name": "Ada Lovelace", "key": "p256", "password": "secret12", "path": "ada.p12" }));
     let open = |a: &mut Automation| ok(a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
     let doc = open(&mut a);
     let args = |doc: u64, extra: Value, out: &str| {
-        let mut args = json!({ "doc": doc, "id": "ada.p12", "password": "secret1", "page": 1, "rect": [10, 150, 190, 290], "reason": "Genehmigt", "location": "Berlin", "out": out });
+        let mut args = json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "page": 1, "rect": [10, 150, 190, 290], "reason": "Genehmigt", "location": "Berlin", "out": out });
         for (k, v) in extra.as_object().unwrap() {
             args[k] = v.clone();
         }
