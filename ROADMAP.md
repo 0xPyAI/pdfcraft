@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~25% (ready for real work 50% → 75%) and ~400–700 h away
 
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-14 · **Change:** minor (M14: the Italian catalog has every entry the other catalogs had and the code looks up; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M12 #2572: repeated XFA print buttons dispatch to their shared click script; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (M3 #2080 candidate: explicit search jumps join per-tab history; rail and control-channel Back/Forward; estimates unchanged)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (M4 #1910: Organize Pages opens on the current page; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (M3 candidate: coordinate control clicks keep press/release together on slow frames and preserve text multi-click selection; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
@@ -156,6 +156,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 | 8 | 1.0 polish: performance, right-to-left, missing languages, keyboard-only (M14) | 55–95 |
 
 ## Progress log
+
+- **2026-10-15 (M12, #2572):** Every copy of a page-master button dispatches to its XFA click script by the clicked field's `/PCSom`, including early copies that share a SOM with later pages. Synthetic engine and automation regressions cover the print script using `numPages`, all three copies and save/reopen. XFA remains partial; estimates unchanged.
 - **2026-10-13 (community, M3, #1569 review):** Pixel-only Wayland wheel, wheel-tilt and continuous input use standalone moved events, so Ctrl zoom does not remain latched after the modifier is released (#991); vendored winit patch (13), with a policy test. Estimates unchanged.
 - **2026-10-12 (M6):** XFDF field import and data-file extraction join all text nodes in a value, preserving text after XML comments and processing instructions. Synthetic regressions cover Unicode, CDATA, empty values and PDF save/reopen. Estimates unchanged.
 - **2026-10-12 (M7, picture right-click menu):** The Edit text & images menu of a picture gains Cut Image, Redact Image (a redaction mark over the picture, applied from Redact a PDF), Create Link… and Recognize Text… (for that page), in all 21 catalogs. The menu was drawn only while the pointer was over the picture, so its items outside the picture (most of a logo's menu, and Delete below a page) could not be clicked; an open menu now stays drawn. Still missing from Acrobat's menu: Arrange (bring to front, send backward), Remove crop, Draw freehand and Edit image using… (opening an external editor).
@@ -490,6 +492,7 @@ Newest first: the date, what moved, and the new overall estimate.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-15 | minor | M12/#2572: repeated page-master buttons use the clicked field's SOM for XFA script dispatch; synthetic engine/tool regressions, including save/reopen. Estimates unchanged. |
 | 2026-10-12 | minor | M6: valid AcroForm XML element names with original PDF field names preserved; saved-PDF collision and Unicode regressions. Estimates unchanged. |
 | 2026-10-12 | minor | M6: preserve carriage returns in exported CSV field names and values; saved-PDF round-trip coverage. Estimates unchanged. |
 | 2026-10-13 | minor | M4: Insert-from-file preserves source bookmarks; integration tests retained with current main. Estimates unchanged. |
