@@ -37,9 +37,11 @@ impl Page {
         }
     }
 
-    /// Clockwise rotation when displayed: 0, 90, 180 or 270.
+    /// Clockwise rotation when displayed: 0, 90, 180 or 270. A `/Rotate` that isn't a multiple
+    /// of 90 (ISO 32000-2 §7.7.3.3 requires one) counts as 0, as the renderer draws that page.
     pub fn rotation(&self, doc: &Document) -> i64 {
-        self.dict.get(b"Rotate").and_then(|o| doc.resolve(o).as_int()).unwrap_or(0).rem_euclid(360) / 90 * 90
+        let r = self.dict.get(b"Rotate").and_then(|o| doc.resolve(o).as_int()).unwrap_or(0).rem_euclid(360);
+        if r % 90 == 0 { r } else { 0 }
     }
 
     /// The size of the page's user-space unit in points (`/UserUnit`; it isn't inherited), read
@@ -182,6 +184,21 @@ mod tests {
             };
             assert_eq!(tl, expect, "rotation {rotate}");
         }
+    }
+
+    /// A `/Rotate` that isn't a quarter turn counts as 0, as the renderer draws the page
+    /// upright, so display space matches what's on screen.
+    #[test]
+    fn rotate_off_a_quarter_turn_counts_as_upright() {
+        for rotate in [135, 30, -45, 359] {
+            let d = doc(rotate);
+            let p = &pages(&d)[0];
+            assert_eq!(p.rotation(&d), 0, "{rotate}");
+            assert_eq!(p.display_size(&d), (200.0, 300.0), "{rotate}");
+            assert_eq!(p.view_matrix(&d), [1.0, 0.0, 0.0, 1.0, 10.0, 20.0], "{rotate}");
+        }
+        let d = doc(-90);
+        assert_eq!(pages(&d)[0].rotation(&d), 270);
     }
 
     /// Display space is in points: `/UserUnit 2` doubles it. As in Acrobat, the value isn't
