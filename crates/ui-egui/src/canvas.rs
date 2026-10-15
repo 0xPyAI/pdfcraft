@@ -2510,6 +2510,11 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         let mut current_overlap = -1.0f32;
         let mut current_height = f32::INFINITY;
         let pointer = ui.input(|i| i.pointer.hover_pos());
+        // A press on a page makes it the current one (as in Acrobat), so a page command with
+        // no selection (Rotate, Delete) acts on the page the reader pointed at, not on a page
+        // gone to earlier that still shows whole beside it.
+        let pressed = unobstructed && ui.input(|i| i.pointer.primary_pressed()) && ui.rect_contains_pointer(avail);
+        let mut pressed_page = None;
         if resp.secondary_clicked() {
             // Set again below when the right-click lands on a link.
             view.links.context = None;
@@ -2518,6 +2523,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             let r = snap_to_pixels(rects[i].translate(origin.to_vec2()), ppp);
             if !r.intersects(visible.expand(400.0)) {
                 continue;
+            }
+            if pressed && pressed_page.is_none() && pointer.is_some_and(|p| r.contains(p)) {
+                pressed_page = Some(i);
             }
             if r.intersects(visible) {
                 visible_now.push(i);
@@ -3137,6 +3145,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         // hand the highlight to that page.
         if current_overlap >= best_overlap - TIE || current_overlap >= current_height - TIE {
             current = view.current;
+        }
+        if let Some(p) = pressed_page {
+            current = p;
         }
         if view.continuous {
             view.current = current;

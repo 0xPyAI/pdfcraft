@@ -1578,3 +1578,30 @@ fn selection_mouse_wheel_resumes_after_point_scrolling() {
         }
     }
 }
+
+#[test]
+fn page_command_without_selection_acts_on_the_page_pressed() {
+    let mut h = harness(); // b.pdf (2 pages) is active
+    h.state_mut().set_option("zoom", "50").unwrap();
+    h.run_steps(3);
+    // Page 2 was gone to earlier; both pages show whole, so it stays current.
+    h.state_mut().set_option("page", "2").unwrap();
+    h.run_steps(5);
+    let at = |h: &Harness<'static, PdfCraftApp>, page: usize| {
+        let v = &h.state().views[h.state().active.unwrap()];
+        v.page_screen_rect(page).expect("page on screen").center()
+    };
+    let first = at(&h, 0);
+    h.event(egui::Event::PointerMoved(first));
+    h.run_steps(2);
+    h.event(egui::Event::PointerButton { pos: first, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.run_steps(2);
+    h.event(egui::Event::PointerButton { pos: first, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    h.run_steps(3);
+    assert_eq!(h.state().views[h.state().active.unwrap()].current, 0, "the pressed page is the current one");
+    h.state_mut().execute("page.rotate");
+    h.run_steps(3);
+    let s = h.state();
+    let d = s.session.get(s.views[s.active.unwrap()].id).unwrap();
+    assert_eq!(d.info.pages.iter().map(|p| p.rotation).collect::<Vec<_>>(), [90, 0]);
+}
