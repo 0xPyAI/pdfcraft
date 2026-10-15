@@ -1946,6 +1946,47 @@ pub fn set_style(
     redraw_or_restore(doc, r, before)
 }
 
+/// Change the font size of a text box, typewriter text or callout (`/DA` keeps its colour; the
+/// rich-text strings follow) and redraw it. The box grows to hold the wrapped text at the new
+/// size and never shrinks, so a box the user drew large stays large. Sizes are 1 to 400 pt.
+pub fn set_font_size(doc: &mut Document, page: usize, index: usize, size: f64, meta: &Meta) -> Result<(), AnnotError> {
+    let (_, r) = annot_ref(doc, page, index)?;
+    unlocked(doc, r)?;
+    let d = annot_dict(doc, r);
+    if d.name(b"Subtype") != Some(b"FreeText") {
+        return Err(AnnotError::Invalid("only text boxes, typewriter text and callouts have a font size".into()));
+    }
+    if !size.is_finite() || !(1.0..=400.0).contains(&size) {
+        return Err(AnnotError::Invalid("font size must be 1\u{2013}400 pt".into()));
+    }
+    refuse_foreign_text(doc, &d)?;
+    let before = d;
+    doc.update_dict(r, |d| {
+        let (col, _) = appearance::parse_da(d);
+        d.set(b"DA".to_vec(), PdfString::literal(format!("{} {} {} rg /Helv {} Tf", n(col[0]), n(col[1]), n(col[2]), n(size)).into_bytes()));
+        rich_text(d);
+        touch(d, meta);
+    })?;
+    let text = text_value(doc, &annot_dict(doc, r), b"Contents").unwrap_or_default();
+    let result = match fitted_box(doc, r, &text) {
+        Some(fit) => {
+            let cur = annot_dict(doc, r);
+            let nums: Vec<f64> =
+                cur.get(b"Rect").and_then(|o| o.as_array()).map(|a| a.iter().filter_map(|x| x.as_f64()).collect()).unwrap_or_default();
+            // Keep the top and sides; only the bottom edge moves, and only downwards.
+            match four(&nums).map(normalize) {
+                Some(old) if !cur.contains(b"CL") => apply_text_box(doc, r, [fit[0], fit[1].min(old[1]), fit[2], fit[3]], meta, false),
+                _ => apply_text_box(doc, r, fit, meta, false),
+            }
+        }
+        None => redraw_or_restore(doc, r, before.clone()),
+    };
+    if result.is_err() {
+        doc.set(r, Object::Dict(before));
+    }
+    result
+}
+
 /// Whether a comment of this subtype has an interior that can be filled (`/IC`: rectangles,
 /// ovals, polygons and clouds, §12.5.6.8–9).
 pub fn fillable(subtype: &str) -> bool {
@@ -2180,6 +2221,8 @@ pub struct Props {
     pub fillable: bool,
     /// `/IC`, the interior colour (`None`: no fill).
     pub fill: Option<Rgb>,
+    /// Text boxes, typewriter text and callouts: the `/DA` font size in points.
+    pub font_size: Option<f64>,
 }
 
 /// The current properties of the comment at `(page, index)`.
@@ -2205,6 +2248,7 @@ pub fn props(doc: &Document, page: usize, index: usize) -> Option<Props> {
         locked: annotation_flags(doc, d) & FLAG_LOCKED != 0,
         fillable: fillable(&subtype),
         fill: fill_of(d),
+        font_size: (subtype == "FreeText").then(|| appearance::parse_da(d).1),
         subtype,
         endings: line_endings_of(d),
     })

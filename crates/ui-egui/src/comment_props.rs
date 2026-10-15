@@ -134,6 +134,11 @@ pub fn edits(d: &PropsDraft) -> Vec<Edit> {
     if e.restylable && e.fillable && e.fill != o.fill {
         out.push(Edit::FillAnnotation { page: d.page, index: d.index, fill: e.fill });
     }
+    if e.restylable
+        && let Some(size) = e.font_size.filter(|s| Some(*s) != o.font_size)
+    {
+        out.push(Edit::FontSizeAnnotation { page: d.page, index: d.index, size });
+    }
     let author = (e.author != o.author).then(|| e.author.clone());
     let subject = (e.subject != o.subject).then(|| e.subject.clone());
     let icon = (e.icon != o.icon).then_some(e.icon).flatten();
@@ -205,6 +210,11 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (boo
                         if let Some(f) = crate::comments::fill_picker(ui, e.fill) {
                             e.fill = f;
                         }
+                        ui.end_row();
+                    }
+                    if let Some(size) = e.font_size.as_mut() {
+                        ui.label(tl!("Font size"));
+                        ui.add(egui::DragValue::new(size).range(1.0..=400.0).speed(0.5).suffix(" pt"));
                         ui.end_row();
                     }
                     ui.label(tl!("Opacity"));

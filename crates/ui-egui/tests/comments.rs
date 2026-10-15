@@ -1181,3 +1181,34 @@ fn a_closed_comments_panel_stays_closed_when_picking_comment_tools() {
     h.run_steps(2);
     assert_eq!(h.state().right, Some(RightPanel::Comments));
 }
+
+/// #1908: Comment properties of a text box has a Font size control; changing it redraws the box
+/// with the new /DA size as one undo step, and shapes without text have no such control.
+#[test]
+fn text_box_properties_change_the_font_size() {
+    use pdfcraft_engine::{Edit, NewAnnotation, Shape};
+    let mut h = harness(|_| {});
+    let tb = NewAnnotation {
+        page: 0,
+        shape: Shape::TextBox { rect: [40.0, 600.0, 240.0, 640.0], font_size: 12.0 },
+        style: Default::default(),
+        contents: "Hello".into(),
+        author: "Ada".into(),
+    };
+    h.state_mut().apply_edit(Edit::AddAnnotation(tb));
+    h.run_steps(2);
+    h.state_mut().open_comment_props(0, 0);
+    h.run_steps(2);
+    h.get_by_label("Font size");
+    {
+        let d = h.state_mut().comment_props.as_mut().expect("open");
+        assert_eq!(d.original.font_size, Some(12.0));
+        d.edited.font_size = Some(30.0);
+    }
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    let s = h.state();
+    let doc = s.session.get(s.views[0].id).unwrap();
+    assert_eq!(doc.comment_props(0, 0).unwrap().font_size, Some(30.0));
+    assert_eq!(doc.can_undo(), Some("Change comment properties"));
+}

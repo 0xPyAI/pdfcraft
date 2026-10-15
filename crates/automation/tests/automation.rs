@@ -3952,6 +3952,33 @@ fn text_the_standard_fonts_cannot_draw_is_never_silent_through_tools() {
     assert!(!text.contains("?? OK"), "{text}");
 }
 
+/// #1908: `comment_edit font_size` resizes the text of a text box, in one undo step, and refuses
+/// sizes outside 1-400 pt and comments without text.
+#[test]
+fn text_box_font_size_through_the_tool() {
+    let dir = workdir("fontsize");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "comment_add", json!({ "doc": doc, "page": 1, "type": "textbox", "rect": [20, 40, 200, 80], "contents": "Hello" }));
+    ok(&mut a, "comment_add", json!({ "doc": doc, "page": 1, "type": "rectangle", "rect": [20, 120, 80, 160] }));
+    ok(&mut a, "comment_edit", json!({ "doc": doc, "page": 1, "index": 1, "font_size": 30 }));
+    for bad in [0, 401] {
+        assert!(matches!(a.call("comment_edit", &json!({ "doc": doc, "page": 1, "index": 1, "font_size": bad })), Err(ToolError::InvalidArgs(_))));
+    }
+    assert!(a.call("comment_edit", &json!({ "doc": doc, "page": 1, "index": 2, "font_size": 12 })).is_err());
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "sized.pdf" }));
+    let saved = pdfcraft_cos::Document::open(std::sync::Arc::new(std::fs::read(dir.join("sized.pdf")).unwrap())).unwrap();
+    let sizes: Vec<String> = saved
+        .object_numbers()
+        .iter()
+        .filter_map(|n| saved.try_get(*n).ok())
+        .filter_map(|o| o.as_dict().and_then(|d| d.get(b"DA")?.as_string().map(|s| String::from_utf8_lossy(&s.bytes).into_owned())))
+        .collect();
+    assert_eq!(sizes.len(), 1, "{sizes:?}");
+    assert!(sizes[0].ends_with("/Helv 30 Tf"), "{sizes:?}");
+    assert_eq!(ok(&mut a, "edit_undo", json!({ "doc": doc }))["undone"], "Change comment properties");
+}
+
 #[test]
 fn line_endings_through_the_tool() {
     let dir = workdir("endings");
