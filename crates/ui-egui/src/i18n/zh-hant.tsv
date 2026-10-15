@@ -2156,7 +2156,7 @@ key	Space	空格
 	Rotate page {label} counterclockwise	逆時針旋轉頁面 {label}
 	Rotate page {label} clockwise	順時針旋轉頁面 {label}
 	Delete page {label}	刪除頁面 {label}
-	Mouse wheel scroll speed	滑鼠滾輪捲動速度
+	Scroll speed (mouse wheel and arrow keys)	捲動速度（滑鼠滾輪與方向鍵）
 scroll speed	Slow	慢
 scroll speed	Normal	正常
 scroll speed	Fast	快

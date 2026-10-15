@@ -2193,7 +2193,7 @@ key	Space	Пробел
 	Rotate page {label} counterclockwise	Повернуть страницу {label} против часовой стрелки
 	Rotate page {label} clockwise	Повернуть страницу {label} по часовой стрелке
 	Delete page {label}	Удалить страницу {label}
-	Mouse wheel scroll speed	Скорость прокрутки колесом мыши
+	Scroll speed (mouse wheel and arrow keys)	Скорость прокрутки (колесо мыши и клавиши со стрелками)
 scroll speed	Slow	Низкая
 scroll speed	Normal	Обычная
 scroll speed	Fast	Высокая

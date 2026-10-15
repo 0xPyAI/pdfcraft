@@ -2275,7 +2275,7 @@ key	Space	Бос орын
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Бұл файл дискіде өзгертілді. «Қайта жүктеу» жаңа нұсқаны көрсетіп, сақталмаған өзгерістеріңізді тастайды; «Сақтау» оны осы нұсқамен алмастырады.
 	Reload	Қайта жүктеу
 	Couldn't reload {name}: {e}	{name} қайта жүктеу мүмкін болмады: {e}
-	Mouse wheel scroll speed	Тінтуір дөңгелегімен айналдыру жылдамдығы
+	Scroll speed (mouse wheel and arrow keys)	Айналдыру жылдамдығы (тінтуір дөңгелегі және көрсеткі пернелері)
 scroll speed	Slow	Баяу
 scroll speed	Normal	Қалыпты
 scroll speed	Fast	Жылдам

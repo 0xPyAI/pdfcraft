@@ -2417,7 +2417,7 @@ key	Space	Espacio
 	Rotate page {label} counterclockwise	Girar la página {label} a la izquierda
 	Rotate page {label} clockwise	Girar la página {label} a la derecha
 	Delete page {label}	Eliminar la página {label}
-	Mouse wheel scroll speed	Velocidad de desplazamiento de la rueda del ratón
+	Scroll speed (mouse wheel and arrow keys)	Velocidad de desplazamiento (rueda del ratón y teclas de flecha)
 scroll speed	Slow	Lenta
 scroll speed	Normal	Normal
 scroll speed	Fast	Rápida

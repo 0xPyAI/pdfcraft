@@ -2280,7 +2280,7 @@ key	Space	スペース
 	Rotate page {label} counterclockwise	ページ {label} を反時計回りに回転
 	Rotate page {label} clockwise	ページ {label} を時計回りに回転
 	Delete page {label}	ページ {label} を削除
-	Mouse wheel scroll speed	マウスホイールのスクロール速度
+	Scroll speed (mouse wheel and arrow keys)	スクロール速度（マウスホイールと矢印キー）
 scroll speed	Slow	遅い
 scroll speed	Normal	標準
 scroll speed	Fast	速い

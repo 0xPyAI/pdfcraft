@@ -2281,7 +2281,7 @@ key	Space	Leertaste
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Diese Datei wurde auf dem Datenträger geändert. „Neu laden“ zeigt die neue Version und verwirft Ihre ungespeicherten Änderungen; „Speichern“ ersetzt sie durch diese Version.
 	Reload	Neu laden
 	Couldn't reload {name}: {e}	{name} konnte nicht neu geladen werden: {e}
-	Mouse wheel scroll speed	Scrollgeschwindigkeit des Mausrads
+	Scroll speed (mouse wheel and arrow keys)	Bildlaufgeschwindigkeit (Mausrad und Pfeiltasten)
 scroll speed	Slow	Langsam
 scroll speed	Normal	Normal
 scroll speed	Fast	Schnell

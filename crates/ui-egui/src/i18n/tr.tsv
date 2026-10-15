@@ -2273,7 +2273,7 @@ key	Space	Boşluk
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Bu dosya diskte değişti. Yeniden yükle yeni sürümü gösterir ve kaydedilmemiş değişikliklerinizi atar; Kaydet onu bu sürümle değiştirir.
 	Reload	Yeniden yükle
 	Couldn't reload {name}: {e}	{name} yeniden yüklenemedi: {e}
-	Mouse wheel scroll speed	Fare tekerleği kaydırma hızı
+	Scroll speed (mouse wheel and arrow keys)	Kaydırma hızı (fare tekerleği ve ok tuşları)
 scroll speed	Slow	Yavaş
 scroll speed	Normal	Orta
 scroll speed	Fast	Hızlı

@@ -2282,7 +2282,7 @@ key	Space	Preslednica
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Ta datoteka se je na disku spremenila. Ponovno naloži pokaže novo različico in zavrže neshranjene spremembe; Shrani jo zamenja s to različico.
 	Reload	Znova naloži
 	Couldn't reload {name}: {e}	Datoteke {name} ni bilo mogoče znova naložiti: {e}
-	Mouse wheel scroll speed	Hitrost drsenja s kolescem miške
+	Scroll speed (mouse wheel and arrow keys)	Hitrost drsenja (kolesce miške in puščične tipke)
 scroll speed	Slow	Počasi
 scroll speed	Normal	Običajno
 scroll speed	Fast	Hitro

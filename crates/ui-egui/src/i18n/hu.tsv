@@ -2279,7 +2279,7 @@ key	Space	Szóköz
 	Rotate page {label} counterclockwise	{label}. oldal elforgatása az óramutató járásával ellentétesen
 	Rotate page {label} clockwise	{label}. oldal elforgatása az óramutató járásával megegyezően
 	Delete page {label}	{label}. oldal törlése
-	Mouse wheel scroll speed	Egérgörgő görgetési sebessége
+	Scroll speed (mouse wheel and arrow keys)	Görgetési sebesség (egérgörgő és nyílbillentyűk)
 scroll speed	Slow	Lassú
 scroll speed	Normal	Normál
 scroll speed	Fast	Gyors

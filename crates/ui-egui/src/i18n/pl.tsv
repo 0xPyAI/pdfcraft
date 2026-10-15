@@ -2260,7 +2260,7 @@ key	Space	Spacja
 	Rotate page {label} counterclockwise	Obróć stronę {label} w lewo
 	Rotate page {label} clockwise	Obróć stronę {label} w prawo
 	Delete page {label}	Usuń stronę {label}
-	Mouse wheel scroll speed	Szybkość przewijania kółkiem myszy
+	Scroll speed (mouse wheel and arrow keys)	Szybkość przewijania (kółko myszy i klawisze strzałek)
 scroll speed	Slow	Wolna
 scroll speed	Normal	Normalna
 scroll speed	Fast	Szybka

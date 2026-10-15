@@ -2048,7 +2048,7 @@ impl PageXform {
     }
 }
 
-pub fn shortcuts(view: &mut DocView, ctx: &egui::Context) {
+pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_speed::ScrollSpeed) {
     use egui::{Key, KeyboardShortcut, Modifiers};
     if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::F))) {
         view.open_find();
@@ -2138,9 +2138,12 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context) {
     // ↓ / ↑ scroll a line, and Page Down / Page Up a screen where the pages scroll. In
     // single-page view, ↓ / ↑ turn the page once there is nothing left to scroll that way, as
     // the wheel does (#273): always on a page that fits.
+    // The Scroll speed preference sets how far ↓ / ↑ go as well as the wheel (#985); Page Down /
+    // Page Up keep a screen.
     if !command {
+        let line = KEY_SCROLL_LINE * speed.factor();
         let screen = (view.viewport_h - KEY_SCROLL_LINE).max(KEY_SCROLL_LINE);
-        let steps = [(Key::ArrowDown, KEY_SCROLL_LINE), (Key::ArrowUp, -KEY_SCROLL_LINE), (Key::PageDown, screen), (Key::PageUp, -screen)];
+        let steps = [(Key::ArrowDown, line), (Key::ArrowUp, -line), (Key::PageDown, screen), (Key::PageUp, -screen)];
         for (k, by) in steps {
             let arrow = matches!(k, Key::ArrowDown | Key::ArrowUp);
             if !key(k) || !(scrolls || arrow) {
@@ -2166,8 +2169,8 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context) {
     }
 }
 
-/// How far ↓ / ↑ scroll: a mouse-wheel line on the desktop. Page Down / Page Up keep this much
-/// of the previous screen in view.
+/// How far ↓ / ↑ scroll at Normal speed (Scroll speed halves or doubles it). Page Down / Page Up
+/// keep this much of the previous screen in view.
 const KEY_SCROLL_LINE: f32 = 40.0;
 
 pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {

@@ -2194,7 +2194,7 @@ key	Space	స్పేస్
 	Rotate page {label} counterclockwise	{label} పేజీని అపసవ్య దిశలో తిప్పండి
 	Rotate page {label} clockwise	{label} పేజీని సవ్య దిశలో తిప్పండి
 	Delete page {label}	{label} పేజీని తొలగించండి
-	Mouse wheel scroll speed	మౌస్ వీల్ స్క్రోల్ వేగం
+	Scroll speed (mouse wheel and arrow keys)	స్క్రోల్ వేగం (మౌస్ వీల్ మరియు బాణం కీలు)
 scroll speed	Slow	నెమ్మదిగా
 scroll speed	Normal	సాధారణం
 scroll speed	Fast	వేగంగా

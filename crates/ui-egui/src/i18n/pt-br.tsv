@@ -2294,7 +2294,7 @@ calendar date	September	setembro
 calendar date	October	outubro
 calendar date	November	novembro
 calendar date	December	dezembro
-	Mouse wheel scroll speed	Velocidade de rolagem da roda do mouse
+	Scroll speed (mouse wheel and arrow keys)	Velocidade de rolagem (roda do mouse e teclas de seta)
 scroll speed	Slow	Lenta
 scroll speed	Normal	Normal
 scroll speed	Fast	Rápida

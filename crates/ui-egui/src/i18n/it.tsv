@@ -2289,7 +2289,7 @@ key	Space	Spazio
 	Rotate page {label} counterclockwise	Ruota pagina {label} in senso antiorario
 	Rotate page {label} clockwise	Ruota pagina {label} in senso orario
 	Delete page {label}	Elimina pagina {label}
-	Mouse wheel scroll speed	Velocità di scorrimento della rotellina del mouse
+	Scroll speed (mouse wheel and arrow keys)	Velocità di scorrimento (rotellina del mouse e tasti freccia)
 scroll speed	Slow	Lenta
 scroll speed	Normal	Normale
 scroll speed	Fast	Veloce

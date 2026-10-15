@@ -2243,7 +2243,7 @@ key	Space	Интервал
 	Rotate page {label} counterclockwise	Завъртане на страница {label} обратно на часовниковата стрелка
 	Rotate page {label} clockwise	Завъртане на страница {label} по часовниковата стрелка
 	Delete page {label}	Изтриване на страница {label}
-	Mouse wheel scroll speed	Скорост на превъртане с колелцето на мишката
+	Scroll speed (mouse wheel and arrow keys)	Скорост на превъртане (колелце на мишката и клавиши със стрелки)
 scroll speed	Slow	Ниска
 scroll speed	Normal	Нормална
 scroll speed	Fast	Висока

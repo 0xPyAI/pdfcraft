@@ -2280,7 +2280,7 @@ key	Space	Espace
 	Rotate page {label} counterclockwise	Faire pivoter la page {label} dans le sens antihoraire
 	Rotate page {label} clockwise	Faire pivoter la page {label} dans le sens horaire
 	Delete page {label}	Supprimer la page {label}
-	Mouse wheel scroll speed	Vitesse de défilement de la molette
+	Scroll speed (mouse wheel and arrow keys)	Vitesse de défilement (molette et touches fléchées)
 scroll speed	Slow	Lente
 scroll speed	Normal	Normale
 scroll speed	Fast	Rapide

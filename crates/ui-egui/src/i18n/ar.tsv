@@ -2301,7 +2301,7 @@ key	Space	مسافة
 	Rotate page {label} counterclockwise	تدوير الصفحة {label} عكس اتجاه عقارب الساعة
 	Rotate page {label} clockwise	تدوير الصفحة {label} باتجاه عقارب الساعة
 	Delete page {label}	حذف الصفحة {label}
-	Mouse wheel scroll speed	سرعة التمرير بعجلة الماوس
+	Scroll speed (mouse wheel and arrow keys)	سرعة التمرير (عجلة الفأرة ومفاتيح الأسهم)
 scroll speed	Slow	بطيئة
 scroll speed	Normal	عادية
 scroll speed	Fast	سريعة

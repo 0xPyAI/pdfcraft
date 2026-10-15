@@ -2302,7 +2302,7 @@ key	Space	Пробіл
 	Rotate page {label} counterclockwise	Повернути сторінку {label} проти годинникової стрілки
 	Rotate page {label} clockwise	Повернути сторінку {label} за годинниковою стрілкою
 	Delete page {label}	Видалити сторінку {label}
-	Mouse wheel scroll speed	Швидкість прокручування коліщатком миші
+	Scroll speed (mouse wheel and arrow keys)	Швидкість прокручування (коліщатко миші та клавіші зі стрілками)
 scroll speed	Slow	Повільна
 scroll speed	Normal	Звичайна
 scroll speed	Fast	Швидка
