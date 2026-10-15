@@ -158,6 +158,9 @@ fn every_registered_command_is_implemented() {
         let dir = std::env::temp_dir().join(format!("pdfcraft-cmd-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         app.save_override = Some(dir.join("out.pdf").to_string_lossy().into_owned());
+        // A picker the list above misses (file.pin_folder, create.multiple_separate did) must not
+        // open a real file dialog on the desktop running the tests: answer it as a cancel.
+        app.pick_override = Some(Vec::new());
         assert!(app.execute(spec.id), "{} is registered but not implemented (or wrongly disabled)", spec.id);
     }
 }
