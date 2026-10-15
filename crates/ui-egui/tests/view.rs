@@ -1100,3 +1100,75 @@ fn sidebar_collapse_and_resize_preserves_scroll_position() {
     let rel_y_reopened = rect_reopened.min.y - vp_reopened.min.y;
     assert!((rel_y_reopened - rel_y_before).abs() < 1.0, "page 2 scroll position preserved on reopen: before {rel_y_before}, after {rel_y_reopened}");
 }
+
+/// Synthetic unequal-height spreads, generated without font or image assets.
+fn final_spread_at_scroll_end(heights: &[u32], cover: bool) -> (Vec<(usize, egui::Rect)>, egui::Rect) {
+    let kids = (0..heights.len()).map(|i| format!("{} 0 R", i + 3)).collect::<Vec<_>>().join(" ");
+    let mut pdf = format!(
+        "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [{kids}] /Count {} >> endobj\n",
+        heights.len()
+    );
+    for (i, height) in heights.iter().enumerate() {
+        pdf += &format!("{} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 {height}] >> endobj\n", i + 3);
+    }
+    pdf += "trailer << /Root 1 0 R >>\n%%EOF";
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_step_dt(1.0 / 60.0).build_eframe(move |_| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("unequal-spreads.pdf", None, pdf.as_bytes().to_vec()).unwrap();
+        for (key, value) in [("left", "closed"), ("panel", "none"), ("layout", "two-up"), ("zoom", "200")] {
+            app.set_option(key, value).unwrap();
+        }
+        app.set_option("cover", if cover { "on" } else { "off" }).unwrap();
+        app
+    });
+    h.run_steps(12);
+    let at = h.state().views[0].viewport_rect().center();
+    h.hover_at(at);
+    h.run_steps(2);
+    for _ in 0..4 {
+        h.event(wheel(MouseWheelUnit::Line, -1000.0, TouchPhase::Move));
+        h.run_steps(45);
+    }
+    let view = &h.state().views[0];
+    let last = heights.len() - 1;
+    let first = if cover { last - (last + 1) % 2 } else { last - last % 2 };
+    let pages = (first..=last).map(|page| (page, view.page_screen_rect(page).expect("final spread is visible"))).collect();
+    (pages, view.viewport_rect())
+}
+
+fn assert_final_spread_bottom_reachable(heights: &[u32], cover: bool) {
+    let (pages, viewport) = final_spread_at_scroll_end(heights, cover);
+    let bottom = pages.iter().map(|(_, rect)| rect.bottom()).fold(0.0_f32, f32::max);
+    assert!(
+        bottom <= viewport.bottom() + 1.0,
+        "final spread remains below the viewport: heights={heights:?}, cover={cover}, pages={pages:?}, viewport={viewport:?}"
+    );
+    // The maximum-height page reaches the bottom margin after the scroll offset settles.
+    assert!((viewport.bottom() - bottom - 28.0).abs() < 1.0, "scroll end leaves the bottom margin: pages={pages:?}, viewport={viewport:?}");
+}
+
+#[test]
+fn two_up_scroll_end_reaches_a_taller_left_page() {
+    assert_final_spread_bottom_reachable(&[400, 400, 400, 100], false);
+}
+
+#[test]
+fn two_up_scroll_end_reaches_a_taller_right_page() {
+    assert_final_spread_bottom_reachable(&[400, 400, 100, 400], false);
+}
+
+#[test]
+fn two_up_scroll_end_reaches_equal_height_pages() {
+    assert_final_spread_bottom_reachable(&[400, 400, 400, 400], false);
+}
+
+#[test]
+fn two_up_scroll_end_reaches_an_unpaired_final_page() {
+    assert_final_spread_bottom_reachable(&[400, 400, 400], false);
+}
+
+#[test]
+fn two_up_scroll_end_with_cover_reaches_a_taller_left_page() {
+    assert_final_spread_bottom_reachable(&[400, 400, 400, 400, 100], true);
+}
