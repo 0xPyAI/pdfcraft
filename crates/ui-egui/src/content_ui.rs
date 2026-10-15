@@ -279,6 +279,22 @@ fn dragged(r: Rect, grab: Grab, d: egui::Vec2, keep_aspect: bool) -> Rect {
     }
 }
 
+/// Added text and images keep pointer ownership over a form field while editing content.
+pub(crate) fn select_grabs(ui: &egui::Ui, xf: &PageXform, page: usize, info: &DocInfo, added: &[Added], view: &DocView) -> bool {
+    let cv = &view.content;
+    if cv.grab.is_some_and(|(grab_page, _, _)| grab_page == page) {
+        return true;
+    }
+    let Some(p) = ui.input(|i| i.pointer.hover_pos().or(i.pointer.interact_pos())).filter(|p| xf.rect.contains(*p)) else {
+        return false;
+    };
+    on_page(added, page).into_iter().any(|(index, item)| {
+        let rect = screen_rect(xf, info, page, item.content.rect());
+        rect.expand(2.0).contains(p)
+            || cv.selected == Some((page, index)) && handles(rect).into_iter().any(|(corner, _, _)| corner.distance(p) <= 6.0)
+    })
+}
+
 /// Pointer input on one page in Edit mode (`adding_text` with the Text tool). `true` when it
 /// used the input.
 #[allow(clippy::too_many_arguments)]

@@ -7,11 +7,19 @@ use egui_kittest::kittest::Queryable;
 use pdfcraft_ui_egui::{PdfCraftApp, QuickTool};
 
 fn harness() -> Harness<'static, PdfCraftApp> {
-    harness_bytes(include_bytes!("data/form.pdf").to_vec())
+    harness_with_step_dt(0.25)
+}
+
+fn harness_with_step_dt(step_dt: f32) -> Harness<'static, PdfCraftApp> {
+    harness_bytes_with_step_dt(include_bytes!("data/form.pdf").to_vec(), step_dt)
 }
 
 fn harness_bytes(bytes: Vec<u8>) -> Harness<'static, PdfCraftApp> {
-    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+    harness_bytes_with_step_dt(bytes, 0.25)
+}
+
+fn harness_bytes_with_step_dt(bytes: Vec<u8>, step_dt: f32) -> Harness<'static, PdfCraftApp> {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_step_dt(step_dt).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
         app.set_option("language", "en").unwrap();
         app.open_bytes("form.pdf", None, bytes.clone()).unwrap();
@@ -234,6 +242,116 @@ fn typing_thai_text_keeps_marks_and_commits_to_page() {
     let p = at(&h, 40.0, 200.0);
     click(&mut h, p);
     assert_eq!(texts(&h), ["น้ำ กิ่ ผู้ใช้ Hello"]);
+}
+
+#[test]
+fn finished_text_over_form_field_keeps_selection_and_drag_ownership() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("edit.text"));
+    h.run_steps(2);
+    let p = at(&h, 60.0, 202.0);
+    click(&mut h, p);
+    h.event(egui::Event::Text("Reviewed".into()));
+    h.run_steps(2);
+    h.get_by_label("Done adding text").click();
+    h.run_steps(3);
+    assert_eq!(texts(&h), ["Reviewed"]);
+    let rect = added(&h)[0].content.rect();
+    let mid_x = ((rect[0] + rect[2]) / 2.0) as f32;
+    let mid_y = ((rect[1] + rect[3]) / 2.0) as f32;
+    assert!((20.0..280.0).contains(&mid_x) && (180.0..200.0).contains(&mid_y), "fixture text must overlap city: {rect:?}");
+    let center = at(&h, mid_x, 400.0 - mid_y);
+    click(&mut h, center);
+    assert!(h.state().views[0].forms.focus.is_none(), "selecting finished text must not focus the field underneath");
+    assert_eq!(h.state().views[0].content.selected, Some((0, 0)));
+    h.run_steps(60);
+    let start = at(&h, mid_x, 400.0 - mid_y);
+    let end = at(&h, mid_x, 400.0 - mid_y - 80.0);
+    h.drag_at(start);
+    h.run_steps(1);
+    for step in 1..=40 {
+        h.hover_at(start + (end - start) * (step as f32 / 40.0));
+        h.run_steps(1);
+    }
+    h.drop_at(end);
+    h.run_steps(4);
+    let moved = added(&h)[0].content.rect();
+    for (actual, expected) in moved.into_iter().zip([rect[0], rect[1] + 80.0, rect[2], rect[3] + 80.0]) {
+        assert!((actual - expected).abs() < 1.0, "text should move upward: {rect:?} -> {moved:?}");
+    }
+    assert!(h.state().views[0].forms.focus.is_none());
+    let bare = at(&h, 270.0, 210.0);
+    click(&mut h, bare);
+    assert_eq!(h.state().views[0].forms.focus.as_ref().map(|f| f.name.as_str()), Some("city"));
+}
+
+fn text_over_city() -> Harness<'static, PdfCraftApp> {
+    let mut h = harness_with_step_dt(1.0 / 60.0);
+    assert!(h.state_mut().execute("edit.text"));
+    h.run_steps(2);
+    let p = at(&h, 60.0, 202.0);
+    click(&mut h, p);
+    h.event(egui::Event::Text("Reviewed".into()));
+    h.run_steps(2);
+    h.get_by_label("Done adding text").click();
+    h.run_steps(3);
+    h
+}
+
+#[test]
+fn finished_text_over_field_keeps_move_and_resize_cursors() {
+    let mut h = text_over_city();
+    let rect = added(&h)[0].content.rect();
+    let center = at(&h, ((rect[0] + rect[2]) / 2.0) as f32, (400.0 - (rect[1] + rect[3]) / 2.0) as f32);
+    h.hover_at(center);
+    h.run_steps(2);
+    assert_eq!(h.output().platform_output.cursor_icon, egui::CursorIcon::Move);
+    // The upper-right handle overlaps the city field; it retains its resize gesture.
+    let corner = at(&h, rect[2] as f32, (400.0 - rect[3]) as f32);
+    h.hover_at(corner);
+    h.run_steps(2);
+    assert_eq!(h.output().platform_output.cursor_icon, egui::CursorIcon::ResizeNeSw);
+    let end = corner + egui::vec2(30.0, -20.0);
+    h.drag_at(corner);
+    h.run_steps(1);
+    for step in 1..=20 {
+        h.hover_at(corner + (end - corner) * (step as f32 / 20.0));
+        h.run_steps(1);
+    }
+    h.drop_at(end);
+    h.run_steps(4);
+    let resized = added(&h)[0].content.rect();
+    assert!(resized[2] > rect[2] + 1.0 && resized[3] > rect[3] + 1.0, "resize must retain ownership: {rect:?} -> {resized:?}");
+    assert!(h.state().views[0].forms.focus.is_none());
+}
+
+#[test]
+fn finished_text_over_field_still_opens_its_editor() {
+    let mut h = text_over_city();
+    let rect = added(&h)[0].content.rect();
+    let center = at(&h, ((rect[0] + rect[2]) / 2.0) as f32, (400.0 - (rect[1] + rect[3]) / 2.0) as f32);
+    h.run_steps(60);
+    h.hover_at(center);
+    h.run_steps(1);
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos: center, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        }
+        h.run_steps(1);
+    }
+    h.run_steps(2);
+    assert!(h.state().views[0].content.draft.as_ref().is_some_and(|d| d.index == Some(0)), "double click edits the added text");
+    assert!(h.state().views[0].forms.focus.is_none());
+}
+
+#[test]
+fn closing_edit_panel_leaves_form_filling_available() {
+    let mut h = text_over_city();
+    h.state_mut().set_option("left", "closed").unwrap();
+    h.run_steps(3);
+    let p = at(&h, 100.0, 210.0);
+    click(&mut h, p);
+    assert_eq!(h.state().views[0].forms.focus.as_ref().map(|f| f.name.as_str()), Some("city"));
 }
 
 /// The screen rectangle of an added item's display-space box (y up, from the page's bottom).
