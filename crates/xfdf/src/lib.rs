@@ -925,7 +925,12 @@ fn walk_xfdf(node: roxmltree::Node, prefix: &str, out: &mut Vec<(String, Vec<Str
     for f in node.children().filter(|c| c.has_tag_name("field")) {
         let Some(name) = f.attribute("name") else { continue };
         let full = if prefix.is_empty() { name.to_string() } else { format!("{prefix}.{name}") };
-        let vals: Vec<String> = f.children().filter(|c| c.has_tag_name("value")).map(|v| v.text().unwrap_or("").to_string()).collect();
+        let vals: Vec<String> = f
+            .children()
+            .filter(|c| c.has_tag_name("value"))
+            // Comments and processing instructions can split a value into several text nodes.
+            .map(|v| v.children().filter(|n| n.is_text()).filter_map(|n| n.text()).collect())
+            .collect();
         if !vals.is_empty() {
             out.push((full.clone(), vals));
         }
