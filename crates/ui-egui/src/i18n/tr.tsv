@@ -2369,6 +2369,9 @@ animation effects	Off	Kapalı
 	This document is trying to open a local file:	Bu belge yerel bir dosya açmaya çalışıyor:
 	Move tag earlier	Etiketi daha erken taşı
 	Move tag later	Etiketi daha geç taşı
+	Find untagged content	Etiketlenmemiş içeriği bul
+	No untagged content was found.	Etiketlenmemiş içerik bulunamadı.
+	Found {n} untagged content problems.	{n} etiketlenmemiş içerik sorunu bulundu.
 	Tag form fields	Form alanlarını etiketle
 	Mark as artifact	Yapıt olarak işaretle
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Bu yaprak etiketini okuma sırasından kaldırın ve doğrudan içeriğini yapıt olarak işaretleyin

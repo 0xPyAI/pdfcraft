@@ -2374,6 +2374,9 @@ animation effects	Off	Aus
 	This document is trying to open a local file:	Dieses Dokument versucht, eine lokale Datei zu öffnen:
 	Move tag earlier	Tag früher verschieben
 	Move tag later	Tag später verschieben
+	Find untagged content	Nicht markierten Inhalt suchen
+	No untagged content was found.	Es wurde kein unmarkierter Inhalt gefunden.
+	Found {n} untagged content problems.	{n} Probleme mit unmarkiertem Inhalt gefunden.
 	Tag form fields	Formularfelder taggen
 	Mark as artifact	Als Artefakt markieren
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Dieses Blatt-Tag aus der Lesereihenfolge entfernen und seinen direkten Inhalt als Artefakt markieren

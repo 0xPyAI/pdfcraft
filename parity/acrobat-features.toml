@@ -8996,11 +8996,11 @@ title = "Find unmarked content, comments and links"
 area = "M"
 tier = "P2"
 milestone = "M12"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["a11y.find_untagged"]
+tools = ["accessibility_find_untagged"]
+evidence = ["crates/automation/tests/automation.rs::finding_untagged_content_limits_results_to_content_annotations_and_widgets", "crates/ui-egui/tests/accessibility.rs::finding_untagged_content_shows_the_focused_accessibility_results"]
+notes = "Lists findings for untagged painted page content, non-widget annotations and form widgets, optionally on selected pages. It reuses the checker and does not identify untagged table structure, links already represented by an annotation, or structure-tree elements that lack content."
 
 [[feature]]
 id = "a11y.table-editor"

@@ -2336,6 +2336,9 @@ animation effects	Off	Изключени
 	This document is trying to open a local file:	Този документ се опитва да отвори локален файл:
 	Move tag earlier	Преместване на етикета по-рано
 	Move tag later	Преместване на етикета по-късно
+	Find untagged content	Намиране на немаркирано съдържание
+	No untagged content was found.	Не е намерено немаркирано съдържание.
+	Found {n} untagged content problems.	Открити са {n} проблема с немаркирано съдържание.
 	Tag form fields	Маркиране на полетата на формуляра
 	Mark as artifact	Маркиране като артефакт
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Премахнете този листов етикет от реда на четене и маркирайте прякото му съдържание като артефакт

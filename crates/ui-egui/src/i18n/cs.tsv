@@ -2447,6 +2447,9 @@ animation effects	Off	Vypnuto
 	This document is trying to open a local file:	Tento dokument se pokouší otevřít místní soubor:
 	Move tag earlier	Přesunout značku dříve
 	Move tag later	Přesunout značku později
+	Find untagged content	Najít neoznačený obsah
+	No untagged content was found.	Nebyl nalezen žádný neoznačený obsah.
+	Found {n} untagged content problems.	Nalezeno problémů s neoznačeným obsahem: {n}.
 	Tag form fields	Označit pole formuláře
 	Mark as artifact	Označit jako artefakt
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Odeberte tuto značku listu z pořadí čtení a označte její přímý obsah jako artefakt

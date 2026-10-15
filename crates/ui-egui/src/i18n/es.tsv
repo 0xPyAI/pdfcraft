@@ -2513,6 +2513,9 @@ animation effects	Off	Desactivados
 	This document is trying to open a local file:	Este documento intenta abrir un archivo local:
 	Move tag earlier	Mover etiqueta antes
 	Move tag later	Mover etiqueta después
+	Find untagged content	Buscar contenido sin etiquetar
+	No untagged content was found.	No se encontró contenido sin etiquetar.
+	Found {n} untagged content problems.	Se encontraron {n} problemas de contenido sin etiquetar.
 	Tag form fields	Etiquetar campos de formulario
 	Mark as artifact	Marcar como artefacto
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Quite esta etiqueta hoja del orden de lectura y marque su contenido directo como artefacto

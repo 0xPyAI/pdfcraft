@@ -2394,6 +2394,9 @@ animation effects	Off	معطّلة
 	This document is trying to open a local file:	يحاول هذا المستند فتح ملف محلي:
 	Move tag earlier	نقل العلامة للأعلى
 	Move tag later	نقل العلامة للأسفل
+	Find untagged content	العثور على محتوى غير مُعلَّم
+	No untagged content was found.	لم يتم العثور على محتوى غير معلَّم.
+	Found {n} untagged content problems.	تم العثور على {n} مشكلة في محتوى غير معلَّم.
 	Tag form fields	وضع علامات على حقول النموذج
 	Mark as artifact	وضع علامة كعنصر زخرفي
 	Remove this leaf tag from reading order and mark its direct content as an artifact	أزل هذه العلامة من ترتيب القراءة وضع علامة على محتواها المباشر كعنصر زخرفي

@@ -416,3 +416,20 @@ fn checker_finding_opens_its_structure_tag() {
     h.run_steps(2);
     assert_eq!(h.state().right, Some(RightPanel::Accessibility), "an unfinished tag edit is preserved");
 }
+
+#[test]
+fn finding_untagged_content_shows_the_focused_accessibility_results() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("notes.pdf", None, FIXTURE.to_vec()).unwrap();
+        app
+    });
+    h.run_steps(3);
+    assert!(h.state_mut().execute("a11y.find_untagged"));
+    h.run_steps(2);
+    assert_eq!(h.state().right, Some(RightPanel::Accessibility));
+    let report = &h.state().a11y.report.as_ref().unwrap().1;
+    let active: Vec<Rule> = report.results.iter().filter(|result| result.status != Status::Skipped).map(|result| result.rule).collect();
+    assert_eq!(active, [Rule::TaggedContent, Rule::TaggedAnnotations, Rule::TaggedFormFields]);
+}

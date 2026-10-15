@@ -944,6 +944,10 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc"],
             )),
+        t("accessibility_find_untagged", "Find untagged content", "Find untagged painted page content, annotations, and form widgets. This focused check does not modify the PDF or claim that its other accessibility rules pass.")
+            .ro()
+            .cmd("a11y.find_untagged")
+            .with(schema(json!({ "doc": doc(), "pages": pages("to search (default: all)") }), &["doc"])),
         t("accessibility_report", "Accessibility report", "Run the full check and write the accessibility report (HTML) to path; returns the results too. Takes the same options as accessibility_check.")
             .destructive()
             .cmd("a11y.report")

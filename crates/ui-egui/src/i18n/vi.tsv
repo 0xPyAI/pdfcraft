@@ -2602,3 +2602,6 @@ key	Space	Space
 	Restore	Khôi phục
 	Use system title bar	Dùng thanh tiêu đề hệ thống
 	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Hiện thanh tiêu đề đơn giản cho các nút cửa sổ thay vì dải tab. GNOME không vẽ thanh tiêu đề cho ứng dụng, nên thanh này không theo chủ đề của nó.
+	Find untagged content	Tìm nội dung chưa được gắn thẻ
+	No untagged content was found.	Không tìm thấy nội dung nào chưa được gắn thẻ.
+	Found {n} untagged content problems.	Đã tìm thấy {n} vấn đề về nội dung chưa được gắn thẻ.

@@ -2286,6 +2286,9 @@ animation effects	Off	Выкл
 	This document is trying to open a local file:	Этот документ пытается открыть локальный файл:
 	Move tag earlier	Переместить тег раньше
 	Move tag later	Переместить тег позже
+	Find untagged content	Найти нетегированный контент
+	No untagged content was found.	Нетегированный контент не найден.
+	Found {n} untagged content problems.	Найдено проблем с нетегированным контентом: {n}.
 	Tag form fields	Пометить поля формы
 	Mark as artifact	Пометить как артефакт
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Удалите этот конечный тег из порядка чтения и пометьте его непосредственное содержимое как артефакт

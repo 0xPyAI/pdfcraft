@@ -2372,6 +2372,9 @@ animation effects	Off	Ki
 	This document is trying to open a local file:	Ez a dokumentum egy helyi fájlt próbál megnyitni:
 	Move tag earlier	Címke korábbra helyezése
 	Move tag later	Címke későbbre helyezése
+	Find untagged content	Címkézetlen tartalom keresése
+	No untagged content was found.	Nem található címkézetlen tartalom.
+	Found {n} untagged content problems.	{n} címkézetlen tartalmi probléma található.
 	Tag form fields	Űrlapmezők címkézése
 	Mark as artifact	Megjelölés műtárgyként
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Távolítsa el ezt a levélcímkét az olvasási sorrendből, és jelölje meg a közvetlen tartalmát műtárgyként

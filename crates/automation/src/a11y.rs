@@ -286,6 +286,14 @@ impl Automation {
         Ok(report_json(&r))
     }
 
+    /// Report only untagged page content, annotations, and AcroForm widgets.
+    pub(crate) fn a11y_find_untagged(&self, a: &Args) -> Result<Value> {
+        let pages = a.opt_ints("pages")?.map(|_| self.pages(a, "pages")).transpose()?;
+        let rules = [Rule::TaggedContent, Rule::TaggedAnnotations, Rule::TaggedFormFields].into_iter().collect();
+        let report = self.doc(a)?.accessibility_check(&Options { rules, pages }).ok_or_else(|| failed("the document can't be read for checking"))?;
+        Ok(report_json(&report))
+    }
+
     pub(crate) fn a11y_report(&self, a: &Args) -> Result<Value> {
         let o = self.a11y_options(a)?;
         let doc = self.doc(a)?;
