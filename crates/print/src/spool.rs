@@ -82,6 +82,8 @@ pub fn open_printer_preferences(printer: &str) -> Result<(), crate::PrintError> 
 
 /// The PPD language codes (`*cupsLanguages`, the `ll` of `*ll.Translation`) to try for a UI
 /// language code, most specific first: `pt-br` → `pt_BR`, `pt`; `zh-hans` → `zh_CN`, `zh`.
+// Read only by the CUPS path; the tests exercise it everywhere.
+#[cfg_attr(not(all(unix, not(target_arch = "wasm32"))), allow(dead_code))]
 fn ppd_languages(lang: &str) -> Vec<String> {
     let lang = lang.to_ascii_lowercase();
     let mut parts = lang.split(['-', '_']).filter(|p| !p.is_empty());
@@ -99,6 +101,8 @@ fn ppd_languages(lang: &str) -> Vec<String> {
 /// (`*ll.Translation Key/Label: ""` for options and groups, `*ll.Key choice/Label: ""` for
 /// choices). Each line is read as UTF-8 on its own: drivers write them so in files whose other
 /// text is Latin-1. Names with no translation, or an empty one, stay as they are.
+// Read only by the CUPS path; the tests exercise it everywhere.
+#[cfg_attr(not(all(unix, not(target_arch = "wasm32"))), allow(dead_code))]
 pub(crate) fn localize(options: &mut [PrinterOption], ppd: &[u8], lang: &str) {
     use std::collections::HashMap;
     let Some(code) = ppd_languages(lang).into_iter().find(|code| {
