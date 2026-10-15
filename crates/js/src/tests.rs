@@ -94,6 +94,17 @@ fn util_printf_printd_and_printx() {
     assert_eq!(o.value, "1,234,567.89|00042|hi|FF|1.234,50|Jan 5, 2024 09:07|Friday|(555) 123-4567|ABC");
 }
 
+#[test]
+fn printd_escapes_multibyte_chars() {
+    let o = go(
+        "event.value = [util.printd('yyyy \\\\é', new Date(2024, 0, 5)), util.printd('\\\\€ yyyy', new Date(2024, 0, 5)), \
+         util.printd('\\\\y yyyy', new Date(2024, 0, 5))].join('|');",
+        &Event::field("Calculate", "total", ""),
+    );
+    assert_eq!(o.error, None);
+    assert_eq!(o.value, "2024 é|€ 2024|y 2024");
+}
+
 fn assert_printf_error(script: &str, message: &str) {
     let o = go(script, &Event::doc("Open"));
     assert!(o.error.as_deref().is_some_and(|e| e.starts_with(message)), "{script}: {:?}", o.error);
