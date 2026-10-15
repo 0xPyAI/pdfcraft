@@ -42,6 +42,10 @@ impl PdfCraftApp {
                 let Some(doc) = self.session.get(id) else { return true };
                 let info = &doc.info;
                 let view = &mut self.views[i];
+                if !matches!(edit, Edit::AddAnnotation(_)) {
+                    // Only a new drawing waits on its raster; any other edit may remove or move it.
+                    view.comments.settling.clear();
+                }
                 view.signature_drag.committed(&edit, doc.edit_generation());
                 view.move_background.committed(&edit, doc.edit_generation());
                 if let Some(page) = comment_page(&edit).or_else(|| content_page(&edit)) {

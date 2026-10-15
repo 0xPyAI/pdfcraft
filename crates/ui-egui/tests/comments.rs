@@ -406,6 +406,42 @@ fn shapes_and_ink_are_drawn_by_dragging() {
     assert!((r[0] - 40.0).abs() < 3.0 && (r[1] - 40.0).abs() < 3.0 && (r[2] - 140.0).abs() < 3.0 && (r[3] - 100.0).abs() < 3.0, "{r:?}");
 }
 
+/// Press, drag and release a stroke, running only one frame after the release.
+fn stroke_without_settling(h: &mut Harness<'static, PdfCraftApp>, a: (f32, f32), b: (f32, f32)) {
+    let (from, to) = (at(h, a.0, a.1), at(h, b.0, b.1));
+    h.hover_at(from);
+    h.run_steps(1);
+    h.drag_at(from);
+    h.run_steps(1);
+    for k in 1..=4 {
+        h.hover_at(from + (to - from) * (k as f32 / 4.0));
+        h.run_steps(1);
+    }
+    h.drop_at(to);
+    h.run_steps(1);
+}
+
+/// #1858: on release the live stroke is replaced by the committed annotation, but the page
+/// raster that draws it arrives later. The stroke stays painted from its points meanwhile.
+#[test]
+fn a_released_pen_stroke_stays_drawn_until_the_page_raster_has_it() {
+    let mut h = harness(|app| app.set_option("quick", "ink").unwrap());
+    stroke_without_settling(&mut h, (40.0, 100.0), (140.0, 60.0));
+    assert_eq!(comments(&h).len(), 1, "the stroke is committed");
+    assert_eq!(h.state().views[0].comments.settling_len(), 1, "still drawn from its points");
+    settle(&mut h);
+    assert_eq!(h.state().views[0].comments.settling_len(), 0, "the raster draws it now");
+}
+
+#[test]
+fn undoing_a_pen_stroke_before_its_raster_leaves_no_ghost() {
+    let mut h = harness(|app| app.set_option("quick", "ink").unwrap());
+    stroke_without_settling(&mut h, (40.0, 100.0), (140.0, 60.0));
+    assert_eq!(h.state().views[0].comments.settling_len(), 1);
+    h.state_mut().undo();
+    assert_eq!(h.state().views[0].comments.settling_len(), 0);
+}
+
 #[test]
 fn pen_strokes_stay_unselected_so_writing_continues() {
     let mut h = harness(|app| app.set_option("quick", "ink").unwrap());

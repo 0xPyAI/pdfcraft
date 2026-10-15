@@ -409,12 +409,53 @@ pub struct Composer {
     pub focus: bool,
 }
 
+/// A released drawing gesture waiting for the page raster to show its annotation.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Settling {
+    pub page: usize,
+    pub tool: CommentTool,
+    pub points: Vec<[f64; 2]>,
+    /// Frame time (seconds) at release; a raster that never arrives must not leave a ghost.
+    pub since: f64,
+}
+
+/// Longest a released drawing stays painted without its page raster, and how many are kept.
+const SETTLE_SECS: f64 = 20.0;
+const SETTLE_MAX: usize = 16;
+
+impl CommentView {
+    /// Remember a released drag drawing so it stays on screen until its page is re-rendered.
+    fn settle(&mut self, now: f64, page: usize, tool: CommentTool, points: &[[f64; 2]]) {
+        if !matches!(tool, CommentTool::Ink | CommentTool::Line | CommentTool::Arrow | CommentTool::Rectangle | CommentTool::Oval) {
+            return;
+        }
+        self.settling.retain(|s| now - s.since < SETTLE_SECS);
+        if self.settling.len() >= SETTLE_MAX {
+            self.settling.remove(0);
+        }
+        self.settling.push(Settling { page, tool, points: points.to_vec(), since: now });
+    }
+
+    /// How many released drawings are still painted from their points (waiting for a raster).
+    pub fn settling_len(&self) -> usize {
+        self.settling.len()
+    }
+
+    /// A fresh raster of `page` is on screen: it draws the committed annotation itself.
+    pub(crate) fn page_rendered(&mut self, page: usize) {
+        self.settling.retain(|s| s.page != page);
+    }
+}
+
 /// Per-document commenting state.
 #[derive(Clone, Debug, Default)]
 pub struct CommentView {
     /// The selected comment: (page, index in `/Annots`).
     pub selected: Option<(usize, usize)>,
     pub gesture: Option<Gesture>,
+    /// Drawings just released: shown from their points until the page raster that includes the
+    /// committed annotation arrives, so the stroke never vanishes in between (#1858).
+    pub(crate) settling: Vec<Settling>,
     /// Escape ends egui's drag too; ignore its synthetic release until the mouse is up.
     cancelled_drag: bool,
     pub composer: Option<Composer>,
@@ -671,6 +712,8 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, cx: &PageCx<'_>, 
                 if tool == CommentTool::Eraser {
                     view.pending_edit = erase(cx, &points);
                 } else if let Some(shape) = drawn_shape(tool, &points) {
+                    let now = ui.input(|i| i.time);
+                    cv.settle(now, page, tool, &points);
                     view.pending_edit = Some(new_comment(cx, tool, shape, String::new()));
                 }
             }
@@ -684,6 +727,8 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, cx: &PageCx<'_>, 
                 && let Some(shape) = drawn_shape(tool, &[cx.to_user(p)])
             {
                 cv.selected = None;
+                let now = ui.input(|i| i.time);
+                cv.settle(now, cx.page, tool, &[cx.to_user(p)]);
                 view.pending_edit = Some(new_comment(cx, tool, shape, String::new()));
             }
             true
@@ -1062,8 +1107,19 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, cx: &PageCx<'_>
 }
 
 fn paint_gesture(painter: &egui::Painter, cx: &PageCx<'_>, view: &DocView) {
+    let now = painter.ctx().input(|i| i.time);
+    for s in view.comments.settling.iter().filter(|s| s.page == cx.page && now - s.since < SETTLE_SECS) {
+        paint_draw(painter, cx, &s.tool, &s.points);
+    }
     if let Some(Gesture::Draw { page, tool, points }) = &view.comments.gesture
         && *page == cx.page
+    {
+        paint_draw(painter, cx, tool, points);
+    }
+}
+
+/// A drawing tool's shape from its points (a live drag, or a released one still settling).
+fn paint_draw(painter: &egui::Painter, cx: &PageCx<'_>, tool: &CommentTool, points: &[[f64; 2]]) {
     {
         let style = cx.prefs.style(*tool);
         let zoom = cx.xf.rect.width() / cx.xf.pw.max(1.0);
