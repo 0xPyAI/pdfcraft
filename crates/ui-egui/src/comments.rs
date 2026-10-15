@@ -591,7 +591,15 @@ impl PageCx<'_> {
     }
 
     /// The same geometry drives the live image, its handles, and the edit on release.
-    pub(crate) fn adjusted_rect(&self, a: &Annotation, gesture: Option<&Gesture>, pointer: Option<Pos2>, pending: Option<&Edit>) -> Rect {
+    /// `shift` is whether Shift is held now: it keeps the box's proportions from a corner.
+    pub(crate) fn adjusted_rect(
+        &self,
+        a: &Annotation,
+        gesture: Option<&Gesture>,
+        pointer: Option<Pos2>,
+        shift: bool,
+        pending: Option<&Edit>,
+    ) -> Rect {
         let r = self.screen_rect(a);
         if let Some(Edit::ResizeAnnotation { page, index, rect }) = pending
             && (*page, *index) == (self.page, a.index)
@@ -610,7 +618,7 @@ impl PageCx<'_> {
         match (gesture, pointer) {
             (Some(Gesture::Move { page, index, from }), Some(p)) if (*page, *index) == (self.page, a.index) => r.translate(p - *from),
             (Some(Gesture::Resize { page, index, handle, from, aspect_ratio }), Some(p)) if (*page, *index) == (self.page, a.index) => {
-                resized(r, *handle, p - *from, *aspect_ratio)
+                resized(r, *handle, p - *from, corner_ratio(r, *aspect_ratio, shift))
             }
             _ => r,
         }
@@ -643,7 +651,13 @@ fn handle_pos(r: Rect, (hx, hy): (i8, i8)) -> Pos2 {
     pos2(x, y)
 }
 
-fn resized(r: Rect, (hx, hy): (i8, i8), d: egui::Vec2, aspect_ratio: Option<f32>) -> Rect {
+/// The proportions a corner drag of `r` keeps: the box's own fixed ratio (an image signature's),
+/// else `r`'s current one while Shift is held, else none.
+pub(crate) fn corner_ratio(r: Rect, fixed: Option<f32>, shift: bool) -> Option<f32> {
+    fixed.or_else(|| (shift && r.width() > 0.0 && r.height() > 0.0).then(|| r.width() / r.height()))
+}
+
+pub(crate) fn resized(r: Rect, (hx, hy): (i8, i8), d: egui::Vec2, aspect_ratio: Option<f32>) -> Rect {
     if hx != 0
         && hy != 0
         && let Some(ratio) = aspect_ratio.filter(|v| v.is_finite() && *v > 0.0)
@@ -1010,7 +1024,9 @@ fn select_input(
             Some(Gesture::Resize { page, index, handle, from, aspect_ratio }) if page == cx.page => {
                 cv.gesture = None;
                 if let Some(a) = cx.get(index) {
-                    let r = resized(cx.screen_rect(a), handle, p - from, aspect_ratio);
+                    let from_rect = cx.screen_rect(a);
+                    let shift = ui.input(|i| i.modifiers.shift);
+                    let r = resized(from_rect, handle, p - from, corner_ratio(from_rect, aspect_ratio, shift));
                     let rect = cx.rect_to_user(r);
                     if r.width() >= 4.0 && r.height() >= 4.0 {
                         view.pending_edit = Some(Edit::ResizeAnnotation { page, index, rect });
@@ -1126,7 +1142,8 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, cx: &PageCx<'_>
         {
             return paint_gesture(painter, cx, view);
         }
-        let r = cx.adjusted_rect(a, cv.gesture.as_ref(), pointer, view.pending_edit.as_ref()).expand(2.0);
+        let shift = ui.input(|i| i.modifiers.shift);
+        let r = cx.adjusted_rect(a, cv.gesture.as_ref(), pointer, shift, view.pending_edit.as_ref()).expand(2.0);
         painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.0, SELECT_BLUE), egui::StrokeKind::Middle);
         if cx.allowed && resizable(a) {
             for h in HANDLES {
@@ -1975,6 +1992,22 @@ mod tests {
         plus[0].click();
         h.run();
         assert_eq!(h.query_all_by_label("Apply").count(), 1, "only the first grid's picker opens");
+    }
+
+    #[test]
+    fn shift_keeps_the_current_proportions_unless_the_box_has_its_own() {
+        let r = Rect::from_min_max(pos2(100.0, 100.0), pos2(196.0, 132.0));
+        assert_eq!(corner_ratio(r, None, false), None);
+        assert_eq!(corner_ratio(r, None, true), Some(3.0));
+        assert_eq!(corner_ratio(r, Some(2.0), false), Some(2.0));
+        assert_eq!(corner_ratio(r, Some(2.0), true), Some(2.0));
+        // A degenerate box has no proportions to keep (no division by zero).
+        let flat = Rect::from_min_max(pos2(100.0, 100.0), pos2(196.0, 100.0));
+        assert_eq!(corner_ratio(flat, None, true), None);
+        // Dragging a corner with Shift held scales the box instead of stretching it.
+        let out = resized(r, (1, 1), vec2(48.0, 0.0), corner_ratio(r, None, true));
+        assert_eq!(out.min, r.min);
+        assert!((out.width() / out.height() - 3.0).abs() < 0.001);
     }
 
     #[test]

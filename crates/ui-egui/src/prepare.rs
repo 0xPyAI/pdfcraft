@@ -11,6 +11,7 @@ use pdfcraft_engine::{BorderStyle, Edit, FieldFont, FieldLook, FieldProps, FormF
 use pdfcraft_render::DocInfo;
 
 use crate::canvas::{DocView, PageXform};
+use crate::comments;
 use crate::theme;
 use crate::widgets;
 
@@ -187,23 +188,14 @@ fn handles(r: Rect) -> [(Pos2, bool, bool); 4] {
     [(r.left_top(), true, true), (r.right_top(), false, true), (r.left_bottom(), true, false), (r.right_bottom(), false, false)]
 }
 
-/// The rect while a move or resize is in progress.
-fn dragged(r: Rect, grab: Grab, delta: egui::Vec2) -> Rect {
+/// The rect while a move or resize is in progress. With `shift` held a corner keeps the field's
+/// proportions, as it does for comments and stamps.
+fn dragged(r: Rect, grab: Grab, delta: egui::Vec2, shift: bool) -> Rect {
     match grab {
         Grab::Move => r.translate(delta),
         Grab::Corner(left, top) => {
-            let mut r = r;
-            if left {
-                r.min.x += delta.x;
-            } else {
-                r.max.x += delta.x;
-            }
-            if top {
-                r.min.y += delta.y;
-            } else {
-                r.max.y += delta.y;
-            }
-            Rect::from_two_pos(r.min, r.max)
+            let handle = (if left { -1 } else { 1 }, if top { -1 } else { 1 });
+            comments::resized(r, handle, delta, comments::corner_ratio(r, None, shift))
         }
         Grab::Draw(_) | Grab::Select(_) => r,
     }
@@ -295,7 +287,8 @@ pub(crate) fn page_input(
                     let Some(w) = form.iter().find(|f| f.name == name).and_then(|f| f.widgets.get(wi)) else { return out };
                     let delta = end - start;
                     if delta.length() >= 1.0 {
-                        let r = dragged(screen_rect(xf, info, page, w.rect), grab, delta);
+                        let shift = ui.input(|i| i.modifiers.shift);
+                        let r = dragged(screen_rect(xf, info, page, w.rect), grab, delta, shift);
                         let rect = user_rect(xf, info, page, r);
                         view.pending_edit =
                             Some(Edit::SetFieldProps { name, props: Box::new(FieldProps { rect: Some((wi, rect)), ..Default::default() }) });
@@ -521,7 +514,7 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform,
             let selected = prep.selected.as_ref().is_some_and(|(n, i)| n == &f.name && *i == wi);
             let also = prep.also.iter().any(|(n, i)| n == &f.name && *i == wi);
             if selected && let (Some((_, g, start)), Some(p)) = (grab, pointer) {
-                r = dragged(r, g, p - start);
+                r = dragged(r, g, p - start, ui.input(|i| i.modifiers.shift));
             }
             painter.rect_filled(r, CornerRadius::ZERO, FIELD_FILL);
             painter.rect_stroke(
@@ -1566,5 +1559,28 @@ fn calculate_tab(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::theme::Tokens
     if let Calculate::Notation(expr) = &mut d.calculate {
         ui.add(crate::widgets::block(expr).hint_text("Price * Quantity").desired_rows(2).desired_width(420.0));
         ui.label(egui::RichText::new(tl!("Field names with + - * / and parentheses; put \\ before spaces in names.")).small().color(t.text_faint));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use egui::pos2;
+
+    use super::*;
+
+    #[test]
+    fn corner_drags_stretch_freely_and_keep_proportions_with_shift() {
+        let r = Rect::from_min_max(pos2(100.0, 100.0), pos2(196.0, 132.0));
+        let free = dragged(r, Grab::Corner(false, false), vec2(24.0, 0.0), false);
+        assert_eq!(free, Rect::from_min_max(pos2(100.0, 100.0), pos2(220.0, 132.0)));
+        for (left, top) in [(true, true), (false, true), (true, false), (false, false)] {
+            let d = vec2(if left { -48.0 } else { 48.0 }, 0.0);
+            let out = dragged(r, Grab::Corner(left, top), d, true);
+            assert!((out.width() / out.height() - 3.0).abs() < 0.001, "{left} {top}: {out:?}");
+            // The opposite corner stays put.
+            assert_eq!(if left { out.max.x } else { out.min.x }, if left { r.max.x } else { r.min.x });
+            assert_eq!(if top { out.max.y } else { out.min.y }, if top { r.max.y } else { r.min.y });
+        }
+        assert_eq!(dragged(r, Grab::Move, vec2(5.0, 6.0), true), r.translate(vec2(5.0, 6.0)));
     }
 }
