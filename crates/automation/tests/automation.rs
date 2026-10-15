@@ -5300,6 +5300,9 @@ fn cut_stack_printing_through_tools() {
     }
     assert!(matches!(a.call("doc_print", &json!({"doc": doc, "order": "cut-stack", "path": "refused.pdf"})), Err(ToolError::InvalidArgs(_))));
     assert!(!dir.join("refused.pdf").exists());
+    // The printer's own two-sided default isn't refused: cut and stack sends single-sided (#2422).
+    ok(&mut a, "doc_print", json!({"doc": doc, "layout": "multiple", "order": "cut-stack", "duplex": "printer", "path": "printer-default.pdf"}));
+    assert!(dir.join("printer-default.pdf").exists());
     assert!(a.call("doc_print", &json!({"doc": doc, "layout": "multiple", "order": "cut-stack", "path": "../escaped.pdf"})).is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
