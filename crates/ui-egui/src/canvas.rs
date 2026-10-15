@@ -371,6 +371,9 @@ pub struct DocView {
     pub(crate) text_failed: HashSet<usize>,
     pub find: Option<Find>,
     selection: Option<Selection>,
+    /// The selection whose action bar was closed by its Copy button: the bar stays hidden
+    /// until the selection changes, as it does once a markup button consumes the selection.
+    actions_dismissed: Option<Selection>,
     /// The drag in progress started a text selection: the wheel scrolls the page during it
     /// (#721), which egui's scroll area refuses while anything is dragged.
     selection_drag: bool,
@@ -649,6 +652,7 @@ impl DocView {
             text_failed: HashSet::new(),
             find: None,
             selection: None,
+            actions_dismissed: None,
             selection_drag: false,
             clicks: 0,
             last_press_time: 0.0,
@@ -955,6 +959,7 @@ impl DocView {
 
     pub(crate) fn clear_selection(&mut self) {
         self.selection = None;
+        self.actions_dismissed = None;
     }
 
     /// Select text on `page` from glyph `from` to glyph `to` (tests and automation).
@@ -3794,7 +3799,13 @@ fn selection_actions(
     if ui.input(|input| input.pointer.is_decidedly_dragging()) {
         return false;
     }
-    let Some(selection) = view.selection else { return false };
+    let Some(selection) = view.selection else {
+        view.actions_dismissed = None;
+        return false;
+    };
+    if view.actions_dismissed == Some(selection) {
+        return false;
+    }
     let Some(text) = view.texts.get(&selection.page) else { return false };
     let Some(xf) = view.page_xform(selection.page) else { return false };
     let Some(last) = selection.rects(text).last().copied() else { return false };
@@ -3831,6 +3842,8 @@ fn selection_actions(
     });
     let Some(action) = chosen else { return false };
     if let SelectionAction::Copy = action {
+        // Copying closes the bar but keeps the words selected, for ⌘C or a second action.
+        view.actions_dismissed = Some(selection);
         return true;
     }
     let Some((page, quads)) = view.selection_quads(info) else { return false };

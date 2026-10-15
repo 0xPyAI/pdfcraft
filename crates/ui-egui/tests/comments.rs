@@ -365,6 +365,21 @@ fn selected_text_shows_actions_and_underlines_without_changing_tools() {
 }
 
 #[test]
+fn selected_text_copy_action_closes_the_bar_and_keeps_the_selection() {
+    let mut h = harness(|_| {});
+    h.state_mut().views[0].select_text(0, 4, 8);
+    h.run_steps(3);
+    h.get_by_label("Copy").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Add comment").is_none(), "the action bar closes after Copy");
+    assert!(h.state().views[0].selected_text().is_some_and(|t| !t.is_empty()), "the words stay selected");
+    // A new selection brings the bar back.
+    h.state_mut().views[0].select_text(0, 2, 6);
+    h.run_steps(3);
+    h.get_by_label("Add comment");
+}
+
+#[test]
 fn selected_text_replace_action_opens_replacement_composer() {
     let mut h = harness(|_| {});
     h.state_mut().views[0].select_text(0, 4, 8);
