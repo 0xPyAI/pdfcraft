@@ -2371,6 +2371,10 @@ animation effects	Off	Desativados
 	The linked PDF opened, but its named destination was not applied.	O PDF vinculado foi aberto, mas seu destino nomeado não foi aplicado.
 	The linked PDF opened, but its page destination was out of range.	O PDF vinculado foi aberto, mas sua página de destino está fora do intervalo.
 	Local cross-PDF links require the desktop app	Links locais entre PDFs exigem o aplicativo para desktop
+	Cut Image	Recortar imagem
+	Redact Image	Ocultar dados da imagem
+	Create Link…	Criar link…
+	Recognize Text…	Reconhecer texto…
 	Minimize	Minimizar
 	Maximize	Maximizar
 	Restore	Restaurar

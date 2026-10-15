@@ -2337,6 +2337,10 @@ animation effects	Off	Wyłączone
 	Local cross-PDF links require the desktop app	Lokalne łącza między plikami PDF wymagają aplikacji komputerowej
 	The existing action will be preserved.	Istniejąca akcja zostanie zachowana.
 	This form's scripts are turned off because one ran too long. Reopen the document to run them again.	Skrypty tego formularza są wyłączone, ponieważ jeden z nich działał zbyt długo. Otwórz dokument ponownie, aby znów je uruchomić.
+	Cut Image	Wytnij obraz
+	Redact Image	Utajnij obraz
+	Create Link…	Utwórz łącze…
+	Recognize Text…	Rozpoznaj tekst…
 	Minimize	Zminimalizuj
 	Maximize	Zmaksymalizuj
 	Restore	Przywróć

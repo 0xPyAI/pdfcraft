@@ -1297,12 +1297,17 @@ fn the_scroll_speed_preference_scales_mouse_wheel_notches() {
 
 /// A 40 × 30 picture (one red corner) and a harness showing a PDF of it.
 fn picture_harness() -> (image::RgbaImage, Harness<'static, PdfCraftApp>) {
+    picture_harness_sized(egui::vec2(1400.0, 900.0))
+}
+
+/// [`picture_harness`] in a window of this size.
+fn picture_harness_sized(size: egui::Vec2) -> (image::RgbaImage, Harness<'static, PdfCraftApp>) {
     let mut px = image::RgbaImage::from_pixel(40, 30, image::Rgba([10, 200, 30, 255]));
     px.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
     let mut png = std::io::Cursor::new(Vec::new());
     image::DynamicImage::ImageRgba8(px.clone()).write_to(&mut png, image::ImageFormat::Png).unwrap();
     let pdf = pdfcraft_engine::Session::new().create_from_images(&[("p.png".into(), png.into_inner())]).unwrap();
-    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+    let mut h = Harness::builder().with_size(size).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
         app.set_option("language", "en").unwrap();
         app.open_bytes("pic.pdf", None, pdf.to_vec()).unwrap();
@@ -1417,6 +1422,91 @@ fn a_picture_inside_form_artwork_under_text_is_selected_and_copied() {
     let png = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png).unwrap().into_rgba8();
     assert_eq!(png.into_raw(), vec![255, 0, 0, 255, 0, 0, 255, 255]);
 }
+
+/// A picture in Edit text & images, right-clicked so its menu is open (in a tall window, so the
+/// whole menu is on screen).
+fn picture_menu() -> (image::RgbaImage, Harness<'static, PdfCraftApp>) {
+    let (px, mut h) = picture_harness_sized(egui::vec2(1400.0, 1500.0));
+    h.state_mut().set_option("quick", "edit-text").unwrap();
+    h.run_steps(3);
+    let i = h.state().active.unwrap();
+    let at = h.state().views[i].page_screen_rect(0).expect("on screen").center();
+    h.hover_at(at);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed: true, modifiers: Default::default() });
+    h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed: false, modifiers: Default::default() });
+    h.run_steps(3);
+    (px, h)
+}
+
+fn picture_count(h: &Harness<'static, PdfCraftApp>) -> usize {
+    let s = h.state();
+    s.session.get(s.active_ids().unwrap().1).unwrap().page_images(0).len()
+}
+
+#[test]
+fn the_picture_menu_cuts_a_picture_to_the_clipboard_and_removes_it() {
+    let (px, mut h) = picture_menu();
+    assert_eq!(picture_count(&h), 1);
+    h.get_by_label("Cut Image").click();
+    h.run_steps(3);
+    let (w, hgt, rgba) = h.state().last_copied_image.clone().expect("the image was copied first");
+    assert_eq!((w, hgt), (40, 30));
+    assert_eq!(rgba, px.into_raw());
+    assert_eq!(picture_count(&h), 0, "then taken off the page");
+    h.state_mut().undo();
+    h.run_steps(2);
+    assert_eq!(picture_count(&h), 1, "one undo step puts it back");
+}
+
+#[test]
+fn the_picture_menu_marks_a_picture_for_redaction() {
+    let (_, mut h) = picture_menu();
+    let marks = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        s.session.get(s.active_ids().unwrap().1).unwrap().redaction_marks()
+    };
+    assert_eq!(marks(&h), 0);
+    h.get_by_label("Redact Image").click();
+    h.run_steps(3);
+    assert_eq!(marks(&h), 1);
+    assert_eq!(picture_count(&h), 1, "marked, not yet removed: Redact a PDF applies it");
+}
+
+#[test]
+fn the_picture_menu_opens_link_properties_and_recognize_text_for_the_picture() {
+    let (_, mut h) = picture_menu();
+    h.get_by_label("Create Link…").click();
+    h.run_steps(3);
+    assert!(matches!(h.state().dialog, Some(pdfcraft_ui_egui::Dialog::LinkProps)));
+    let draft = h.state().link_draft.clone().expect("the link draft");
+    assert_eq!(draft.page, 0);
+    assert!(draft.rect[2] > draft.rect[0] && draft.rect[3] > draft.rect[1], "over the picture: {:?}", draft.rect);
+
+    let (_, mut h) = picture_menu();
+    h.get_by_label("Recognize Text…").click();
+    h.run_steps(3);
+    assert!(matches!(h.state().dialog, Some(pdfcraft_ui_egui::Dialog::RecognizeText)));
+    let d = &h.state().ocr_draft;
+    assert_eq!((format!("{:?}", d.pages), d.from, d.to), ("Range".to_string(), 1, 1));
+}
+
+/// The menu is longer than the picture is tall, so most items lie outside it: the pointer moving
+/// onto them must not close the menu (it used to be drawn only while the pointer was over the
+/// picture, so Delete and the items below the page could not be clicked).
+#[test]
+fn every_item_of_the_picture_menu_can_be_clicked_outside_the_picture() {
+    let (_, mut h) = picture_menu();
+    let s = h.state();
+    let page = s.views[s.active.unwrap()].page_screen_rect(0).expect("on screen");
+    let delete = h.get_by_label("Delete").rect();
+    assert!(delete.center().y > page.bottom(), "Delete lies below the page: {delete:?} vs {page:?}");
+    assert_eq!(picture_count(&h), 1);
+    h.get_by_label("Delete").click();
+    h.run_steps(3);
+    assert_eq!(picture_count(&h), 0);
+}
+
 #[test]
 fn mouse_wheel_scrolls_while_selecting_text() {
     let mut h = harness();

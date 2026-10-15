@@ -2321,6 +2321,10 @@ animation effects	Off	关
 	The linked PDF opened, but its named destination was not applied.	已打开链接的 PDF，但未应用其命名目标。
 	The linked PDF opened, but its page destination was out of range.	已打开链接的 PDF，但其页面目标超出范围。
 	Local cross-PDF links require the desktop app	PDF 之间的本地链接需要桌面应用
+	Cut Image	剪切图像
+	Redact Image	密文图像
+	Create Link…	创建链接…
+	Recognize Text…	识别文本…
 	Minimize	最小化
 	Maximize	最大化
 	Restore	还原

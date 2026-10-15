@@ -2497,6 +2497,10 @@ animation effects	Off	Desactivados
 	The linked PDF opened, but its page destination was out of range.	El PDF vinculado se abrió, pero su página de destino está fuera de rango.
 	Local cross-PDF links require the desktop app	Los enlaces locales entre PDF requieren la aplicación de escritorio
 	The existing action will be preserved.	Se conservará la acción existente.
+	Cut Image	Cortar imagen
+	Redact Image	Censurar imagen
+	Create Link…	Crear enlace…
+	Recognize Text…	Reconocer texto…
 	Minimize	Minimizar
 	Maximize	Maximizar
 	Restore	Restaurar

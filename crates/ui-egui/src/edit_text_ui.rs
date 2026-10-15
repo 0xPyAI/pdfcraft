@@ -575,6 +575,14 @@ pub(crate) enum ImageAction {
     Save(usize, usize),
     Copy(usize, usize),
     CopyFile(usize, usize),
+    /// Copy the picture, then remove it from the page.
+    Cut(usize, usize),
+    /// Mark the picture for redaction (applied later from Redact a PDF).
+    Redact(usize, usize),
+    /// Create a link over the picture.
+    Link(usize, usize),
+    /// Open Recognize Text for the picture's page.
+    Recognize(usize),
 }
 
 fn user_box(xf: &PageXform, info: &DocInfo, page: usize, r: Rect) -> [f64; 4] {
@@ -759,6 +767,22 @@ pub(crate) fn image_input(
     if !allow_interaction {
         return false;
     }
+    // An open menu stays drawn wherever the pointer is: most of its items lie outside the picture
+    // (a logo is smaller than its menu), and a menu that is not drawn for a frame cannot be clicked.
+    // Only a menu opened by a right-click on the picture: one opened over text or empty page while
+    // a picture stays selected is the page's own menu.
+    let menu_key = resp.id.with("image-menu");
+    if resp.secondary_clicked() {
+        ui.ctx().data_mut(|d| d.insert_temp(menu_key, false));
+    }
+    let mut menu_drawn = false;
+    if let Some(sel) = selected
+        && resp.context_menu_opened()
+        && ui.ctx().data(|d| d.get_temp::<bool>(menu_key)).unwrap_or(false)
+    {
+        resp.context_menu(|ui| image_menu(ui, page, sel, images, view, action));
+        menu_drawn = true;
+    }
     let Some(p) = hover_pos.filter(|p| xf.rect.contains(*p)) else { return false };
     let Some(hit) = boxes.iter().enumerate().rposition(|(i, b)| b.contains(p) && image_contains(i, p)) else { return false };
     if selected != Some(hit) {
@@ -775,63 +799,93 @@ pub(crate) fn image_input(
     if resp.clicked() || resp.secondary_clicked() {
         view.image_selection = Some(ImageSelection { page, index: hit, drag: None, crop: None });
     }
-    if selected == Some(hit) {
-        resp.context_menu(|ui| {
-            use pdfcraft_engine::ImageEdit as E;
-            let items: [(&str, Option<E>); 4] = [
-                (tl!("Rotate Clockwise"), Some(E::Rotate(1))),
-                (tl!("Rotate Counterclockwise"), Some(E::Rotate(3))),
-                (tl!("Flip Horizontal"), Some(E::Flip { horizontal: true })),
-                (tl!("Flip Vertical"), Some(E::Flip { horizontal: false })),
-            ];
-            for (label, change) in items {
-                if ui.button(label).clicked() {
-                    view.pending_edit = change.map(|c| Edit::EditPageImage { page, index: hit, change: c });
-                    ui.close();
-                }
-            }
-            // Crop: the handles trim instead of resizing until Done.
-            if ui.button(tl!("Crop Image")).clicked() {
-                if let (Some(s), Some(im)) = (view.image_selection.as_mut(), images.get(hit)) {
-                    s.crop = Some(CropMode::new(im.visible_rect.unwrap_or(im.rect)));
-                }
-                ui.close();
-            }
-            let cropped =
-                images.get(hit).is_some_and(|im| im.visible_rect.is_some_and(|v| v.iter().zip(im.rect.iter()).any(|(a, b)| (a - b).abs() > 0.01)));
-            if ui.add_enabled(cropped, egui::Button::new(tl!("Remove Crop"))).clicked() {
-                if let Some(im) = images.get(hit) {
-                    view.pending_edit = Some(Edit::EditPageImage { page, index: hit, change: E::Crop(im.rect) });
-                }
-                ui.close();
-            }
-            let raster = images.get(hit).is_some_and(|image| !image.is_form);
-            if ui.add_enabled(raster, egui::Button::new(tl!("Replace Image…"))).clicked() {
-                *action = Some(ImageAction::Replace(page, hit));
-                ui.close();
-            }
-            if ui.add_enabled(raster, egui::Button::new(tl!("Save Image As…"))).clicked() {
-                *action = Some(ImageAction::Save(page, hit));
-                ui.close();
-            }
-            // Copying also finds the picture inside grouped Form artwork.
-            if ui.button(tl!("Copy Image")).clicked() {
-                *action = Some(ImageAction::Copy(page, hit));
-                ui.close();
-            }
-            if ui.button(tl!("Copy Image in Original Format")).clicked() {
-                *action = Some(ImageAction::CopyFile(page, hit));
-                ui.close();
-            }
-            ui.separator();
-            if ui.button(tl!("Delete")).clicked() {
-                view.image_selection = None;
-                view.pending_edit = Some(Edit::EditPageImage { page, index: hit, change: E::Delete });
-                ui.close();
-            }
-        });
+    if resp.secondary_clicked() {
+        ui.ctx().data_mut(|d| d.insert_temp(menu_key, true));
+    }
+    if selected == Some(hit) && !menu_drawn {
+        resp.context_menu(|ui| image_menu(ui, page, hit, images, view, action));
     }
     true
+}
+
+/// The right-click menu of the picture `hit` (its rotate, flip, replace, copy, cut, redact, link,
+/// recognize and delete items).
+fn image_menu(
+    ui: &mut egui::Ui,
+    page: usize,
+    hit: usize,
+    images: &[pdfcraft_engine::PageImage],
+    view: &mut DocView,
+    action: &mut Option<ImageAction>,
+) {
+    use pdfcraft_engine::ImageEdit as E;
+    let items: [(&str, Option<E>); 4] = [
+        (tl!("Rotate Clockwise"), Some(E::Rotate(1))),
+        (tl!("Rotate Counterclockwise"), Some(E::Rotate(3))),
+        (tl!("Flip Horizontal"), Some(E::Flip { horizontal: true })),
+        (tl!("Flip Vertical"), Some(E::Flip { horizontal: false })),
+    ];
+    for (label, change) in items {
+        if ui.button(label).clicked() {
+            view.pending_edit = change.map(|c| Edit::EditPageImage { page, index: hit, change: c });
+            ui.close();
+        }
+    }
+    // Crop: the handles trim instead of resizing until Done.
+    if ui.button(tl!("Crop Image")).clicked() {
+        if let (Some(s), Some(im)) = (view.image_selection.as_mut(), images.get(hit)) {
+            s.crop = Some(CropMode::new(im.visible_rect.unwrap_or(im.rect)));
+        }
+        ui.close();
+    }
+    let cropped = images.get(hit).is_some_and(|im| im.visible_rect.is_some_and(|v| v.iter().zip(im.rect.iter()).any(|(a, b)| (a - b).abs() > 0.01)));
+    if ui.add_enabled(cropped, egui::Button::new(tl!("Remove Crop"))).clicked() {
+        if let Some(im) = images.get(hit) {
+            view.pending_edit = Some(Edit::EditPageImage { page, index: hit, change: E::Crop(im.rect) });
+        }
+        ui.close();
+    }
+    let raster = images.get(hit).is_some_and(|image| !image.is_form);
+    if ui.add_enabled(raster, egui::Button::new(tl!("Replace Image…"))).clicked() {
+        *action = Some(ImageAction::Replace(page, hit));
+        ui.close();
+    }
+    if ui.add_enabled(raster, egui::Button::new(tl!("Save Image As…"))).clicked() {
+        *action = Some(ImageAction::Save(page, hit));
+        ui.close();
+    }
+    // Cutting and copying also find the picture inside grouped Form artwork.
+    if ui.button(tl!("Cut Image")).clicked() {
+        *action = Some(ImageAction::Cut(page, hit));
+        ui.close();
+    }
+    if ui.button(tl!("Copy Image")).clicked() {
+        *action = Some(ImageAction::Copy(page, hit));
+        ui.close();
+    }
+    if ui.button(tl!("Copy Image in Original Format")).clicked() {
+        *action = Some(ImageAction::CopyFile(page, hit));
+        ui.close();
+    }
+    ui.separator();
+    if ui.button(tl!("Redact Image")).clicked() {
+        *action = Some(ImageAction::Redact(page, hit));
+        ui.close();
+    }
+    if ui.button(tl!("Create Link…")).clicked() {
+        *action = Some(ImageAction::Link(page, hit));
+        ui.close();
+    }
+    if ui.button(tl!("Recognize Text…")).clicked() {
+        *action = Some(ImageAction::Recognize(page));
+        ui.close();
+    }
+    ui.separator();
+    if ui.button(tl!("Delete")).clicked() {
+        view.image_selection = None;
+        view.pending_edit = Some(Edit::EditPageImage { page, index: hit, change: E::Delete });
+        ui.close();
+    }
 }
 
 /// Open `block` on `page` in the inline editor. The box's geometry and source are read from the

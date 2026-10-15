@@ -2233,6 +2233,10 @@ animation effects	Off	關
 	The linked PDF opened, but its page destination was out of range.	已開啟連結的 PDF，但其頁面目的地超出範圍。
 	Local cross-PDF links require the desktop app	PDF 之間的本機連結需要桌面應用程式
 	The existing action will be preserved.	將保留現有動作。
+	Cut Image	剪下圖片
+	Redact Image	遮蔽圖片
+	Create Link…	建立連結…
+	Recognize Text…	辨識文字…
 	Minimize	最小化
 	Maximize	最大化
 	Restore	還原

@@ -2357,6 +2357,10 @@ animation effects	Off	オフ
 	The linked PDF opened, but its named destination was not applied.	リンク先の PDF を開きましたが、名前付き移動先は適用されませんでした。
 	The linked PDF opened, but its page destination was out of range.	リンク先の PDF を開きましたが、移動先のページが範囲外です。
 	Local cross-PDF links require the desktop app	PDF 間のローカルリンクにはデスクトップアプリが必要です
+	Cut Image	画像を切り取り
+	Redact Image	画像を墨消し
+	Create Link…	リンクを作成…
+	Recognize Text…	テキストを認識…
 	Minimize	最小化
 	Maximize	最大化
 	Restore	元のサイズに戻す

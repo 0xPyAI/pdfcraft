@@ -2601,6 +2601,10 @@ key	Esc	Esc
 key	Home	Home
 key	End	End
 key	Space	Tarpas
+	Cut Image	Iškirpti paveikslėlį
+	Redact Image	Pašalinti konfidencialią informaciją iš paveikslėlio
+	Create Link…	Kurti saitą…
+	Recognize Text…	Atpažinti tekstą…
 	Minimize	Sumažinti
 	Maximize	Išdidinti
 	Restore	Atkurti

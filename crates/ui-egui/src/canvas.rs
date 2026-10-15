@@ -3699,8 +3699,17 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     match image_action {
         Some(crate::edit_text_ui::ImageAction::Replace(page, index)) => app.replace_page_image_dialog(page, index),
         Some(crate::edit_text_ui::ImageAction::Save(page, index)) => app.save_page_image(page, index),
-        Some(crate::edit_text_ui::ImageAction::Copy(page, index)) => app.copy_page_image(page, index),
+        Some(crate::edit_text_ui::ImageAction::Copy(page, index)) => {
+            app.copy_page_image(page, index);
+        }
         Some(crate::edit_text_ui::ImageAction::CopyFile(page, index)) => app.copy_page_image_file(page, index),
+        Some(crate::edit_text_ui::ImageAction::Cut(page, image)) => {
+            app.views[index].image_selection = None;
+            app.cut_page_image(page, image);
+        }
+        Some(crate::edit_text_ui::ImageAction::Redact(page, index)) => app.redact_page_image(page, index),
+        Some(crate::edit_text_ui::ImageAction::Link(page, index)) => app.link_page_image(page, index),
+        Some(crate::edit_text_ui::ImageAction::Recognize(page)) => app.recognize_text_on_page(page),
         None => {}
     }
     if let Some(why) = refused {
