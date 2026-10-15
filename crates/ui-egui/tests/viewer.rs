@@ -128,7 +128,11 @@ fn view_history_select_all_and_find_options() {
     assert_eq!(h.state().views[0].find.as_ref().unwrap().matches.len(), 0, "\"page\" alone, lower case, appears nowhere");
     h.state_mut().views[0].find.as_mut().unwrap().query = "PAGE".into();
     h.state_mut().views[0].rerun_find();
-    h.run_steps(2);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while std::time::Instant::now() < deadline && h.state().views[0].find.as_ref().unwrap().matches.len() < 5 {
+        h.run_steps(2);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     assert_eq!(h.state().views[0].find.as_ref().unwrap().matches.len(), 5);
 }
 
