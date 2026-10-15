@@ -811,6 +811,9 @@ mod tests {
         for command in pdfcraft_engine::commands::COMMANDS {
             assert!(has(JA(), command.label), "missing command: {}", command.label);
         }
+        for category in pdfcraft_engine::catalog::TOOL_CATEGORIES {
+            assert!(has(JA(), category.label), "missing category: {}", category.label);
+        }
         for group in pdfcraft_engine::catalog::TOOL_GROUPS {
             assert!(has(JA(), group.label), "missing group: {}", group.label);
             for section in group.sections {

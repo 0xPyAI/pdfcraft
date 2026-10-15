@@ -126,6 +126,50 @@ fn every_catalog_tool_is_listed_after_view_more() {
 }
 
 #[test]
+fn expanded_all_tools_lists_every_tool_by_category_and_searches() {
+    let mut h = harness(|_| {});
+    h.get_by_label("Expand").click();
+    h.run_steps(3);
+    assert!(h.state().all_tools_full);
+    for c in pdfcraft_engine::catalog::TOOL_CATEGORIES {
+        h.get_by_label(c.label);
+    }
+    for g in pdfcraft_engine::catalog::TOOL_GROUPS {
+        assert!(h.query_all_by_label(g.label).count() >= 1, "tool {} missing from the expanded view", g.label);
+    }
+    // An item name finds its tool; the other categories drop out.
+    h.state_mut().all_tools_query = "rotate".into();
+    h.run_steps(3);
+    assert_eq!(h.query_all_by_label("Organize pages").count(), 1, "only the expanded view's tile; the sidebar is gone");
+    assert!(h.query_by_label("Forms & Signatures").is_none());
+    h.state_mut().all_tools_query = "no such tool".into();
+    h.run_steps(3);
+    h.get_by_label("No tools match your search.");
+    // Choosing a tool goes back to the workspace with that tool's panel.
+    h.state_mut().all_tools_query = "organize".into();
+    h.run_steps(3);
+    h.get_by_label("Organize pages").click();
+    h.run_steps(3);
+    assert!(!h.state().all_tools_full);
+    assert_eq!(h.state().left, pdfcraft_ui_egui::LeftPanel::Tool("organize"));
+    h.get_by_label("Back to all tools");
+}
+
+#[test]
+fn collapse_and_escape_close_the_expanded_all_tools() {
+    let mut h = harness(|app| app.set_option("tools", "full").unwrap());
+    h.get_by_label("Collapse").click();
+    h.run_steps(3);
+    assert!(!h.state().all_tools_full);
+    h.get_by_label("View more");
+    h.get_by_label("Expand").click();
+    h.run_steps(3);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(!h.state().all_tools_full);
+}
+
+#[test]
 fn opening_a_pdf_shows_comments_and_bookmarks() {
     let mut h = harness(|app| app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens"));
     // Documents with comments open on the Comments panel, like Acrobat.

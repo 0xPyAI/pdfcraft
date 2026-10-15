@@ -30,6 +30,7 @@ macro_rules! tl_ctx {
 
 mod a11y_ui;
 mod actions_ui;
+mod all_tools_ui;
 mod appearance;
 pub mod canvas;
 mod chrome;
@@ -563,6 +564,9 @@ pub struct PdfCraftApp {
     pub palette_open: bool,
     pub palette_query: String,
     pub all_tools_expanded: bool,
+    /// The All tools view fills the workspace (its sidebar's expand button).
+    pub all_tools_full: bool,
+    pub all_tools_query: String,
     pub recent: Vec<RecentFile>,
     /// Preferences: reopen the files that were open when PdfCraft last closed (#442).
     pub reopen_last_session: bool,
@@ -929,6 +933,8 @@ impl PdfCraftApp {
             palette_open: false,
             palette_query: String::new(),
             all_tools_expanded: false,
+            all_tools_full: false,
+            all_tools_query: String::new(),
             recent: Vec::new(),
             reopen_last_session: false,
             last_session: Default::default(),
@@ -2171,6 +2177,10 @@ impl PdfCraftApp {
     /// that panel. The rail stays in Read mode, and its buttons open panels there too (#932).
     pub(crate) fn switch_mode(&mut self, mode: Mode, select_tools: bool) {
         let was_read = self.mode == Mode::Read;
+        // Another workspace puts the expanded All tools view away.
+        if mode != Mode::AllTools {
+            self.all_tools_full = false;
+        }
         if select_tools {
             self.select_mode(mode);
         } else {
@@ -2549,7 +2559,14 @@ impl PdfCraftApp {
                     _ => Some(Dialog::About),
                 }
             }
-            ("tools", _) => self.all_tools_expanded = value != "collapsed",
+            ("tools", _) if value == "full" => {
+                self.mode = Mode::AllTools;
+                self.all_tools_full = true;
+            }
+            ("tools", _) => {
+                self.all_tools_full = false;
+                self.all_tools_expanded = value != "collapsed";
+            }
             ("palette", _) => {
                 self.palette_open = true;
                 self.palette_query = value.to_string();
@@ -3145,6 +3162,8 @@ impl eframe::App for PdfCraftApp {
                         None => canvas::document_area(self, index, ui),
                     },
                 }
+            } else if self.mode == Mode::AllTools && self.all_tools_full {
+                all_tools_ui::show(self, ui);
             } else {
                 docking::show(self, ui);
             }
