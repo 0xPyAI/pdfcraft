@@ -450,18 +450,26 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
             u32::MAX
         )));
     }
+    // The same goes for Bates numbers: the last selected page must still fit in a u64.
+    let bates0 = hf.text.iter().find_map(|t| bates_start(t)).unwrap_or(1);
+    if bates0.checked_add(pages.len().saturating_sub(1) as u64).is_none() {
+        return Err(EditError::Invalid(format!(
+            "the Bates start number {bates0} leaves no room for {} pages (Bates numbers stop at {})",
+            pages.len(),
+            u64::MAX
+        )));
+    }
     if replace {
         remove_marks(doc, pages, MarkKind::HeaderFooter)?;
     }
     let all = page_list(doc);
     let count = all.len();
-    let bates0 = hf.text.iter().find_map(|t| bates_start(t)).unwrap_or(1);
     for (k, &i) in pages.iter().enumerate() {
         let page = &all[i];
         let (w, h) = page.display_size(doc);
         let number =
             u32::try_from(u64::from(hf.start_number) + k as u64).map_err(|_| EditError::Invalid("the header page numbers are too large".into()))?;
-        let bates = bates0 + k as u64;
+        let bates = bates0.checked_add(k as u64).ok_or_else(|| EditError::Invalid("the Bates numbers are too large".into()))?;
         let size = hf.font_size;
         let [top, bottom, left, right] = hf.margins;
         let mut body: Vec<u8> = format!("BT\n/PCHelv {} Tf\n{}\n", n(size), rgb(hf.color)).into_bytes();

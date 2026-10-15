@@ -116,6 +116,23 @@ fn header_start_number_that_would_wrap_is_refused_without_drawing() {
 }
 
 #[test]
+fn header_bates_start_that_would_overflow_is_refused_without_drawing() {
+    // A Bates start of u64::MAX has no room for a second page. The run must be refused up front
+    // instead of overflowing (a panic in debug builds, a wrap to 0 in release builds).
+    let mut doc = fixture();
+    let hf = HeaderFooter {
+        text: [String::new(), String::new(), "<<Bates Number#6#18446744073709551615#A#B>>".into(), String::new(), String::new(), String::new()],
+        ..HeaderFooter::default()
+    };
+    let err = add_header_footer(&mut doc, &[0, 1], &hf, false, &cx()).unwrap_err();
+    assert!(err.to_string().contains("Bates"), "{err}");
+    assert!(marks_present(&doc).is_empty(), "nothing is drawn when the run is refused");
+    // A single page still fits the start number itself.
+    add_header_footer(&mut doc, &[0], &hf, false, &cx()).unwrap();
+    assert_eq!(marks_present(&doc).len(), 1);
+}
+
+#[test]
 fn replace_and_remove_restore_the_original_content() {
     let mut doc = fixture();
     let original = streams(&doc, 0);
