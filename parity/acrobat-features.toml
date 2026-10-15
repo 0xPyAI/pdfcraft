@@ -10082,11 +10082,11 @@ title = "Localization (Fluent catalogs)"
 area = "N"
 tier = "P1"
 milestone = "M14"
-status = "planned"
+status = "partial"
 commands = []
 tools = []
-evidence = []
-notes = ""
+evidence = ["crates/ui-egui/src/i18n/mod.rs::bundled_catalogs_are_consistent", "crates/ui-egui/src/i18n/mod.rs::date_languages_are_the_interface_languages", "crates/ui-egui/src/i18n/mod.rs::language_persists_and_invalid_input_keeps_current_language"]
+notes = "The UI offers 22 non-English catalogs plus English fallback (entry counts vary by language), and the selected language persists. Partial because the languages are not all usable yet: Chinese shows tofu in releases (#826, #688), the release-pinned craft-fonts has no Telugu face, Arabic is not mirrored (misc.rtl-ui), and strings missing from a catalog fall back to English (localization-parity.md). The language can be set through the UI control channel (`set language`) but not through an automation tool, so pdfcraft-cli run and MCP cannot change it."
 
 [[feature]]
 id = "misc.rtl-ui"
@@ -10106,10 +10106,11 @@ title = "Signed installers for macOS, Windows and Linux"
 area = "N"
 tier = "P1"
 milestone = "M14"
-status = "planned"
+status = "partial"
 commands = []
 tools = []
 evidence = []
+notes = "Release builds provide signed and notarized macOS artifacts and code-signed Windows installers when signing credentials are configured (packaging/macos/package.sh; packaging/windows/sign.ps1; README.md). Linux AppImage, Flatpak, deb and rpm packages ship, but are not code-signed. Windows MSI creates a Start menu shortcut, an optional (default on) desktop shortcut and an optional (default on, INSTALLPDFCONTEXTMENU) \"Edit with PdfCraft\" File Explorer menu entry for PDF files (#682), and confirms full-UI completion with Finish (#143); packaging/windows/test-msi.ps1 checks the compiled MSI and windows-arm64.yml checks installation/removal. PDF files use a dedicated embedded document icon when PdfCraft is chosen as the default reader (confirmed in Windows Explorer); first-page thumbnails remain unsupported."
 notes = "Windows MSI creates a Start menu shortcut, an optional (default on) desktop shortcut, an optional (default on, INSTALLPDFCONTEXTMENU) \"Edit with PdfCraft\" File Explorer menu entry for PDF files (#682) and an optional (default on, INSTALLIMAGECONTEXTMENU) \"Create PDF with PdfCraft…\" entry for images; an update keeps whichever of the three the installed version has (#1058, #305). It confirms full-UI completion with Finish (#143); packaging/windows/test-msi.ps1 checks the compiled MSI and windows-arm64.yml checks installation/removal. PDF files use a dedicated embedded document icon when PdfCraft is chosen as the default reader (confirmed in Windows Explorer); first-page thumbnails remain unsupported. Signed installers across platforms remain planned."
 
 [[feature]]

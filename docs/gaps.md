@@ -356,14 +356,15 @@ update the numbers.
 
 - **Missing:** a menu and tool listing captured from Acrobat (names only, `plan/acrobat/`, never
   committed) diffed against the checklist, so that features the checklist never listed show up.
-  Also correct `misc.localization` and `misc.installers`, which are still `planned` though both
-  ship.
+  `misc.localization` and `misc.installers` are now `partial` (Chinese, Telugu and Arabic are not
+  fully usable yet; Linux packages are unsigned).
 - **Estimate:** 4–8 h. **Doc:** [target-app-parity.md](target-app-parity.md).
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-15 | patch | Gap 24: record localization and installers as partial (unusable Chinese, Telugu and Arabic; unsigned Linux packages) |
 | 2026-10-13 | minor | Gap 6: Organize Pages selects and reveals the current page on open, including after an earlier grid selection elsewhere (#1910). Estimates unchanged. |
 | 2026-10-12 | minor | Gap 6: rubber stamps, explicit image rectangles and PDF-page stamps read upright on rotated pages (#1398). Estimates unchanged. |
 | 2026-10-12 | minor | #1316: replacing a line or paragraph keeps a neighbouring line whose glyph box overlaps. Gap 3 remains. Estimates unchanged. |
