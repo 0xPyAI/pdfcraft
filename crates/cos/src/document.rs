@@ -441,6 +441,13 @@ impl std::fmt::Debug for Document {
     }
 }
 
+/// How an encrypted document is opened: with a password, or with the file key of a document
+/// that has the same encryption (an earlier revision of the same file).
+enum Credentials<'a> {
+    Password(Option<&'a str>),
+    Handler { handler: &'a Arc<pdfcraft_crypt::SecurityHandler>, id0: Vec<u8> },
+}
+
 impl Document {
     /// A new document with an empty page tree (for split / extract / combine). It has no
     /// original bytes, so saving always writes a full file.
@@ -497,6 +504,23 @@ impl Document {
     /// document is read-only: objects in a larger object stream read as missing, so the
     /// writers refuse to save it ([`CosError::ReadOnlyLimit`]).
     pub fn open_with_stream_limit(data: Arc<Vec<u8>>, password: Option<&str>, stream_limit: usize) -> Result<Self, CosError> {
+        Self::open_as(data, Credentials::Password(password), stream_limit)
+    }
+
+    /// Open `data`, an earlier revision of this file (the bytes a signature covers) or another
+    /// save of it, with this document's credentials: an encrypted one must have the same
+    /// `/Encrypt` dictionary and `/ID` as this document, whose file key is then reused, so no
+    /// password is needed or kept; unencrypted data opens as [`open`](Self::open) does. Data
+    /// encrypted differently fails with `NeedsPassword`.
+    pub fn open_with_same_credentials(&self, data: Arc<Vec<u8>>) -> Result<Self, CosError> {
+        let credentials = match &self.security {
+            Some(handler) => Credentials::Handler { handler, id0: self.first_id() },
+            None => Credentials::Password(None),
+        };
+        Self::open_as(data, credentials, self.stream_limit)
+    }
+
+    fn open_as(data: Arc<Vec<u8>>, credentials: Credentials<'_>, stream_limit: usize) -> Result<Self, CosError> {
         // Viewers accept files whose header is missing or damaged as long as the body looks
         // like PDF; so do we (a note goes to the repair log).
         let header = find(&data, b"%PDF-", 0, 1024);
@@ -546,7 +570,7 @@ impl Document {
                 // Authenticate before checking the catalog: it may sit in an encrypted object
                 // stream, which reads as garbage until the key is known.
                 if let Some(enc) = doc.trailer.get(b"Encrypt").cloned() {
-                    doc.authenticate(&enc, password)?;
+                    doc.authenticate(&enc, &credentials)?;
                     authenticated = true;
                 }
                 doc.root_is_catalog()
@@ -567,7 +591,7 @@ impl Document {
         if (!ok || !authenticated)
             && let Some(enc) = doc.trailer.get(b"Encrypt").cloned()
         {
-            doc.authenticate(&enc, password)?;
+            doc.authenticate(&enc, &credentials)?;
         }
         let max = doc.entries.max_num();
         let size = doc.trailer.int(b"Size").unwrap_or(0).max(0) as u32;
@@ -575,7 +599,7 @@ impl Document {
         Ok(doc)
     }
 
-    fn authenticate(&mut self, enc: &Object, password: Option<&str>) -> Result<(), CosError> {
+    fn authenticate(&mut self, enc: &Object, credentials: &Credentials<'_>) -> Result<(), CosError> {
         // Authentication can change how the same input is decoded.
         self.source_identity = Arc::new(());
         let (num, dict) = match enc {
@@ -593,12 +617,17 @@ impl Document {
         };
         let params = crate::security::encrypt_dict(self, &dict);
         let id0 = self.first_id();
-        let handler = pdfcraft_crypt::SecurityHandler::open(params, &id0, password).map_err(|e| match e {
-            pdfcraft_crypt::CryptError::WrongPassword if password.is_none() => CosError::NeedsPassword,
-            pdfcraft_crypt::CryptError::WrongPassword => CosError::WrongPassword,
-            other => CosError::Security(other.to_string()),
-        })?;
-        self.security = Some(Arc::new(handler));
+        let handler = match credentials {
+            Credentials::Password(password) => Arc::new(pdfcraft_crypt::SecurityHandler::open(params, &id0, *password).map_err(|e| match e {
+                pdfcraft_crypt::CryptError::WrongPassword if password.is_none() => CosError::NeedsPassword,
+                pdfcraft_crypt::CryptError::WrongPassword => CosError::WrongPassword,
+                other => CosError::Security(other.to_string()),
+            })?),
+            // The same encryption as the document whose key this is: that key opens it.
+            Credentials::Handler { handler, id0: known } if *handler.dict() == params && *known == id0 => Arc::clone(handler),
+            Credentials::Handler { .. } => return Err(CosError::NeedsPassword),
+        };
+        self.security = Some(handler);
         self.encrypt_num = num;
         // Objects read while locating the catalog were read before decryption was possible.
         self.cache = Arc::default();
