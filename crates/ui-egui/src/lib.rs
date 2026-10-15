@@ -1152,12 +1152,19 @@ impl PdfCraftApp {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn poll_pending_opens(&mut self) {
-        let mut ready = Vec::new();
-        let mut waiting = Vec::new();
         let pending_opens = std::mem::take(&mut self.pending_opens);
-        for pending in pending_opens {
+        let mut remaining = pending_opens.into_iter();
+        let mut waiting = Vec::new();
+        while let Some(pending) = remaining.next() {
+            // A tool, password prompt or file picker belongs to the document just admitted.
+            // Keep later replies queued so another open cannot change its recipient.
+            if self.modal_open() || self.pickers.pending() {
+                waiting.push(pending);
+                waiting.extend(remaining);
+                break;
+            }
             match pending.receiver.try_recv() {
-                Ok(result) if result.token == pending.token => ready.push((pending, result.kind)),
+                Ok(result) if result.token == pending.token => self.finish_pending_open(pending, result.kind),
                 Ok(_) => waiting.push(pending),
                 Err(std::sync::mpsc::TryRecvError::Empty) => waiting.push(pending),
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -1165,10 +1172,10 @@ impl PdfCraftApp {
                 }
             }
         }
+        // A completion may schedule another open; preserve those requests as well as the
+        // earlier waiting replies, without consuming a blocked receiver's result.
+        waiting.append(&mut self.pending_opens);
         self.pending_opens = waiting;
-        for (pending, kind) in ready {
-            self.finish_pending_open(pending, kind);
-        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
