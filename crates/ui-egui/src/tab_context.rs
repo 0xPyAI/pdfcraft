@@ -56,7 +56,19 @@ fn reveal(path: &std::path::Path) -> Result<(), String> {
     }
     let platform = std::env::consts::OS;
     let run = |program: &str, args: &[std::ffi::OsString]| {
-        std::process::Command::new(program).args(args).output().map(|o| o.status.success()).map_err(|e| e.to_string())
+        let mut command = std::process::Command::new(program);
+        // Windows: `reveal_command` already quotes what Explorer needs quoted, and Rust's own
+        // quoting of an argument with a space breaks `/select,` (#2579), so pass them as written.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt as _;
+            for arg in args {
+                command.raw_arg(arg);
+            }
+        }
+        #[cfg(not(windows))]
+        command.args(args);
+        command.output().map(|o| o.status.success()).map_err(|e| e.to_string())
     };
     if matches!(platform, "linux" | "freebsd") {
         // `dbus-send --print-reply` waits up to 2 s for the file manager (then xdg-open may run),
@@ -95,9 +107,16 @@ fn reveal_via(
 fn reveal_command(platform: &str, path: &std::path::Path) -> Result<(&'static str, Vec<std::ffi::OsString>), String> {
     match platform {
         "windows" => {
-            // Explorer uses /select,<object>, rather than a separate option value.
-            let mut selection = std::ffi::OsString::from("/select,");
+            // Explorer reads `/select,"<object>"`: the path quoted after the comma (#2579). Quoting
+            // the whole argument instead ("/select,C:\a b.pdf", what an ordinary argument with a
+            // space becomes) opens Documents. A Windows path can't contain `"`, so the quotes
+            // can't be closed early; one that does is refused.
+            if path.as_os_str().as_encoded_bytes().contains(&b'"') {
+                return Err("The file name can't be shown in File Explorer".into());
+            }
+            let mut selection = std::ffi::OsString::from("/select,\"");
             selection.push(path);
+            selection.push("\"");
             Ok(("explorer.exe", vec![selection]))
         }
         "macos" => Ok(("open", vec!["-R".into(), path.as_os_str().into()])),
@@ -229,10 +248,13 @@ mod tests {
         assert_eq!(args, [std::ffi::OsString::from("-R"), path.as_os_str().into()]);
         let (exe, args) = reveal_command("windows", path).unwrap();
         assert_eq!(exe, "explorer.exe");
-        assert_eq!(args, [std::ffi::OsString::from("/select,/tmp/年度 report.pdf")]);
+        assert_eq!(args, [std::ffi::OsString::from("/select,\"/tmp/年度 report.pdf\"")]);
+        // #2579: the path is quoted after the comma, never the whole argument, which Explorer
+        // reads as no selection and answers by opening Documents.
         let special = std::path::Path::new(r"C:\Reports\年度 report, #1 & (draft).pdf");
         let (_, windows) = reveal_command("windows", special).unwrap();
-        assert_eq!(windows, [std::ffi::OsString::from(r"/select,C:\Reports\年度 report, #1 & (draft).pdf")]);
+        assert_eq!(windows, [std::ffi::OsString::from(r#"/select,"C:\Reports\年度 report, #1 & (draft).pdf""#)]);
+        assert!(reveal_command("windows", std::path::Path::new(r#"C:\a" b.pdf"#)).is_err(), "a quote can't end the path early");
         let (exe, args) = reveal_command("linux", path).unwrap();
         assert_eq!(exe, "dbus-send");
         assert_eq!(args[6], "array:string:file:///tmp/%E5%B9%B4%E5%BA%A6%20report.pdf");
