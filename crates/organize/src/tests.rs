@@ -2444,3 +2444,43 @@ fn combine_field_conflicts_previews_each_file_in_order() {
     assert_eq!(preview[1], [("Text1".to_string(), "Text1-1".to_string())]);
     assert_eq!(preview[2], [("Text1".to_string(), "Text1-2".to_string())], "the cascade continues past the earlier rename");
 }
+
+/// #1800: thousands of shallow objects, each referring to the next, used to recurse once per
+/// object and exhaust the stack. The copy is refused instead, and the destination is as it was;
+/// a chain within the budget and a short cycle copy as before.
+#[test]
+fn a_chain_of_objects_too_deep_to_copy_is_refused_and_leaves_the_destination_alone() {
+    fn chained(tail: &[String]) -> Document {
+        let mut b: Vec<String> = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".into(),
+            "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Foo 6 0 R >>".into(),
+            body("C1"),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+        ];
+        b.extend_from_slice(tail);
+        open(build(&b, "/Root 1 0 R"))
+    }
+    fn chain(n: usize) -> Document {
+        let mut tail: Vec<String> = (0..n).map(|i| format!("<< /Next {} 0 R >>", 7 + i)).collect();
+        tail.push("<< /End true >>".into());
+        chained(&tail)
+    }
+    // On a thread with less stack than any platform's main thread, so the budget is proven.
+    let run = std::thread::Builder::new()
+        .stack_size(512 << 10)
+        .spawn(|| {
+            let mut dst = open(fixture());
+            let before = (labels(&dst), dst.object_numbers());
+            let err = import_pages(&mut dst, &chain(20_000), &[0], 0).unwrap_err();
+            assert!(matches!(&err, OrganizeError::Invalid(m) if m.contains("levels deep")), "{err:?}");
+            assert_eq!((labels(&dst), dst.object_numbers()), before, "the destination is as it was");
+            import_pages(&mut dst, &chain(100), &[0], 0).unwrap();
+            let cycle = chained(&["<< /Next 7 0 R >>".into(), "<< /Next 6 0 R >>".into()]);
+            import_pages(&mut dst, &cycle, &[0], 0).unwrap();
+            assert_eq!(labels(&dst)[..3], ["C1", "C1", "Page 1"]);
+        })
+        .unwrap()
+        .join();
+    assert!(run.is_ok(), "the copy must not overflow the stack");
+}
