@@ -3480,6 +3480,38 @@ trailer << /Root 1 0 R >>
         page(&format!("q 20 0 0 20 5 5 cm /Im1 Do Q {red}"), fax);
     }
 
+    /// Scanners and fax services write Group 4 pages with `/Rows 0`, which ISO 32000-2 Table 11
+    /// defines as "height not predetermined" (the default), not as zero rows. Such a page used to
+    /// render blank. The image is an 8 × 4 all-black Group 4 stream, hand-encoded from ITU-T T.6:
+    /// one horizontal-mode row (white 0, black 8), three V0 rows, then EOFB.
+    #[test]
+    fn group4_fax_with_rows_zero_decodes_to_the_image_height() {
+        const ALL_BLACK_8X4: [u8; 6] = [0x26, 0xa2, 0xfe, 0x00, 0x20, 0x02];
+        for rows in ["", "/Rows 4", "/Rows 0"] {
+            let content = "q 20 0 0 20 5 5 cm /Im1 Do Q";
+            let mut pdf = format!(
+                "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 40 40] /Contents 4 0 R /Resources << /XObject << /Im1 5 0 R >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /XObject /Subtype /Image /Width 8 /Height 4 /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /CCITTFaxDecode /DecodeParms << /K -1 /Columns 8 {rows} >> /Length {} >> stream\n",
+                content.len(),
+                ALL_BLACK_8X4.len()
+            )
+            .into_bytes();
+            pdf.extend_from_slice(&ALL_BLACK_8X4);
+            pdf.extend_from_slice(b"\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF");
+            let mut renderer = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+            let page = renderer.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(page.error.is_none(), "{rows:?}: {:?}", page.error);
+            assert_eq!(&page.rgba[((24 * 40 + 15) * 4)..][..4], &[0, 0, 0, 255], "{rows:?}: the fax image paints black");
+            assert_eq!(&page.rgba[((38 * 40 + 1) * 4)..][..4], &[255, 255, 255, 255], "{rows:?}: outside the image stays white");
+        }
+    }
+
     #[test]
     fn tiff_predictor_packed_rgb_rows_keep_their_byte_boundaries() {
         use hayro_syntax::object::{FromBytes, Object};
