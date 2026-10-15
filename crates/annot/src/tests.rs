@@ -1308,3 +1308,16 @@ fn text_box_font_size_changes_the_da_and_grows_the_box() {
         assert_eq!(props(&doc, 0, i).unwrap().font_size, None);
     }
 }
+
+/// #1786: TrueType glyph contours (such as Inter's composite Ђ and ћ) overlap with the same
+/// winding direction where strokes cross, so typed signature appearances must fill with the
+/// non-zero winding operator (`f`), not even-odd (`f*`).
+#[test]
+fn typed_signature_uses_nonzero_winding_fill() {
+    let mut doc = fixture();
+    let contours = vec![vec![[0.4, 0.0], [0.6, 0.0], [0.6, 1.0], [0.4, 1.0]], vec![[0.0, 0.7], [1.0, 0.7], [1.0, 0.85], [0.0, 0.85]]];
+    let idx = add_annotation(&mut doc, &new(0, Shape::TypedSignature { rect: [100.0, 100.0, 200.0, 140.0], contours }), &meta("sig")).unwrap();
+    let ap = ap_content(&doc, &list(&doc, 0)[idx]);
+    assert!(ap.ends_with("h\nf\n"), "expected non-zero winding fill (`f`), got: {ap}");
+    assert!(!ap.contains("f*"), "must not use even-odd fill (`f*`): {ap}");
+}

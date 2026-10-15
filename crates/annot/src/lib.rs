@@ -386,7 +386,7 @@ pub enum Shape {
         by: Option<String>,
     },
     /// A typed signature or initials: filled outlines (each contour as points normalised to
-    /// `rect`, 0–1, y up), drawn with the even-odd rule.
+    /// `rect`, 0–1, y up), drawn with the non-zero winding rule.
     TypedSignature {
         rect: [f64; 4],
         contours: Vec<Vec<[f64; 2]>>,

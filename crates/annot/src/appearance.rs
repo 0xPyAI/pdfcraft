@@ -559,7 +559,7 @@ pub fn build(d: &Dict) -> Option<Stream> {
                         c.push_str("h\n");
                     }
                 }
-                c.push_str("f*\n");
+                c.push_str("f\n");
                 return Some(form(rect, c.as_bytes(), res));
             }
             // A custom stamp: its picture (an image, or a form mapped to /PCPictureSize) fills
