@@ -2498,6 +2498,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let redact_mark = (app.redact_prefs.hover_fill, app.redact_prefs.opacity);
     let units = app.units;
     let allowed = doc.allows_annotation();
+    let can_copy = doc.allows_copying();
+    let mut copy_selected = false;
     let comments_hidden = doc.comments_hidden();
     let form = doc.form.clone();
     let can_fill = doc.allows_form_filling();
@@ -3359,6 +3361,15 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 }
                 return;
             }
+            if view.comments.selected.is_none() {
+                let selected = view.selected_text().is_some_and(|t| !t.is_empty());
+                let key = crate::commands::shortcut_label(ui.ctx(), crate::commands::COPY);
+                if ui.add_enabled(can_copy && selected, egui::Button::new(tl!("Copy")).shortcut_text(key)).clicked() {
+                    copy_selected = true;
+                    ui.close();
+                }
+                ui.separator();
+            }
             // Over a picture (and no comment): Copy Image, as in Acrobat's page menu.
             let mut copy_image = None;
             if view.comments.selected.is_none()
@@ -3402,7 +3413,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     view.viewport_screen = out.inner_rect;
     view.auto_scroll.paint(ui, avail);
     if unobstructed && matches!(tool, QuickTool::Select | QuickTool::ColumnSelect) {
-        selection_actions(ui, avail, view, info, prefs, allowed && !comments_hidden);
+        copy_selected |= selection_actions(ui, avail, view, info, prefs, allowed && !comments_hidden, can_copy);
     }
 
     // Collect all main-page demand, including cached surfaces, for byte admission later.
@@ -3697,6 +3708,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if let Some((name, action)) = app.views[index].forms.button.take() {
         run_button(app, index, &name, action);
     }
+    if copy_selected {
+        app.execute("edit.copy");
+    }
     quick_bar(app, avail, ui);
     if let Some((source, file, destination)) = remote_open {
         app.open_remote_link(source, file, destination);
@@ -3712,21 +3726,29 @@ enum SelectionAction {
 }
 
 /// Actions on an existing text selection, next to the selected words.
-fn selection_actions(ui: &mut egui::Ui, viewport: Rect, view: &mut DocView, info: &DocInfo, prefs: &comments::CommentPrefs, can_comment: bool) {
+fn selection_actions(
+    ui: &mut egui::Ui,
+    viewport: Rect,
+    view: &mut DocView,
+    info: &DocInfo,
+    prefs: &comments::CommentPrefs,
+    can_comment: bool,
+    can_copy: bool,
+) -> bool {
     if ui.input(|input| input.pointer.is_decidedly_dragging()) {
-        return;
+        return false;
     }
-    let Some(selection) = view.selection else { return };
-    let Some(text) = view.texts.get(&selection.page) else { return };
-    let Some(xf) = view.page_xform(selection.page) else { return };
-    let Some(last) = selection.rects(text).last().copied() else { return };
+    let Some(selection) = view.selection else { return false };
+    let Some(text) = view.texts.get(&selection.page) else { return false };
+    let Some(xf) = view.page_xform(selection.page) else { return false };
+    let Some(last) = selection.rects(text).last().copied() else { return false };
     let selected = selection.text(text);
     if selected.is_empty() {
-        return;
+        return false;
     }
     let rect = xf.view_rect(last);
     if !viewport.intersects(rect) {
-        return;
+        return false;
     }
     let x = rect.left().clamp(viewport.left() + 8.0, (viewport.right() - 520.0).max(viewport.left() + 8.0));
     let y = if rect.bottom() + 48.0 < viewport.bottom() { rect.bottom() + 6.0 } else { (rect.top() - 44.0).max(viewport.top() + 6.0) };
@@ -3745,18 +3767,17 @@ fn selection_actions(ui: &mut egui::Ui, viewport: Rect, view: &mut DocView, info
                         chosen = Some(action);
                     }
                 }
-                if ui.button(tl!("Copy")).clicked() {
+                if ui.add_enabled(can_copy, egui::Button::new(tl!("Copy"))).clicked() {
                     chosen = Some(SelectionAction::Copy);
                 }
             });
         });
     });
-    let Some(action) = chosen else { return };
+    let Some(action) = chosen else { return false };
     if let SelectionAction::Copy = action {
-        ui.ctx().copy_text(selected);
-        return;
+        return true;
     }
-    let Some((page, quads)) = view.selection_quads(info) else { return };
+    let Some((page, quads)) = view.selection_quads(info) else { return false };
     let last = quads.last().copied().unwrap_or_default();
     let at = [last[2].max(last[6]), last[1].max(last[3])];
     view.clear_selection();
@@ -3775,7 +3796,7 @@ fn selection_actions(ui: &mut egui::Ui, viewport: Rect, view: &mut DocView, info
         }
         SelectionAction::Markup(tool) => {
             // Every markup button carries a markup tool; anything else adds nothing.
-            let Some(kind) = tool.markup() else { return };
+            let Some(kind) = tool.markup() else { return false };
             view.pending_edit = Some(Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
                 page,
                 shape: pdfcraft_engine::Shape::TextMarkup { kind, quads },
@@ -3784,9 +3805,10 @@ fn selection_actions(ui: &mut egui::Ui, viewport: Rect, view: &mut DocView, info
                 author: prefs.author.clone(),
             }));
         }
-        // Copied above.
+        // Copy is dispatched through the app after the view borrow ends.
         SelectionAction::Copy => {}
     }
+    false
 }
 
 /// Run a push button's action (the ones that need no JavaScript engine).

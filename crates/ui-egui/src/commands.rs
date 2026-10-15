@@ -85,6 +85,8 @@ impl PdfCraftApp {
             return self.combine_can_undo(spec.needs == commands::Needs::Undo);
         }
         commands::is_enabled(spec, &self.session, self.active_ids().map(|(_, id)| id))
+            && (spec.id != "edit.copy"
+                || self.active.and_then(|i| self.views.get(i)).is_some_and(|v| !v.organize && v.selected_text().is_some_and(|t| !t.is_empty())))
             && (spec.needs != commands::Needs::TwoPageView || self.active.and_then(|i| self.views.get(i)).is_some_and(crate::DocView::cover_applies))
             && match spec.id {
                 "view.previous_view" => self.active.and_then(|i| self.views.get(i)).is_some_and(|v| !v.back.is_empty()),
@@ -527,6 +529,12 @@ impl PdfCraftApp {
                 self.quick_tool = crate::QuickTool::Snapshot;
                 self.notify_tr("Drag a rectangle around the area to copy");
             }
+            "edit.copy" => {
+                if let (Some(i), Some(ctx)) = (active, self.ctx.clone()) {
+                    return self.copy_selected_text(i, &ctx);
+                }
+                return false;
+            }
             "page.copy" => self.copy_pages(false),
             "page.cut" => self.copy_pages(true),
             "page.paste" => self.paste_pages(),
@@ -785,7 +793,7 @@ pub(crate) fn registry_menu(app: &mut PdfCraftApp, ui: &mut egui::Ui, menu: &str
             }
             continue;
         }
-        let shortcut = spec.shortcut.map(|s| shortcut_label(ui.ctx(), s)).unwrap_or_default();
+        let shortcut = spec.shortcut.or((spec.id == "edit.copy").then_some(COPY)).map(|s| shortcut_label(ui.ctx(), s)).unwrap_or_default();
         let enabled = app.command_enabled(spec);
         let resp = ui.add_enabled(enabled, egui::Button::new(label).shortcut_text(shortcut));
         if resp.clicked() {
