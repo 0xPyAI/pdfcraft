@@ -28,6 +28,20 @@ pub fn create_staging(
     form: StagingName,
     suffixes: impl IntoIterator<Item = u64>,
 ) -> std::io::Result<(PathBuf, std::fs::File)> {
+    create_staging_as(dir, name, form, suffixes, None)
+}
+
+/// [`create_staging`], giving the new file the permissions `keep` on Unix. It is created readable
+/// and writable by its owner only and then given `keep`, so it is never open to more people than
+/// the file it will replace, not even while it is still empty (a handle opened then would keep
+/// reading what is written later).
+fn create_staging_as(
+    dir: &Path,
+    name: &str,
+    form: StagingName,
+    suffixes: impl IntoIterator<Item = u64>,
+    keep: Option<&std::fs::Permissions>,
+) -> std::io::Result<(PathBuf, std::fs::File)> {
     // At most 128 bytes of the target's name, cut between characters, so the staging name fits
     // the 255-byte (Linux, macOS) and 255-unit (Windows) limits however long that name is.
     let mut stem = String::new();
@@ -42,8 +56,22 @@ pub fn create_staging(
             StagingName::SuffixThenTag => format!(".{stem}.{suffix:016x}.pdfcraft-tmp"),
             StagingName::TagThenSuffix => format!(".{stem}.pdfcraft-{suffix:016x}.tmp"),
         });
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
-            Ok(file) => return Ok((tmp, file)),
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        if keep.is_some() {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        match options.open(&tmp) {
+            Ok(file) => {
+                if let Some(keep) = keep {
+                    // A volume that can't change modes (FAT, some network shares) leaves the file
+                    // owner-only: stricter than the file it replaces, never looser.
+                    let _ = file.set_permissions(keep.clone());
+                }
+                return Ok((tmp, file));
+            }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             // Windows reports a folder at the name as "access denied"; it is taken all the same.
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && tmp.symlink_metadata().is_ok() => {}
@@ -69,7 +97,9 @@ pub fn staging_suffixes() -> impl Iterator<Item = u64> {
 /// crash, a full disk or a refused flush never leaves a half-written file where a good one was,
 /// and the target is untouched until the new file is complete. The target's folder must exist;
 /// a folder at the target is refused by the rename. Flushing is the staging file's own
-/// (`sync_all`); parent-directory durability after a power loss is not promised.
+/// (`sync_all`); parent-directory durability after a power loss is not promised. On Unix a file
+/// that is replaced keeps its permissions, so a private file stays private; a new file gets the
+/// usual mode for a new file.
 pub fn write_atomically(path: &Path, bytes: &[u8], form: StagingName) -> std::io::Result<()> {
     write_atomically_with(path, bytes, form, staging_suffixes(), std::fs::File::sync_all)
 }
@@ -87,7 +117,12 @@ pub fn write_atomically_with(
     use std::io::Write as _;
     let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("save");
-    let (tmp, file) = create_staging(dir, name, form, suffixes)?;
+    // A file that is replaced keeps its permissions (#1790). Unix modes only: Windows is as before.
+    #[cfg(unix)]
+    let keep = std::fs::metadata(path).ok().map(|m| m.permissions());
+    #[cfg(not(unix))]
+    let keep = None;
+    let (tmp, file) = create_staging_as(dir, name, form, suffixes, keep.as_ref())?;
     let result = (|| {
         // Closed at the end of the block, before the rename (required on Windows).
         {
@@ -213,6 +248,36 @@ mod tests {
         // A folder that does not exist: nothing is written anywhere.
         assert!(write_atomically(&dir.join("missing").join("out.pdf"), b"X", StagingName::SuffixThenTag).is_err());
         assert_eq!(names(&dir), ["out.pdf"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #1790: a replaced file keeps its permissions, and its staging file already has them while
+    /// it is written; a new file gets the same mode as any other new file.
+    #[cfg(unix)]
+    #[test]
+    fn a_replaced_file_keeps_its_permissions() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = test_dir("modes");
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let target = dir.join("out.pdf");
+        for keep in [0o600, 0o640, 0o664] {
+            std::fs::write(&target, b"OLD").unwrap();
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(keep)).unwrap();
+            let mut staged = 0;
+            write_atomically_with(&target, b"NEW", StagingName::SuffixThenTag, [keep as u64], |f| {
+                staged = f.metadata()?.permissions().mode() & 0o777;
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(staged, keep, "the staging file has the target's mode before it is flushed");
+            assert_eq!(mode(&target), keep, "the saved file keeps mode {keep:o}");
+            assert_eq!(std::fs::read(&target).unwrap(), b"NEW");
+        }
+        let fresh = dir.join("new.pdf");
+        write_atomically(&fresh, b"NEW", StagingName::TagThenSuffix).unwrap();
+        let plain = dir.join("plain");
+        std::fs::write(&plain, b"").unwrap();
+        assert_eq!(mode(&fresh), mode(&plain), "a new file is not made private");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
