@@ -857,7 +857,10 @@ fn root_refusals_do_not_reveal_what_exists_outside() {
     // Inside the root nothing changes: missing files say so, and existing ones open and save,
     // however the path is spelled.
     let missing = a.call("doc_open", &json!({ "path": "missing-inside.pdf" })).unwrap_err();
-    assert!(matches!(&missing, ToolError::Failed(m) if m.starts_with("missing-inside.pdf: ") && !m.contains("outside")), "{missing:?}");
+    assert!(
+        matches!(&missing, ToolError::Failed(m) if m.starts_with("missing-inside.pdf not found (looked for ") && !m.contains("outside")),
+        "{missing:?}"
+    );
     let not_dir = a.call("doc_open", &json!({ "path": "inside.pdf/x" })).unwrap_err();
     assert!(matches!(&not_dir, ToolError::Failed(m) if !m.contains("outside")), "{not_dir:?}");
     #[cfg_attr(not(windows), allow(unused_mut))]
@@ -5938,4 +5941,24 @@ fn absolute_gotor_consent_does_not_bypass_validation_or_passwords() {
     let opened = ok(&mut a, "link_open", json!({ "doc": doc, "page": 1, "index": 1, "allow_absolute": true, "password": "secret" }));
     assert_eq!(opened["document"]["encrypted"], true);
     assert_eq!(opened["destination_applied"], true);
+}
+
+#[test]
+fn a_missing_path_under_the_root_names_where_it_was_looked_for() {
+    // #1890: a script written from another working directory repeats the root's folder in its
+    // paths. The refusal names the resolved path and the root, so there is something to correct.
+    let (base, root) = sandbox("resolved-path");
+    let mut a = auto(&root);
+    let looked = |rel: &str| root.join(rel).display().to_string();
+    for (path, rel) in
+        [("root/inside.pdf", "root/inside.pdf"), ("missing/deeper/x.pdf", "missing/deeper/x.pdf"), ("./sub/../root/inside.pdf", "root/inside.pdf")]
+    {
+        let ToolError::Failed(m) = err(&mut a, "doc_open", json!({ "path": path })) else { panic!("{path}: not a failure") };
+        assert_eq!(m, format!("{path} not found (looked for {}, --root {})", looked(rel), root.display()));
+    }
+    // The same mistake with a file that does exist outside still gets the plain refusal (#136).
+    let ToolError::Failed(m) = err(&mut a, "doc_open", json!({ "path": "../outside/secret.pdf" })) else { panic!("not a failure") };
+    assert!(!m.contains("looked for"), "{m}");
+    ok(&mut a, "doc_open", json!({ "path": "inside.pdf" }));
+    let _ = std::fs::remove_dir_all(base);
 }
