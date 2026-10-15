@@ -268,6 +268,20 @@ impl XrefIndex {
         }
     }
 
+    /// Every entry, newest section first, as the materialized reader keeps them.
+    fn to_map(&self, file: &[u8]) -> BTreeMap<u32, XrefEntry> {
+        match self {
+            Self::Materialized(entries) => entries.as_ref().clone(),
+            Self::Compact { revisions, .. } => {
+                let mut numbers = Vec::new();
+                for revision in revisions {
+                    revision.extend_numbers(&mut numbers);
+                }
+                numbers.into_iter().filter_map(|num| self.lookup(num, file).map(|entry| (num, entry))).collect()
+            }
+        }
+    }
+
     fn max_num(&self) -> u32 {
         match self {
             Self::Compact { max_num, .. } => *max_num,
@@ -1924,8 +1938,8 @@ impl Document {
     /// Existing entries are never replaced: an object freed by an update stays freed.
     fn fill_xref_gaps(&mut self, log: &mut Vec<String>) {
         let entries = &self.entries;
-        let shifted = matches!(entries.get(&0), Some(XrefEntry::InFile { .. }));
-        let set_aside = self.xref_oddities.iter().any(|(_, num)| !entries.contains_key(num));
+        let shifted = matches!(entries.lookup(0, &self.data), Some(XrefEntry::InFile { .. }));
+        let set_aside = self.xref_oddities.iter().any(|(_, num)| entries.lookup(*num, &self.data).is_none());
         if !(shifted || set_aside) {
             return;
         }
@@ -1933,7 +1947,7 @@ impl Document {
         for (num, offset, generation) in object_headers(&self.data) {
             located.insert(num, (offset, generation));
         }
-        let mut filled = entries.as_ref().clone();
+        let mut filled = entries.to_map(&self.data);
         let mut found = 0usize;
         for (&num, &(offset, generation)) in &located {
             if num != 0 && !filled.contains_key(&num) {
@@ -1943,7 +1957,7 @@ impl Document {
         }
         if found > 0 {
             log.push(format!("the cross-reference data leaves out {found} objects the file contains; located them by their object headers"));
-            self.entries = Arc::new(filled);
+            self.entries = Arc::new(XrefIndex::Materialized(Arc::new(filled)));
         }
         self.located = Arc::new(located);
     }
