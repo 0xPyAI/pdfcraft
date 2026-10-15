@@ -836,6 +836,13 @@ impl DocView {
         !self.last_queue.is_empty() || self.text_background.pending() || self.move_background.pending()
     }
 
+    /// The cached tile keys of a page, as (scale tag, tile x, tile y) (diagnostics and tests).
+    pub fn tiles_debug(&self, page: usize) -> Vec<(u64, u32, u32)> {
+        let mut k: Vec<(u64, u32, u32)> = self.tiles.keys().filter(|key| key.0 == page).map(|key| (key.1, key.2, key.3)).collect();
+        k.sort_unstable();
+        k
+    }
+
     /// Re-render every page and text layer (the document's appearance changed, e.g. a layer
     /// was toggled). Out-of-date rasters stay on screen until their replacements arrive, so the
     /// view never flashes blank.
@@ -1562,8 +1569,13 @@ impl DocView {
         }
         self.pages.retain(|p, _| pages.contains(p));
         // Tiles of an earlier zoom (not a demanded scale) stay while the canvas keeps them, a
-        // bounded few under a page whose current tiles are still missing (OLD_TILES).
-        self.tiles.retain(|key, _| tiles.contains(key) || !tile_tags.contains(&key.1));
+        // bounded few under a page whose current tiles are still missing (OLD_TILES). Tiles of a
+        // page on screen stay too even when this frame does not demand them (#2196): the viewport
+        // moves while zooming, so a tile that was sharp a moment ago falls outside the demanded
+        // rectangle, and dropping it made every pan or zoom back a cold miss that re-blurred the
+        // page and re-interpreted it once per tile. The per-frame cap below (OLD_TILES,
+        // nearest scale first) is what bounds how much of that stays.
+        self.tiles.retain(|key, _| tiles.contains(key) || !tile_tags.contains(&key.1) || self.frame_visible.contains(&key.0));
         self.stale_tiles.retain(|key| self.tiles.contains_key(key));
         queue.extend(grid);
         // Opening (or turning to) a page queues its pixels alongside thumbnails and
@@ -3391,17 +3403,36 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let (mut wanted, visible_now) = out.inner;
     let cur = view.current;
     wanted.sort_by_key(|w| (!visible_now.contains(&w.0), w.0.abs_diff(cur), w.3.is_some()));
-    // Tiles of far-away pages are useless: free them. Tiles of other zooms stay only while a
-    // current tile of their page is still missing, at most `OLD_TILES` of them, nearest scale first.
+    // Tiles of far-away pages are useless: free them. Tiles of an earlier zoom stay for a page
+    // that is on screen, whether or not the page is tiled at this zoom (#2196): a zoom out below
+    // the tiling threshold used to drop the tiles of the zoom just left, so coming back to it
+    // was a cold miss and the page re-blurred through the backdrop while every tile was
+    // interpreted again. `OLD_TILES` still bounds how many older tiles are kept, nearest scale
+    // first, and admission keeps them inside `TILE_BYTES`.
     let missing: HashSet<usize> = wanted.iter().filter(|w| w.3.is_some()).map(|w| w.0).collect();
-    view.tiles.retain(|(p, t, _, _), _| p.abs_diff(cur) <= 2 && (*t == tag || missing.contains(p)));
+    let on_screen: HashSet<usize> = visible_now.iter().copied().collect();
+    view.tiles.retain(|(p, t, _, _), _| p.abs_diff(cur) <= 2 && (*t == tag || missing.contains(p) || on_screen.contains(p)));
     let mut older: Vec<(f32, (usize, u64, u32, u32))> =
         view.tiles.keys().filter(|k| k.1 != tag).map(|k| ((tag_scale(k.1) / scale).ln().abs(), *k)).collect();
-    if older.len() > OLD_TILES {
-        older.sort_by(|a, b| a.0.total_cmp(&b.0));
-        for (_, k) in older.drain(OLD_TILES..) {
-            view.tiles.remove(&k);
+    // Tiles of earlier zooms are kept nearest scale first, and bounded by count *and* bytes: a
+    // large scan renders a tile up to 4096² (about 67 MiB), so a count alone let a few tiles of
+    // a few zooms run far past the tile allowance. #2196 keeps a zoom already visited, which
+    // makes that reachable in ordinary zooming, so the byte bound has to be here too.
+    older.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut kept = 0usize;
+    let mut kept_bytes = 0usize;
+    let mut drop: Vec<(usize, u64, u32, u32)> = Vec::new();
+    for (_dist, key) in older {
+        let bytes = view.tiles.get(&key).map_or(0, texture_bytes);
+        if kept >= OLD_TILES || kept_bytes.saturating_add(bytes) > TILE_BYTES {
+            drop.push(key);
+        } else {
+            kept = kept.saturating_add(1);
+            kept_bytes = kept_bytes.saturating_add(bytes);
         }
+    }
+    for key in drop {
+        view.tiles.remove(&key);
     }
     let mut queue: Vec<RenderRequest> = wanted
         .iter()

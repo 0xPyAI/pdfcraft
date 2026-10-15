@@ -842,8 +842,8 @@ milestone = "M3"
 status = "partial"
 commands = []
 tools = []
-evidence = ["crates/render/src/raster.rs::tiles_match_full_render", "crates/render/src/raster.rs::effective_scale_never_exceeds_the_caps"]
-notes = "capped at 8192 px per side (M3.3)"
+evidence = ["crates/render/src/raster.rs::tiles_match_full_render", "crates/render/src/raster.rs::effective_scale_never_exceeds_the_caps", "crates/ui-egui/tests/view.rs::returning_to_a_visited_zoom_reuses_its_cached_tiles", "crates/ui-egui/tests/view.rs::zooming_a_tiled_page_shows_its_earlier_tiles_until_new_ones_arrive"]
+notes = "capped at 8192 px per side (M3.3); tiles of a zoom already rendered stay cached while their page is on screen, so zooming away and back shows the area sharp instead of re-rendering it tile by tile (#2196)"
 
 [[feature]]
 id = "view.layout-continuous"
