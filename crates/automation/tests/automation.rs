@@ -5180,6 +5180,24 @@ fn command_batch_refuses_more_than_a_thousand_steps() {
 }
 
 #[test]
+fn command_batch_tells_a_tool_name_from_an_unknown_or_toolless_command() {
+    let dir = workdir("batch-ids");
+    let mut a = auto(&dir);
+    let steps = json!([{"id":"page_rotate"}, {"id":"doc_inspect"}, {"id":"no.such.command"}, {"id":"help.about"}]);
+    let r = ok(&mut a, "command_batch", json!({"steps": steps, "stop_on_error": false}));
+    let errors: Vec<&str> = r["results"].as_array().unwrap().iter().map(|s| s["error"].as_str().unwrap()).collect();
+    assert_eq!(
+        errors,
+        [
+            r#""page_rotate" is a tool, not a command id; use the command id "page.rotate", or call the tool directly"#,
+            r#""doc_inspect" is a tool, not a command id; call it directly (command ids are in command_list)"#,
+            r#"unknown command id "no.such.command"; see command_list"#,
+            r#"command "help.about" has no headless tool; see command_list"#,
+        ]
+    );
+}
+
+#[test]
 fn thai_text_through_tools_saves_reopens_extracts_and_renders() {
     let dir = workdir("thai-content");
     let mut a = auto(&dir);
