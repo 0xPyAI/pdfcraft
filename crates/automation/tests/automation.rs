@@ -2474,6 +2474,59 @@ fn editing_existing_text_through_tools() {
     assert_eq!(p["lines"].as_array().map(Vec::len), Some(2), "{p}");
 }
 
+/// #2593: a paragraph whose own font cannot show a character is written from PdfCraft's fallback
+/// faces. The Cyrillic the craft-fonts faces lack (Uzbek қ ғ ҳ, Kazakh ә ө ү ұ һ) comes from the
+/// bundled Inter face, so the edit is not refused even without `CRAFT_FONTS_DIR`, and the words
+/// survive a save and a reopen. (`crates/edit/src/tests.rs::uzbek_and_kazakh_cyrillic_use_the_bundled_latin_face`
+/// pins which face drew them.)
+#[test]
+fn editing_uzbek_and_kazakh_cyrillic_through_tools() {
+    let dir = workdir("cyrillic-fallback");
+    let body = "BT /F1 12 Tf 14.4 TL 1 0 0 1 72 700 Tm (The quick brown fox jumps over the lazy dog) Tj T* (and keeps running through the long field.) Tj ET";
+    std::fs::write(dir.join("cy.pdf"), win_ansi_paragraph_pdf(body)).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "cy.pdf" }))["doc"].as_u64().unwrap();
+    for word in ["қизил", "әже"] {
+        let text = format!("The quick brown fox jumps over the lazy dog {word}\nand keeps running through the long field.");
+        let edited = ok(&mut a, "text_edit", json!({ "doc": doc, "page": 1, "paragraph": 1, "text": text }));
+        let paragraph = edited["paragraph"]["text"].as_str().unwrap();
+        assert!(paragraph.starts_with("The quick brown fox") && paragraph.ends_with("long field."), "{word}: {edited}");
+        assert!(paragraph.contains(word), "{word}: {edited}");
+        assert!(page_text(&mut a, doc)[0].contains(word), "{word}: the edited page reads it back");
+        assert_eq!(ok(&mut a, "edit_undo", json!({ "doc": doc }))["undone"], "Edit text");
+    }
+    // Keep the Kazakh edit, save it, and read it back from the file on disk.
+    let text = "The quick brown fox jumps over the lazy dog әже\nand keeps running through the long field.";
+    ok(&mut a, "text_edit", json!({ "doc": doc, "page": 1, "paragraph": 1, "text": text }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "cy-out.pdf" }));
+    let saved = ok(&mut a, "doc_open", json!({ "path": "cy-out.pdf" }))["doc"].as_u64().unwrap();
+    assert!(page_text(&mut a, saved)[0].contains("әже"), "the saved file reads it back");
+}
+
+/// One Letter page whose Helvetica is not embedded (WinAnsi), with `body` as its content stream.
+fn win_ansi_paragraph_pdf(body: &str) -> Vec<u8> {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".into(),
+        format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    bytes
+}
+
 /// One page whose content is one stream in three pieces (#155): a `TJ` array ends the middle
 /// piece and its operator starts the last one.
 fn split_streams_pdf() -> Vec<u8> {

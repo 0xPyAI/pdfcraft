@@ -1303,12 +1303,28 @@ fn needs_type3(text: &str) -> bool {
 const JAPANESE_FONT_NAME: &str = "PCJapanese";
 /// The `/Name` of the Type 3 fonts generated for Hebrew text.
 const HEBREW_FONT_NAME: &str = "PCHebrew";
+/// The `/Name` of the Type 3 fonts generated from the bundled Latin (Inter) face.
+const LATIN_FONT_NAME: &str = "PCLatin";
 
-/// Whether `font` is one of those generated fonts (Japanese or Hebrew): a replacement longer than
-/// one of them is split across several, which read back as one line (see [`same_font`]).
+/// Whether `font` is one of those generated fonts (Latin, Japanese or Hebrew): a replacement longer
+/// than one of them is split across several, which read back as one line (see [`same_font`]).
 fn is_type3_fallback(font: &Dict) -> bool {
     font.name(b"Subtype") == Some(b"Type3")
-        && font.name(b"Name").is_some_and(|n| n == JAPANESE_FONT_NAME.as_bytes() || n == HEBREW_FONT_NAME.as_bytes())
+        && font
+            .name(b"Name")
+            .is_some_and(|n| n == JAPANESE_FONT_NAME.as_bytes() || n == HEBREW_FONT_NAME.as_bytes() || n == LATIN_FONT_NAME.as_bytes())
+}
+
+/// The generated font's `/Name` and its resource prefix: the bundled Latin face, Hebrew, or the
+/// Japanese ones.
+fn fallback_names(face: &CraftFont, hebrew: bool) -> (&'static str, &'static str) {
+    if hebrew {
+        (HEBREW_FONT_NAME, "PCHe")
+    } else if face.family == "Inter" {
+        (LATIN_FONT_NAME, "PCLat")
+    } else {
+        (JAPANESE_FONT_NAME, "PCJp")
+    }
 }
 
 /// Whether a run shown in `font` (a resource name, and the Japanese or Hebrew fallback face it subsets, if
@@ -1340,7 +1356,8 @@ const MAX_TYPE3_GLYPHS: usize = 240;
 struct Type3Fallback {
     /// The family its glyphs come from ("Shippori Mincho").
     family: &'static str,
-    /// The fonts' resource names in order; the first is `PCJp` (`PCHe` for Hebrew text).
+    /// The fonts' resource names in order; the first is `PCJp` (`PCLat` for the bundled Latin
+    /// face, `PCHe` for Hebrew text).
     names: Vec<String>,
     /// Every unique character with its advance (em), in order of first appearance.
     widths: Vec<(char, f64)>,
@@ -1414,11 +1431,19 @@ fn unicode_hex(ch: char) -> String {
     encoded.iter().map(|u| format!("{u:04X}")).collect()
 }
 
-/// No font this build has can draw `text`. Only Japanese text is about the Japanese face: other
+/// The same outline for a face that may simply lack the glyph: `None` then, so the caller can try
+/// the next face (and report the character once none of them has it).
+fn type3_glyph(face: &CraftFont, ch: char) -> Result<Option<(Vec<u8>, f64)>, EditError> {
+    match japanese_glyph_from(face, ch) {
+        Err(GlyphError::Missing) => Ok(None),
+        _ => type3_path(face, ch).map(Some),
+    }
+}
+
+/// No face this build has can draw `text`. Only Japanese text is about the Japanese face: other
 /// characters are missing from the paragraph's font, and choosing a font that has them works too.
 fn no_fallback_font(text: &str) -> EditError {
-    let japanese = |c: char| matches!(u32::from(c), 0x3000..=0x30FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF);
-    if text.chars().any(japanese) {
+    if text.chars().any(needs_japanese) {
         return no_japanese_font();
     }
     let Some(ch) = text.chars().find(|c| !c.is_whitespace() && !is_win_ansi_char(*c)) else { return no_japanese_font() };
@@ -1426,6 +1451,28 @@ fn no_fallback_font(text: &str) -> EditError {
         "the paragraph's font has no glyph for {ch} (U+{:04X}) and this build has no fallback font for it; \
          choose a font that has it (Load font… or Installed fonts…), or use an official release, which includes \
          PdfCraft's fallback fonts (to build them in, set CRAFT_FONTS_DIR to a craft-fonts checkout)",
+        u32::from(ch)
+    ))
+}
+
+/// The character the craft-fonts Japanese faces are for: kana, CJK ideographs and their compatibility
+/// and full-width forms.
+fn needs_japanese(ch: char) -> bool {
+    matches!(u32::from(ch), 0x3000..=0x30FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF)
+}
+
+/// The chosen face has no outline for `ch`, and neither has any other: say which character it is and
+/// what the writer can do about it. A CJK character without a Japanese face in the build is about
+/// that build input, which is the one answer that changes it.
+fn no_glyph_for(face: &CraftFont, ch: char) -> EditError {
+    if needs_japanese(ch) && pdfcraft_fonts::document_japanese_font().is_none() {
+        return no_japanese_font();
+    }
+    EditError::Invalid(format!(
+        "the {} fallback font has no glyph for {ch} (U+{:04X}), and no fallback face covers the text; \
+         choose a font that has it (Load font… or Installed fonts…), or use an official release, which includes \
+         PdfCraft's fallback fonts (to build them in, set CRAFT_FONTS_DIR to a craft-fonts checkout)",
+        face.family,
         u32::from(ch)
     ))
 }
@@ -1454,12 +1501,15 @@ fn no_hebrew_font() -> EditError {
 }
 
 /// The faces a Type 3 replacement may draw `text` with, best first. Text with Hebrew takes the
-/// Hebrew face first (its Latin and digits too, so a line keeps one look), then the Japanese
-/// faces for anything it lacks; other text takes the Japanese faces, as before.
+/// Hebrew face first (its Latin and digits too, so a line keeps one look), then the Japanese faces
+/// and the bundled Latin one for anything it lacks; other text takes the Japanese faces, and the
+/// bundled Latin face behind them, which covers the Latin, Greek and Cyrillic letters they lack
+/// (#2593: the Japanese faces have no қ, ғ, ҳ, ә, ө, ү, ұ or һ).
 fn type3_faces(text: &str, family: crate::added::Family, bold: bool) -> Result<(Vec<&'static CraftFont>, bool), EditError> {
     let japanese = pdfcraft_fonts::document_japanese_fonts_for_style(family == crate::added::Family::Times, bold);
+    let latin = pdfcraft_fonts::document_latin_fonts(bold);
     if !text.chars().any(crate::bidi::is_hebrew) {
-        return Ok((japanese, false));
+        return Ok((japanese.into_iter().chain(latin).collect(), false));
     }
     // Points are drawn on their letter with the font's positioning, which a one-glyph-per-
     // character Type 3 font can't do; refuse rather than print them beside the letter.
@@ -1467,7 +1517,7 @@ fn type3_faces(text: &str, family: crate::added::Family, bold: bool) -> Result<(
         return Err(EditError::Invalid("Hebrew points (niqqud) can't be written into a PDF yet; type the text without them".into()));
     }
     let hebrew = pdfcraft_fonts::document_hebrew_font(bold).ok_or_else(no_hebrew_font)?;
-    Ok((std::iter::once(hebrew).chain(japanese).collect(), true))
+    Ok((std::iter::once(hebrew).chain(japanese).chain(latin).collect(), true))
 }
 
 fn type3_font(
@@ -1501,8 +1551,16 @@ fn type3_font(
     let per_font = max_glyphs.clamp(1, MAX_TYPE3_GLYPHS);
     let mut glyphs = Vec::with_capacity(chars.len());
     for (i, ch) in chars.into_iter().enumerate() {
-        // Hebrew text: the first face with the glyph, else the Hebrew face's error.
-        let (path, width) = others.iter().fold(type3_path(face, ch), |found, f| found.or_else(|e| type3_path(f, ch).map_err(|_| e)))?;
+        // The chosen face first, then the faces after it (Hebrew text takes a character the Hebrew
+        // face lacks from the next face that has it); a character no face draws is reported once.
+        let mut drawn = type3_glyph(face, ch)?;
+        for f in others.iter().copied() {
+            if drawn.is_some() {
+                break;
+            }
+            drawn = type3_glyph(f, ch)?;
+        }
+        let Some((path, width)) = drawn else { return Err(no_glyph_for(face, ch)) };
         let code = u8::try_from((i % per_font).saturating_add(1))
             .map_err(|_| EditError::Invalid("replacement text has too many unique characters".into()))?;
         glyphs.push(Type3Glyph { code, ch, path, width });
@@ -1526,7 +1584,7 @@ fn type3_font(
 }
 
 /// Adds one generated font whose codes 1 to `glyphs.len()` show `glyphs`, and returns its resource
-/// name (`PCJp`, then `PCJp1`, ...; `PCHe`, ... for Hebrew text). Nothing here can fail: the
+/// name (`PCLat`, `PCJp`, then `PCJp1`, ...; `PCHe`, ... for Hebrew text). Nothing here can fail: the
 /// outlines were read already.
 fn add_type3_font(doc: &mut Document, fonts_res: &mut Dict, face: &CraftFont, hebrew: bool, glyphs: Vec<Type3Glyph>) -> String {
     let last_char = glyphs.len();
@@ -1557,7 +1615,8 @@ fn add_type3_font(doc: &mut Document, fonts_res: &mut Dict, face: &CraftFont, he
     let mut font = Dict::new();
     font.set(b"Type".to_vec(), Object::name("Font"));
     font.set(b"Subtype".to_vec(), Object::name("Type3"));
-    font.set(b"Name".to_vec(), Object::name(if hebrew { HEBREW_FONT_NAME } else { JAPANESE_FONT_NAME }));
+    let (font_name, prefix) = fallback_names(face, hebrew);
+    font.set(b"Name".to_vec(), Object::name(font_name));
     let mut descriptor = Dict::new();
     descriptor.set(b"Type".to_vec(), Object::name("FontDescriptor"));
     descriptor.set(b"FontName".to_vec(), Object::name(&format!("{}-{}", face.family, face.style).replace(' ', "")));
@@ -1577,7 +1636,6 @@ fn add_type3_font(doc: &mut Document, fonts_res: &mut Dict, face: &CraftFont, he
     font.set(b"Encoding".to_vec(), Object::Dict(encoding));
     font.set(b"CharProcs".to_vec(), Object::Dict(charprocs));
     font.set(b"ToUnicode".to_vec(), Object::Ref(cmap_ref));
-    let prefix = if hebrew { "PCHe" } else { "PCJp" };
     let mut name = String::from(prefix);
     let mut suffix = 0usize;
     while fonts_res.contains(name.as_bytes()) {

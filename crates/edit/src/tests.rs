@@ -1085,6 +1085,44 @@ fn cyrillic_in_a_serif_line_falls_back_to_a_face_that_has_it() {
     }
 }
 
+/// #2593: the craft-fonts faces are Japanese, and part of the Cyrillic (Uzbek қ ғ ҳ, Kazakh ә ө ү
+/// ұ һ) is in none of them. The bundled Inter face has it, so the replacement is written instead of
+/// being refused, and a build without craft-fonts can do it too.
+#[test]
+fn uzbek_and_kazakh_cyrillic_use_the_bundled_latin_face() {
+    for replacement in ["The quick brown fox jumps over the lazy dog қизил", "әже", "ўзбекча ғўза"] {
+        for paragraph in [false, true] {
+            let mut doc = text_page("BT /F2 12 Tf 72 700 Td (ab) Tj ET");
+            let edit =
+                if paragraph { text::replace_block(&mut doc, 0, 0, replacement) } else { text::replace_line(&mut doc, 0, 0, replacement) }.unwrap();
+            assert_eq!(edit.substituted.as_deref(), Some("Inter Type3"), "{replacement}: {edit:?}");
+            let content = String::from_utf8_lossy(&page_content_bytes(&doc, 0)).into_owned();
+            assert!(content.contains("/PCLat"), "{replacement}: {content}");
+            let lines = text::text_lines(&reopen(&doc), 0).unwrap();
+            assert_eq!(lines[0].text, replacement);
+            assert_eq!(lines[0].base_font, "Inter-Regular", "the generated font reports the face it drew");
+        }
+    }
+}
+
+/// The Japanese faces keep first refusal for the Cyrillic they do carry, so Russian text keeps the
+/// face it was drawn with before the bundled Latin face was added.
+#[test]
+fn cyrillic_the_japanese_faces_carry_keeps_them() {
+    if without_craft_fonts("cyrillic_the_japanese_faces_carry_keeps_them") {
+        return;
+    }
+    let face = pdfcraft_fonts::document_japanese_font_for_style(false, false).unwrap();
+    if pdfcraft_fonts::japanese_glyph_from(face, 'ф').is_err() {
+        eprintln!("skipping: the Japanese fallback face has no Cyrillic");
+        return;
+    }
+    let mut doc = text_page("BT /F2 12 Tf 72 700 Td (ab) Tj ET");
+    let edit = text::replace_line(&mut doc, 0, 0, "Привет, world").unwrap();
+    let expected = format!("{} Type3", face.family);
+    assert_eq!(edit.substituted.as_deref(), Some(expected.as_str()));
+}
+
 #[test]
 fn japanese_paragraph_uses_unicode_type3_fallback() {
     if without_craft_fonts("japanese_paragraph_uses_unicode_type3_fallback") {
@@ -4187,15 +4225,17 @@ fn a_new_character_comes_from_the_source_fonts_own_embedded_program() {
 #[test]
 fn a_subset_program_is_not_trusted_for_new_characters_and_the_error_names_the_character() {
     let mut doc = embedded_program_page("BT /F1 12 Tf 72 700 Td (Stable text) Tj ET", "ABCDEF+Inter-Regular");
+    // The subset's own program is not trusted for a character: the bundled Inter face draws it
+    // through a generated font instead (the subset may map a code whose outline was dropped).
+    let edit = text::rewrite_block(&mut doc, 0, 0, Some("Stable tőxt"), &text::BlockStyle::default()).unwrap();
+    assert_eq!(edit.substituted.as_deref(), Some("Inter Type3"));
+    assert_eq!(text::text_blocks(&reopen(&doc), 0).unwrap()[0].editor_text, "Stable tőxt");
+    // A character no fallback face has is refused, named, and left as it was.
+    let mut doc = embedded_program_page("BT /F1 12 Tf 72 700 Td (Stable text) Tj ET", "ABCDEF+Inter-Regular");
     let before = page_content_bytes(&doc, 0);
-    let result = text::rewrite_block(&mut doc, 0, 0, Some("Stable tőxt"), &text::BlockStyle::default());
-    if pdfcraft_fonts::document_japanese_font().is_some() {
-        eprintln!("built with craft-fonts: the fallback font draws the new character");
-        assert!(result.is_ok(), "{result:?}");
-        return;
-    }
+    let result = text::rewrite_block(&mut doc, 0, 0, Some("Stable กtext"), &text::BlockStyle::default());
     let Err(EditError::Invalid(msg)) = result else { panic!("expected a clear error, got {result:?}") };
-    assert!(msg.contains("ő (U+0151)") && msg.contains("Load font") && !msg.contains("Japanese"), "{msg}");
+    assert!(msg.contains("ก (U+0E01)") && msg.contains("Load font") && !msg.contains("Japanese"), "{msg}");
     assert_eq!(page_content_bytes(&doc, 0), before);
 }
 
