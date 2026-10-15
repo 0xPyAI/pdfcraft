@@ -622,6 +622,29 @@ fn text_editor_background_is_read_only_and_removes_source_glyphs() {
 }
 
 #[test]
+fn added_text_editor_background_hides_only_the_item_without_editing() {
+    let dir = workdir("added-text-preview");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let render = json!({"doc":doc,"page":1,"dpi":72});
+    let before = a.call("page_render", &render).unwrap();
+    ok(&mut a, "page_add_text", json!({"doc":doc,"page":1,"text":"Retype this label","at":[20,20],"width":160}));
+    let drawn = a.call("page_render", &render).unwrap();
+    assert_ne!(drawn, before);
+    let state = ok(&mut a, "doc_info", json!({"doc":doc}));
+    let items = ok(&mut a, "content_list", json!({"doc":doc}));
+    let preview = a.call("page_render", &json!({"doc":doc,"page":1,"dpi":72,"hide_added_text":1})).unwrap();
+    assert_eq!(preview, before, "native text and the page background stay intact");
+    assert_eq!(a.call("page_render", &render).unwrap(), drawn);
+    assert_eq!(ok(&mut a, "doc_info", json!({"doc":doc})), state);
+    assert_eq!(ok(&mut a, "content_list", json!({"doc":doc})), items);
+    for index in [-1, 0, 2, i64::MAX] {
+        assert!(a.call("page_render", &json!({"doc":doc,"page":1,"hide_added_text":index})).is_err());
+    }
+    assert!(a.call("page_render", &json!({"doc":doc,"page":1,"hide_added_text":1,"hide_text_block":1})).is_err());
+}
+
+#[test]
 fn edit_undo_redo_and_save_round_trip() {
     let dir = workdir("edit");
     let mut a = auto(&dir);

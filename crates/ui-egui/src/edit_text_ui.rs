@@ -15,11 +15,17 @@ use crate::canvas::{DocView, PageXform};
 
 const ACCENT: Color32 = Color32::from_rgb(0x14, 0x73, 0xE6);
 
+#[derive(Clone, Copy, PartialEq)]
+enum TextTarget {
+    Block(usize),
+    Added(usize),
+}
+
 /// A cached, read-only page background. The source glyphs are removed before rasterization;
 /// colour, pictures and unselected text beneath the editor remain visible.
 #[derive(Default)]
 pub(crate) struct TextBackground {
-    key: Option<(u64, usize, usize)>,
+    key: Option<(u64, usize, TextTarget)>,
     renderer: Option<pdfcraft_render::RenderPool>,
     texture: Option<egui::TextureHandle>,
     tag: Option<u64>,
@@ -33,12 +39,26 @@ impl TextBackground {
         self.renderer.is_some() && self.received != self.tag
     }
 
-    pub fn prepare(&mut self, ctx: &egui::Context, doc: &pdfcraft_engine::Document, editor: Option<&LineEditor>, scale: f32) {
-        let key = editor.map(|ed| (doc.edit_generation(), ed.page, ed.block));
+    pub fn prepare(
+        &mut self,
+        ctx: &egui::Context,
+        doc: &pdfcraft_engine::Document,
+        editor: Option<&LineEditor>,
+        draft: Option<&crate::content_ui::TextDraft>,
+        scale: f32,
+    ) {
+        let key = editor
+            .map(|ed| (doc.edit_generation(), ed.page, TextTarget::Block(ed.block)))
+            .or_else(|| draft.and_then(|d| d.index.map(|index| (doc.edit_generation(), d.page, TextTarget::Added(index)))));
         if self.key != key {
             *self = Self { key, ..Default::default() };
-            if let Some((_, page, block)) = key {
-                self.renderer = doc.text_edit_preview(page, block).ok().map(|p| p.renderer());
+            if let Some((_, page, target)) = key {
+                self.renderer = match target {
+                    TextTarget::Block(block) => doc.text_edit_preview(page, block),
+                    TextTarget::Added(index) => doc.added_text_preview(page, index),
+                }
+                .ok()
+                .map(|p| p.renderer());
             }
         }
         if let Some(ed) = editor {
@@ -82,11 +102,26 @@ impl TextBackground {
     }
 
     pub fn ready(&self, page: usize, block: usize) -> bool {
-        self.key.is_some_and(|(_, p, b)| (p, b) == (page, block)) && self.texture.is_some()
+        self.key.is_some_and(|(_, p, target)| (p, target) == (page, TextTarget::Block(block))) && self.texture.is_some()
     }
 
-    pub fn paint(&self, painter: &egui::Painter, xf: &PageXform, page: usize, editor: Option<&LineEditor>) {
-        let Some(_) = editor.filter(|ed| ed.page == page && self.ready(page, ed.block)) else { return };
+    pub fn ready_added(&self, page: usize, index: usize) -> bool {
+        self.key.is_some_and(|(_, p, target)| (p, target) == (page, TextTarget::Added(index))) && self.texture.is_some()
+    }
+
+    pub fn paint(
+        &self,
+        painter: &egui::Painter,
+        xf: &PageXform,
+        page: usize,
+        editor: Option<&LineEditor>,
+        draft: Option<&crate::content_ui::TextDraft>,
+    ) {
+        let ready = editor.is_some_and(|ed| ed.page == page && self.ready(page, ed.block))
+            || draft.is_some_and(|d| d.page == page && d.index.is_some_and(|index| self.ready_added(page, index)));
+        if !ready {
+            return;
+        }
         let Some(tex) = &self.texture else { return };
         // Font metrics can underestimate the actual glyph ink. Paint the complete textless
         // page so overhanging glyphs cannot remain outside the estimated source rectangle.
@@ -273,7 +308,7 @@ fn look_of(b: &pdfcraft_engine::TextBlock) -> pdfcraft_engine::AddedText {
     source_look(&b.base_font, b.size, b.color, b.bold, b.italic)
 }
 
-fn editor_font(look: &pdfcraft_engine::AddedText, size: f32) -> FontId {
+pub(crate) fn editor_font(look: &pdfcraft_engine::AddedText, size: f32) -> FontId {
     let family = match (look.family, look.bold) {
         (pdfcraft_engine::FontFamily::Courier, _) => FontFamily::Monospace,
         (_, true) => FontFamily::Name("semibold".into()),
@@ -1304,7 +1339,7 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
             // extent: single rows grow toward the page edge, paragraphs rewrap at their
             // source width, and the visible frame grows/shrinks vertically with their rows.
             // An OCR phrase (several stretched words on one scanned line) also grows rightwards.
-            let single_run = ed.source.as_ref().is_some_and(|(block, _)| block.lines.len() == 1 || block.invisible);
+            let single_run = ed.source.as_ref().is_some_and(|(block, _)| block.rows.len() == 1 || block.invisible);
             let width = if !ed.multiline && single_run && !ed.text.contains('\n') && ed.has_changes() {
                 let job = editor_job(ui, ed, &ed.text, scale, f32::INFINITY);
                 let natural = ui.fonts_mut(|f| f.layout_job(job)).size().x;
@@ -1449,7 +1484,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut background = TextBackground::default();
         for _ in 0..100 {
-            background.prepare(&ctx, doc, Some(&ed), 1.0);
+            background.prepare(&ctx, doc, Some(&ed), None, 1.0);
             if background.ready(0, 0) {
                 break;
             }
@@ -1458,12 +1493,12 @@ mod tests {
         assert!(background.ready(0, 0));
         assert!(!background.pending());
         let texture = background.texture.as_ref().unwrap().id();
-        background.prepare(&ctx, doc, Some(&ed), 1.0);
+        background.prepare(&ctx, doc, Some(&ed), None, 1.0);
         assert_eq!(background.texture.as_ref().unwrap().id(), texture);
         assert_eq!(doc.bytes, source);
         assert_eq!(doc.edit_generation(), generation);
         assert!(!doc.dirty && doc.can_undo().is_none());
-        background.prepare(&ctx, doc, None, 1.0);
+        background.prepare(&ctx, doc, None, None, 1.0);
         assert!(background.texture.is_none() && background.renderer.is_none());
     }
 
@@ -1478,7 +1513,7 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.begin_pass(egui::RawInput { max_texture_side: Some(16384), ..Default::default() });
         let mut background = TextBackground::default();
-        background.prepare(&ctx, doc, Some(&ed), 8.0);
+        background.prepare(&ctx, doc, Some(&ed), None, 8.0);
         let expected = 8.0f32.min(crate::canvas::TILE_THRESHOLD / page.width.max(page.height));
         assert!(expected > crate::canvas::BASE_SIDE / page.width.max(page.height), "the test page needs the larger side");
         assert_eq!(background.tag, Some((expected * 1000.0) as u64));
@@ -1486,7 +1521,7 @@ mod tests {
         ctx.end_pass().textures_delta.clear();
         ctx.begin_pass(egui::RawInput { max_texture_side: Some(2048), ..Default::default() });
         let mut small = TextBackground::default();
-        small.prepare(&ctx, doc, Some(&ed), 8.0);
+        small.prepare(&ctx, doc, Some(&ed), None, 8.0);
         assert_eq!(small.tag, Some(((2048.0 / page.width.max(page.height)) * 1000.0) as u64));
         ctx.end_pass().textures_delta.clear();
     }

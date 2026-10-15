@@ -1798,12 +1798,23 @@ impl Automation {
             return Err(ToolError::InvalidArgs(format!("dpi must be between 1 and {MAX_DPI}")));
         }
         let scale = (dpi / 72.0) as f32;
-        let out = if let Some(block) = a.opt_int("hide_text_block")? {
+        let block = a.opt_int("hide_text_block")?;
+        let added = a.opt_int("hide_added_text")?;
+        if block.is_some() && added.is_some() {
+            return Err(ToolError::InvalidArgs("choose only one of hide_text_block and hide_added_text".into()));
+        }
+        let out = if let Some(block) = block {
             let index = usize::try_from(block)
                 .ok()
                 .and_then(|n| n.checked_sub(1))
                 .ok_or_else(|| ToolError::InvalidArgs("hide_text_block must be a positive paragraph index from text_paragraphs".into()))?;
             self.doc(a)?.text_edit_preview(page, index).map_err(failed)?.render_background(scale).map_err(failed)?
+        } else if let Some(added) = added {
+            let index = usize::try_from(added)
+                .ok()
+                .and_then(|n| n.checked_sub(1))
+                .ok_or_else(|| ToolError::InvalidArgs("hide_added_text must be a positive added text index from object_list".into()))?;
+            self.doc(a)?.added_text_preview(page, index).map_err(failed)?.render_background(scale).map_err(failed)?
         } else {
             self.renderer(id)?.render(RenderRequest { page, kind: RequestKind::Pixels, tile: None, scale, tag: 0, preview: false })
         };

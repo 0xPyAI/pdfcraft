@@ -3432,6 +3432,30 @@ fn mixed_styles_and_matrix_sizes_form_visual_regions_without_merging_columns() {
 }
 
 #[test]
+fn a_single_row_with_mixed_styles_grows_before_wrapping() {
+    let mut doc = text_page("BT /F1 10 Tf 72 582 Td (Plain ) Tj /F2 10 Tf (bold) Tj /F1 10 Tf ( text.) Tj ET");
+    doc.update_dict(pdfcraft_cos::ObjRef::new(6, 0), |f| {
+        *f = Dict::new();
+        f.set(b"Type".to_vec(), Object::name("Font"));
+        f.set(b"Subtype".to_vec(), Object::name("Type1"));
+        f.set(b"BaseFont".to_vec(), Object::name("Helvetica-Bold"));
+    })
+    .unwrap();
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    let index = blocks.iter().position(|b| b.editor_text == "Plain bold text.").unwrap();
+    let source = &blocks[index];
+    assert_eq!(source.rows.len(), 1);
+    assert!(source.lines.len() > 1);
+    let draft = "Plain bold text. More words on the same line";
+    text::replace_block(&mut doc, 0, index, draft).unwrap();
+    let edited = text::text_blocks(&reopen(&doc), 0).unwrap();
+    let block = edited.iter().find(|b| b.text == draft).unwrap();
+    assert_eq!(block.rows.len(), 1, "a style boundary must not pin a single row to its original width");
+    assert!((block.rect[0] - source.rect[0]).abs() < 0.1);
+    assert!(block.rect[2] > source.rect[2] + 20.0);
+}
+
+#[test]
 fn explicit_editor_rows_survive_single_run_edit_and_reopen() {
     let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Original heading) Tj ET");
     let text = "First row\nSecond row\nLast row";

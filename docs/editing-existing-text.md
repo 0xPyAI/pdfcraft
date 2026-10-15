@@ -10,6 +10,12 @@ moved because an earlier row wrapped, are rewritten, and formatting a selection 
 only the rows it covers. Changing the whole paragraph's formatting, width or position rewrites
 every row.
 
+Add Text also opens existing text when it is clicked; a blank-space click starts a new item.
+Both text tools retype an added text item with one click. Draft boxes grow to the page edge
+before wrapping, and the saved item uses that width. A single visual source row grows across font/style boundaries;
+multi-row paragraphs retain their existing wrap width. Retyping uses a preview with only
+that added item's old drawing removed, so deleted draft characters do not show underneath.
+
 A subset font contains only some of the original face's glyphs. A new character cannot be
 reconstructed from a glyph the PDF does not contain. **Load font…** imports an openly licensed,
 embeddable standalone `.ttf` or `.otf` face. **Installed fonts…** discovers eligible user-installed

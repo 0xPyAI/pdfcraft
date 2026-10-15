@@ -501,6 +501,11 @@ pub fn text_rect(t: &AddedText) -> [f64; 4] {
     [r[0], r[3] - h, r[2], r[3]]
 }
 
+/// The widest explicit line before wrapping, measured with the PDF writing fonts.
+pub fn text_width(t: &AddedText) -> f64 {
+    t.text.split('\n').map(|line| shaped_width(t, line, unicode_bidi::get_base_direction(line) == unicode_bidi::Direction::Rtl)).fold(0.0, f64::max)
+}
+
 fn font_name(base: &str) -> String {
     format!("PCF{}", base.replace('-', ""))
 }

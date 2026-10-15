@@ -379,8 +379,9 @@ pub(super) fn rewrite_styled_block(
     if !dx.is_finite() || !dy.is_finite() || style.width.is_some_and(|w| !w.is_finite()) {
         return Err(EditError::Invalid("the paragraph's position and width must be finite".into()));
     }
-    // A rewritten OCR line grows to the right rather than wrapping onto the scanned line below.
-    let natural = if block.invisible {
+    // A visual row grows even when it contains several source/font runs. Multi-row
+    // paragraphs retain their container width; an explicit width always wins.
+    let natural = if block.invisible || block.rows.len() == 1 {
         (p.crop(doc)[2] - 36.0 - (block.rect[0] + dx)).max(block.rect[2] - block.rect[0])
     } else {
         block.rect[2] - block.rect[0]

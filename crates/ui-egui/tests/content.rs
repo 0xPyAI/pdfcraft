@@ -77,6 +77,113 @@ fn texts(h: &Harness<'static, PdfCraftApp>) -> Vec<String> {
 }
 
 #[test]
+fn text_tool_drafts_grow_for_latin_and_arabic() {
+    for text in ["Wide words ".repeat(8), "سلام عليكم ".repeat(8)] {
+        let mut h = harness();
+        assert!(h.state_mut().execute("edit.text"));
+        h.run_steps(2);
+        let point = at(&h, 40.0, 300.0);
+        click(&mut h, point);
+        let before = h.state().views[0].content.draft.as_ref().unwrap().rect;
+        h.event(egui::Event::Text(text.clone()));
+        h.run_steps(4);
+        let draft = h.state().views[0].content.draft.as_ref().unwrap();
+        assert!(draft.rect[2] - draft.rect[0] > before[2] - before[0] + 10.0, "the editor grows before wrapping: {}", text);
+        assert!(draft.rect[2] <= 300.0 && draft.rect[1] < before[1], "the frame stays on the page and grows vertically");
+        if let Ok(dir) = std::env::var("PDFCRAFT_SHOTS") {
+            let language = if text.starts_with("Wide") { "latin" } else { "arabic" };
+            h.render().unwrap().save(format!("{dir}/growing-{language}-text.png")).unwrap();
+        }
+        h.get_by_label("Done adding text").click();
+        h.run_steps(3);
+        if text.starts_with("سلام") && pdfcraft_fonts::document_arabic_font().is_none() {
+            assert!(h.state().views[0].content.draft.is_some(), "without a document font the draft remains available");
+            assert!(added(&h).is_empty());
+            continue;
+        }
+        let pdfcraft_engine::AddedContent::Text(saved) = &added(&h)[0].content else { panic!() };
+        assert_eq!(saved.text, text.trim_end());
+        assert!(saved.rect[2] - saved.rect[0] > before[2] - before[0] + 10.0, "Save uses the grown width");
+    }
+}
+
+#[test]
+fn text_tool_single_click_retypes_added_text_without_another_item() {
+    for command in ["edit.text", "edit.edit_text"] {
+        for (original, replacement) in [("Original", "Replacement"), ("سلام", "سلام عليكم ورحمة الله")] {
+            if original == "سلام" && pdfcraft_fonts::document_arabic_font().is_none() {
+                continue;
+            }
+            let mut h = harness();
+            assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::AddText {
+                page: 0,
+                text: pdfcraft_engine::AddedText { rect: [40.0, 195.0, 140.0, 210.0], text: original.into(), ..Default::default() },
+            }));
+            assert!(h.state_mut().execute(command));
+            h.run_steps(3);
+            let point = at(&h, 45.0, 195.0);
+            click(&mut h, point);
+            let draft = h.state().views[0].content.draft.as_ref().expect("one click edits the existing item");
+            assert_eq!(draft.index, Some(0));
+            assert_eq!(draft.text, original);
+            h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+            h.event(egui::Event::Text(replacement.into()));
+            h.run_steps(3);
+            h.get_by_label("Done adding text").click();
+            h.run_steps(3);
+            assert_eq!(texts(&h), [replacement]);
+            let state = h.state();
+            let bytes = state.session.save_bytes(state.views[0].id).unwrap();
+            let mut reopened = pdfcraft_engine::Session::new();
+            let id = reopened.open("again.pdf", None, bytes, None).unwrap();
+            assert_eq!(reopened.get(id).unwrap().added().len(), 1);
+            let pdfcraft_engine::AddedContent::Text(text) = &reopened.get(id).unwrap().added()[0].content else { panic!() };
+            assert_eq!(text.text, replacement);
+        }
+    }
+}
+
+#[test]
+fn text_tool_deleting_a_draft_hides_the_old_added_glyphs_and_cancel_restores_them() {
+    let mut h = harness();
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::AddText {
+        page: 0,
+        text: pdfcraft_engine::AddedText { rect: [40.0, 195.0, 240.0, 220.0], text: "Original glyphs".into(), size: 18.0, ..Default::default() },
+    }));
+    let bytes = h.state().session.get(h.state().views[0].id).unwrap().bytes.clone();
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(3);
+    let point = at(&h, 45.0, 185.0);
+    click(&mut h, point);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.key_press(egui::Key::Backspace);
+    for _ in 0..100 {
+        h.run_steps(2);
+        if !h.state().render_pending() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(h.state().views[0].content.draft.as_ref().unwrap().text.is_empty());
+    let shot = h.render().unwrap();
+    for x in 105..140 {
+        for y in 185..197 {
+            let pixel = at(&h, x as f32, y as f32);
+            let [r, g, b, a] = shot.get_pixel(pixel.x as u32, pixel.y as u32).0;
+            assert!(r > 200 && g > 200 && b > 200 && a == 255, "old glyph ink remains at {x},{y}: {r},{g},{b},{a}");
+        }
+    }
+    if let Ok(dir) = std::env::var("PDFCRAFT_SHOTS") {
+        shot.save(format!("{dir}/cleared-added-text.png")).unwrap();
+    }
+    assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().bytes, bytes, "previewing does not edit the document");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert_eq!(texts(&h), ["Original glyphs"]);
+    assert!(h.state().views[0].content.draft.is_none());
+}
+
+#[test]
 fn clicking_elsewhere_keeps_the_text_and_starts_a_new_box() {
     // #74: a click elsewhere on the page threw away the text being typed and opened a new box.
     let mut h = harness();

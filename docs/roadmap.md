@@ -178,6 +178,7 @@ M2 (renderer), M7 (content editing), M10 (OCR and Office), M11 (Preflight and st
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | minor | M7 local candidate: text drafts grow and save their width; single visual rows grow across style boundaries; both text tools retype added items and Add Text edits source text. Added-item textless previews are read-only and covered by UI/tool regressions. Estimates unchanged. |
 | 2026-10-12 | minor | M14/#1395: XDG configuration preferences, safe migration and fallback; logs/recovery retain data locations, portable/non-XDG unchanged. Estimates unchanged. |
 | 2026-10-12 | minor | M6: XFDF field import and data extraction preserve all text around XML comments and processing instructions; synthetic save/reopen regressions. Estimates unchanged. |
 | 2026-10-12 | minor | M2: preserve whitespace-bounded EI bytes in known unfiltered inline images; row padding, masks and aliases tested, with independent saved-PDF pixel checks. Estimates unchanged. |
