@@ -1284,16 +1284,21 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
     match done {
         Some(apply) => {
             let ed = view.line_editor.take()?;
-            let style = ed.style();
-            (apply && (ed.text != ed.original || style != pdfcraft_engine::BlockStyle::default())).then_some(Edit::EditTextBlock {
-                page: ed.page,
-                block: ed.block,
-                text: ed.text,
-                style,
-            })
+            if apply { finished_edit(ed) } else { None }
         }
         None => None,
     }
+}
+
+/// The edit a closed paragraph editor applies, or `None` when nothing in it changed.
+pub(crate) fn finished_edit(ed: LineEditor) -> Option<Edit> {
+    let style = ed.style();
+    (ed.text != ed.original || style != pdfcraft_engine::BlockStyle::default()).then_some(Edit::EditTextBlock {
+        page: ed.page,
+        block: ed.block,
+        text: ed.text,
+        style,
+    })
 }
 
 /// Caret colour that stays visible on a field filled with `fill`: black on light fills, white on dark ones.

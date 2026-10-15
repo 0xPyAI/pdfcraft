@@ -1346,7 +1346,8 @@ fn explicit_panel_requests_reveal_inactive_group_members() {
     h.get_by_label("This document has no bookmarks.");
     ok(&mut h, &c, "ui.command", json!({"id":"edit.edit_text"}));
     h.run_steps(4);
-    h.get_by_label("Edit text & images");
+    // The Edit panel's own row: the tool's name is on the floating toolbar too while it is on.
+    h.get_by_label("Header and footer");
 }
 
 #[test]

@@ -4195,6 +4195,18 @@ fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                                 }
                             });
                     }
+                    // Edit text & images, while the Edit workspace is open (Acrobat's Edit toolbar)
+                    // or the tool is in use.
+                    if app.mode == crate::Mode::Edit || app.quick_tool == QuickTool::EditText {
+                        let on = app.quick_tool == QuickTool::EditText;
+                        if icons::button(ui, "text-cursor-input", 32.0, on, tl!("Edit text & images")).clicked() {
+                            if on {
+                                app.put_down_edit_text();
+                            } else {
+                                app.quick_tool = QuickTool::EditText;
+                            }
+                        }
+                    }
                     // Fill & Sign ▸ (text, marks, date, signature).
                     let current_fill = match app.quick_tool {
                         QuickTool::Fill(f) => Some(f),

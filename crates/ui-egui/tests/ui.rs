@@ -1308,3 +1308,27 @@ fn the_combine_tab_does_not_move_and_documents_stay_in_order() {
     drag_named_tab(&mut h, "Combine files", first.left_center() - egui::vec2(10.0, 0.0), true);
     assert_eq!(h.state().views.iter().map(|view| view.id).collect::<Vec<_>>(), ids);
 }
+
+/// The Edit tab turns on Edit text & images at once, as Acrobat does, so every paragraph and image
+/// is boxed and editable with one click; another tab puts the tool down again.
+#[test]
+fn the_edit_tab_turns_on_edit_text_and_images() {
+    use pdfcraft_ui_egui::{Mode, QuickTool};
+    let mut h = harness(|app| app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens"));
+    assert_eq!(h.state().quick_tool, QuickTool::Select);
+    h.get_by_label("Edit").click();
+    h.run_steps(3);
+    assert_eq!(h.state().mode, Mode::Edit);
+    assert_eq!(h.state().quick_tool, QuickTool::EditText);
+    h.get_by_label("All tools").click();
+    h.run_steps(3);
+    assert_eq!(h.state().mode, Mode::AllTools);
+    assert_eq!(h.state().quick_tool, QuickTool::Select);
+    // Another tool picked inside Edit is not taken away by leaving it.
+    h.get_by_label("Edit").click();
+    h.run_steps(3);
+    h.state_mut().quick_tool = QuickTool::Hand;
+    h.get_by_label("Convert").click();
+    h.run_steps(3);
+    assert_eq!(h.state().quick_tool, QuickTool::Hand);
+}
