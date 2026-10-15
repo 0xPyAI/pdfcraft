@@ -1718,8 +1718,8 @@ milestone = "M4"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/commands.rs::shortcuts_run_registered_commands", "crates/engine/src/commands.rs::shortcut_labels_follow_platform_conventions"]
-notes = ""
+evidence = ["crates/ui-egui/tests/commands.rs::shortcuts_run_registered_commands", "crates/engine/src/commands.rs::shortcut_labels_follow_platform_conventions", "crates/ui-egui/tests/commands.rs::quit_shortcut_requires_exact_modifiers_and_preserves_unsaved_work", "crates/ui-egui/tests/signing.rs::ctrl_alt_q_types_an_email_without_quitting"]
+notes = "Quit requires exact Ctrl+Q/Cmd+Q modifiers and preserves unsaved-document confirmation. Ctrl+Alt+Q email input is covered with synthetic key/text events; native German keyboard-layout translation is not covered by that test (#1980)."
 
 [[feature]]
 id = "view.shortcuts-dialog"

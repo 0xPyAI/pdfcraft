@@ -64,6 +64,35 @@ fn field<'a>(h: &'a Harness<'static, PdfCraftApp>, label: &'a str) -> egui_kitte
 }
 
 #[test]
+fn ctrl_alt_q_types_an_email_without_quitting() {
+    let mut h = harness(dir());
+    h.state_mut().execute("sign.digital");
+    let (a, b) = (at(&h, 40.0, 90.0), at(&h, 220.0, 40.0));
+    drag(&mut h, a, b);
+    assert_eq!(h.state().sign_draft.as_ref().unwrap().step, SignStep::Configure);
+    field(&h, "Email Address").click();
+    h.run_steps(1);
+    field(&h, "Email Address").type_text("test");
+    h.run_steps(1);
+    // The key and text events produced by Ctrl+Alt+Q on German QWERTZ.
+    h.input_mut().events.push(egui::Event::Key {
+        key: egui::Key::Q,
+        physical_key: Some(egui::Key::Q),
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers { ctrl: true, command: true, alt: true, ..Default::default() },
+    });
+    h.input_mut().events.push(egui::Event::Text("@".into()));
+    h.step();
+    assert!(!h.output().viewport_output.values().any(|v| v.commands.contains(&egui::ViewportCommand::Close)));
+    assert_eq!(h.state().sign_draft.as_ref().unwrap().new_id.email, "test@");
+    field(&h, "Email Address").type_text("example.org");
+    h.run_steps(1);
+    assert_eq!(h.state().sign_draft.as_ref().unwrap().new_id.email, "test@example.org");
+    assert_eq!(h.state().dialog, Some(Dialog::Sign));
+}
+
+#[test]
 fn drawing_a_signature_creating_an_id_signing_and_trusting() {
     let dir = dir();
     let mut h = harness(dir.clone());

@@ -840,6 +840,17 @@ impl PdfCraftApp {
 
     /// Intercept window close while documents have unsaved changes.
     pub(crate) fn guard_quit(&mut self, ctx: &egui::Context) {
+        // egui's default quit shortcut ignores extra Alt/Shift, including Ctrl+Alt+Q for '@'.
+        ctx.options_mut(|o| o.quit_shortcuts.clear());
+        let shortcut = ctx.input(|i| {
+            i.events.iter().any(|e| {
+                matches!(e, egui::Event::Key { key: egui::Key::Q, pressed: true, modifiers, .. }
+                    if modifiers.matches_exact(egui::Modifiers::COMMAND))
+            })
+        });
+        if shortcut {
+            self.request_quit(ctx);
+        }
         self.sync_unsaved_flag();
         if !ctx.input(|i| i.viewport().close_requested()) {
             return;

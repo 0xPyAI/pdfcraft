@@ -493,6 +493,36 @@ fn the_about_dialog_shows_the_running_version() {
 }
 
 #[test]
+fn quit_shortcut_requires_exact_modifiers_and_preserves_unsaved_work() {
+    for (os, modifiers) in [
+        (OperatingSystem::Windows, Modifiers { ctrl: true, command: true, ..Default::default() }),
+        (OperatingSystem::Mac, Modifiers { mac_cmd: true, command: true, ..Default::default() }),
+    ] {
+        for (extra, dirty, should_close) in
+            [(Modifiers::ALT, false, false), (Modifiers::SHIFT, false, false), (Modifiers::NONE, false, true), (Modifiers::NONE, true, false)]
+        {
+            let mut h = harness();
+            h.ctx.set_os(os);
+            if dirty {
+                assert!(h.state_mut().execute("page.insert_blank"));
+                h.run_steps(2);
+            }
+            h.event(egui::Event::Key { key: Key::Q, physical_key: None, pressed: true, repeat: false, modifiers: modifiers | extra });
+            h.step();
+            let closes = h.output().viewport_output.values().any(|v| v.commands.contains(&egui::ViewportCommand::Close));
+            assert_eq!(closes, should_close, "{os:?}, extra={extra:?}, dirty={dirty}");
+            if dirty {
+                h.get_by_label("Cancel").click();
+                h.run_steps(2);
+                assert_eq!(h.state().views.len(), 1);
+                assert!(h.state().session.get(h.state().views[0].id).unwrap().dirty);
+                assert!(!h.output().viewport_output.values().any(|v| v.commands.contains(&egui::ViewportCommand::Close)));
+            }
+        }
+    }
+}
+
+#[test]
 fn command_w_closes_empty_macos_window_but_not_an_empty_windows_window() {
     for (os, should_close) in [(OperatingSystem::Mac, true), (OperatingSystem::Windows, false)] {
         let mut h = Harness::builder().with_size(egui::vec2(1000.0, 700.0)).build_eframe(|_cc| PdfCraftApp::new());
