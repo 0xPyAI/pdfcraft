@@ -14,6 +14,9 @@ const PREVIEW_W: f32 = 320.0;
 const PREVIEW_H: f32 = 380.0;
 const PREVIEW_INSET: f32 = 12.0;
 pub(crate) const PREVIEW_BOX: (f32, f32) = (PREVIEW_W - 2.0 * PREVIEW_INSET, PREVIEW_H - 2.0 * PREVIEW_INSET);
+/// Label printing reads the printed area of at most this many pages (each is a quick render on
+/// the UI thread); further pages print whole.
+pub(crate) const LABEL_CROP_PAGES: usize = 50;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Which {
@@ -30,6 +33,8 @@ pub enum Handling {
     Poster,
     Multiple,
     Booklet,
+    /// Shipping label: cut to the printed area, turned upright, one per sheet.
+    Label,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -81,6 +86,13 @@ pub struct PrintDraft {
     pub show_driver_options: bool,
     /// Why the printer's preferences window didn't open (Windows).
     pub driver_error: Option<String>,
+    /// Label: turn a further 180°.
+    pub label_flip: bool,
+    /// Label: each page's printed area and text direction, read when Label is chosen
+    /// ([`PdfCraftApp::read_label_crops`]); empty until then.
+    pub crops: Vec<Option<print::Crop>>,
+    /// The pages `crops` were read for, so a changed page selection reads them again.
+    pub crop_pages: Option<Vec<usize>>,
 }
 
 impl Default for PrintDraft {
@@ -123,6 +135,9 @@ impl Default for PrintDraft {
             driver_choices: Default::default(),
             show_driver_options: false,
             driver_error: None,
+            label_flip: false,
+            crops: Vec::new(),
+            crop_pages: None,
         }
     }
 }
@@ -160,6 +175,7 @@ impl PrintDraft {
             },
             Handling::Booklet => Layout::Booklet { subset: self.booklet_subset, binding: self.binding },
             Handling::Poster => Layout::Poster { scale: self.poster_scale, overlap: self.overlap, cut_marks: self.cut_marks },
+            Handling::Label => Layout::Label { flip: self.label_flip },
         };
         Ok(print::Settings {
             pages,
@@ -168,6 +184,7 @@ impl PrintDraft {
             layout,
             content: self.content,
             raster: self.as_image.then_some(print::Raster { dpi: self.dpi, grayscale: self.grayscale }),
+            crops: self.crops.clone(),
         })
     }
 
@@ -184,7 +201,11 @@ impl PrintDraft {
             options: match (&self.printer, &self.driver_options) {
                 (Some(p), Some((read_for, _))) if p == read_for => self.driver_choices.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
                 _ => Vec::new(),
-            },
+            }
+            .into_iter()
+            // The sheet the PDF was laid out on, not the queue's default paper.
+            .chain(print::cups_media(self.paper).map(|m| ("media".to_string(), m.to_string())))
+            .collect(),
         }
     }
 }
@@ -292,6 +313,8 @@ impl PdfCraftApp {
             (true, other) => other,
         };
         self.print_draft = PrintDraft {
+            crops: Vec::new(),
+            crop_pages: None,
             printers,
             printers_loading,
             printer_picked: false,
@@ -304,6 +327,50 @@ impl PdfCraftApp {
             ..keep
         };
         self.dialog = Some(crate::Dialog::Print);
+    }
+
+    /// Label printing: find each printed page's printed area (a quick low-resolution render, as
+    /// Fit Visible does) and which way its text runs. Only the pages being printed are read, at
+    /// most [`LABEL_CROP_PAGES`] of them (the rest print whole); read again when they change.
+    pub(crate) fn read_label_crops(&mut self, id: pdfcraft_engine::DocId) {
+        let Some(doc) = self.session.get(id) else { return };
+        let labels: Vec<String> = doc.info.pages.iter().map(|p| p.label.clone()).collect();
+        let mut pages = self.print_draft.settings(doc.info.pages.len(), &labels).map(|s| s.pages).unwrap_or_default();
+        pages.sort_unstable();
+        pages.dedup();
+        pages.truncate(LABEL_CROP_PAGES);
+        if self.print_draft.crop_pages.as_ref() == Some(&pages) {
+            return;
+        }
+        let up = self.session.print_text_up(id, &pages);
+        let config = pdfcraft_render::RenderConfig { password: doc.password.as_deref().map(std::sync::Arc::from), ..Default::default() };
+        let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), config);
+        self.print_draft.crops = doc
+            .info
+            .pages
+            .iter()
+            .enumerate()
+            .map(|(page, p)| {
+                let (w, h) = (f64::from(p.width), f64::from(p.height));
+                if pages.binary_search(&page).is_err() || w <= 0.0 || h <= 0.0 {
+                    return None;
+                }
+                let out = r.render(pdfcraft_render::RenderRequest {
+                    page,
+                    kind: pdfcraft_render::RequestKind::Pixels,
+                    tile: None,
+                    scale: (1000.0 / w.max(h) as f32).clamp(0.1, 4.0),
+                    tag: 0,
+                    preview: false,
+                });
+                let [u0, v0, u1, v1] = crate::zoom_snap::ink_bounds(out.width as usize, out.height as usize, &out.rgba)?;
+                // Image rows run down from the top; display space runs up. Half a millimetre of slack.
+                let pad = 1.5;
+                let rect = [f64::from(u0) * w - pad, (1.0 - f64::from(v1)) * h - pad, f64::from(u1) * w + pad, (1.0 - f64::from(v0)) * h + pad];
+                Some(print::Crop { rect, text_up: up.get(page).copied().unwrap_or(false) })
+            })
+            .collect();
+        self.print_draft.crop_pages = Some(pages);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -838,11 +905,17 @@ pub(crate) fn body(
                 ui.end_row();
                 ui.label(tl!("Paper:"));
                 let paper_name = PAPERS.get(d.paper).map_or("US Letter", |p| p.0);
-                egui::ComboBox::from_id_salt("paper").selected_text(paper_name).width(260.0).show_ui(ui, |ui| {
+                let before = d.paper;
+                egui::ComboBox::from_id_salt("paper").selected_text(tl!(paper_name)).width(260.0).show_ui(ui, |ui| {
                     for (i, (name, _)) in PAPERS.iter().enumerate() {
-                        ui.selectable_value(&mut d.paper, i, *name);
+                        ui.selectable_value(&mut d.paper, i, tl!(name));
                     }
                 });
+                // Label stock gets the label layout (cut, turned upright, fitted).
+                if d.paper != before && d.paper == print::LABEL_PAPER {
+                    d.handling = Handling::Label;
+                    d.sheet = 0;
+                }
                 ui.end_row();
             });
             // Windows says which drivers can't print two-sided as they're asked; they keep their
@@ -914,10 +987,15 @@ pub(crate) fn body(
                     (Handling::Poster, tl!("Poster")),
                     (Handling::Multiple, tl!("Multiple")),
                     (Handling::Booklet, tl!("Booklet")),
+                    (Handling::Label, tl!("Label")),
                 ] {
                     if widgets::mode_tab(ui, label, d.handling == h).clicked() {
                         d.handling = h;
                         d.sheet = 0;
+                        // A label goes on label stock.
+                        if h == Handling::Label {
+                            d.paper = print::LABEL_PAPER;
+                        }
                     }
                 }
             });
@@ -936,6 +1014,14 @@ pub(crate) fn body(
                         }
                         ui.add_enabled(custom, egui::DragValue::new(&mut d.custom_scale).range(1.0..=1000.0).suffix(" %"));
                     });
+                }
+                Handling::Label => {
+                    ui.add(widgets::checkbox(&mut d.label_flip, tl!("Turn upside down (180°)")));
+                    ui.label(
+                        egui::RichText::new(tl!("Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet."))
+                            .small()
+                            .color(t.text_muted),
+                    );
                 }
                 Handling::Poster => {
                     ui.horizontal(|ui| {

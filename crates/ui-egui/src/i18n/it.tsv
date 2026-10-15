@@ -2383,6 +2383,9 @@ animation effects	Off	Disattivati
 	This document is trying to open a local file:	Questo documento sta tentando di aprire un file locale:
 	Move tag earlier	Sposta tag prima
 	Move tag later	Sposta tag dopo
+	Turn upside down (180°)	Capovolgi (ruota di 180°)
+	4 x 6 in label (101.6 x 152.4 mm)	Etichetta 4×6 - 101,6 × 152,4 mm
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Ritaglia l'area stampata di ogni pagina, la raddrizza e la adatta al foglio senza deformarla. Un'etichetta per foglio.
 	Find untagged content	Trova contenuto senza tag
 	No untagged content was found.	Non è stato trovato contenuto senza tag.
 	Found {n} untagged content problems.	Trovati {n} problemi di contenuto senza tag.

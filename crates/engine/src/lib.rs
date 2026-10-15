@@ -4297,6 +4297,20 @@ impl Session {
         pdfcraft_print::impose(&cos, settings).map_err(|e| EditError::Print(e.to_string()))
     }
 
+    /// For each page, whether its text mostly runs bottom-to-top ([`pdfcraft_print::text_reads_up`]);
+    /// only `pages` are read, the others are `false`.
+    pub fn print_text_up(&self, id: DocId, pages: &[usize]) -> Vec<bool> {
+        let Some(doc) = self.get(id) else { return Vec::new() };
+        let cos = match doc.editor.as_ref() {
+            Some(e) => e.cos.clone(),
+            None => match pdfcraft_cos::Document::open_with_password(doc.bytes.clone(), doc.password.as_deref()) {
+                Ok(c) => c,
+                Err(_) => return Vec::new(),
+            },
+        };
+        (0..doc.info.pages.len()).map(|i| pages.contains(&i) && pdfcraft_print::text_reads_up(&cos, i)).collect()
+    }
+
     /// Combine whole files, in order, into new PDF bytes (one bookmark per file).
     pub fn combine(&self, sources: &[(String, Arc<Vec<u8>>)]) -> Result<Arc<Vec<u8>>, EditError> {
         let docs = sources.iter().map(|(n, b)| open_source(n, b)).collect::<Result<Vec<_>, _>>()?;

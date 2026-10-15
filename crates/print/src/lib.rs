@@ -179,6 +179,11 @@ pub enum Layout {
         overlap: f64,
         cut_marks: bool,
     },
+    /// Shipping label: each page cut to its [`Settings::crops`] box, turned so its text reads
+    /// upright on the sheet and fitted with [`LABEL_MARGIN`]; `flip` turns it a further 180°.
+    Label {
+        flip: bool,
+    },
 }
 
 impl Default for Layout {
@@ -228,6 +233,10 @@ pub struct Settings {
     pub orientation: Orientation,
     pub layout: Layout,
     pub content: Content,
+    /// For [`Layout::Label`], per source page: the area to keep (display space) and whether its
+    /// text runs bottom-to-top (so a quarter turn clockwise makes it upright). `None` or a
+    /// missing entry keeps the whole page.
+    pub crops: Vec<Option<Crop>>,
     /// Print as image (Acrobat's Advanced Print Setup): every page rendered to a picture at this
     /// resolution before it is placed on the paper. The engine does the rendering; `impose` is
     /// then given the image-only document.
@@ -249,6 +258,12 @@ impl Default for Raster {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Crop {
+    pub rect: [f64; 4],
+    pub text_up: bool,
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Settings {
@@ -258,12 +273,13 @@ impl Default for Settings {
             layout: Layout::default(),
             content: Content::default(),
             raster: None,
+            crops: Vec::new(),
         }
     }
 }
 
 /// Common paper sizes (points, portrait).
-pub const PAPERS: [(&str, (f64, f64)); 19] = [
+pub const PAPERS: [(&str, (f64, f64)); 20] = [
     ("US Letter", (612.0, 792.0)),
     ("US Legal", (612.0, 1008.0)),
     ("Tabloid", (792.0, 1224.0)),
@@ -283,7 +299,90 @@ pub const PAPERS: [(&str, (f64, f64)); 19] = [
     ("A2", (1190.55, 1683.78)),
     ("A1", (1683.78, 2383.94)),
     ("A0", (2383.94, 3370.39)),
+    ("4 x 6 in label (101.6 x 152.4 mm)", (288.0, 432.0)),
 ];
+
+/// `PAPERS` index of the 4 × 6 in shipping label.
+pub const LABEL_PAPER: usize = 19;
+
+/// The CUPS media name for `PAPERS[index]`, so the spooler feeds the sheet the PDF was laid out
+/// on rather than the queue's default (PPD keywords; `w288h432` is the usual 4×6 label).
+pub fn cups_media(index: usize) -> Option<&'static str> {
+    match PAPERS.get(index)?.0 {
+        "US Letter" => Some("Letter"),
+        "US Legal" => Some("Legal"),
+        "Tabloid" => Some("Tabloid"),
+        "A3" => Some("A3"),
+        "A4" => Some("A4"),
+        "A5" => Some("A5"),
+        _ if index == LABEL_PAPER => Some("w288h432"),
+        _ => None,
+    }
+}
+
+/// Whether most of page `index`'s text runs bottom-to-top as the page displays (a label laid
+/// sideways on a letter or A4 sheet), counting each text-showing operator once; form XObjects
+/// are followed a few levels deep.
+pub fn text_reads_up(doc: &Document, index: usize) -> bool {
+    let Some(page) = pdfcraft_model::pages(doc).into_iter().nth(index) else { return false };
+    let to_display = Matrix(page.view_matrix(doc)).invert().unwrap_or_default();
+    let res = page.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
+    let mut score = 0i64;
+    text_direction(doc, &decoded_contents(doc, &page.dict), &res, to_display, 0, &mut score);
+    score > 0
+}
+
+fn text_direction(doc: &Document, data: &[u8], res: &Dict, base: Matrix, depth: usize, score: &mut i64) {
+    let (mut ctm, mut tm, mut stack) = (base, Matrix::IDENTITY, Vec::new());
+    for op in pdfcraft_content::parse(data).ops {
+        match op.op.as_slice() {
+            // Bounded like the renderer's graphics-state stack: deeper saves are ignored.
+            b"q" if stack.len() < 256 => stack.push(ctm),
+            b"Q" => ctm = stack.pop().unwrap_or(base),
+            b"cm" => ctm = Matrix::from_operands(&op.operands).unwrap_or_default().then(&ctm),
+            b"BT" => tm = Matrix::IDENTITY,
+            b"Tm" => tm = Matrix::from_operands(&op.operands).unwrap_or_default(),
+            b"Tj" | b"TJ" | b"'" | b"\"" => {
+                let [a, b, ..] = tm.then(&ctm).0;
+                *score += i64::from(b > a.abs()) - i64::from(-b > a.abs());
+            }
+            b"Do" if depth < 4 => {
+                let Some(name) = op.name(0) else { continue };
+                let Some(xobj) = res.get(b"XObject").and_then(|x| doc.resolve(x).as_dict().and_then(|x| x.get(name).cloned())) else { continue };
+                let Object::Stream(form) = &*doc.resolve(&xobj) else { continue };
+                if form.dict.get(b"Subtype").and_then(|s| doc.resolve(s).as_name().map(<[u8]>::to_vec)).as_deref() != Some(b"Form".as_slice()) {
+                    continue;
+                }
+                let m = form.dict.get(b"Matrix").and_then(|m| doc.resolve(m).as_array().and_then(|a| Matrix::from_operands(a))).unwrap_or_default();
+                let inner = form.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_else(|| res.clone());
+                if let Ok(body) = form.decoded() {
+                    text_direction(doc, &body, &inner, m.then(&ctm), depth + 1, score);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Margin kept around a label: thermal heads miss the very edge, and many 4×6 drivers feed
+/// 100 × 150 mm (283 × 425 pt), a little short of the 288 × 432 pt sheet.
+pub const LABEL_MARGIN: f64 = 8.0;
+
+/// Place `crop` (display space) of `page` centred in `cell`, scaled by `s` and turned by
+/// `quarter` quarter turns counter-clockwise (0–3).
+fn place_crop(page: usize, crop: [f64; 4], cell: [f64; 4], s: f64, quarter: u8) -> Placement {
+    let (w, h) = (crop[2] - crop[0], crop[3] - crop[1]);
+    let (pw, ph) = if quarter % 2 == 1 { (h * s, w * s) } else { (w * s, h * s) };
+    let (x, y) = (cell[0] + (cell[2] - cell[0] - pw) / 2.0, cell[1] + (cell[3] - cell[1] - ph) / 2.0);
+    let [a, b, c, d, e, f] = match quarter % 4 {
+        0 => [s, 0.0, 0.0, s, x, y],
+        1 => [0.0, s, -s, 0.0, x + pw, y],
+        2 => [-s, 0.0, 0.0, -s, x + pw, y + ph],
+        _ => [0.0, -s, s, 0.0, x, y + ph],
+    };
+    // Move the crop's corner to the origin first.
+    Placement { page, matrix: Matrix([a, b, c, d, e - a * crop[0] - c * crop[1], f - b * crop[0] - d * crop[1]]), clip: crop }
+}
 
 /// Match a displayed PDF page to a standard sheet, independent of orientation.
 /// Half a point allows rounded metric PDF dimensions without confusing distinct sizes.
@@ -371,6 +470,34 @@ pub fn layout(sizes: &[(f64, f64)], settings: &Settings) -> Result<Vec<Sheet>, P
                     SizeMode::Custom(_) => return Err(PrintError::Invalid("the scale must be more than 0%".into())),
                 };
                 sheets.push(Sheet { size, placed: vec![place_in(p, d, [0.0, 0.0, size.0, size.1], s, false)], ..Sheet::default() });
+            }
+        }
+        Layout::Label { flip } => {
+            let size = oriented(paper, settings.orientation, false);
+            let cell = [LABEL_MARGIN, LABEL_MARGIN, size.0 - LABEL_MARGIN, size.1 - LABEL_MARGIN];
+            for &p in &pages {
+                let d = sizes[p];
+                let crop = settings.crops.get(p).copied().flatten();
+                let rect = crop
+                    .map(|c| [c.rect[0].max(0.0), c.rect[1].max(0.0), c.rect[2].min(d.0), c.rect[3].min(d.1)])
+                    .filter(|r| r[2] - r[0] > 1.0 && r[3] - r[1] > 1.0)
+                    .unwrap_or([0.0, 0.0, d.0, d.1]);
+                let (w, h) = (rect[2] - rect[0], rect[3] - rect[1]);
+                let turn = (w > h) != (cell[2] - cell[0] > cell[3] - cell[1]);
+                let mut quarter = match (turn, crop.is_some_and(|c| c.text_up)) {
+                    (false, _) => 0,
+                    (true, true) => 3,
+                    (true, false) => 1,
+                };
+                if flip {
+                    quarter = (quarter + 2) % 4;
+                }
+                let s = if turn {
+                    fit_scale((h, w), (cell[2] - cell[0], cell[3] - cell[1]))
+                } else {
+                    fit_scale((w, h), (cell[2] - cell[0], cell[3] - cell[1]))
+                };
+                sheets.push(Sheet { size, placed: vec![place_crop(p, rect, cell, s, quarter)], ..Sheet::default() });
             }
         }
         Layout::Multiple { cols, rows, per_sheet, order, border, auto_rotate } => {

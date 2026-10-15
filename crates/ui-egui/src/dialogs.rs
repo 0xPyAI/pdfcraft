@@ -836,6 +836,9 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                     close = true;
                     return;
                 };
+                if app.print_draft.handling == crate::print_ui::Handling::Label {
+                    app.read_label_crops(id);
+                }
                 let Some(doc) = app.session.get(id) else { return };
                 let sizes: Vec<(f64, f64)> = doc.info.pages.iter().map(|p| (p.width as f64, p.height as f64)).collect();
                 let labels: Vec<String> = doc.info.pages.iter().map(|p| p.label.clone()).collect();
