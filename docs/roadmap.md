@@ -199,6 +199,7 @@ M2 (renderer), M7 (content editing), M10 (OCR and Office), M11 (Preflight and st
 | 2026-10-12 | minor | M7/#1200 candidate: bounded local GoToR opening, root-confined automation, and action-preserving appearance edits; named destinations and window behavior remain partial; estimates unchanged. |
 | 2026-10-12 | minor | Exclusive image crops resize with their pixels across nested states, intervening operators and content streams; shared clips remain fixed. Synthetic engine/tool regressions and private image save/reopen checks; estimates unchanged. |
 | 2026-10-11 | minor | M4: editable Organize page-range selection (#1092), synchronized with thumbnails and available through UI control. Estimates unchanged. |
+| 2026-10-11 | minor | M6 #1208: expose dropdown and list-box alignment; preserve existing values and cover cancel, undo/redo, save/reopen. Estimates unchanged. |
 | 2026-10-11 | minor | M10: Word invoice export regressions (#773); estimates unchanged. |
 | 2026-10-12 | minor | M2: short same-line redraws split before placement; estimates unchanged. |
 | 2026-10-12 | minor | M5: Ctrl+Enter posts highlight comment text and replies; Shift+Enter adds newlines. Estimates unchanged. |

@@ -921,6 +921,22 @@ fn flag_box(ui: &mut egui::Ui, flags: &mut u32, bit: u32, inverted: bool, label:
     }
 }
 
+/// Shared PDF `/Q` picker for text and choice-field Options.
+fn alignment(ui: &mut egui::Ui, quadding: &mut i64) {
+    ui.label(tl!("Alignment:"));
+    egui::ComboBox::from_id_salt("quadding")
+        .selected_text(tl!(match (*quadding).clamp(0, 2) {
+            1 => "Center",
+            2 => "Right",
+            _ => "Left",
+        }))
+        .show_ui(ui, |ui| {
+            for (q, label) in [(0, tl!("Left")), (1, tl!("Center")), (2, tl!("Right"))] {
+                ui.selectable_value(quadding, q, label);
+            }
+        });
+}
+
 /// Draw Field Properties; returns (apply, cancel).
 pub(crate) fn body(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::theme::Tokens) -> (bool, bool) {
     use crate::widgets;
@@ -1074,14 +1090,7 @@ pub(crate) fn body(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::theme::Toke
                 FormFieldKind::Text => {
                     use pdfcraft_engine::field_flags as ff;
                     egui::Grid::new("text-options").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-                        ui.label(tl!("Alignment:"));
-                        egui::ComboBox::from_id_salt("quadding")
-                            .selected_text(tl!(["Left", "Center", "Right"][d.quadding.clamp(0, 2) as usize]))
-                            .show_ui(ui, |ui| {
-                                for (q, l) in [(0, tl!("Left")), (1, tl!("Center")), (2, tl!("Right"))] {
-                                    ui.selectable_value(&mut d.quadding, q, l);
-                                }
-                            });
+                        alignment(ui, &mut d.quadding);
                         ui.end_row();
                         let l = ui.label(tl!("Default Value:"));
                         ui.add(crate::widgets::line(&mut d.default).desired_width(260.0)).labelled_by(l.id);
@@ -1142,6 +1151,8 @@ pub(crate) fn body(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::theme::Toke
                     }
                 }
                 _ => {
+                    ui.horizontal(|ui| alignment(ui, &mut d.quadding));
+                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         let l = ui.label(tl!("Item:"));
                         let r = ui.add(crate::widgets::line(&mut d.new_option).desired_width(240.0)).labelled_by(l.id);
