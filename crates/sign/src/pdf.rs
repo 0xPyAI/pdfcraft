@@ -1205,6 +1205,8 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
     // attacker-written version carries (relabelling a signed page /Type /Sig, or dropping its
     // /Type and adding /ModDate, must not reclassify it away from page content).
     let signed_pages: HashSet<ObjRef> = pdfcraft_annot::page_refs(&old).unwrap_or_default().into_iter().collect();
+    // What each signed page draws from, by the role it held when signed (#1787).
+    let signed_resources = signed_page_resources(&old, &signed_pages);
     let old_info = old.trailer().get(b"Info").and_then(Object::as_ref);
     let (mut allowed, mut disallowed): (Vec<&'static str>, Vec<&'static str>) = (Vec::new(), Vec::new());
     let dss = dss_parts(doc, &old);
@@ -1250,10 +1252,23 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
             }
             continue;
         }
-        let what = match &*new {
+        // A resource of a signed page is page content whatever keys its new version carries
+        // (#1787): a /FT or /Subtype /Widget written by whoever rewrote a font, an XObject or a
+        // graphics state does not make that a form fill. A container (the resources dictionary,
+        // a category dictionary) that kept every entry it had and only gained names changes
+        // nothing the signed content draws, and is judged as before.
+        let kept_entries = |d: &Dict| before.as_deref().and_then(Object::as_dict).is_some_and(|b| b.iter().all(|(k, v)| d.get(k) == Some(v)));
+        let resource_kind = match (signed_resources.get(&r), &*new) {
+            (Some(false), _) => Some(kind::PAGE_CONTENT),
+            (Some(true), Object::Dict(d)) if kept_entries(d) => None,
+            (Some(true), _) => Some(kind::PAGE_CONTENT),
+            (None, _) => None,
+        };
+        let what = match (resource_kind, &*new) {
+            (Some(k), _) => k,
             // The Document Security Store's own arrays and dictionaries, when they only grew.
-            _ if dss.contains(&num) => kind::SECURITY_STORE,
-            Object::Dict(d) => {
+            (_, _) if dss.contains(&num) => kind::SECURITY_STORE,
+            (_, Object::Dict(d)) => {
                 let was = before.as_deref().and_then(Object::as_dict);
                 if signed_pages.contains(&r) {
                     // A signed page is always judged by what the page shows, whatever it is now
@@ -1266,7 +1281,7 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
                     change_kind(doc, &old, d, was)
                 }
             }
-            Object::Stream(s) => {
+            (_, Object::Stream(s)) => {
                 // File plumbing is what the stream was when signed: the /Type it has now is
                 // written by whoever changed it, and the renderer ignores /Type (a page's Form
                 // XObject relabelled /ObjStm still draws its new content).
@@ -1485,6 +1500,88 @@ fn without(x: &Dict, keys: &[&[u8]]) -> Vec<(Vec<u8>, Object)> {
 /// signed revision, so a later relabel of some other object cannot pose as a signature change.
 fn is_signature_dict(d: &Dict) -> bool {
     matches!(d.name(b"Type"), Some(b"Sig" | b"DocTimeStamp" | b"SigRef" | b"TransformParams")) || d.name(b"FT") == Some(b"Sig")
+}
+
+/// The objects the signed pages draw from, by reference, with the role each held when signed
+/// (#1787): `true` for a container (a page's resources dictionary, or one of its category
+/// dictionaries), where a name added later can't be reached by unchanged content; `false` for
+/// everything reached from a container's entries (fonts and their files, XObjects and their own
+/// resources, graphics states and soft masks, colour spaces, patterns, shadings, optional-content
+/// properties), where any change changes what the page shows. Resources are the page's own or
+/// inherited. Bounded by depth and by the number of objects visited; past the bound the rest is
+/// judged as before.
+fn signed_page_resources(old: &Document, pages: &HashSet<ObjRef>) -> HashMap<ObjRef, bool> {
+    const CATEGORIES: [&[u8]; 7] = [b"Font", b"XObject", b"ExtGState", b"ColorSpace", b"Pattern", b"Shading", b"Properties"];
+    const MAX_VISITED: usize = 50_000;
+    const MAX_DEPTH: u8 = 32;
+    const MAX_INHERITANCE: usize = 64;
+
+    /// Everything reachable from `o` is content the page draws (a leaf role, overriding a
+    /// container one reached by another path). A signed page or the catalog reached this way
+    /// (a `/P` or `/Parent` back-reference) keeps the role of its own: the walk stops there.
+    fn reach(old: &Document, o: &Object, depth: u8, stop: &HashSet<ObjRef>, roles: &mut HashMap<ObjRef, bool>) {
+        if roles.len() >= MAX_VISITED || depth > MAX_DEPTH {
+            return;
+        }
+        let resolved;
+        let o = match o {
+            Object::Ref(r) => {
+                if stop.contains(r) || roles.insert(*r, false).is_some() {
+                    return;
+                }
+                resolved = old.get(*r);
+                &*resolved
+            }
+            other => other,
+        };
+        match o {
+            Object::Dict(d) => d.iter().for_each(|(_, v)| reach(old, v, depth + 1, stop, roles)),
+            Object::Stream(s) => s.dict.iter().for_each(|(_, v)| reach(old, v, depth + 1, stop, roles)),
+            Object::Array(a) => a.iter().for_each(|v| reach(old, v, depth + 1, stop, roles)),
+            _ => {}
+        }
+    }
+
+    /// A page's `/Resources`, its own or the nearest ancestor's.
+    fn resources(old: &Document, page: ObjRef) -> Option<Object> {
+        let mut seen = HashSet::new();
+        let mut cur = page;
+        while seen.insert(cur) && seen.len() <= MAX_INHERITANCE {
+            let d = old.get(cur);
+            let d = d.as_dict()?;
+            if let Some(r) = d.get(b"Resources") {
+                return Some(r.clone());
+            }
+            cur = d.get(b"Parent").and_then(Object::as_ref)?;
+        }
+        None
+    }
+
+    let mut roles = HashMap::new();
+    let mut stop = pages.clone();
+    stop.extend(old.root());
+    for page in pages {
+        let Some(res) = resources(old, *page) else { continue };
+        let container = |o: &Object, roles: &mut HashMap<ObjRef, bool>| -> Arc<Object> {
+            match o {
+                Object::Ref(r) => {
+                    roles.entry(*r).or_insert(true);
+                    old.get(*r)
+                }
+                other => Arc::new(other.clone()),
+            }
+        };
+        let res = container(&res, &mut roles);
+        let Some(d) = res.as_dict() else { continue };
+        for category in CATEGORIES {
+            let Some(v) = d.get(category) else { continue };
+            let category = container(v, &mut roles);
+            if let Some(entries) = category.as_dict() {
+                entries.iter().for_each(|(_, entry)| reach(old, entry, 0, &stop, &mut roles));
+            }
+        }
+    }
+    roles
 }
 
 /// A changed object that was a page in the signed revision, judged by what the page shows rather
