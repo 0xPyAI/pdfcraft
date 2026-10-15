@@ -2397,7 +2397,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // Paging owns the vertical axis in single-page view; leave it to the pager.
     // The rest of a gesture that turned the page is swallowed too, or it would pan the new page
     // away from the edge it was shown at.
-    if single_paging || (!view.continuous && view.wheel.gesture_turned()) {
+    let paging_owns_vertical = single_paging || (!view.continuous && view.wheel.gesture_turned());
+    if paging_owns_vertical {
         precise_scroll.y = 0.0;
     }
     if now < view.precise_scroll_until {
@@ -2410,7 +2411,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // dialog has the input, or animations are off; any click, key, zoom or other scrolling ends it.
     // Asked of the preference, not of egui's animation time, which test harnesses zero.
     let animates = app.animation_effects.animates(app.motion.reduced);
-    let may_glide = !single_paging && !middle_gesture && navigation_enabled && unobstructed && animates;
+    let may_glide = !paging_owns_vertical && !middle_gesture && navigation_enabled && unobstructed && animates;
     let over_page = ui.rect_contains_pointer(avail);
     ui.input(|i| view.fling.read(&i.events, now, may_glide && over_page));
     let interrupted = ui.input(|i| i.pointer.any_pressed() || i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })));
