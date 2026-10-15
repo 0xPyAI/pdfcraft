@@ -1210,7 +1210,7 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
                 edit.request_focus();
                 c.focus = false;
             }
-            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.command);
+            let enter = submit_key(ui, &edit, false);
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 cancel = true;
             }
@@ -1286,6 +1286,27 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
             Some(new_comment(&cx, CommentTool::Caret, Shape::Caret { rect: [x - half, y - size, x + half, y] }, text))
         }
     }
+}
+
+/// Submit only from the focused comment editor. Match each key event's modifiers exactly,
+/// so Shift+Enter stays a newline and another editor cannot submit this draft. Replies also
+/// keep their existing unmodified Enter-to-post behavior.
+pub(crate) fn submit_key(ui: &mut egui::Ui, field: &egui::Response, plain_enter: bool) -> bool {
+    field.has_focus()
+        && ui.input_mut(|input| {
+            let mut submit = false;
+            input.events.retain(|event| {
+                let matched = matches!(event,
+                    egui::Event::Key { key: egui::Key::Enter, pressed: true, modifiers, .. }
+                        if modifiers.matches_exact(egui::Modifiers::CTRL)
+                            || modifiers.matches_exact(egui::Modifiers::COMMAND)
+                            || plain_enter && modifiers.matches_exact(egui::Modifiers::NONE)
+                );
+                submit |= matched;
+                !matched
+            });
+            submit
+        })
 }
 
 /// The side of the caret's box, in user space units, away from text.

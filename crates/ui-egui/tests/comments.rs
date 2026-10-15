@@ -232,6 +232,111 @@ fn a_new_highlight_opens_its_note_for_typing() {
 }
 
 #[test]
+fn ctrl_enter_posts_a_highlight_comment_and_shift_enter_adds_a_line() {
+    let mut h = harness(|app| {
+        app.set_option("quick", "highlight").unwrap();
+        app.set_option("panel", "comments").unwrap();
+    });
+    let (a, b) = {
+        let v = &h.state().views[0];
+        (v.glyph_screen_pos(0, 4).expect("text layer"), v.glyph_screen_pos(0, 14).expect("glyph"))
+    };
+    drag(&mut h, a, b);
+    h.query_all_by(|n| n.role() == egui::accesskit::Role::MultilineTextInput && n.placeholder() != Some("Add a reply"))
+        .next()
+        .expect("highlight editor")
+        .click();
+    h.run_steps(2);
+    h.event(egui::Event::Text("First line".into()));
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Enter);
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].comments.editing.as_ref().unwrap().2, "First line\n");
+    assert_eq!(comments(&h)[0].contents.as_deref().unwrap_or(""), "", "a newline does not post");
+    h.event(egui::Event::Text("Second line".into()));
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(h.state().views[0].comments.editing, None);
+    assert_eq!(comments(&h)[0].contents.as_deref(), Some("First line\nSecond line"));
+    h.state_mut().undo();
+    h.run_steps(2);
+    assert_eq!(comments(&h)[0].contents.as_deref().unwrap_or(""), "", "posting is one undo step");
+}
+
+#[test]
+fn ctrl_enter_posts_a_reply_and_shift_enter_adds_a_line() {
+    let mut h = harness(|app| app.set_option("panel", "comments").unwrap());
+    field(&h, "Add a comment").click();
+    h.run_steps(2);
+    field(&h, "Add a comment").type_text("Parent");
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    field(&h, "Add a reply").click();
+    h.run_steps(2);
+    field(&h, "Add a reply").type_text("First line");
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Enter);
+    h.run_steps(2);
+    assert_eq!(comments(&h).len(), 1, "Shift+Enter does not post a reply");
+    assert_eq!(h.state().views[0].comments.reply, "First line\n");
+    h.event(egui::Event::Text("Second line".into()));
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::Enter);
+    h.run_steps(3);
+    let c = comments(&h);
+    assert_eq!(c.len(), 2);
+    assert_eq!(c[1].contents.as_deref(), Some("First line\nSecond line"));
+    assert_eq!(c[1].in_reply_to, c[0].name);
+    assert_eq!(c[1].author.as_deref(), Some("Tester"));
+    assert!(h.state().views[0].comments.reply.is_empty());
+    h.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::Enter);
+    h.run_steps(2);
+    assert_eq!(comments(&h).len(), 2, "an empty reply is not posted");
+    h.state_mut().undo();
+    h.run_steps(2);
+    assert_eq!(comments(&h).len(), 1, "posting is one undo step");
+    h.state_mut().set_option("comment", "1:1").unwrap();
+    h.run_steps(2);
+    field(&h, "Add a reply").click();
+    h.run_steps(2);
+    field(&h, "Add a reply").type_text("Enter still posts");
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(comments(&h)[1].contents.as_deref(), Some("Enter still posts"));
+}
+
+#[test]
+fn the_comment_composer_shortcut_only_posts_the_focused_editor() {
+    let mut h = harness(|app| app.set_option("quick", "note").unwrap());
+    click_pt(&mut h, (250.0, 180.0));
+    field(&h, "Add a comment").click();
+    h.run_steps(2);
+    h.event(egui::Event::Text("First line".into()));
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Enter);
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].comments.composer.as_ref().unwrap().text, "First line\n");
+    assert!(comments(&h).is_empty());
+    h.event(egui::Event::Text("Second line".into()));
+    h.run_steps(2);
+    h.query_all_by_value("1").next().expect("current page input").focus();
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::Enter);
+    h.run_steps(2);
+    assert!(h.state().views[0].comments.composer.is_some(), "a shortcut outside the editor keeps the draft");
+    assert!(comments(&h).is_empty());
+    h.query_all_by(|n| n.role() == egui::accesskit::Role::MultilineTextInput).next().expect("composer editor").focus();
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::Enter);
+    h.run_steps(3);
+    assert!(h.state().views[0].comments.composer.is_none());
+    assert_eq!(comments(&h)[0].contents.as_deref(), Some("First line\nSecond line"));
+}
+
+#[test]
 fn a_selection_made_first_is_marked_when_a_tool_is_picked() {
     let mut h = harness(|_| {});
     h.state_mut().views[0].select_text(0, 4, 8);

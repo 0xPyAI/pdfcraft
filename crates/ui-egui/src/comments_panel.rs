@@ -299,10 +299,12 @@ fn card(
                     if !r.has_focus() && !ui.memory(|m| m.focused().is_some()) {
                         r.request_focus();
                     }
+                    let submit = crate::comments::submit_key(ui, &r, false);
                     ui.horizontal(|ui| {
-                        if ui
+                        if (ui
                             .add(egui::Button::new(egui::RichText::new(tl!("Save")).color(Color32::WHITE)).fill(t.accent).corner_radius(12))
                             .clicked()
+                            || submit)
                             && let Some((page, index, text)) = view.comments.editing.take()
                         {
                             edit = Some(Edit::SetAnnotationContents { page, index, text });
@@ -359,12 +361,14 @@ fn card(
                     // around the button can't fit every language's "Post" exactly, and any overflow
                     // would widen the resizable panel again on every repaint.
                     let r = ui.add(
-                        crate::widgets::line(&mut view.comments.reply)
+                        crate::widgets::block(&mut view.comments.reply)
+                            .desired_rows(1)
+                            .return_key(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter))
                             .hint_text(tl!("Add a reply"))
                             .desired_width(f32::INFINITY)
                             .id_salt(("comment-reply", key)),
                     );
-                    let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let enter = crate::comments::submit_key(ui, &r, true);
                     let ok = !view.comments.reply.trim().is_empty();
                     let post =
                         ui.with_layout(Layout::right_to_left(Align::Min), |ui| ui.add_enabled(ok, egui::Button::new(tl!("Post")).corner_radius(12)));

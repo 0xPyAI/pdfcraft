@@ -624,10 +624,8 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
         match k {
             // Literal digits in the format may be typed or left out ("15.05.26" or "15.05"
             // for "dd.mm.26"); a different number there is left over and rejected below.
-            '#' => {
-                if it.peek() == Some(&literal) {
-                    it.next();
-                }
+            '#' if it.peek() == Some(&literal) => {
+                it.next();
             }
             'm' => {
                 dt.m = match month_name {
