@@ -200,13 +200,16 @@ pub fn system_printers() -> PrinterSource {
 }
 
 /// The Print dialog's work in the background: the printer list being read, and the jobs being
-/// spooled (the printer each was sent to, and the spooler's answer).
+/// spooled, oldest first.
 #[derive(Default)]
 pub(crate) struct PrintTasks {
     #[cfg(not(target_arch = "wasm32"))]
     printers: Option<std::sync::mpsc::Receiver<Vec<spool::Printer>>>,
     #[cfg(not(target_arch = "wasm32"))]
-    jobs: Vec<(String, std::sync::mpsc::Receiver<Result<String, String>>)>,
+    jobs: Vec<PrintJob>,
+    /// The progress card is showing a print job (it is shared with other long jobs).
+    #[cfg(not(target_arch = "wasm32"))]
+    showing_progress: bool,
     /// The browser print being drawn, a sheet a frame (`web_print`).
     #[cfg(target_arch = "wasm32")]
     web_job: Option<crate::web_print::WebPrintJob>,
@@ -242,6 +245,22 @@ fn still_looking(d: &PrintDraft) -> bool {
 /// A printer's name as the dialog shows it.
 fn printer_label(name: &str) -> String {
     if name == crate::web_print::BROWSER_PRINTER { crate::web_print::browser_printer_label().to_string() } else { name.to_string() }
+}
+
+/// A job being spooled: its printer, the sheets sent so far of how many, and its worker's news.
+#[cfg(not(target_arch = "wasm32"))]
+struct PrintJob {
+    printer: String,
+    sheets: Option<(usize, usize)>,
+    news: std::sync::mpsc::Receiver<JobNews>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+enum JobNews {
+    /// `(sent, sheets)`: the spooler has this many of the job's sheets.
+    Sent(usize, usize),
+    /// The spooler's answer.
+    Done(Result<String, String>),
 }
 
 /// The printer the dialog preselects: the system default, else the first.
@@ -329,20 +348,60 @@ impl PdfCraftApp {
                 }
             }
             let mut finished = Vec::new();
-            self.print_tasks.jobs.retain(|(printer, rx)| match rx.try_recv() {
-                Ok(r) => {
-                    finished.push((printer.clone(), r));
-                    false
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => true,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    finished.push((printer.clone(), Err("the print job stopped unexpectedly".into())));
-                    false
+            self.print_tasks.jobs.retain_mut(|job| {
+                loop {
+                    match job.news.try_recv() {
+                        Ok(JobNews::Sent(sent, sheets)) => job.sheets = Some((sent, sheets)),
+                        Ok(JobNews::Done(r)) => {
+                            finished.push((job.printer.clone(), r));
+                            break false;
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => break true,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            finished.push((job.printer.clone(), Err("the print job stopped unexpectedly".into())));
+                            break false;
+                        }
+                    }
                 }
             });
+            self.show_print_progress();
             for (printer, result) in finished {
                 self.report_print_job(&printer, result);
             }
+        }
+    }
+
+    /// The oldest job being spooled on the progress card, counting its sheets as they reach the
+    /// spooler, while no other long job holds the card.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn show_print_progress(&mut self) {
+        let Some(job) = self.print_tasks.jobs.first() else {
+            if std::mem::take(&mut self.print_tasks.showing_progress) {
+                self.progress_notice = None;
+            }
+            return;
+        };
+        if self.progress_notice.is_some() && !self.print_tasks.showing_progress {
+            return;
+        }
+        let printer = job.printer.as_str();
+        let (label, fraction) = match job.sheets {
+            Some((sent, sheets)) if sheets > 0 => {
+                // The sheet on its way: one past those sent, until the last is.
+                let sheet = sent.saturating_add(1).min(sheets).to_string();
+                let label = crate::i18n::fmt(
+                    tl!("Sending sheet {s} of {n} to {printer}…"),
+                    &[("s", &sheet), ("n", &sheets.to_string()), ("printer", printer)],
+                );
+                (label, sent as f32 / sheets as f32)
+            }
+            _ => (crate::i18n::fmt(tl!("Sending to {printer}…"), &[("printer", printer)]), 0.0),
+        };
+        self.progress_notice = Some(crate::widgets::ProgressNotice { label, fraction, cancellable: false });
+        self.print_tasks.showing_progress = true;
+        // The bar's sweep keeps moving between sheets.
+        if let Some(ctx) = &self.ctx {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
     }
 
@@ -398,20 +457,29 @@ impl PdfCraftApp {
     }
 
     /// Spool a job off the UI thread: on Windows every sheet is rendered at the printer's
-    /// resolution first, which can take minutes for a long document. The dialog closes at once
-    /// and the spooler's answer arrives as a notice.
+    /// resolution first, which can take minutes for a long document. The dialog closes at once,
+    /// the progress card counts the sheets as they reach the spooler, and the spooler's answer
+    /// arrives as a notice.
     #[cfg(not(target_arch = "wasm32"))]
     fn send_to_printer(&mut self, printer: String, bytes: Vec<u8>, job: spool::Job) -> bool {
         let (tx, rx) = std::sync::mpsc::channel();
         let ctx = self.ctx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(spool::submit(&bytes, &job).map_err(|e| e.to_string()));
-            if let Some(ctx) = ctx {
-                ctx.request_repaint();
-            }
+            let repaint = || {
+                if let Some(ctx) = &ctx {
+                    ctx.request_repaint();
+                }
+            };
+            // The receiver may be gone (the app quit): nothing to report to then.
+            let result = spool::submit_with_progress(&bytes, &job, &mut |sent, sheets| {
+                let _ = tx.send(JobNews::Sent(sent, sheets));
+                repaint();
+            });
+            let _ = tx.send(JobNews::Done(result.map_err(|e| e.to_string())));
+            repaint();
         });
-        self.notify(crate::i18n::fmt(tl!("Sending to {printer}…"), &[("printer", &printer)]));
-        self.print_tasks.jobs.push((printer, rx));
+        self.print_tasks.jobs.push(PrintJob { printer, sheets: None, news: rx });
+        self.show_print_progress();
         true
     }
 
@@ -1125,6 +1193,46 @@ mod tests {
         assert_eq!(job.scaling, spool::Scaling::Exact);
         assert_eq!(job.duplex, Some(spool::Duplex::LongEdge));
         assert_eq!(PrintDraft::default().job("report.pdf").duplex, Some(spool::Duplex::Off));
+    }
+
+    /// A job being spooled holds the progress card, counting its sheets as the spooler reports
+    /// them; the card goes when the job ends and its answer arrives as a notice. A card another
+    /// long job is showing is left alone.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_progress_card_counts_the_sheets_of_a_print_job() {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.print_tasks.jobs.push(PrintJob { printer: "Office".into(), sheets: None, news: rx });
+        app.poll_print();
+        assert_eq!(app.progress_notice.as_ref().map(|p| p.label.as_str()), Some("Sending to Office…"));
+
+        tx.send(JobNews::Sent(0, 3)).unwrap();
+        tx.send(JobNews::Sent(1, 3)).unwrap();
+        app.poll_print();
+        let shown = app.progress_notice.clone().unwrap();
+        assert_eq!(shown.label, "Sending sheet 2 of 3 to Office…");
+        assert!((shown.fraction - 1.0 / 3.0).abs() < 1e-4 && !shown.cancellable, "{shown:?}");
+
+        tx.send(JobNews::Sent(3, 3)).unwrap();
+        tx.send(JobNews::Done(Ok(String::new()))).unwrap();
+        app.poll_print();
+        assert!(app.progress_notice.is_none() && app.print_tasks.jobs.is_empty());
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("Sent to Office"));
+
+        // Another job's card stays; a worker that vanished is reported, not left spinning.
+        let other = crate::widgets::ProgressNotice { label: "Optimizing…".into(), fraction: 0.5, cancellable: true };
+        app.progress_notice = Some(other.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.print_tasks.jobs.push(PrintJob { printer: "Office".into(), sheets: None, news: rx });
+        tx.send(JobNews::Sent(1, 2)).unwrap();
+        app.poll_print();
+        assert_eq!(app.progress_notice, Some(other));
+        drop(tx);
+        app.poll_print();
+        assert!(app.print_tasks.jobs.is_empty() && app.progress_notice.is_some());
+        assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("the print job stopped unexpectedly"));
     }
 
     /// Issue #1308: Current page is the page on screen, even when a later page is labelled with

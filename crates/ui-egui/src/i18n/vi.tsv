@@ -1040,6 +1040,7 @@ theme	Appearance	Giao diện
 	Selected pages	Các trang đã chọn
 	Selection	Vùng chọn
 	Sending to {printer}…	Đang gửi đến {printer}…
+	Sending sheet {s} of {n} to {printer}…	Đang gửi tờ {s}/{n} đến {printer}…
 	Sensitivity	Độ nhạy
 	Sent to {printer}	Đã gửi đến {printer}
 	Sent to {printer}: {msg}	Đã gửi đến {printer}: {msg}

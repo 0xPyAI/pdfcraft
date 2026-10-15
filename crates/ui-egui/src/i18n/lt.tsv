@@ -1048,6 +1048,7 @@
 	Selected pages	Pasirinkti puslapiai
 	Selection	Pasirinkimas
 	Sending to {printer}…	Siunčiama į {printer}…
+	Sending sheet {s} of {n} to {printer}…	Siunčiamas lapas {s} iš {n} į {printer}…
 	Sensitivity	Jautrumas
 	Sent to {printer}	Išsiųsta į {printer}
 	Sent to {printer}: {msg}	Išsiųsta į {printer}: {msg}
