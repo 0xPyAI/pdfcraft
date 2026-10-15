@@ -161,15 +161,20 @@ fn audit(args: &[String]) -> Result<(), CliError> {
     validate_options("audit", args, AUDIT_OPTIONS)?;
     let path = *positional(args).first().ok_or("audit: missing file")?;
     let bytes = read(path)?;
-    let doc = pdfcraft_cos::Document::open_with_password(bytes, flag(args, "--password")).map_err(|e| format!("{path}: {e}"))?;
+    let password = flag(args, "--password");
+    let doc = pdfcraft_cos::Document::open_with_password(bytes.clone(), password).map_err(|e| format!("{path}: {e}"))?;
     let findings = pdfcraft_audit::audit_redactions(&doc).map_err(|e| format!("{path}: {e}"))?;
+    // Rectangles in points from the top-left of the displayed page, as `doc_audit_redactions`
+    // reports them; the page geometry is read only when there is something to place.
+    let info = if findings.is_empty() { None } else { Some(inspect(bytes, password).map_err(|e| format!("{path}: {e}"))?) };
     let items: Vec<serde_json::Value> = findings
         .into_iter()
         .map(|f| {
+            let rect = f.rect.map(|v| v as f32);
             serde_json::json!({
                 "page": f.page + 1,
                 "kind": f.kind.id(),
-                "rect": f.rect,
+                "rect": info.as_ref().map_or(rect, |i| pdfcraft_automation::view_rect(i, f.page, rect)),
                 "covered_text": f.covered_text,
             })
         })

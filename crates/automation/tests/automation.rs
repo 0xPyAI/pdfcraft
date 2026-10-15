@@ -3178,6 +3178,9 @@ fn auditing_faux_redactions_through_tools() {
     assert_eq!(f["page"], 1);
     assert_eq!(f["kind"], "covered-text");
     assert!(f["covered_text"].as_str().unwrap().contains("TOP SECRET"), "{f}");
+    // Points from the top-left of the page, like every other tool (the cover is `90 688 220 32 re`
+    // on a 792 pt high page).
+    assert_eq!(f["rect"], json!([90.0, 72.0, 310.0, 104.0]), "{f}");
     // A clean document audits clean.
     let clean = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
     assert_eq!(ok(&mut a, "doc_audit_redactions", json!({ "doc": clean }))["count"], 0);
