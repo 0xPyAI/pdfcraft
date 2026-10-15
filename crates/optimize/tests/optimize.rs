@@ -246,6 +246,100 @@ fn space_audit_counts_images_a_content_stream_dictionary_points_at_as_images() {
 }
 
 #[test]
+fn space_audit_counts_what_fields_and_comments_draw_with_by_kind() {
+    // A font or image a form field or comment draws with is still a font or image. The form
+    // was claimed first, so its fonts made a fillable form look like mostly "Forms".
+    let mut doc = Document::new_empty();
+    let p = page(&mut doc, &[], "BT ET");
+    let font = |doc: &mut Document| {
+        let file = doc.add(Object::Stream(Stream::from_raw(Dict::new(), vec![7; 40_000])));
+        let mut desc = Dict::new();
+        desc.set(b"Type".to_vec(), Object::name("FontDescriptor"));
+        desc.set(b"FontFile2".to_vec(), Object::Ref(file));
+        let desc = doc.add(Object::Dict(desc));
+        let mut f = Dict::new();
+        f.set(b"Type".to_vec(), Object::name("Font"));
+        f.set(b"Subtype".to_vec(), Object::name("TrueType"));
+        f.set(b"FontDescriptor".to_vec(), Object::Ref(desc));
+        doc.add(Object::Dict(f))
+    };
+    let (field_font, comment_font) = (font(&mut doc), font(&mut doc));
+    let icon = image(&mut doc, 200, 200, 3, false, None);
+    let appearance = |doc: &mut Document, kind: &str, name: &str, r: ObjRef| {
+        let mut entries = Dict::new();
+        entries.set(name.as_bytes().to_vec(), Object::Ref(r));
+        let mut res = Dict::new();
+        res.set(kind.as_bytes().to_vec(), Object::Dict(entries));
+        let mut d = Dict::new();
+        d.set(b"Subtype".to_vec(), Object::name("Form"));
+        d.set(b"Resources".to_vec(), Object::Dict(res));
+        Object::Ref(doc.add(Object::Stream(Stream::from_raw(d, b"q Q".to_vec()))))
+    };
+    let annot = |doc: &mut Document, subtype: &str, ap: Object| {
+        let mut d = Dict::new();
+        d.set(b"Type".to_vec(), Object::name("Annot"));
+        d.set(b"Subtype".to_vec(), Object::name(subtype));
+        d.set(b"Rect".to_vec(), Object::Array(vec![0.into(), 0.into(), 10.into(), 10.into()]));
+        d.set(b"P".to_vec(), Object::Ref(p));
+        let mut aps = Dict::new();
+        aps.set(b"N".to_vec(), ap);
+        d.set(b"AP".to_vec(), Object::Dict(aps));
+        Object::Ref(doc.add(Object::Dict(d)))
+    };
+    // A text field's appearance uses the form's default font; a check box's "on" state (one of
+    // a dictionary of states) draws an image; a free-text comment has a font of its own.
+    let text_ap = appearance(&mut doc, "Font", "F1", field_font);
+    let text = annot(&mut doc, "Widget", text_ap);
+    let mut states = Dict::new();
+    states.set(b"On".to_vec(), appearance(&mut doc, "XObject", "Im0", icon));
+    let check = annot(&mut doc, "Widget", Object::Dict(states));
+    let comment_ap = appearance(&mut doc, "Font", "F2", comment_font);
+    let comment = annot(&mut doc, "FreeText", comment_ap);
+    doc.update_dict(p, |d| d.set(b"Annots".to_vec(), Object::Array(vec![text.clone(), check.clone(), comment]))).unwrap();
+    let mut fonts = Dict::new();
+    fonts.set(b"F1".to_vec(), Object::Ref(field_font));
+    let mut dr = Dict::new();
+    dr.set(b"Font".to_vec(), Object::Dict(fonts));
+    let mut form = Dict::new();
+    form.set(b"Fields".to_vec(), Object::Array(vec![text, check]));
+    form.set(b"DR".to_vec(), Object::Dict(dr));
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |c| c.set(b"AcroForm".to_vec(), Object::Dict(form))).unwrap();
+    let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
+    let doc = Document::open(Arc::new(bytes.clone())).unwrap();
+    let audit = audit_space(&doc, bytes.len() as u64);
+    let get = |c: SpaceCategory| audit.iter().find(|u| u.category == c).unwrap().bytes;
+    assert!(get(SpaceCategory::Fonts) > 80_000, "both fonts are fonts: {audit:?}");
+    assert!(get(SpaceCategory::Images) > 2_000, "the check box's image is an image: {audit:?}");
+    assert!(get(SpaceCategory::Forms) < 2_000 && get(SpaceCategory::Comments) < 1_000, "{audit:?}");
+    assert!(get(SpaceCategory::Forms) > 0 && get(SpaceCategory::Comments) > 0, "the fields and the comment are still counted: {audit:?}");
+}
+
+#[test]
+fn space_audit_survives_deeply_nested_forms() {
+    // Each form draws the next; sorting their resources by kind recursed once per form, so a
+    // long enough chain overflowed the stack.
+    let mut doc = Document::new_empty();
+    let mut next: Option<ObjRef> = None;
+    for _ in 0..20_000 {
+        let mut d = Dict::new();
+        d.set(b"Subtype".to_vec(), Object::name("Form"));
+        if let Some(n) = next {
+            let mut x = Dict::new();
+            x.set(b"X".to_vec(), Object::Ref(n));
+            let mut res = Dict::new();
+            res.set(b"XObject".to_vec(), Object::Dict(x));
+            d.set(b"Resources".to_vec(), Object::Dict(res));
+        }
+        next = Some(doc.add(Object::Stream(Stream::from_raw(d, b"/X Do".to_vec()))));
+    }
+    page(&mut doc, &[("X", next.unwrap())], "/X Do");
+    let audit = audit_space(&doc, 0);
+    let forms = audit.iter().find(|u| u.category == SpaceCategory::XObjectForms).unwrap();
+    assert!(forms.bytes > 20_000 * 40, "every form is counted, however deep: {audit:?}");
+}
+
+#[test]
 fn invalid_links_and_unreferenced_destinations_go() {
     let mut doc = Document::new_empty();
     let p = page(&mut doc, &[], "BT ET");

@@ -541,6 +541,7 @@
 	Remove unused objects and merge identical ones	Kullanılmayan nesneleri kaldır ve aynı olanları birleştir
 	Audit space usage…	Alan kullanımını denetle…
 	Space Audit	Alan Denetimi
+	What takes up the space in this file, by kind of content.	Bu dosyadaki alanı neyin kapladığı, içerik türüne göre.
 	Bytes	Bayt
 	Content Streams	İçerik Akışları
 	X Object Forms	XObject Formları

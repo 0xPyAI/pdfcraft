@@ -263,6 +263,7 @@
 	Remove unused objects and merge identical ones	删除未使用的对象并合并相同的对象
 	Audit space usage…	审计空间使用情况…
 	Space Audit	空间审计
+	What takes up the space in this file, by kind of content.	此文件的空间被哪些内容占用，按内容类型列出。
 	Bytes	字节
 	Content Streams	内容流
 	X Object Forms	XObject 表单

@@ -556,6 +556,7 @@
 	Remove unused objects and merge identical ones	Unbenutzte Objekte entfernen und identische zusammenführen
 	Audit space usage…	Speicherbelegung prüfen…
 	Space Audit	Speicherbelegung
+	What takes up the space in this file, by kind of content.	Wofür der Platz in dieser Datei verwendet wird, nach Art des Inhalts.
 	Bytes	Bytes
 	Content Streams	Inhalts-Streams
 	X Object Forms	XObject-Formulare

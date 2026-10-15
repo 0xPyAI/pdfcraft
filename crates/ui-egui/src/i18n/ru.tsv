@@ -576,6 +576,7 @@
 	Remove unused objects and merge identical ones	Удалить неиспользуемые объекты и объединить одинаковые
 	Audit space usage…	Анализ использования места…
 	Space Audit	Анализ места
+	What takes up the space in this file, by kind of content.	Что занимает место в этом файле, по типу содержимого.
 	Bytes	Байты
 	Content Streams	Потоки содержимого
 	X Object Forms	Формы X Object

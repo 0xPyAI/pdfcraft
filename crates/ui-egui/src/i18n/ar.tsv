@@ -583,6 +583,7 @@
 	Remove unused objects and merge identical ones	إزالة الكائنات غير المستخدمة ودمج المتطابقة
 	Audit space usage…	تدقيق استخدام المساحة…
 	Space Audit	تدقيق المساحة
+	What takes up the space in this file, by kind of content.	ما الذي يشغل المساحة في هذا الملف، حسب نوع المحتوى.
 	Bytes	بايت
 	Content Streams	تدفقات المحتوى
 	X Object Forms	نماذج X Object

@@ -578,6 +578,7 @@
 	Remove unused objects and merge identical ones	Usuń nieużywane obiekty i scal identyczne
 	Audit space usage…	Analiza wykorzystania miejsca…
 	Space Audit	Analiza miejsca
+	What takes up the space in this file, by kind of content.	Co zajmuje miejsce w tym pliku, według rodzaju zawartości.
 	Bytes	Bajty
 	Content Streams	Strumienie zawartości
 	X Object Forms	Obiekty Form XObject

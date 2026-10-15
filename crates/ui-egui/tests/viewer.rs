@@ -901,6 +901,22 @@ fn optimizer_audits_space_usage() {
 }
 
 #[test]
+fn space_audit_numbers_line_up_under_their_headers() {
+    // The percentages were drawn at the dialog's far edge, away from their header and the
+    // striped rows: a right-to-left layout in a grid's last column takes the rest of the window.
+    let mut h = harness();
+    assert!(h.state_mut().execute("optimize.advanced"));
+    h.run_steps(2);
+    h.get_by_label("Audit space usage…").click();
+    h.run_steps(3);
+    let total = h.state().space_audit.iter().map(|r| r.bytes).sum::<u64>().to_string();
+    let right = |label: &str| h.get_by_label(label).rect().right();
+    assert!((right("Percentage") - right("100.00%")).abs() < 1.0, "{} vs {}", right("Percentage"), right("100.00%"));
+    assert!((right("Bytes") - right(&total)).abs() < 1.0, "{} vs {}", right("Bytes"), right(&total));
+    assert!(right("100.00%") < right("OK") + 1.0, "the table stays inside the dialog");
+}
+
+#[test]
 fn each_document_keeps_its_own_scroll_position() {
     // #189: every document's page view shared one scroll position, so switching tabs showed a
     // document at wherever the other one had been scrolled to (usually back at the top).

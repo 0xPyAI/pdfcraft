@@ -1883,6 +1883,7 @@
 	Remove unused objects and merge identical ones	Αφαίρεση αχρησιμοποίητων αντικειμένων και συγχώνευση πανομοιότυπων
 	Audit space usage…	Έλεγχος χρήσης χώρου…
 	Space Audit	Έλεγχος χώρου
+	What takes up the space in this file, by kind of content.	Τι καταλαμβάνει τον χώρο σε αυτό το αρχείο, ανά είδος περιεχομένου.
 	Bytes	Byte
 	Content Streams	Ροές περιεχομένου
 	X Object Forms	Φόρμες XObject

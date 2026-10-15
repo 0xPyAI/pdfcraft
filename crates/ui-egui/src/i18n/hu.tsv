@@ -554,6 +554,7 @@
 	Remove unused objects and merge identical ones	Nem használt objektumok eltávolítása és az azonosak egyesítése
 	Audit space usage…	Helyfoglalás vizsgálata…
 	Space Audit	Helyfoglalás
+	What takes up the space in this file, by kind of content.	Mi foglalja a helyet ebben a fájlban, tartalomtípusonként.
 	Bytes	Bájt
 	Content Streams	Tartalomfolyamok
 	X Object Forms	XObject-űrlapok

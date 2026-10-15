@@ -583,6 +583,7 @@
 	Remove unused objects and merge identical ones	未使用オブジェクトを削除し同一オブジェクトを統合
 	Audit space usage…	容量の使用状況を確認…
 	Space Audit	容量の使用状況
+	What takes up the space in this file, by kind of content.	このファイルの容量を何が占めているか、コンテンツの種類別に示します。
 	Bytes	バイト数
 	Content Streams	コンテンツストリーム
 	X Object Forms	フォーム XObject

@@ -543,6 +543,7 @@
 	Remove unused objects and merge identical ones	Пайдаланылмаған нысандарды алып тастау және ұқсастарын біріктіру
 	Audit space usage…	Кеңістікті пайдалануды тексеру…
 	Space Audit	Кеңістікті пайдалану аудиті
+	What takes up the space in this file, by kind of content.	Бұл файлдағы орынды не алып жатыр, мазмұн түрі бойынша.
 	Bytes	Байт
 	Content Streams	Мазмұн ағындары
 	X Object Forms	XObject формалары

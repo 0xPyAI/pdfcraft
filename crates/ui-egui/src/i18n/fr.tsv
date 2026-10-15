@@ -556,6 +556,7 @@
 	Remove unused objects and merge identical ones	Retirer les objets inutilisés et fusionner les identiques
 	Audit space usage…	Auditer l'espace utilisé…
 	Space Audit	Audit de l'espace
+	What takes up the space in this file, by kind of content.	Ce qui occupe l'espace dans ce fichier, par type de contenu.
 	Bytes	Octets
 	Content Streams	Flux de contenu
 	X Object Forms	Formulaires XObject

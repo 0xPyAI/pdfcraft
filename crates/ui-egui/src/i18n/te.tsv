@@ -560,6 +560,7 @@ comment menu	Edit	సవరించు
 	Remove unused objects and merge identical ones	ఉపయోగించని ఆబ్జెక్ట్‌లను తీసివేసి, ఒకేలా ఉన్నవాటిని విలీనం చేయి
 	Audit space usage…	స్థల వినియోగాన్ని పరిశీలించు…
 	Space Audit	స్థల వినియోగ పరిశీలన
+	What takes up the space in this file, by kind of content.	ఈ ఫైల్‌లో స్థలాన్ని ఏవి ఆక్రమిస్తున్నాయి, కంటెంట్ రకం వారీగా.
 	Bytes	బైట్‌లు
 	Content Streams	కంటెంట్ స్ట్రీమ్‌లు
 	X Object Forms	X ఆబ్జెక్ట్ ఫారాలు

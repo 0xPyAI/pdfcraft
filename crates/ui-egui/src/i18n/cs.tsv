@@ -663,6 +663,7 @@ key	Space	Mezerník
 	Remove unused objects and merge identical ones	Odebrat nepoužívané objekty a sloučit shodné
 	Audit space usage…	Analyzovat využití místa…
 	Space Audit	Analýza využití místa
+	What takes up the space in this file, by kind of content.	Co zabírá místo v tomto souboru, podle druhu obsahu.
 	Bytes	Bajty
 	Content Streams	Proudy obsahu
 	X Object Forms	Objekty Form XObject
