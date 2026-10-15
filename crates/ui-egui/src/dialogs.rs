@@ -1339,6 +1339,10 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 app.apply_edit(Edit::Batch { label: "Change comment properties".into(), edits });
             }
         }
+        // Make Properties Default: the look chosen here, even when it was already the comment's.
+        if d.make_default && d.edited.restylable {
+            app.make_props_default(d.page, d.index, &d.edited);
+        }
     }
     if export_now && let Dialog::Export(kind) = dialog {
         app.start_export(kind);

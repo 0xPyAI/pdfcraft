@@ -962,6 +962,54 @@ fn make_current_properties_default() {
     assert_eq!(last.color, Some([0.0, 0.47, 0.84]));
 }
 
+/// Acrobat's Properties ▸ Make Properties Default: OK with the box ticked makes the edited look
+/// the tool's default (here a strikethrough's colour); without it, only the comment changes.
+#[test]
+fn properties_dialog_makes_the_strikethrough_colour_default() {
+    use pdfcraft_ui_egui::comments::CommentTool;
+    let mut h = harness(|app| app.set_option("quick", "strikeout").unwrap());
+    let green = [0.18, 0.62, 0.36];
+    let blue = [0.0, 0.47, 0.84];
+    assert_ne!(h.state().comment_prefs.style(CommentTool::StrikeOut).color, green);
+    drag_pt(&mut h, (18.0, 155.0), (150.0, 155.0));
+    assert_eq!(comments(&h).iter().filter(|a| a.subtype == "StrikeOut").count(), 1);
+
+    // Without the box: the comment turns blue, the tool keeps its colour.
+    let before = h.state().comment_prefs.style(CommentTool::StrikeOut);
+    h.state_mut().open_comment_props(0, 0);
+    h.run_steps(2);
+    h.state_mut().comment_props.as_mut().expect("open").edited.color = Some(blue);
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    assert_eq!(h.state().comment_prefs.style(CommentTool::StrikeOut).color, before.color);
+
+    // With it: green, and a 0% opacity is clamped so the next strikethrough stays visible.
+    h.state_mut().open_comment_props(0, 0);
+    h.run_steps(2);
+    {
+        let d = h.state_mut().comment_props.as_mut().expect("open");
+        d.edited.color = Some(green);
+        d.edited.opacity = 0.0;
+    }
+    h.get_by_label("Make Properties Default").click();
+    h.run_steps(1);
+    assert!(h.state().comment_props.as_ref().is_some_and(|d| d.make_default));
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    let st = h.state().comment_prefs.style(CommentTool::StrikeOut);
+    assert_eq!((st.color, st.opacity), (green, 0.1));
+    let fresh = {
+        let mut fresh = PdfCraftApp::new();
+        fresh.restore(&h.state().persist());
+        fresh.comment_prefs.style(CommentTool::StrikeOut).color
+    };
+    assert_eq!(fresh, green, "the default persisted");
+    drag_pt(&mut h, (18.0, 155.0), (150.0, 155.0));
+    let c = comments(&h);
+    let made = c.iter().rfind(|a| a.subtype == "StrikeOut").and_then(|a| a.color).expect("a colougreen strikethrough");
+    assert!(made.iter().zip(green).all(|(m, r)| (f64::from(*m) - r).abs() < 0.01), "the next strikethrough is green: {made:?}");
+}
+
 /// #1302: making an arrow's properties the default updates the Arrow tool, not later plain lines.
 #[test]
 fn an_arrows_default_does_not_restyle_lines() {

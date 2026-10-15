@@ -3901,8 +3901,8 @@ milestone = "M5"
 status = "shipped"
 commands = ["comment.list"]
 tools = []
-evidence = ["crates/ui-egui/tests/comments.rs::make_current_properties_default"]
-notes = "colour, opacity and line width become the tool's defaults (canvas and Comments panel menus) and survive a restart: the per-tool styles are persisted with the settings and restored through their clamping setters (#340)"
+evidence = ["crates/ui-egui/tests/comments.rs::make_current_properties_default", "crates/ui-egui/tests/comments.rs::properties_dialog_makes_the_strikethrough_colour_default"]
+notes = "colour, opacity and line width become the tool's defaults (canvas and Comments panel menus, and Acrobat's Make Properties Default box in Comment Properties, applied on OK with the edited look) and survive a restart: the per-tool styles are persisted with the settings and restored through their clamping setters (#340)"
 
 [[feature]]
 id = "comment.author-identity"
