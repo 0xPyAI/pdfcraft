@@ -1933,3 +1933,13 @@ fn stripping_takes_the_xfa_out_and_leaves_an_ordinary_document() {
     assert_eq!(r.field_keys, 2000);
     assert!(started.elapsed() < std::time::Duration::from_secs(5), "{:?}", started.elapsed());
 }
+
+#[test]
+fn som_indices_count_earlier_same_named_siblings() {
+    let draw = |name: Option<&str>| {
+        Node::Draw(Box::new(Draw { common: Common { name: name.map(str::to_string), ..Default::default() }, ..Default::default() }))
+    };
+    let children = [draw(Some("a")), draw(Some("b")), draw(Some("a")), draw(None), draw(Some("a")), draw(Some("b"))];
+    let sibs = SomIndices::of(&children);
+    assert_eq!((0..=children.len()).map(|i| sibs.at(i)).collect::<Vec<_>>(), [0, 0, 1, 0, 2, 1, 0]);
+}
