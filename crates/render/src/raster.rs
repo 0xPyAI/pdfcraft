@@ -4343,8 +4343,8 @@ trailer << /Root 1 0 R >>
     /// Found while triaging `cargo xtask fuzz` on Windows, by hand rather than by the fuzzer
     /// (random mutations almost never make a high-ratio stream): a 2 MB page whose content
     /// stream, or whose 8 × 8 image, inflated to 2 GB took the renderer past 3 GB in under a
-    /// second. Flate (through flate2 and through the fallback inflater), LZW and RunLength expand
-    /// without limit. Vendored hayro-syntax patch: each stops at `MAX_DECODED_STREAM`, and an image
+    /// second. Flate (through flate2 and through the fallback inflater), LZW, RunLength and ASCII85
+    /// (#1796: each `z` is four bytes, here after Flate) expand without limit. Vendored hayro-syntax patch: each stops at `MAX_DECODED_STREAM`, and an image
     /// of known size at its own rows.
     #[test]
     fn decompression_bombs_stop_at_the_stream_limit() {
@@ -4354,11 +4354,14 @@ trailer << /Root 1 0 R >>
         let big = limit + (32 << 20);
         let mut run_length = [0x81u8, 0].repeat(big / 128 + 1); // runs of 128 zeros
         run_length.push(128);
-        let streams: [(&str, Vec<u8>); 4] = [
+        let mut a85 = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        std::io::Write::write_all(&mut a85, &b"z".repeat(big / 4 + 1)).unwrap();
+        let streams: [(&str, Vec<u8>); 5] = [
             ("/FlateDecode", zlib_zeros(big)),
             ("/FlateDecode", deflate_for_the_fallback(big)),
             ("/LZWDecode", lzw_zeros(big / 7_000_000 + 1)),
             ("/RunLengthDecode", run_length),
+            ("[/FlateDecode /ASCII85Decode]", a85.finish().unwrap()),
         ];
         let mut pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 40 40] >> endobj\n".to_vec();
         for (i, (filter, data)) in streams.iter().enumerate() {
@@ -4369,7 +4372,7 @@ trailer << /Root 1 0 R >>
         pdf.extend_from_slice(b"trailer << /Root 1 0 R >>\n%%EOF\n");
         let doc = Pdf::new(pdf).expect("parses");
         let found: Vec<Stream<'_>> = doc.objects().into_iter().filter_map(|o| if let Object::Stream(s) = o { Some(s) } else { None }).collect();
-        assert_eq!(found.len(), 4, "all four bomb streams are found");
+        assert_eq!(found.len(), 5, "all five bomb streams are found");
         for stream in &found {
             let what = format!("{:?}", stream.filters());
             let decoded = stream.decoded().expect("a bomb still decodes, up to the limit");
