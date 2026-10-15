@@ -3976,8 +3976,10 @@ fn notices(
             ui.horizontal(|ui| {
                 ui.add(icons::image("rotate-cw", 16.0, t.accent_text));
                 ui.label(
-                    egui::RichText::new(tl!("This file changed on disk. Reload it to see the new version; your unsaved changes will be lost."))
-                        .color(t.text),
+                    egui::RichText::new(tl!(
+                        "This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version."
+                    ))
+                    .color(t.text),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if icons::button(ui, "x", 22.0, false, tl!("Dismiss")).clicked() {

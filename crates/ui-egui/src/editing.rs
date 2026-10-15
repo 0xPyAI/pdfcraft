@@ -18,6 +18,16 @@ pub enum CloseRequest {
     All,
 }
 
+/// A save held back by [`Dialog::OverwriteChanged`](crate::Dialog::OverwriteChanged): the file
+/// on disk is another version than the document came from (#2166).
+#[cfg(not(target_arch = "wasm32"))]
+pub struct PendingOverwrite {
+    pub id: pdfcraft_engine::DocId,
+    pub dest: String,
+    /// What was to run once the document is written (close its tab, quit).
+    after: Box<dyn FnOnce(&mut PdfCraftApp) + Send>,
+}
+
 /// Where Save writes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SaveTarget {
@@ -597,18 +607,12 @@ impl PdfCraftApp {
                     let dialog = rfd::AsyncFileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(name);
                     // The bytes are taken once the user has chosen, so edits made meanwhile are saved too.
                     self.ask_one(crate::pickers::Ask::Save(dialog), None, move |app, dest| {
-                        if app.save_doc_to(id, &dest.to_string_lossy()) {
-                            after(app);
-                        }
+                        app.save_doc_to_then(id, &dest.to_string_lossy(), Box::new(after));
                     });
                     return false;
                 }
             };
-            let saved = self.save_doc_to(id, &destination);
-            if saved {
-                after(self);
-            }
-            saved
+            self.save_doc_to_then(id, &destination, Box::new(after))
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -654,6 +658,44 @@ impl PdfCraftApp {
                     false
                 }
             }
+        }
+    }
+
+    /// [`Self::save_doc_to`], then `after`. When `dest` is the document's own file and it is
+    /// another version on disk than the one the document came from (something else wrote it
+    /// since the open or the last save, #2166), it asks first: the save waits in
+    /// `pending_overwrite` behind [`Dialog::OverwriteChanged`](crate::Dialog::OverwriteChanged).
+    /// Returns `true` if written now.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save_doc_to_then(&mut self, id: pdfcraft_engine::DocId, dest: &str, after: Box<dyn FnOnce(&mut Self) + Send>) -> bool {
+        let own = self.session.get(id).and_then(|d| d.path.as_deref()).is_some_and(|p| crate::same_file(p, dest));
+        if own && self.watch.disk_differs(id, dest) {
+            self.pending_overwrite = Some(PendingOverwrite { id, dest: dest.to_string(), after });
+            self.dialog = Some(crate::Dialog::OverwriteChanged);
+            return false;
+        }
+        let saved = self.save_doc_to(id, dest);
+        if saved {
+            after(self);
+        }
+        saved
+    }
+
+    /// The dialog's Save anyway: write over the changed file.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn overwrite_changed_file(&mut self) {
+        let Some(p) = self.pending_overwrite.take() else { return };
+        if self.save_doc_to(p.id, &p.dest) {
+            (p.after)(self);
+        }
+    }
+
+    /// The dialog's Save as…: leave the file on disk as it is and ask where to put this version.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn save_changed_file_elsewhere(&mut self) {
+        let Some(p) = self.pending_overwrite.take() else { return };
+        if let Some(index) = self.views.iter().position(|v| v.id == p.id) {
+            self.save_then(index, SaveTarget::As, p.after);
         }
     }
 

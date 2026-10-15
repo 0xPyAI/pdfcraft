@@ -950,6 +950,9 @@
 	Sort comments by:	Ταξινόμηση σχολίων κατά:
 	Create PDF Comment Summary	Δημιουργία σύνοψης σχολίων PDF
 	Revert to the previously saved version of “{name}”? Changes since then can't be undone afterwards.	Επαναφορά της τελευταίας αποθηκευμένης έκδοσης του «{name}»; Οι μεταγενέστερες αλλαγές δεν θα μπορούν να αναιρεθούν.
+	Save over the changed file?	Αποθήκευση πάνω στο αλλαγμένο αρχείο;
+	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	Το «{name}» άλλαξε στον δίσκο μετά το άνοιγμα ή την τελευταία αποθήκευση. Η αποθήκευση τώρα αντικαθιστά αυτή τη νεότερη έκδοση με αυτήν εδώ.
+	Save anyway	Αποθήκευση ούτως ή άλλως
 	Number pages	Αρίθμηση σελίδων
 	Style	Στυλ
 	None (prefix only)	Κανένα (μόνο πρόθεμα)
@@ -2278,7 +2281,7 @@ comment menu	Edit	Επεξεργασία
 	Printer paper and scaling may differ. Check driver settings.	Το χαρτί και η κλίμακα του εκτυπωτή μπορεί να διαφέρουν. Ελέγξτε τις ρυθμίσεις του προγράμματος οδήγησης.
 	Drawing scale changes. Use Actual size for full-scale plans.	Η κλίμακα του σχεδίου αλλάζει. Για σχέδια σε πλήρη κλίμακα χρησιμοποιήστε το Πραγματικό μέγεθος.
 	Reload documents when their files change on disk	Επαναφόρτωση εγγράφων όταν αλλάζουν τα αρχεία τους στον δίσκο
-	This file changed on disk. Reload it to see the new version; your unsaved changes will be lost.	Αυτό το αρχείο άλλαξε στον δίσκο. Επαναφορτώστε το για να δείτε τη νέα έκδοση· οι μη αποθηκευμένες αλλαγές θα χαθούν.
+	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Αυτό το αρχείο άλλαξε στον δίσκο. Η επαναφόρτωση δείχνει τη νέα έκδοση και απορρίπτει τις μη αποθηκευμένες αλλαγές σας· η αποθήκευση την αντικαθιστά με αυτή την έκδοση.
 	Reload	Επαναφόρτωση
 	Couldn't reload {name}: {e}	Δεν ήταν δυνατή η επαναφόρτωση του {name}: {e}
 	Mouse wheel scroll speed	Ταχύτητα κύλισης τροχού ποντικιού

@@ -1416,6 +1416,9 @@
 	Sort comments by:	فرز التعليقات حسب:
 	Create PDF Comment Summary	إنشاء ملخص تعليقات PDF
 	Revert to the previously saved version of “{name}”? Changes since then can't be undone afterwards.	هل تريد الرجوع إلى آخر نسخة محفوظة من «{name}»؟ لا يمكن التراجع بعدها عن التغييرات التي أُجريت منذ ذلك الحين.
+	Save over the changed file?	الحفظ فوق الملف الذي تغيّر؟
+	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	تغيّر «{name}» على القرص بعد فتحه أو حفظه آخر مرة. الحفظ الآن يستبدل تلك النسخة الأحدث بهذه.
+	Save anyway	الحفظ على أي حال
 	Number pages	ترقيم الصفحات
 	Style	النمط
 	None (prefix only)	لا شيء (البادئة فقط)
@@ -2290,7 +2293,7 @@ key	Space	مسافة
 	Printer paper and scaling may differ. Check driver settings.	قد يختلف ورق الطابعة ومقياس الطباعة. تحقق من إعدادات برنامج التشغيل.
 	Drawing scale changes. Use Actual size for full-scale plans.	يتغير مقياس الرسم. استخدم الحجم الفعلي لطباعة المخططات بمقياسها الأصلي.
 	Reload documents when their files change on disk	إعادة تحميل المستندات عند تغيّر ملفاتها على القرص
-	This file changed on disk. Reload it to see the new version; your unsaved changes will be lost.	تغيّر هذا الملف على القرص. أعد تحميله لعرض النسخة الجديدة؛ ستفقد تغييراتك غير المحفوظة.
+	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	تغيّر هذا الملف على القرص. «إعادة التحميل» تعرض النسخة الجديدة وتُسقط تغييراتك غير المحفوظة؛ و«حفظ» يستبدلها بهذه النسخة.
 	Reload	إعادة تحميل
 	Couldn't reload {name}: {e}	تعذّرت إعادة تحميل {name}: {e}
 	Select page {label}	تحديد الصفحة {label}

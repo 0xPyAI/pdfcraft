@@ -78,6 +78,8 @@ fn harness(path: &str) -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
         app.set_option("language", "en").unwrap();
+        // The labels looked for are English, whatever the machine's language.
+        app.set_option("language", "en").unwrap();
         app.run_inline = true;
         app.open_path(&path);
         app
@@ -290,4 +292,75 @@ fn a_shorter_new_version_drops_what_pointed_into_the_old_one() {
     assert_eq!(pages(&h), 1);
     assert_eq!(view.current, 0, "the page is clamped");
     assert!(view.selected.is_empty() && view.comments.selected.is_none(), "no selection points past the new version");
+}
+
+/// Save asks before writing over a version of the file the document did not come from (#2166):
+/// something else wrote it since the open or the last save. Cancel keeps the file on disk;
+/// Save anyway replaces it, and the next Save does not ask.
+#[test]
+fn saving_over_a_file_changed_by_something_else_asks_first() {
+    let file = TempPdf::new("overwrite", &fixture(2));
+    let mut h = harness(&file.path);
+    rotate_first_page(&mut h);
+    file.rebuild(&fixture(4));
+    h.run_steps(3);
+    h.get_by_label_contains("This file changed on disk");
+    assert!(!h.state_mut().save_active(SaveTarget::InPlace), "not written yet");
+    h.run_steps(2);
+    h.get_by_label("Save over the changed file?");
+    h.get_by_label("Cancel").click();
+    h.run_steps(2);
+    assert_eq!(std::fs::read(&file.path).unwrap(), fixture(4), "Cancel keeps the newer file");
+    assert!(dirty(&h) && h.state().pending_overwrite.is_none());
+    assert!(!h.state_mut().save_active(SaveTarget::InPlace));
+    h.run_steps(2);
+    h.get_by_label("Save anyway").click();
+    h.run_steps(3);
+    assert!(!dirty(&h), "written");
+    assert_ne!(std::fs::read(&file.path).unwrap(), fixture(4));
+    assert_eq!(pages(&h), 2, "the document, not the file, is what is shown");
+    // Our own write is the version the document came from now.
+    rotate_first_page(&mut h);
+    assert!(h.state_mut().save_active(SaveTarget::InPlace), "written at once");
+}
+
+/// With the watcher off nothing notices the change until Save looks at the file.
+#[test]
+fn saving_checks_the_file_with_the_watcher_off_too() {
+    let file = TempPdf::new("overwrite-unwatched", &fixture(2));
+    let path = file.path.clone();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.run_inline = true;
+        app.reload_changed_files = false;
+        app.open_path(&path);
+        app
+    });
+    h.run_steps(4);
+    rotate_first_page(&mut h);
+    file.rebuild(&fixture(4));
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("This file changed on disk").is_none(), "nothing watched");
+    assert!(!h.state_mut().save_active(SaveTarget::InPlace));
+    h.run_steps(2);
+    h.get_by_label("Save over the changed file?");
+}
+
+/// One file, one tab (#2166): opening a file that is open already brings its tab forward,
+/// however its path is spelled.
+#[test]
+fn opening_a_file_that_is_open_focuses_its_tab() {
+    let file = TempPdf::new("twice", &fixture(2));
+    let mut h = harness(&file.path);
+    let id = h.state().views[0].id;
+    h.state_mut().open_bytes("other.pdf", None, fixture(1)).unwrap();
+    h.run_steps(2);
+    assert_eq!((h.state().views.len(), h.state().active), (2, Some(1)));
+    let spelled = file.dir.join(".").join("thesis.pdf").to_string_lossy().into_owned();
+    assert_ne!(spelled, file.path);
+    h.state_mut().open_path(&spelled);
+    h.run_steps(2);
+    let app = h.state();
+    assert_eq!((app.views.len(), app.active, app.views[0].id), (2, Some(0), id), "focused, not opened again");
 }

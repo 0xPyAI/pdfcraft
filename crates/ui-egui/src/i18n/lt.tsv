@@ -969,6 +969,9 @@
 	Reverse pages	Apversti puslapius
 	Revert changes	Atšaukti pakeitimus
 	Revert to the previously saved version of “{name}”? Changes since then can't be undone afterwards.	Grąžinti anksčiau įrašytą „{name}“ versiją? Po to atliktų pakeitimų nebegalėsite atkurti.
+	Save over the changed file?	Įrašyti ant pakeisto failo?
+	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	„{name}“ diske pasikeitė po atidarymo arba paskutinio įrašymo. Įrašius dabar ta naujesnė versija bus pakeista šia.
+	Save anyway	Vis tiek įrašyti
 	Review History	Pakeitimų retrospektyva
 	Revisions	Versijos
 	Right	Dešinė
@@ -1176,7 +1179,7 @@
 	This document isn't password-protected	Šis dokumentas neapsaugotas slaptažodžiu
 	This drawing exceeds the snapping limit; only the first paths are used.	Brėžinys viršija pritraukimo ribą; naudojami tik pirmieji keliai.
 	This field is locked. Unlock it to change its properties.	Šis laukas užrakintas. Atrakinkite jį, kad galėtumėte keisti savybes.
-	This file changed on disk. Reload it to see the new version; your unsaved changes will be lost.	Failas diske pasikeitė. Įkelkite jį iš naujo, kad matytumėte naują versiją; neįrašyti pakeitimai bus prarasti.
+	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Šis failas diske pasikeitė. „Įkelti iš naujo“ parodo naują versiją ir atmeta neįrašytus pakeitimus; „Įrašyti“ pakeičia ją šia versija.
 	This file was damaged and has been repaired. Saving keeps the repaired version.	Failas buvo pažeistas ir pataisytas. Įrašius bus išsaugota pataisyta versija.
 	This folder isn't available right now. It may have moved, or its drive or cloud sync is offline.	Aplankas šiuo metu nepasiekiamas. Jis galėjo būti perkeltas arba diskas ar sinchronizavimas su debesija neveikia.
 	This form's scripts are turned off because one ran too long. Reopen the document to run them again.	Šios formos scenarijai išjungti, nes vienas jų veikė per ilgai. Atverkite dokumentą iš naujo, kad scenarijai būtų vykdomi vėl.
