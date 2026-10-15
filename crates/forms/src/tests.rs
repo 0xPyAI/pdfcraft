@@ -608,6 +608,33 @@ fn choices_accept_exports_or_display_text() {
 }
 
 #[test]
+fn list_box_selection_scrolls_to_show_selected_options() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R] >>".into(),
+        "<< /Fields [6 0 R] /DA (/Helv 10 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (days) /Ff 2097152 /Opt [(Mon) (Tue) (Wed) (Thu) (Fri)] /Rect [50 700 200 746] /P 3 0 R >>"
+            .into(),
+    ];
+    let mut doc = document(&objs);
+    // Setting value to Tue and Thu (indices 1 and 3) in a 46 pt high box (fits 3 rows).
+    // It should scroll /TI to 1 so Tue (1), Wed (2), Thu (3) are drawn and highlighted.
+    set_value(&mut doc, "days", &FieldValue::Choice(vec!["Tue".into(), "Thu".into()])).unwrap();
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    let days = field(&all, "days");
+    assert_eq!(days.value, ["Tue", "Thu"]);
+    let ti = doc.get(days.obj).as_dict().unwrap().get(b"TI").and_then(|o| o.as_int());
+    assert_eq!(ti, Some(1), "TI scrolled to 1 so both selected options are visible");
+    let appearance = ap(&doc, &days.widgets[0]);
+    assert!(appearance.contains("(Tue) Tj"), "Tue is drawn: {appearance}");
+    assert!(appearance.contains("(Thu) Tj"), "Thu is drawn: {appearance}");
+    assert_eq!(appearance.matches("0.6 0.75 0.86 rg").count(), 2, "both Tue and Thu highlighted");
+}
+
+#[test]
 fn multiselect_choice_indices_are_sorted_without_reordering_values() {
     let mut forward_appearance = None;
     for values in [["Ham", "Olives"], ["Olives", "Ham"]] {

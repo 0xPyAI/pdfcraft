@@ -23,6 +23,7 @@
 	Auto follows the system's text size. Pages always render at the display's full resolution.	Az Automatikus beállítás a rendszer szövegméretét követi. Az oldalak mindig a kijelző teljes felbontásában jelennek meg.
 	Identity	Személyazonosság
 	Name on new comments	Név az új megjegyzéseken
+	Hide hover previews for highlights without comment text	Megjegyzésszöveg nélküli kiemelések előnézetének elrejtése rámutatáskor
 	Open…	Megnyitás…
 	New blank PDF	Új üres PDF
 	Create PDF from file…	PDF létrehozása fájlból…
@@ -2254,6 +2255,8 @@ key	Space	Szóköz
 	Switch to List view to change the pages it takes.	Válts listanézetre, ha módosítanád, mely oldalak kerüljenek bele.
 	Expand all	Összes kibontása
 	Collapse all	Összes összecsukása
+	Collapse all pages	Összes oldal összecsukása
+	Expand all pages	Összes oldal kibontása
 	Remove page	Oldal eltávolítása
 	Remove {n} pages	{n} oldal eltávolítása
 
@@ -2355,6 +2358,10 @@ animation effects	Off	Ki
 	The linked PDF opened, but its named destination was not applied.	A hivatkozott PDF megnyílt, de a nevesített cél nem lett alkalmazva.
 	The linked PDF opened, but its page destination was out of range.	A hivatkozott PDF megnyílt, de a céloldal a tartományon kívül esik.
 	Local cross-PDF links require the desktop app	A PDF-ek közötti helyi hivatkozásokhoz az asztali alkalmazás szükséges
+	Cut Image	Kép kivágása
+	Redact Image	Kép kitakarása
+	Create Link…	Hivatkozás létrehozása…
+	Recognize Text…	Szövegfelismerés…
 	Minimize	Minimalizálás
 	Maximize	Maximalizálás
 	Restore	Visszaállítás
@@ -2372,6 +2379,13 @@ animation effects	Off	Ki
 	This document is trying to open a local file:	Ez a dokumentum egy helyi fájlt próbál megnyitni:
 	Move tag earlier	Címke korábbra helyezése
 	Move tag later	Címke későbbre helyezése
+	Turn upside down (180°)	Fejjel lefelé fordítás (180°)
+	4 x 6 in label (101.6 x 152.4 mm)	4 × 6 hüvelykes címke (101,6 × 152,4 mm)
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Minden oldalt a nyomtatott területére vág, függőlegesre fordítja, és torzítás nélkül a laphoz igazítja. Laponként egy címke.
+	Find untagged content	Címkézetlen tartalom keresése
+	No untagged content was found.	Nem található címkézetlen tartalom.
+	Found {n} untagged content problems.	{n} címkézetlen tartalmi probléma található.
+	Tag form fields	Űrlapmezők címkézése
 	Mark as artifact	Megjelölés műtárgyként
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Távolítsa el ezt a levélcímkét az olvasási sorrendből, és jelölje meg a közvetlen tartalmát műtárgyként
 	Mark content as artifact	Tartalom megjelölése műtárgyként

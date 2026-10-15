@@ -23,6 +23,7 @@
 	Auto follows the system's text size. Pages always render at the display's full resolution.	Automático sigue el tamaño del texto del sistema. Las páginas siempre se muestran con la resolución completa de la pantalla.
 	Identity	Identidad
 	Name on new comments	Nombre en los comentarios nuevos
+	Hide hover previews for highlights without comment text	Ocultar las vistas previas al pasar el puntero en resaltados sin texto de comentario
 	Open…	Abrir…
 	Open Recent	Abrir recientes
 	Clear Recent Files	Borrar archivos recientes
@@ -2396,6 +2397,8 @@ key	Space	Espacio
 	Switch to List view to change the pages it takes.	Cambia a la vista de lista para cambiar las páginas que se incluyen.
 	Expand all	Expandir todo
 	Collapse all	Contraer todo
+	Collapse all pages	Contraer todas las páginas
+	Expand all pages	Expandir todas las páginas
 	Remove page	Quitar página
 	Remove {n} pages	Quitar {n} páginas
 
@@ -2496,6 +2499,10 @@ animation effects	Off	Desactivados
 	The linked PDF opened, but its page destination was out of range.	El PDF vinculado se abrió, pero su página de destino está fuera de rango.
 	Local cross-PDF links require the desktop app	Los enlaces locales entre PDF requieren la aplicación de escritorio
 	The existing action will be preserved.	Se conservará la acción existente.
+	Cut Image	Cortar imagen
+	Redact Image	Censurar imagen
+	Create Link…	Crear enlace…
+	Recognize Text…	Reconocer texto…
 	Minimize	Minimizar
 	Maximize	Maximizar
 	Restore	Restaurar
@@ -2513,6 +2520,13 @@ animation effects	Off	Desactivados
 	This document is trying to open a local file:	Este documento intenta abrir un archivo local:
 	Move tag earlier	Mover etiqueta antes
 	Move tag later	Mover etiqueta después
+	Turn upside down (180°)	Girar boca abajo (180°)
+	4 x 6 in label (101.6 x 152.4 mm)	Etiqueta 4 × 6 in (101,6 × 152,4 mm)
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Recorta cada página a su área impresa, la endereza y la ajusta a la hoja sin deformarla. Una etiqueta por hoja.
+	Find untagged content	Buscar contenido sin etiquetar
+	No untagged content was found.	No se encontró contenido sin etiquetar.
+	Found {n} untagged content problems.	Se encontraron {n} problemas de contenido sin etiquetar.
+	Tag form fields	Etiquetar campos de formulario
 	Mark as artifact	Marcar como artefacto
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Quite esta etiqueta hoja del orden de lectura y marque su contenido directo como artefacto
 	Mark content as artifact	Marcar contenido como artefacto

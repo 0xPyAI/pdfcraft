@@ -1355,13 +1355,9 @@ impl Document {
                         None => return Ok(None),
                     }
                 }
-                Err(e) => {
-                    if sections.is_empty() {
-                        return Err(e);
-                    }
-                    log.push(format!("older cross-reference section at {off} is unreadable: {e}"));
-                    break;
-                }
+                // An unreadable older section loses every object only it locates: the
+                // materialized reader logs it and the file is rebuilt from object headers (#1656).
+                Err(e) => return Err(e),
             };
             revisions.push(Revision { xref_offset: off, is_stream });
             let Some(rows) = retained_rows.checked_add(primary.row_count).filter(|rows| *rows <= MAX_COMPACT_XREF_ROWS) else { return Ok(None) };
@@ -1649,11 +1645,12 @@ impl Document {
                     self.read_section(off as usize + self.header_offset, &mut sect, &mut odd)?
                 }
                 Err(e) => {
-                    if revisions.is_empty() {
-                        return Err(e);
+                    // An unreadable older section loses every object only it locates (the page
+                    // tree, often): rebuild from object headers, as readers do (#1656).
+                    if !revisions.is_empty() {
+                        log.push(format!("older cross-reference section at {off} is unreadable: {e}"));
                     }
-                    log.push(format!("older cross-reference section at {off} is unreadable: {e}"));
-                    break;
+                    return Err(e);
                 }
             };
             revisions.push(Revision { xref_offset: off, is_stream });
@@ -2186,6 +2183,32 @@ mod tests {
                 assert_eq!(doc.get(ObjRef::new(1, 0)).as_dict().unwrap().name(b"Type"), Some(b"Catalog".as_slice()));
             }
         }
+    }
+
+    #[test]
+    fn objects_only_an_unreadable_older_section_locates_are_found_by_scanning() {
+        // The newest section lists the catalog only; its /Prev points past the end of the file,
+        // so the page tree is reachable only by scanning object headers, as readers do (#1656).
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (num, body) in
+            [(1, "<< /Type /Catalog /Pages 2 0 R >>"), (2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"), (3, "<< /Type /Page /Parent 2 0 R >>")]
+        {
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{num} 0 obj\n{body}\nendobj\n").as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend_from_slice(
+            format!(
+                "xref\n0 2\n0000000000 65535 f \n{:010} 00000 n \ntrailer\n<< /Root 1 0 R /Size 4 /Prev 999999 >>\nstartxref\n{xref}\n%%EOF\n",
+                offsets[0]
+            )
+            .as_bytes(),
+        );
+        let doc = Document::open(Arc::new(bytes)).unwrap();
+        assert_eq!(doc.get(ObjRef::new(2, 0)).as_dict().and_then(|d| d.name(b"Type")), Some(b"Pages".as_slice()));
+        assert_eq!(doc.get(ObjRef::new(3, 0)).as_dict().and_then(|d| d.name(b"Type")), Some(b"Page".as_slice()));
+        assert!(doc.repair_log().iter().any(|l| l.contains("999999")), "{:?}", doc.repair_log());
     }
 
     #[test]

@@ -29,6 +29,7 @@
 	Auto follows the system's text size. Pages always render at the display's full resolution.	Auto segue la dimensione del testo del sistema. Le pagine vengono sempre visualizzate alla piena risoluzione dello schermo.
 	Identity	Identità
 	Name on new comments	Nome sui nuovi commenti
+	Hide hover previews for highlights without comment text	Nascondi le anteprime al passaggio del puntatore per le evidenziazioni senza testo di commento
 	Open…	Apri…
 	Open Recent	Apri recenti
 	Pin folder to Home…	Fissa una cartella sulla Home…
@@ -2266,6 +2267,8 @@ key	Space	Spazio
 	Switch to List view to change the pages it takes.	Passa alla vista elenco per cambiare le pagine incluse.
 	Expand all	Espandi tutto
 	Collapse all	Comprimi tutto
+	Collapse all pages	Comprimi tutte le pagine
+	Expand all pages	Espandi tutte le pagine
 	Remove page	Rimuovi pagina
 	Remove {n} pages	Rimuovi {n} pagine
 
@@ -2365,6 +2368,10 @@ animation effects	Off	Disattivati
 	The linked PDF opened, but its named destination was not applied.	Il PDF collegato è stato aperto, ma la sua destinazione con nome non è stata applicata.
 	The linked PDF opened, but its page destination was out of range.	Il PDF collegato è stato aperto, ma la pagina di destinazione è fuori intervallo.
 	Local cross-PDF links require the desktop app	I collegamenti locali tra PDF richiedono l'app desktop
+	Cut Image	Taglia immagine
+	Redact Image	Oscura immagine
+	Create Link…	Crea collegamento…
+	Recognize Text…	Riconosci testo…
 	Minimize	Riduci a icona
 	Maximize	Ingrandisci
 	Restore	Ripristina
@@ -2382,6 +2389,13 @@ animation effects	Off	Disattivati
 	This document is trying to open a local file:	Questo documento sta tentando di aprire un file locale:
 	Move tag earlier	Sposta tag prima
 	Move tag later	Sposta tag dopo
+	Turn upside down (180°)	Capovolgi (ruota di 180°)
+	4 x 6 in label (101.6 x 152.4 mm)	Etichetta 4×6 - 101,6 × 152,4 mm
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Ritaglia l'area stampata di ogni pagina, la raddrizza e la adatta al foglio senza deformarla. Un'etichetta per foglio.
+	Find untagged content	Trova contenuto senza tag
+	No untagged content was found.	Non è stato trovato contenuto senza tag.
+	Found {n} untagged content problems.	Trovati {n} problemi di contenuto senza tag.
+	Tag form fields	Assegna tag ai campi del modulo
 	Mark as artifact	Segna come artefatto
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Rimuovi questo tag foglia dall'ordine di lettura e segna il suo contenuto diretto come artefatto
 	Mark content as artifact	Segna il contenuto come artefatto

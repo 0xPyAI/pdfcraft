@@ -1121,6 +1121,7 @@
 	Name	Ime
 	Name (A–Z)	Ime (A–Ž)
 	Name on new comments	Ime na novih komentarjih
+	Hide hover previews for highlights without comment text	Skrij predoglede ob lebdenju za označitve brez besedila komentarja
 	Name:	Ime:
 	Named Destinations	Poimenovani cilji
 	Navigation links	Navigacijske povezave
@@ -2191,6 +2192,8 @@ signature pad	Type	Vtipkaj
 	Auto follows the system's text size. Pages always render at the display's full resolution.	Samodejno sledi velikosti besedila v sistemu. Strani se vedno izrišejo v polni ločljivosti zaslona.
 	Check the pages	Preveri strani
 	Collapse all	Strni vse
+	Collapse all pages	Strni vse strani
+	Expand all pages	Razširi vse strani
 	Column select	Izbira stolpcev
 	Drag the selection to move it. Esc clears the selection.	Povlecite izbor, da ga premaknete. Esc počisti izbor.
 	Expand all	Razširi vse
@@ -2361,6 +2364,10 @@ animation effects	Off	Izklopljeni
 	The linked PDF opened, but its named destination was not applied.	Povezani PDF se je odprl, vendar njegov poimenovani cilj ni bil uporabljen.
 	The linked PDF opened, but its page destination was out of range.	Povezani PDF se je odprl, vendar je ciljna stran zunaj obsega.
 	Local cross-PDF links require the desktop app	Lokalne povezave med PDF-ji zahtevajo namizno aplikacijo
+	Cut Image	Izreži sliko
+	Redact Image	Počrni sliko
+	Create Link…	Ustvari povezavo…
+	Recognize Text…	Prepoznaj besedilo…
 	Minimize	Pomanjšaj
 	Maximize	Povečaj
 	Restore	Obnovi
@@ -2378,6 +2385,13 @@ animation effects	Off	Izklopljeni
 	This document is trying to open a local file:	Ta dokument poskuša odpreti lokalno datoteko:
 	Move tag earlier	Premakni oznako prej
 	Move tag later	Premakni oznako pozneje
+	Turn upside down (180°)	Obrni na glavo (180°)
+	4 x 6 in label (101.6 x 152.4 mm)	Nalepka 4 × 6 in (101,6 × 152,4 mm)
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Vsako stran obreže na natisnjeno območje, jo poravna pokonci in prilagodi listu brez raztegovanja. Ena nalepka na list.
+	Find untagged content	Poišči neoznačeno vsebino
+	No untagged content was found.	Neoznačene vsebine ni bilo mogoče najti.
+	Found {n} untagged content problems.	Najdenih je {n} težav z neoznačeno vsebino.
+	Tag form fields	Označi polja obrazca
 	Mark as artifact	Označi kot artefakt
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Odstranite to listno oznako iz vrstnega reda branja in označite njeno neposredno vsebino kot artefakt
 	Mark content as artifact	Označi vsebino kot artefakt

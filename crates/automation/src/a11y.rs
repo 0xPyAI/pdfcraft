@@ -217,6 +217,19 @@ impl Automation {
         }))
     }
 
+    pub(crate) fn accessibility_autotag_form_fields(&mut self, a: &Args) -> Result<Value> {
+        let id = self.doc(a)?.id;
+        self.session.apply(id, pdfcraft_engine::Edit::AutoTagFormFields).map_err(failed)?;
+        let report = self
+            .doc(a)?
+            .accessibility_check(&Options { rules: [Rule::TaggedFormFields].into(), pages: None })
+            .ok_or_else(|| failed("the document can't be read"))?;
+        let result = report.result(Rule::TaggedFormFields).ok_or_else(|| failed("the form field check is unavailable"))?;
+        Ok(
+            json!({ "status": status_id(result.status), "remaining_findings": result.findings.len(), "note": "Only form widgets were tagged. Review text, figures, links, reading order, and other document content separately." }),
+        )
+    }
+
     pub(crate) fn accessibility_autotag_preview(&self, a: &Args) -> Result<Value> {
         let page = self.page(a)?;
         let preview = self.doc(a)?.autotag_preview(page).map_err(failed)?;
@@ -271,6 +284,14 @@ impl Automation {
         let o = self.a11y_options(a)?;
         let r = self.doc(a)?.accessibility_check(&o).ok_or_else(|| failed("the document can't be read for checking"))?;
         Ok(report_json(&r))
+    }
+
+    /// Report only untagged page content, annotations, and AcroForm widgets.
+    pub(crate) fn a11y_find_untagged(&self, a: &Args) -> Result<Value> {
+        let pages = a.opt_ints("pages")?.map(|_| self.pages(a, "pages")).transpose()?;
+        let rules = [Rule::TaggedContent, Rule::TaggedAnnotations, Rule::TaggedFormFields].into_iter().collect();
+        let report = self.doc(a)?.accessibility_check(&Options { rules, pages }).ok_or_else(|| failed("the document can't be read for checking"))?;
+        Ok(report_json(&report))
     }
 
     pub(crate) fn a11y_report(&self, a: &Args) -> Result<Value> {
@@ -488,6 +509,16 @@ impl Automation {
             })
             .collect();
         Ok(json!({ "count": count, "tags": tags, "next": next }))
+    }
+
+    pub(crate) fn accessibility_tag_content(&self, a: &Args) -> Result<Value> {
+        let object = u32::try_from(a.int("object")?).map_err(|_| ToolError::InvalidArgs("object must be a positive tag object number".into()))?;
+        let generation =
+            u16::try_from(a.int("generation")?).map_err(|_| ToolError::InvalidArgs("generation must be a PDF object generation".into()))?;
+        let content = self.doc(a)?.tag_content(pdfcraft_cos::ObjRef { num: object, generation }).map_err(failed)?;
+        Ok(
+            json!({ "count": content.len(), "content": content.into_iter().map(|item| json!({ "page": item.page.map(|p| p + 1), "mcid": item.mcid, "text": item.text })).collect::<Vec<_>>() }),
+        )
     }
 
     pub(crate) fn accessibility_set_tag_property(&mut self, a: &Args) -> Result<Value> {

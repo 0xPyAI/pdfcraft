@@ -157,6 +157,10 @@ For inline editor previews, `page_render` accepts `hide_text_block` (a 1-based i
 `text_paragraphs`). It renders the page without that paragraph’s source glyphs and leaves the
 working document unchanged.
 
+`page_render.hide_added_text` does the same for an added text item's 1-based index from
+`content_list` or `object_list`. It removes only that item in a read-only preview and is
+mutually exclusive with `hide_text_block`.
+
 
 ## Existing text and document fonts
 

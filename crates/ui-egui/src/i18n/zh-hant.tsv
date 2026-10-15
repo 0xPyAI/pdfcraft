@@ -22,6 +22,7 @@
 	Auto follows the system's text size. Pages always render at the display's full resolution.	「自動」會跟隨系統的文字大小。頁面一律以螢幕的完整解析度呈現。
 	Identity	個人資訊
 	Name on new comments	新註解的作者名稱
+	Hide hover previews for highlights without comment text	隱藏沒有註解文字的螢光標示的停留預覽
 	Open…	開啟…
 	Open Recent	開啟最近的檔案
 	Clear Recent Files	清除最近的檔案
@@ -2138,6 +2139,8 @@ key	Space	空格
 	Switch to List view to change the pages it takes.	切換到清單檢視以變更要使用的頁面。
 	Expand all	全部展開
 	Collapse all	全部摺疊
+	Collapse all pages	摺疊所有頁面
+	Expand all pages	展開所有頁面
 	Remove page	刪除頁面
 	Remove {n} pages	刪除 {n} 頁
 
@@ -2232,6 +2235,10 @@ animation effects	Off	關
 	The linked PDF opened, but its page destination was out of range.	已開啟連結的 PDF，但其頁面目的地超出範圍。
 	Local cross-PDF links require the desktop app	PDF 之間的本機連結需要桌面應用程式
 	The existing action will be preserved.	將保留現有動作。
+	Cut Image	剪下圖片
+	Redact Image	遮蔽圖片
+	Create Link…	建立連結…
+	Recognize Text…	辨識文字…
 	Minimize	最小化
 	Maximize	最大化
 	Restore	還原
@@ -2249,6 +2256,13 @@ animation effects	Off	關
 	This document is trying to open a local file:	此文件正嘗試開啟本機檔案：
 	Move tag earlier	將標記前移
 	Move tag later	將標記後移
+	Turn upside down (180°)	上下顛倒 (180°)
+	4 x 6 in label (101.6 x 152.4 mm)	4 × 6 英吋標籤 (101.6 × 152.4 公釐)
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	將每頁裁切至其列印區域，轉正後不拉伸地符合紙張。每張紙一個標籤。
+	Find untagged content	尋找未標記的內容
+	No untagged content was found.	找不到未標記的內容。
+	Found {n} untagged content problems.	發現 {n} 個未標記內容問題。
+	Tag form fields	標記表單欄位
 	Mark as artifact	標記為成品
 	Remove this leaf tag from reading order and mark its direct content as an artifact	從閱讀順序中移除此葉標記，並將其直接內容標記為成品
 	Mark content as artifact	將內容標記為成品

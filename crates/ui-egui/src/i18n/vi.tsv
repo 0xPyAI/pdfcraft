@@ -25,6 +25,7 @@
 	Auto ({percent}%)	Tự động ({percent}%)
 	Identity	Danh tính
 	Name on new comments	Tên trên bình luận mới
+	Hide hover previews for highlights without comment text	Ẩn bản xem trước khi di chuột cho các phần tô sáng không có nội dung nhận xét
 	Open…	Mở…
 	Open Recent	Mở gần đây
 	Clear Recent Files	Xóa tệp gần đây
@@ -373,6 +374,8 @@ theme	Appearance	Giao diện
 	Closed arrow	Mũi tên đóng
 	Collapse	Thu gọn
 	Collapse all	Thu gọn tất cả
+	Collapse all pages	Thu gọn tất cả các trang
+	Expand all pages	Mở rộng tất cả các trang
 	Collapse all bookmarks	Thu gọn tất cả dấu trang
 	Collapse tag	Thu gọn thẻ
 	Collate	Sắp theo bộ
@@ -2592,6 +2595,7 @@ key	End	End
 key	Space	Space
 	Move tag earlier	Chuyển thẻ lên trước
 	Move tag later	Chuyển thẻ ra sau
+	Tag form fields	Gắn thẻ các trường biểu mẫu
 	Only allow this if you trust the source document.	Chỉ cho phép nếu bạn tin tưởng tài liệu nguồn.
 	Open this local PDF?	Mở PDF cục bộ này?
 	This document is trying to open a local file:	Tài liệu này đang cố mở một tệp cục bộ:
@@ -2601,6 +2605,16 @@ key	Space	Space
 	Restore	Khôi phục
 	Use system title bar	Dùng thanh tiêu đề hệ thống
 	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Hiện thanh tiêu đề đơn giản cho các nút cửa sổ thay vì dải tab. GNOME không vẽ thanh tiêu đề cho ứng dụng, nên thanh này không theo chủ đề của nó.
+	Turn upside down (180°)	Lật ngược (180°)
+	4 x 6 in label (101.6 x 152.4 mm)	Nhãn 4 × 6 in (101,6 × 152,4 mm)
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Cắt mỗi trang theo vùng được in, xoay thẳng và vừa với tờ giấy mà không kéo giãn. Mỗi tờ một nhãn.
+	Find untagged content	Tìm nội dung chưa được gắn thẻ
+	No untagged content was found.	Không tìm thấy nội dung nào chưa được gắn thẻ.
+	Found {n} untagged content problems.	Đã tìm thấy {n} vấn đề về nội dung chưa được gắn thẻ.
+	Cut Image	Cắt hình ảnh
+	Redact Image	Xóa nội dung nhạy cảm của hình ảnh
+	Create Link…	Tạo liên kết…
+	Recognize Text…	Nhận dạng văn bản…
 	Attach a file…	Đính kèm tệp…
 	Delete attachment	Xóa tệp đính kèm
 	Attaching files is not available on the web yet	Chưa thể đính kèm tệp trên web

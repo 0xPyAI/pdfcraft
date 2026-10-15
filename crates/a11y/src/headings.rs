@@ -178,7 +178,7 @@ fn sub(doc: &Document, d: &Dict, key: &[u8]) -> Dict {
 /// than an em from it, starts a new word (the em is the font size times |`Tz`|; see [`new_word`]).
 /// Text-positioning operators alone don't break words: producers that place every glyph with its
 /// own `Td` (Chromium) would otherwise read as "C h a p t e r".
-fn mcid_texts(doc: &Document, page: &Dict) -> HashMap<i64, String> {
+pub(crate) fn mcid_texts(doc: &Document, page: &Dict) -> HashMap<i64, String> {
     let res = sub(doc, page, b"Resources");
     let (fonts, props) = (sub(doc, &res, b"Font"), sub(doc, &res, b"Properties"));
     let mut metrics: HashMap<Vec<u8>, Metrics> = HashMap::new();

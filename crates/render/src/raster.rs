@@ -5617,6 +5617,56 @@ trailer << /Root 1 0 R >>
         assert_eq!(pixel(&on, 150, 55), &[255, 255, 255, 255], "the image's white quadrant stays white");
     }
 
+    /// Reading colours replace *document* colours, never annotation colours (issue #1548): a
+    /// highlight keeps its `/C`, so on a dark background the content under it shows through the
+    /// Multiply blend in the highlight's colour instead of being darkened into invisibility.
+    /// Both annotation paths are covered: the `/AP` appearance stream and the no-`/AP`
+    /// `/QuadPoints` fallback.
+    #[test]
+    fn reading_colors_keep_highlight_annotations_readable() {
+        let content = "0 g 100 40 10 20 re f";
+        let pdf = format!(
+            "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R /Annots [5 0 R] >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /Annot /Subtype /Highlight /Rect [15 35 120 65] /QuadPoints [15 65 120 65 15 35 120 35] /C [1 1 0] {{annot}} >> endobj
+6 0 obj << /Type /XObject /Subtype /Form /BBox [15 35 120 65] /Length 24 >> stream
+0 0 1 rg 15 35 50 30 re f
+endstream endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+            content.len()
+        );
+        let render = |annot: &str| {
+            let mut r = PageRenderer::new(
+                Arc::new(pdf.replace("{annot}", annot).into_bytes()),
+                RenderConfig { reading_colors: ReadingColors::WHITE_ON_BLACK, ..Default::default() },
+            );
+            let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(p.error.is_none(), "{annot}: {:?}", p.error);
+            p
+        };
+        let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..4].to_vec();
+
+        // No /AP: the page's black rectangle is remapped to white (document line art), the
+        // yellow fill is not, so Multiply leaves the content under the quad yellow — readable.
+        let p = render("");
+        assert_eq!(px(&p, 5, 5), vec![0, 0, 0, 255], "the page clears to the background");
+        assert_eq!(px(&p, 105, 50), vec![255, 255, 0, 255], "content under the quad shows through in the highlight's colour");
+        assert_eq!(px(&p, 30, 50), vec![0, 0, 0, 255], "the band itself multiplies into the dark background, as in Acrobat");
+        assert_eq!(px(&p, 150, 50), vec![0, 0, 0, 255], "outside the quad");
+
+        // With /AP the appearance's blue is an annotation colour too and stays blue instead of
+        // being remapped towards white by its luminance.
+        let p = render("/AP << /N 6 0 R >>");
+        assert_eq!(px(&p, 30, 50), vec![0, 0, 255, 255], "the appearance keeps its own colour");
+        assert_eq!(px(&p, 90, 50), vec![0, 0, 0, 255], "outside the appearance's own drawing");
+    }
+
     /// A print-preview request (`PRINT_TAG`) renders the document's true colours even though
     /// the document's config carries reading colours: a preview's job is fidelity to the
     /// printout, which is imposed from the uncoloured document. Covers both render paths —

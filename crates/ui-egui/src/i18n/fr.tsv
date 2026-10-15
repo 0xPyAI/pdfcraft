@@ -23,6 +23,7 @@
 	Auto follows the system's text size. Pages always render at the display's full resolution.	Automatique suit la taille du texte du système. Les pages sont toujours rendues à la pleine résolution de l'écran.
 	Identity	Identité
 	Name on new comments	Nom sur les nouveaux commentaires
+	Hide hover previews for highlights without comment text	Masquer les aperçus au survol des surlignages sans texte de commentaire
 	Open…	Ouvrir…
 	New blank PDF	Nouveau PDF vierge
 	Create PDF from file…	Créer un PDF à partir d'un fichier…
@@ -2259,6 +2260,8 @@ key	Space	Espace
 	Switch to List view to change the pages it takes.	Passez à la vue en liste pour modifier les pages prises.
 	Expand all	Tout développer
 	Collapse all	Tout réduire
+	Collapse all pages	Réduire toutes les pages
+	Expand all pages	Développer toutes les pages
 	Remove page	Retirer la page
 	Remove {n} pages	Retirer {n} pages
 
@@ -2356,6 +2359,10 @@ animation effects	Off	Désactivés
 	The linked PDF opened, but its named destination was not applied.	Le PDF lié s'est ouvert, mais sa destination nommée n'a pas été appliquée.
 	The linked PDF opened, but its page destination was out of range.	Le PDF lié s'est ouvert, mais sa page de destination est hors limites.
 	Local cross-PDF links require the desktop app	Les liens locaux entre PDF nécessitent l'application de bureau
+	Cut Image	Couper l'image
+	Redact Image	Biffer l'image
+	Create Link…	Créer un lien…
+	Recognize Text…	Reconnaître le texte…
 	Minimize	Réduire
 	Maximize	Agrandir
 	Restore	Restaurer
@@ -2373,6 +2380,13 @@ animation effects	Off	Désactivés
 	This document is trying to open a local file:	Ce document tente d’ouvrir un fichier local :
 	Move tag earlier	Déplacer la balise plus tôt
 	Move tag later	Déplacer la balise plus tard
+	Turn upside down (180°)	Retourner (180°)
+	4 x 6 in label (101.6 x 152.4 mm)	Étiquette 4 × 6 po (101,6 × 152,4 mm)
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Rogne chaque page à sa zone imprimée, la redresse et l’ajuste à la feuille sans la déformer. Une étiquette par feuille.
+	Find untagged content	Rechercher le contenu non balisé
+	No untagged content was found.	Aucun contenu non balisé n’a été trouvé.
+	Found {n} untagged content problems.	{n} problèmes de contenu non balisé trouvés.
+	Tag form fields	Baliser les champs de formulaire
 	Mark as artifact	Marquer comme artefact
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Retirez cette balise feuille de l’ordre de lecture et marquez son contenu direct comme artefact
 	Mark content as artifact	Marquer le contenu comme artefact

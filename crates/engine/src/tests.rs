@@ -2070,7 +2070,7 @@ fn headers_footers_watermarks_and_backgrounds_show_update_and_remove() {
     s.apply(id, Edit::AddHeaderFooter { pages: vec![0, 1], settings: hf.clone(), replace: false }).unwrap();
     // The session clock is 2023-11-14.
     assert_eq!(page_texts(&s, id)[1], "Page 2\nPage 2 of 2 · 2023-11-14");
-    assert_eq!(s.get(id).unwrap().marks, [MarkKind::HeaderFooter]);
+    assert_eq!(s.get(id).unwrap().marks(), [MarkKind::HeaderFooter]);
     hf.text[4] = "Draft".into();
     s.apply(id, Edit::AddHeaderFooter { pages: vec![0, 1], settings: hf, replace: true }).unwrap();
     assert_eq!(page_texts(&s, id)[0], "Page 1\nDraft");
@@ -2089,19 +2089,19 @@ fn headers_footers_watermarks_and_backgrounds_show_update_and_remove() {
         },
     )
     .unwrap();
-    assert_eq!(s.get(id).unwrap().marks.len(), 3);
+    assert_eq!(s.get(id).unwrap().marks().len(), 3);
     assert!(page_texts(&s, id)[0].contains("SECRET"));
     s.apply(id, Edit::RemoveMarks { kind: MarkKind::HeaderFooter }).unwrap();
     s.apply(id, Edit::RemoveMarks { kind: MarkKind::Watermark }).unwrap();
     s.apply(id, Edit::RemoveMarks { kind: MarkKind::Background }).unwrap();
     assert_eq!(page_texts(&s, id), ["Page 1", "Page 2"]);
-    assert!(s.get(id).unwrap().marks.is_empty());
+    assert!(s.get(id).unwrap().marks().is_empty());
     assert!(matches!(s.apply(id, Edit::RemoveMarks { kind: MarkKind::Watermark }), Err(EditError::Edit(_))));
     assert_eq!(s.get(id).unwrap().can_undo(), Some("Remove background"));
 }
 
 #[test]
-fn open_populates_marks_and_added_from_the_combined_marker_scan() {
+fn marker_indexes_match_after_open_and_save_when_requested() {
     let (mut source, source_id) = session_with(1);
     let mut header = HeaderFooter::default();
     header.text[0] = "Header".into();
@@ -2136,18 +2136,95 @@ fn open_populates_marks_and_added_from_the_combined_marker_scan() {
     let expected_added = pdfcraft_edit::list_added(&reference);
     source.mark_saved(source_id, bytes.clone(), None).unwrap();
     let refreshed = source.get(source_id).unwrap();
-    assert_eq!(refreshed.marks, expected_marks);
-    assert_eq!(refreshed.added, expected_added);
+    assert_eq!(refreshed.marks(), expected_marks);
+    assert_eq!(refreshed.added(), expected_added);
     let mut reopened = Session::new();
     let reopened_id = reopened.open("marked.pdf", None, bytes, None).unwrap();
     let opened = reopened.get(reopened_id).unwrap();
-    assert_eq!(opened.marks, expected_marks);
-    assert_eq!(opened.added, expected_added);
-    assert_eq!(opened.marks.len(), 3);
-    assert!(opened.marks.contains(&MarkKind::HeaderFooter));
-    assert!(opened.marks.contains(&MarkKind::Watermark));
-    assert!(opened.marks.contains(&MarkKind::Background));
-    assert_eq!(opened.added.len(), 1);
+    assert_eq!(opened.marks(), expected_marks);
+    assert_eq!(opened.added(), expected_added);
+    assert_eq!(opened.marks().len(), 3);
+    assert!(opened.marks().contains(&MarkKind::HeaderFooter));
+    assert!(opened.marks().contains(&MarkKind::Watermark));
+    assert!(opened.marks().contains(&MarkKind::Background));
+    assert_eq!(opened.added().len(), 1);
+}
+
+#[test]
+fn secondary_indexes_load_once_and_follow_edit_scopes() {
+    reset_secondary_scan_counts();
+    let (mut session, id) = session_with(1);
+    assert_eq!(secondary_scan_counts(), (0, 0), "open does not scan markers or links");
+
+    {
+        let doc = session.get(id).unwrap();
+        assert!(doc.marks().is_empty());
+        assert!(doc.added().is_empty());
+        assert!(doc.added().is_empty());
+        assert_eq!(secondary_scan_counts(), (1, 0), "marks and added content share one scan");
+        assert!(doc.links().is_empty());
+        assert!(doc.links().is_empty());
+        assert_eq!(secondary_scan_counts(), (1, 1), "repeated reads reuse the link list");
+    }
+
+    session.apply(id, Edit::SetInfo { key: "Title".into(), value: "Changed".into() }).unwrap();
+    assert!(session.get(id).unwrap().links().is_empty());
+    assert!(session.get(id).unwrap().marks().is_empty());
+    assert_eq!(secondary_scan_counts(), (1, 1), "metadata does not invalidate either index");
+
+    session.apply(id, rect_comment(0, [20.0, 20.0, 60.0, 60.0])).unwrap();
+    assert!(session.get(id).unwrap().links().is_empty());
+    assert_eq!(secondary_scan_counts(), (1, 2), "comment edits invalidate the annotation-position link index");
+
+    session
+        .apply(
+            id,
+            Edit::AddLink {
+                page: 0,
+                rect: [10.0, 10.0, 80.0, 30.0],
+                action: LinkAction::Uri("https://example.org".into()),
+                style: LinkStyle::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(secondary_scan_counts(), (1, 2), "a link edit invalidates only the link list");
+    assert_eq!(session.get(id).unwrap().links()[0].index, 1, "link indexes include earlier annotations");
+    assert_eq!(secondary_scan_counts(), (1, 3));
+    session.undo(id).unwrap();
+    assert_eq!(session.get(id).unwrap().links().len(), 0);
+    assert_eq!(secondary_scan_counts(), (1, 4), "undo rebuilds the link list once");
+    session.redo(id).unwrap();
+    assert_eq!(session.get(id).unwrap().links()[0].index, 1);
+    assert_eq!(secondary_scan_counts(), (1, 5), "redo rebuilds the link list once");
+    session.apply(id, Edit::DeleteAnnotation { page: 0, index: 0 }).unwrap();
+    assert_eq!(session.get(id).unwrap().links()[0].index, 0, "deleting an earlier annotation shifts link indexes");
+    assert_eq!(secondary_scan_counts(), (1, 6), "comment deletion rebuilds annotation-position indexes");
+
+    session
+        .apply(id, Edit::AddText { page: 0, text: AddedText { rect: [20.0, 250.0, 100.0, 280.0], text: "Added".into(), ..Default::default() } })
+        .unwrap();
+    assert_eq!(secondary_scan_counts(), (1, 6), "content edits defer rebuilding until a marker getter is used");
+    assert_eq!(session.get(id).unwrap().added().len(), 1);
+    assert_eq!(session.get(id).unwrap().links().len(), 1);
+    assert_eq!(secondary_scan_counts(), (2, 6), "content edits preserve the link cache");
+
+    let mut header = HeaderFooter::default();
+    header.text[0] = "Header".into();
+    session.apply(id, Edit::AddHeaderFooter { pages: vec![0], settings: header, replace: false }).unwrap();
+    assert_eq!(session.get(id).unwrap().marks(), [MarkKind::HeaderFooter]);
+    assert_eq!(secondary_scan_counts(), (3, 6));
+    session.undo(id).unwrap();
+    assert!(session.get(id).unwrap().marks().is_empty());
+    assert_eq!(secondary_scan_counts(), (4, 6), "undo invalidates marker state");
+    session.undo(id).unwrap();
+    assert!(session.get(id).unwrap().added().is_empty());
+    assert_eq!(secondary_scan_counts(), (5, 6), "undo of added content invalidates marker state");
+    session.redo(id).unwrap();
+    assert_eq!(session.get(id).unwrap().added().len(), 1);
+    assert_eq!(secondary_scan_counts(), (6, 6), "redo of added content rebuilds once");
+    session.redo(id).unwrap();
+    assert_eq!(session.get(id).unwrap().marks(), [MarkKind::HeaderFooter]);
+    assert_eq!(secondary_scan_counts(), (7, 6), "redo of marks rebuilds once");
 }
 
 #[test]
@@ -2390,15 +2467,15 @@ fn added_text_and_images_render_and_stay_editable() {
     }
     s.apply(id, Edit::AddImage { page: 0, rect: None, name: "dot.png".into(), bytes: Arc::new(png) }).unwrap();
     let d = s.get(id).unwrap();
-    assert_eq!(d.added.len(), 2);
-    assert_eq!(d.added[1].content.rect(), [90.0, 145.0, 110.0, 155.0], "20×10 px at 72 dpi, centred on 200×300");
-    let moved = d.added[0].content.with_rect([30.0, 100.0, 190.0, 130.0]);
+    assert_eq!(d.added().len(), 2);
+    assert_eq!(d.added()[1].content.rect(), [90.0, 145.0, 110.0, 155.0], "20×10 px at 72 dpi, centred on 200×300");
+    let moved = d.added()[0].content.with_rect([30.0, 100.0, 190.0, 130.0]);
     s.apply(id, Edit::UpdateContent { page: 0, index: 0, content: moved }).unwrap();
-    assert_eq!(s.get(id).unwrap().added[0].content.rect()[3], 130.0);
+    assert_eq!(s.get(id).unwrap().added()[0].content.rect()[3], 130.0);
     s.apply(id, Edit::DeleteContent { page: 0, index: 1 }).unwrap();
-    assert_eq!(s.get(id).unwrap().added.len(), 1);
+    assert_eq!(s.get(id).unwrap().added().len(), 1);
     s.undo(id).unwrap();
-    assert_eq!(s.get(id).unwrap().added.len(), 2);
+    assert_eq!(s.get(id).unwrap().added().len(), 2);
 }
 
 #[test]
@@ -2430,7 +2507,7 @@ fn added_images_rotate_flip_and_crop_as_drawn() {
     let blue = |c: [u8; 3]| c[2] > 200 && c[0] < 60;
     // Display y 100–200 is rows 100–200 from the top on a 300 pt page.
     assert!(red(colour_at(&s, 70, 150)) && blue(colour_at(&s, 130, 150)), "as placed: red left, blue right");
-    let item = |s: &Session| s.get(id).unwrap().added[0].content.clone();
+    let item = |s: &Session| s.get(id).unwrap().added()[0].content.clone();
     let AddedContent::Image(mut img) = item(&s) else { panic!() };
     img.rotation = 1;
     s.apply(id, Edit::UpdateContent { page: 0, index: 0, content: AddedContent::Image(img.clone()) }).unwrap();
@@ -2531,21 +2608,21 @@ fn links_from_urls_and_link_edits() {
     assert_eq!(found[0].2, "http://www.example.org");
     s.apply(id, Edit::AddLinks { links: found, style: LinkStyle::default() }).unwrap();
     let d = s.get(id).unwrap();
-    assert_eq!(d.links.len(), 1);
+    assert_eq!(d.links().len(), 1);
     assert_eq!(d.info.links.len(), 1, "the viewer follows it");
     assert!(s.find_urls(id).is_empty(), "already linked");
     // Remove all links and undo.
     s.apply(id, Edit::RemoveLinks { pages: None }).unwrap();
-    assert!(s.get(id).unwrap().links.is_empty());
+    assert!(s.get(id).unwrap().links().is_empty());
     assert_eq!(s.get(id).unwrap().can_undo(), Some("Remove all links"));
     s.undo(id).unwrap();
-    assert_eq!(s.get(id).unwrap().links.len(), 1);
+    assert_eq!(s.get(id).unwrap().links().len(), 1);
     // Link Properties and delete.
-    let l = s.get(id).unwrap().links[0].clone();
+    let l = s.get(id).unwrap().links()[0].clone();
     s.apply(id, Edit::SetLink { page: 0, index: l.index, rect: None, action: Some(LinkAction::Page(0)), style: None }).unwrap();
-    assert_eq!(s.get(id).unwrap().links[0].action, LinkAction::Page(0));
+    assert_eq!(s.get(id).unwrap().links()[0].action, LinkAction::Page(0));
     s.apply(id, Edit::DeleteLink { page: 0, index: l.index }).unwrap();
-    assert!(s.get(id).unwrap().links.is_empty());
+    assert!(s.get(id).unwrap().links().is_empty());
     assert!(s.apply(id, Edit::RemoveLinks { pages: None }).is_err(), "nothing left to remove");
 }
 
@@ -2575,14 +2652,14 @@ fn appearance_only_edit_preserves_gotor_action_semantics() {
     let mut session = Session::new();
     let id = session.open("source.pdf", Some("/docs/source.pdf".into()), Arc::new(bytes), None).unwrap();
     let before = session.get(id).unwrap().info.links[0].target.clone();
-    let mut style = session.get(id).unwrap().links[0].style;
+    let mut style = session.get(id).unwrap().links()[0].style;
     style.visible = true;
     style.width = 2.0;
     session.apply(id, Edit::SetLink { page: 0, index: 0, rect: None, action: None, style: Some(style) }).unwrap();
 
     let after = &session.get(id).unwrap().info.links[0].target;
     assert_eq!(*after, before, "the GoToR file, destination and /NewWindow hint must remain unchanged");
-    assert_eq!(session.get(id).unwrap().links[0].style, style, "the appearance edit is applied");
+    assert_eq!(session.get(id).unwrap().links()[0].style, style, "the appearance edit is applied");
 }
 
 #[test]
@@ -4556,7 +4633,7 @@ fn group_moves_preserve_rotated_added_content_raster_geometry() {
     image.write_to(&mut png, image::ImageFormat::Png).unwrap();
     s.apply(id, Edit::AddImage { page: 0, rect: Some([40.0, 40.0, 80.0, 70.0]), name: "quadrants.png".into(), bytes: Arc::new(png.into_inner()) })
         .unwrap();
-    let AddedContent::Image(mut image) = s.get(id).unwrap().added[1].content.clone() else { panic!() };
+    let AddedContent::Image(mut image) = s.get(id).unwrap().added()[1].content.clone() else { panic!() };
     image.flip_h = true;
     image.crop = [0.1, 0.0, 0.2, 0.0];
     s.apply(id, Edit::UpdateContent { page: 0, index: 1, content: AddedContent::Image(image) }).unwrap();
@@ -4819,7 +4896,7 @@ fn content_edit_keeps_pages_annotations_fields_and_links() {
     let annotations = format!("{:?}", before.info.annotations);
     let links = format!("{:?}", before.links);
     let form = before.form.clone();
-    let marks = before.marks.clone();
+    let marks = before.marks().to_vec();
     let bytes = before.bytes.clone();
     let text = AddedText {
         rect: [20.0, 20.0, 200.0, 60.0],
@@ -4837,8 +4914,8 @@ fn content_edit_keeps_pages_annotations_fields_and_links() {
     assert_eq!(format!("{:?}", after.info.annotations), annotations);
     assert_eq!(format!("{:?}", after.links), links);
     assert_eq!(after.form, form, "no field was touched");
-    assert_eq!(after.marks, marks, "no mark was touched");
-    assert!(after.added.iter().any(|a| a.page == 1), "the added text is listed");
+    assert_eq!(after.marks(), marks, "no mark was touched");
+    assert!(after.added().iter().any(|a| a.page == 1), "the added text is listed");
     assert_ne!(after.bytes, bytes, "the working file carries the edit");
     assert_ne!(after.display, bytes, "the display copy carries the edit too");
     // The display bytes still open and render the edited page.
@@ -4848,7 +4925,7 @@ fn content_edit_keeps_pages_annotations_fields_and_links() {
     // Undo goes through the same narrow refresh without the edit at hand.
     session.undo(id).unwrap();
     let undone = session.get(id).unwrap();
-    assert!(undone.added.is_empty(), "undo drops the added text");
+    assert!(undone.added().is_empty(), "undo drops the added text");
     assert_eq!(format!("{:?}", undone.info.pages), pages);
 }
 
@@ -5047,6 +5124,50 @@ fn copy_image_finds_a_picture_inside_form_artwork_under_text() {
     // The largest picture in the group, as the JPEG stored in the PDF.
     assert_eq!(d.page_image_copy_file(0, 0).unwrap(), ("jpg", jpeg));
     assert!(d.page_image_copy_file(0, 1).is_err());
+}
+
+/// `fixture(2)` with the catalog pointing at a page tree object the file does not have (#1656).
+fn fixture_without_page_tree() -> Vec<u8> {
+    let bytes = fixture(2);
+    let catalog = b"<< /Type /Catalog /Pages 2 0 R >>";
+    let at = bytes.windows(catalog.len()).position(|w| w == catalog).unwrap();
+    let mut out = bytes.clone();
+    out[at..at + catalog.len()].copy_from_slice(b"<< /Type /Catalog /Pages 9 0 R >>");
+    out
+}
+
+#[test]
+fn a_recovered_page_tree_opens_unmodified_and_edits_the_pages_shown() {
+    let mut s = Session::new();
+    let id = s.open("damaged.pdf", None, Arc::new(fixture_without_page_tree()), None).unwrap();
+    let doc = s.get(id).unwrap();
+    assert_eq!(doc.info.pages.len(), 2);
+    assert!(!doc.editor.as_ref().unwrap().cos.is_modified(), "the repair is a revision of the opened file, not an unsaved edit");
+    assert!(doc.repair_log().iter().any(|l| l.contains("page tree is missing")), "{:?}", doc.repair_log());
+    s.apply(id, Edit::RotatePages { pages: vec![1], degrees: 90 }).unwrap();
+    assert_eq!(s.get(id).unwrap().info.pages.iter().map(|p| p.rotation).collect::<Vec<_>>(), [0, 90]);
+}
+
+#[test]
+fn a_signed_document_rebuilt_from_object_headers_refuses_edits() {
+    let p12 = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12")).unwrap();
+    let digital_id = sign::pkcs12::open(&p12, "test").unwrap();
+    let mut s = Session::new().with_clock(|| 1_800_000_000);
+    let id = s.open("fixture.pdf", None, Arc::new(fixture(2)), None).unwrap();
+    let opts = SignOptions { page: 1, rect: Some([20.0, 20.0, 180.0, 60.0]), ..SignOptions::default() };
+    let signed = s.sign(id, &digital_id, opts).unwrap();
+    s.mark_signed(id, signed, None).unwrap();
+    // A broken startxref: the file opens only by rebuilding from object headers, and any save
+    // of it is a full rewrite.
+    let mut bytes = s.get(id).unwrap().bytes.as_ref().clone();
+    let sx = bytes.windows(10).rposition(|w| w == b"startxref\n").unwrap() + 10;
+    let end = sx + bytes[sx..].iter().position(|b| !b.is_ascii_digit()).unwrap();
+    bytes.splice(sx..end, b"1".iter().copied());
+    let id = s.open("damaged.pdf", None, Arc::new(bytes), None).unwrap();
+    assert!(s.get(id).unwrap().is_signed());
+    assert!(s.get(id).unwrap().editor.as_ref().unwrap().cos.revisions().is_empty(), "the fixture must be rebuilt");
+    assert!(matches!(s.apply(id, rect_comment(0, [80.0, 80.0, 120.0, 120.0])), Err(EditError::SignedRewrite(_))));
+    assert!(!s.get(id).unwrap().dirty);
 }
 
 /// #1324: marking a figure decorative rewrites that figure only. The header, added text and an

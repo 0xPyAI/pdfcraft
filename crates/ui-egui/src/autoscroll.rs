@@ -188,6 +188,34 @@ impl AutoScroll {
     }
 }
 
+/// Width of the band along each edge of the viewport where a drawing in progress scrolls the view.
+const EDGE_BAND: f32 = 32.0;
+/// Scroll speed at the inner edge of the band, in points per second. It grows with the square of
+/// how far into the band (or past the edge) the pointer is, up to 1.5 bands deep.
+const DRAW_EDGE_SPEED: f32 = 700.0;
+
+/// How far to scroll the content this frame while a drawing is in progress and the pointer is in
+/// the band along an edge of `viewport` (or just past it): up, down, left and right. Positive
+/// moves the content down or right, like [`AutoScroll::update`]. The pointer must be within the
+/// viewport grown by one band, so a pointer over a neighbouring panel never scrolls the page.
+pub(crate) fn edge_scroll(pointer: Option<Pos2>, viewport: egui::Rect, dt: f32) -> Vec2 {
+    let Some(p) = pointer.filter(|p| p.is_finite()) else { return Vec2::ZERO };
+    if !dt.is_finite() || !viewport.is_positive() || !viewport.expand(EDGE_BAND).contains(p) {
+        return Vec2::ZERO;
+    }
+    let dt = dt.clamp(0.0, 0.05);
+    let axis = |p: f32, lo: f32, hi: f32| {
+        // A viewport narrower than two bands would scroll both ways at once: scroll neither.
+        if hi - lo < 2.0 * EDGE_BAND {
+            return 0.0;
+        }
+        let depth = |d: f32| (d / EDGE_BAND).clamp(0.0, 1.5);
+        let (before, after) = (depth(lo + EDGE_BAND - p), depth(p - (hi - EDGE_BAND)));
+        (before * before - after * after) * DRAW_EDGE_SPEED * dt
+    };
+    vec2(axis(p.x, viewport.left(), viewport.right()), axis(p.y, viewport.top(), viewport.bottom()))
+}
+
 /// Within this distance of the viewport's top or bottom edge, a text-selection drag scrolls.
 const EDGE: f32 = 30.0;
 /// Points per second for each point the pointer is into the edge band or past the viewport.
@@ -364,5 +392,46 @@ mod tests {
             assert_eq!(scroll_delta(invalid, 0.016), 0.0);
             assert_eq!(scroll_delta(1000.0, invalid), 0.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod edge_tests {
+    use super::*;
+
+    fn view() -> egui::Rect {
+        egui::Rect::from_min_max(egui::pos2(100.0, 50.0), egui::pos2(900.0, 650.0))
+    }
+
+    #[test]
+    fn scrolls_toward_each_of_the_four_edges() {
+        let dt = 1.0 / 60.0;
+        // Near the top or left edge the content moves down or right (positive), and the reverse
+        // near the bottom or right edge.
+        assert!(edge_scroll(Some(egui::pos2(500.0, 55.0)), view(), dt).y > 0.0);
+        assert!(edge_scroll(Some(egui::pos2(500.0, 645.0)), view(), dt).y < 0.0);
+        assert!(edge_scroll(Some(egui::pos2(105.0, 300.0)), view(), dt).x > 0.0);
+        assert!(edge_scroll(Some(egui::pos2(895.0, 300.0)), view(), dt).x < 0.0);
+        // Only the axis whose edge is near moves.
+        assert_eq!(edge_scroll(Some(egui::pos2(500.0, 55.0)), view(), dt).x, 0.0);
+    }
+
+    #[test]
+    fn the_middle_and_far_away_pointers_do_not_scroll() {
+        let dt = 1.0 / 60.0;
+        assert_eq!(edge_scroll(Some(egui::pos2(500.0, 300.0)), view(), dt), Vec2::ZERO);
+        assert_eq!(edge_scroll(Some(egui::pos2(500.0, 900.0)), view(), dt), Vec2::ZERO, "over another panel");
+        assert_eq!(edge_scroll(None, view(), dt), Vec2::ZERO);
+        assert_eq!(edge_scroll(Some(egui::pos2(f32::NAN, 55.0)), view(), dt), Vec2::ZERO);
+        assert_eq!(edge_scroll(Some(egui::pos2(500.0, 55.0)), view(), f32::INFINITY), Vec2::ZERO);
+    }
+
+    #[test]
+    fn it_speeds_up_the_closer_to_the_edge_and_past_it() {
+        let dt = 1.0 / 60.0;
+        let shallow = edge_scroll(Some(egui::pos2(500.0, 70.0)), view(), dt).y;
+        let deep = edge_scroll(Some(egui::pos2(500.0, 51.0)), view(), dt).y;
+        let past = edge_scroll(Some(egui::pos2(500.0, 40.0)), view(), dt).y;
+        assert!(0.0 < shallow && shallow < deep && deep < past, "{shallow} {deep} {past}");
     }
 }

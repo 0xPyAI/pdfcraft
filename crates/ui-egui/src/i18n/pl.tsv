@@ -26,6 +26,7 @@
 	Interface language	Język interfejsu
 	Identity	Tożsamość
 	Name on new comments	Autor nowych komentarzy
+	Hide hover previews for highlights without comment text	Ukryj podglądy po najechaniu dla wyróżnień bez tekstu komentarza
 	Open…	Otwórz…
 	Open Recent	Otwórz ostatnie
 	Clear Recent Files	Wyczyść listę ostatnich plików
@@ -1309,6 +1310,8 @@
 	Expand all bookmarks	Rozwiń wszystkie zakładki
 	Expand top-level bookmarks	Rozwiń zakładki najwyższego poziomu
 	Collapse all bookmarks	Zwiń wszystkie zakładki
+	Collapse all pages	Zwiń wszystkie strony
+	Expand all pages	Rozwiń wszystkie strony
 	New bookmark (⌘B)	Nowa zakładka (⌘B)
 	This document has no bookmarks.	Ten dokument nie zawiera zakładek.
 	This document has no layers.	Ten dokument nie zawiera warstw.
@@ -2336,6 +2339,10 @@ animation effects	Off	Wyłączone
 	Local cross-PDF links require the desktop app	Lokalne łącza między plikami PDF wymagają aplikacji komputerowej
 	The existing action will be preserved.	Istniejąca akcja zostanie zachowana.
 	This form's scripts are turned off because one ran too long. Reopen the document to run them again.	Skrypty tego formularza są wyłączone, ponieważ jeden z nich działał zbyt długo. Otwórz dokument ponownie, aby znów je uruchomić.
+	Cut Image	Wytnij obraz
+	Redact Image	Utajnij obraz
+	Create Link…	Utwórz łącze…
+	Recognize Text…	Rozpoznaj tekst…
 	Minimize	Zminimalizuj
 	Maximize	Zmaksymalizuj
 	Restore	Przywróć
@@ -2353,6 +2360,13 @@ animation effects	Off	Wyłączone
 	This document is trying to open a local file:	Ten dokument próbuje otworzyć plik lokalny:
 	Move tag earlier	Przenieś znacznik wcześniej
 	Move tag later	Przenieś znacznik później
+	Turn upside down (180°)	Obróć do góry nogami (180°)
+	4 x 6 in label (101.6 x 152.4 mm)	Etykieta 4 × 6 cali (101,6 × 152,4 mm)
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Przycina każdą stronę do zadrukowanego obszaru, obraca ją pionowo i dopasowuje do arkusza bez rozciągania. Jedna etykieta na arkusz.
+	Find untagged content	Znajdź nieoznaczoną zawartość
+	No untagged content was found.	Nie znaleziono nieoznaczonej zawartości.
+	Found {n} untagged content problems.	Znaleziono problemów z nieoznaczoną zawartością: {n}.
+	Tag form fields	Oznacz pola formularza
 	Mark as artifact	Oznacz jako artefakt
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Usuń ten znacznik liścia z kolejności odczytu i oznacz jego bezpośrednią zawartość jako artefakt
 	Mark content as artifact	Oznacz zawartość jako artefakt

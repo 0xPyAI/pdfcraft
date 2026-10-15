@@ -2626,6 +2626,89 @@ fn editing_existing_text_in_place() {
     assert_eq!(texts_of(s, 0), ["Chapter One"], "the page shows it");
 }
 
+#[test]
+fn text_tool_clicking_source_text_edits_instead_of_adding_a_copy() {
+    let mut h = harness(1, |_| {});
+    assert!(h.state_mut().execute("edit.text"));
+    h.run_steps(2);
+    let page = h.state().views[0].page_screen_rect(0).unwrap();
+    let blank = egui::pos2(page.left() + 0.2 * page.width(), page.top() + 0.1 * page.height());
+    h.hover_at(blank);
+    h.run_steps(1);
+    h.drag_at(blank);
+    h.run_steps(1);
+    h.drop_at(blank);
+    h.run_steps(3);
+    h.event(egui::Event::Text("Keep this note".into()));
+    h.run_steps(3);
+    let point = egui::pos2(page.left() + 40.0 / 200.0 * page.width(), page.top() + 142.0 / 300.0 * page.height());
+    h.hover_at(point);
+    h.run_steps(1);
+    h.drag_at(point);
+    h.run_steps(1);
+    h.drop_at(point);
+    h.run_steps(4);
+    assert!(h.state().views[0].content.draft.is_none(), "clicking source text must not start an added layer");
+    assert_eq!(h.state().views[0].line_editor.as_ref().unwrap().text, "Page 1");
+    assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().added().len(), 1, "the previous draft is kept");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.event(egui::Event::Text("Replacement".into()));
+    h.run_steps(3);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run_steps(3);
+    assert_eq!(page_texts(h.state()), ["Keep this note\nReplacement"]);
+    assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().added().len(), 1, "editing the source adds no second layer");
+}
+
+#[test]
+fn text_tool_mixed_style_row_grows_in_the_editor_and_saved_pdf() {
+    let bytes = source_font_fixture_with_text("BT /F1 12 Tf 20 220 Td (Small ) Tj /F2 12 Tf (row) Tj ET");
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("mixed-row.pdf", None, bytes).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let page = h.state().views[0].page_screen_rect(0).unwrap();
+    let point = egui::pos2(page.left() + 25.0 / 300.0 * page.width(), page.top() + 75.0 / 300.0 * page.height());
+    h.hover_at(point);
+    h.run_steps(1);
+    h.drag_at(point);
+    h.run_steps(1);
+    h.drop_at(point);
+    h.run_steps(4);
+    let replacement = "Small row with more words";
+    h.key_press_modifiers(Modifiers::COMMAND, Key::End);
+    h.event(egui::Event::Text(" with more words".into()));
+    h.run_steps(4);
+    let galley = h
+        .output()
+        .shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if t.galley.text() == replacement => Some(&t.galley),
+            _ => None,
+        })
+        .expect("the draft is painted");
+    assert_eq!(galley.rows.len(), 1, "mixed source runs grow as one visual row");
+    if let Ok(path) = std::env::var("PDFCRAFT_MIXED_ROW_SHOT") {
+        h.render().unwrap().save(path).unwrap();
+    }
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run_steps(3);
+    let state = h.state();
+    let doc = state.session.get(state.views[0].id).unwrap();
+    assert_eq!(doc.text_blocks(0)[0].editor_text, replacement);
+    assert_eq!(doc.text_blocks(0)[0].rows.len(), 1);
+    let bytes = state.session.save_bytes(state.views[0].id).unwrap();
+    let mut reopened = pdfcraft_engine::Session::new();
+    let id = reopened.open("again.pdf", None, bytes, None).unwrap();
+    assert_eq!(reopened.get(id).unwrap().text_blocks(0)[0].rows.len(), 1);
+}
+
 /// One page whose only line is drawn twice at the same spot (fake bold, as many generated
 /// documents do).
 fn double_drawn() -> Vec<u8> {
@@ -3273,7 +3356,7 @@ fn check_added_text_drag(panel_open: bool) {
     h.run_steps(4);
     let added = |h: &Harness<'static, PdfCraftApp>| {
         let app = h.state();
-        app.session.get(app.views[0].id).unwrap().added.clone()
+        app.session.get(app.views[0].id).unwrap().added().to_vec()
     };
     let before_added = added(&h);
     assert_eq!(before_added.len(), 1);

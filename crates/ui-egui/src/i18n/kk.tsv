@@ -9,6 +9,7 @@
 	Interface language	Интерфейс тілі
 	Identity	Жеке деректер
 	Name on new comments	Жаңа түсініктемелердегі аты
+	Hide hover previews for highlights without comment text	Түсініктеме мәтіні жоқ белгілеулер үшін меңзер алдын ала қарауын жасыру
 	Open…	Ашу…
 	Open Recent	Соңғы файлдарды ашу
 	Pin folder to Home…	Қалтаны Басты бетке бекіту…
@@ -2141,6 +2142,8 @@ calendar date	December	Желтоқсан
 	Check the pages	Беттерді белгілеу
 	Closed arrow	Жабық көрсеткі
 	Collapse all	Барлығын жию
+	Collapse all pages	Барлық беттерді жию
+	Expand all pages	Барлық беттерді жаю
 	Column select	Баған бойынша таңдау
 	Comb of characters	Таңбалар торы
 	Custom font	Арнаулы қаріп
@@ -2354,6 +2357,10 @@ animation effects	Off	Өшірулі
 	The linked PDF opened, but its named destination was not applied.	Байланысты PDF ашылды, бірақ оның аталған мақсаты қолданылмады.
 	The linked PDF opened, but its page destination was out of range.	Байланысты PDF ашылды, бірақ оның мақсатты беті ауқымнан тыс.
 	Local cross-PDF links require the desktop app	PDF файлдары арасындағы жергілікті сілтемелер үшін жұмыс үстелі қолданбасы қажет
+	Cut Image	Суретті кесу
+	Redact Image	Суретті жасыру
+	Create Link…	Сілтеме жасау…
+	Recognize Text…	Мәтінді тану…
 	Minimize	Жию
 	Maximize	Жаю
 	Restore	Қалпына келтіру
@@ -2371,6 +2378,13 @@ animation effects	Off	Өшірулі
 	This document is trying to open a local file:	Бұл құжат жергілікті файлды ашуға әрекеттеніп жатыр:
 	Move tag earlier	Тегті ертерек жылжыту
 	Move tag later	Тегті кейінірек жылжыту
+	Turn upside down (180°)	Төңкеру (180°)
+	4 x 6 in label (101.6 x 152.4 mm)	4 × 6 дюйм жапсырма (101,6 × 152,4 мм)
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Әр бетті басылған аймағына дейін қиып, тік бұрып, созбай параққа сыйғызады. Әр параққа бір жапсырма.
+	Find untagged content	Тегтелмеген мазмұнды табу
+	No untagged content was found.	Тегтелмеген мазмұн табылмады.
+	Found {n} untagged content problems.	Тегтелмеген мазмұнға қатысты {n} мәселе табылды.
+	Tag form fields	Пішін өрістерін тегтеу
 	Mark as artifact	Артефакт ретінде белгілеу
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Осы жапырақ тегін оқу ретінен алып тастап, оның тікелей мазмұнын артефакт ретінде белгілеңіз
 	Mark content as artifact	Мазмұнды артефакт ретінде белгілеу

@@ -63,6 +63,7 @@
 	Auto follows the system's text size. Pages always render at the display's full resolution.	“自动”会跟随系统的文字大小。页面始终以显示器的完整分辨率渲染。
 	Identity	身份
 	Name on new comments	新注释的作者姓名
+	Hide hover previews for highlights without comment text	隐藏无评论文字的高亮的悬停预览
 	Open…	打开…
 	Open Recent	打开最近的文件
 	Clear Recent Files	清除最近的文件
@@ -2223,6 +2224,8 @@ key	Space	空格
 	Switch to List view to change the pages it takes.	切换到列表视图以更改要使用的页面。
 	Expand all	全部展开
 	Collapse all	全部折叠
+	Collapse all pages	折叠所有页面
+	Expand all pages	展开所有页面
 	Remove page	删除页面
 	Remove {n} pages	删除 {n} 页
 
@@ -2320,6 +2323,10 @@ animation effects	Off	关
 	The linked PDF opened, but its named destination was not applied.	已打开链接的 PDF，但未应用其命名目标。
 	The linked PDF opened, but its page destination was out of range.	已打开链接的 PDF，但其页面目标超出范围。
 	Local cross-PDF links require the desktop app	PDF 之间的本地链接需要桌面应用
+	Cut Image	剪切图像
+	Redact Image	密文图像
+	Create Link…	创建链接…
+	Recognize Text…	识别文本…
 	Minimize	最小化
 	Maximize	最大化
 	Restore	还原
@@ -2337,6 +2344,13 @@ animation effects	Off	关
 	This document is trying to open a local file:	此文档正尝试打开本地文件：
 	Move tag earlier	将标签前移
 	Move tag later	将标签后移
+	Turn upside down (180°)	上下颠倒 (180°)
+	4 x 6 in label (101.6 x 152.4 mm)	4 × 6 英寸标签 (101.6 × 152.4 毫米)
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	将每页裁切到其打印区域，转正后不拉伸地适合纸张。每张纸一个标签。
+	Find untagged content	查找未标记的内容
+	No untagged content was found.	未找到未标记的内容。
+	Found {n} untagged content problems.	发现 {n} 个未标记内容问题。
+	Tag form fields	标记表单字段
 	Mark as artifact	标记为工件
 	Remove this leaf tag from reading order and mark its direct content as an artifact	从阅读顺序中移除此叶标签，并将其直接内容标记为工件
 	Mark content as artifact	将内容标记为工件

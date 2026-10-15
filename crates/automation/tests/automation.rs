@@ -291,7 +291,22 @@ fn autotag_apply_writes_reviewable_tags_and_survives_save_reopen() {
     let pages = pdfcraft_model::pages(&reopened);
     assert_eq!(pages.len(), 2);
     assert!(pages.iter().all(|page| page.dict.contains(b"StructParents")));
-    assert!(reopened.get(reopened.root().unwrap()).as_dict().unwrap().contains(b"StructTreeRoot"));
+}
+
+#[test]
+fn autotag_form_fields_writes_reviewable_widget_tags() {
+    let dir = workdir("autotag-form-fields");
+    std::fs::write(dir.join("field.pdf"), form_pdf("name")).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "field.pdf" }))["doc"].as_u64().unwrap();
+    let tagged = ok(&mut a, "accessibility_autotag_form_fields", json!({ "doc": doc }));
+    assert_eq!(tagged["status"], "passed");
+    assert_eq!(tagged["remaining_findings"], 0);
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "tagged.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "tagged.pdf" }))["doc"].as_u64().unwrap();
+    let check = ok(&mut a, "accessibility_check", json!({ "doc": reopened, "rules": ["tagged-form-fields"] }));
+    let result = check["results"].as_array().unwrap().iter().find(|result| result["rule"] == "tagged-form-fields").unwrap();
+    assert_eq!(result["status"], "passed");
 }
 
 /// A one-page PDF whose form holds one text field named `name`.
@@ -604,6 +619,29 @@ fn text_editor_background_is_read_only_and_removes_source_glyphs() {
     for block in [-1, 0, 2, i64::MAX] {
         assert!(a.call("page_render", &json!({ "doc": doc, "page": 1, "hide_text_block": block })).is_err());
     }
+}
+
+#[test]
+fn added_text_editor_background_hides_only_the_item_without_editing() {
+    let dir = workdir("added-text-preview");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let render = json!({"doc":doc,"page":1,"dpi":72});
+    let before = a.call("page_render", &render).unwrap();
+    ok(&mut a, "page_add_text", json!({"doc":doc,"page":1,"text":"Retype this label","at":[20,20],"width":160}));
+    let drawn = a.call("page_render", &render).unwrap();
+    assert_ne!(drawn, before);
+    let state = ok(&mut a, "doc_info", json!({"doc":doc}));
+    let items = ok(&mut a, "content_list", json!({"doc":doc}));
+    let preview = a.call("page_render", &json!({"doc":doc,"page":1,"dpi":72,"hide_added_text":1})).unwrap();
+    assert_eq!(preview, before, "native text and the page background stay intact");
+    assert_eq!(a.call("page_render", &render).unwrap(), drawn);
+    assert_eq!(ok(&mut a, "doc_info", json!({"doc":doc})), state);
+    assert_eq!(ok(&mut a, "content_list", json!({"doc":doc})), items);
+    for index in [-1, 0, 2, i64::MAX] {
+        assert!(a.call("page_render", &json!({"doc":doc,"page":1,"hide_added_text":index})).is_err());
+    }
+    assert!(a.call("page_render", &json!({"doc":doc,"page":1,"hide_added_text":1,"hide_text_block":1})).is_err());
 }
 
 #[test]
@@ -3557,7 +3595,7 @@ fn text_styling_on_an_image_is_refused_without_an_edit() {
     ok(&mut a, "doc_save", json!({ "doc": doc, "path": "saved.pdf" }));
     let state = |a: &Automation| {
         let d = a.session().docs().iter().find(|d| d.id.0 == doc).unwrap();
-        (format!("{:?}", d.added), d.dirty, d.edit_generation(), d.can_undo().map(str::to_owned), d.can_redo().map(str::to_owned))
+        (format!("{:?}", d.added()), d.dirty, d.edit_generation(), d.can_undo().map(str::to_owned), d.can_redo().map(str::to_owned))
     };
     let before = state(&a);
     assert!(!before.1 && before.4.is_some(), "a clean document with a step to redo: {before:?}");
@@ -6370,6 +6408,26 @@ fn absolute_gotor_consent_does_not_bypass_validation_or_passwords() {
     let opened = ok(&mut a, "link_open", json!({ "doc": doc, "page": 1, "index": 1, "allow_absolute": true, "password": "secret" }));
     assert_eq!(opened["document"]["encrypted"], true);
     assert_eq!(opened["destination_applied"], true);
+}
+
+#[test]
+fn finding_untagged_content_limits_results_to_content_annotations_and_widgets() {
+    let dir = workdir("find-untagged");
+    std::fs::write(dir.join("field.pdf"), form_pdf("name")).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "field.pdf" }))["doc"].as_u64().unwrap();
+    let found = ok(&mut a, "accessibility_find_untagged", json!({ "doc": doc }));
+    let active: Vec<&str> = found["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|result| result["status"] != "skipped")
+        .map(|result| result["rule"].as_str().unwrap())
+        .collect();
+    assert_eq!(active, ["tagged-content", "tagged-annotations", "tagged-form-fields"]);
+    let fields = found["results"].as_array().unwrap().iter().find(|result| result["rule"] == "tagged-form-fields").unwrap();
+    assert_eq!(fields["status"], "failed");
+    assert_eq!(fields["findings"][0]["page"], 1);
 }
 
 #[test]

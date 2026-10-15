@@ -645,6 +645,57 @@ fn paper_matching_accepts_rounded_metric_sizes_but_not_custom_or_invalid_sizes()
 }
 
 #[test]
+fn label_is_cut_turned_upright_and_fitted_without_distortion() {
+    let label = LABEL_PAPER;
+    assert_eq!(PAPERS[label].0, "4 x 6 in label (101.6 x 152.4 mm)");
+    assert_eq!(PAPERS[label].1, (288.0, 432.0));
+    assert_eq!(cups_media(label), Some("w288h432"));
+    // A sideways label in the lower half of an A4 sheet, text running bottom-to-top.
+    let rect = [40.0, 30.0, 560.0, 420.0];
+    for (text_up, flip, want_text_dir) in [(true, false, (1.0, 0.0)), (false, false, (1.0, 0.0)), (true, true, (-1.0, 0.0))] {
+        // Text direction on the page: up when text_up, down otherwise.
+        let page_dir = if text_up { (0.0, 1.0) } else { (0.0, -1.0) };
+        let s = Settings {
+            pages: vec![0],
+            paper: PAPERS[label].1,
+            layout: Layout::Label { flip },
+            crops: vec![Some(Crop { rect, text_up })],
+            ..Settings::default()
+        };
+        let sheets = layout(&[(595.0, 842.0)], &s).unwrap();
+        assert_eq!(sheets.len(), 1);
+        assert_eq!(sheets[0].size, (288.0, 432.0));
+        let pl = sheets[0].placed[0];
+        assert_eq!(pl.clip, rect);
+        let [a, b, c, d, _, _] = pl.matrix.0;
+        // A pure quarter turn with one scale: no stretching.
+        assert!((a.hypot(b) - c.hypot(d)).abs() < 1e-9 && (a * c + b * d).abs() < 1e-9);
+        let dir = (a * page_dir.0 + c * page_dir.1, b * page_dir.0 + d * page_dir.1);
+        let n = dir.0.hypot(dir.1);
+        assert!((dir.0 / n - want_text_dir.0).abs() < 1e-9 && (dir.1 / n - want_text_dir.1).abs() < 1e-9, "text_up={text_up} flip={flip}");
+        let corners = [(rect[0], rect[1]), (rect[2], rect[1]), (rect[2], rect[3]), (rect[0], rect[3])].map(|(x, y)| pl.matrix.apply(x, y));
+        let (x0, x1) = corners.iter().fold((f64::MAX, f64::MIN), |m, p| (m.0.min(p.0), m.1.max(p.0)));
+        let (y0, y1) = corners.iter().fold((f64::MAX, f64::MIN), |m, p| (m.0.min(p.1), m.1.max(p.1)));
+        assert!(x0 >= LABEL_MARGIN - 1e-6 && x1 <= 288.0 - LABEL_MARGIN + 1e-6 && y0 >= LABEL_MARGIN - 1e-6 && y1 <= 432.0 - LABEL_MARGIN + 1e-6);
+        // Fills the label's width (the crop's height, 390 pt, becomes it).
+        assert!((x1 - x0 - (288.0 - 2.0 * LABEL_MARGIN)).abs() < 1e-6);
+    }
+    // No crop: the whole page, upright.
+    let whole =
+        layout(&[(200.0, 300.0)], &Settings { pages: vec![0], paper: (288.0, 432.0), layout: Layout::Label { flip: false }, ..Settings::default() })
+            .unwrap();
+    assert_eq!(whole[0].placed[0].clip, [0.0, 0.0, 200.0, 300.0]);
+    assert_eq!(whole[0].placed[0].matrix.0[1], 0.0);
+}
+
+#[test]
+fn text_direction_is_read_from_text_and_form_matrices() {
+    let doc = fixture(1);
+    assert!(!text_reads_up(&doc, 0), "upright text");
+    assert!(!text_reads_up(&doc, 9), "no such page");
+}
+
+#[test]
 fn imposed_pages_preserve_large_user_unit_matrices() {
     let (unit, mode) = (75000.0, SizeMode::Fit);
     let mut doc = fixture(1);
