@@ -3951,6 +3951,7 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "windows",
+ "winit",
  "winresource",
  "winsafe",
 ]
