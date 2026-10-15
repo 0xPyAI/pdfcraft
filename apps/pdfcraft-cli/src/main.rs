@@ -577,8 +577,11 @@ fn render(args: &[String]) -> Result<(), CliError> {
         Some("pam") => None,
         _ => return Err(format!("render: --out {out}: use a .png, .jpg, .tif or .pam name").into()),
     };
+    // The app renders a display copy that draws comments missing their /AP streams; the CLI
+    // must agree with it (and with independent viewers), while keeping the file it reads intact.
+    let bytes = read(path)?;
     let mut r = PageRenderer::new(
-        read(path)?,
+        pdfcraft_engine::display_bytes_for(bytes.clone(), flag(args, "--password")),
         RenderConfig { password: flag(args, "--password").map(Arc::from), reject_oversize: true, ..Default::default() },
     );
     let p = r.render(RenderRequest { page: page_index, kind: RequestKind::Pixels, tile: None, scale: dpi / 72.0, tag: 0, preview: false });

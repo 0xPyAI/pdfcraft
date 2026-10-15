@@ -4345,6 +4345,51 @@ fn comments_without_appearances_are_drawn_but_not_saved() {
     }
 }
 
+/// A page with a FreeText comment that has no `/AP` stream: the smallest case behind #2371.
+fn free_text_without_appearance() -> Arc<Vec<u8>> {
+    let objs: Vec<&[u8]> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>",
+        b"<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>",
+        b"<< /Type /Annot /Subtype /FreeText /Rect [20 200 180 260] /Contents (Box) /DA (/Helv 10 Tf 0 0 1 rg) /Border [0 0 1] /C [.85 .47 .02] >>",
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        bytes.extend_from_slice(o);
+        bytes.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    Arc::new(bytes)
+}
+
+/// #2371: a comment without an appearance stream is displayed by the app, so the CLI's page image
+/// must show it too. The helper's copy is for rendering only; documents that need no copy, and
+/// files it can't display, keep exactly the original source bytes.
+#[test]
+fn cli_display_adds_missing_appearances_without_changing_the_source() {
+    let original = free_text_without_appearance();
+    let display = display_bytes_for(original.clone(), None);
+    assert_ne!(display.as_slice(), original.as_slice(), "the display copy draws the missing comment appearance");
+
+    let doc = pdfcraft_cos::Document::open(display).unwrap();
+    let object = doc.get(pdfcraft_cos::ObjRef::new(4, 0));
+    let annot = object.as_dict().unwrap();
+    assert!(annot.contains(b"AP"), "the display copy has an appearance stream");
+
+    let plain = Arc::new(fixture(1));
+    assert!(Arc::ptr_eq(&display_bytes_for(plain.clone(), None), &plain), "a complete document needs no copy");
+    let damaged = Arc::new(b"not a PDF".to_vec());
+    assert!(Arc::ptr_eq(&display_bytes_for(damaged.clone(), None), &damaged), "an unreadable file falls back to its source");
+}
+
 /// Titles a browser writes for a blank page or a pop-up name no document; real titles stay.
 #[test]
 fn placeholder_titles_are_recognised() {

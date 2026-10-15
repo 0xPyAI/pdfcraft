@@ -799,6 +799,23 @@ fn display_bytes(editor: Option<&mut Editor>, bytes: &Arc<Vec<u8>>) -> Arc<Vec<u
     write_incremental(&display, &SaveOptions::default()).map(Arc::new).unwrap_or_else(|_| bytes.clone())
 }
 
+/// The copy PDFCraft displays when opening `bytes`: with appearances drawn, in memory only, for
+/// comments that have none. Render paths outside the app, such as the CLI, use this so their page
+/// images agree with the app and independent viewers. It never changes the source document, and an
+/// unparseable file, a write failure or a parser panic falls back to the original bytes.
+pub fn display_bytes_for(bytes: Arc<Vec<u8>>, password: Option<&str>) -> Arc<Vec<u8>> {
+    guard(|| {
+        pdfcraft_cos::Document::open_with_password(bytes.clone(), password)
+            .ok()
+            .and_then(|cos| pdfcraft_annot::with_missing_appearances(&cos))
+            .and_then(|display| write_incremental(&display, &SaveOptions::default()).ok())
+            .map(Arc::new)
+    })
+    .ok()
+    .flatten()
+    .unwrap_or(bytes)
+}
+
 /// Fails when the renderer still draws text under an applied redaction mark.
 ///
 /// Redaction decides what lies under a mark from the positions its own interpreter computes, and
