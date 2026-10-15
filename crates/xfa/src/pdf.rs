@@ -421,6 +421,9 @@ impl Emitter<'_> {
                     }
                 };
                 d.set(b"Parent".to_vec(), Object::Ref(parent));
+                // Appearance states are PDF names, so a space becomes an underscore. The datasets
+                // still hold the template's text (`/PCOn`); writing the name back would drop the selection.
+                d.set(b"PCOn".to_vec(), Object::String(PdfString::text(on)));
                 let state = state_name(on);
                 let chosen = w.value.is_some();
                 d.set(b"AS".to_vec(), Object::name(if chosen { &state } else { "Off" }));

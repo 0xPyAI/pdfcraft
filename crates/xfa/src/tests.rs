@@ -426,6 +426,61 @@ fn the_datasets_packet_is_written_from_the_fields_and_read_back() {
     assert!(!write_datasets(&mut plain, &[]).unwrap().written);
 }
 
+/// A radio item whose text contains a space keeps that text in the datasets. The appearance
+/// state is a PDF name (`New_York`); writing it back used to clear the selection on the next layout.
+#[test]
+fn spaced_radio_values_stay_in_the_datasets() {
+    for (value, state) in [("New York", "New_York"), ("Y", "Y")] {
+        let xdp = format!(
+            r#"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+<pageSet><pageArea name="page"><contentArea x="36pt" y="36pt" w="540pt" h="720pt"/><medium short="612pt" long="792pt"/></pageArea></pageSet>
+<exclGroup name="city" layout="lr-tb">
+<field name="first" w="108pt" h="18pt"><ui><checkButton/></ui><items><text>{value}</text></items></field>
+<field name="second" w="108pt" h="18pt"><ui><checkButton/></ui><items><text>Boston</text></items></field>
+</exclGroup>
+<field name="note" w="108pt" h="18pt"><ui><textEdit/></ui></field>
+<field name="agree" w="108pt" h="18pt"><ui><checkButton/></ui><items><text>{value}</text><text>No</text></items></field>
+</subform>
+</template>
+<xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"><xfa:data><form><city>{value}</city><note>before</note><agree>{value}</agree></form></xfa:data></xfa:datasets>
+</xdp:xdp>"#
+        );
+        let mut doc = Document::open(Arc::new(shell(&xdp))).unwrap();
+        let report = render_into(&mut doc).unwrap();
+        assert!(report.warnings.is_empty(), "{value:?} {:?}", report.warnings);
+        let fields = field_data(&doc);
+        assert!(fields.iter().any(|f| f.name == "city" && f.data == FieldData::Radio(Some(state.into()))), "{value:?} {fields:?}");
+        let unchanged = write_datasets(&mut doc, &fields).unwrap();
+        assert!(!unchanged.written && unchanged.warnings.is_empty(), "{value:?} {unchanged:?}");
+        let mut fields = fields;
+        for f in &mut fields {
+            if f.name == "note" {
+                f.data = FieldData::Text("after".into());
+            }
+        }
+        let write = write_datasets(&mut doc, &fields).unwrap();
+        assert!(write.written && write.warnings.is_empty(), "{value:?} {write:?}");
+        let packets = read_packets(&doc).unwrap().unwrap();
+        let data = parse_datasets(&packets.xdp).unwrap();
+        assert_eq!(data.text_at(&som_to_path("form[0].city[0]")), Some(value));
+        assert_eq!(data.text_at(&som_to_path("form[0].agree[0]")), Some(value));
+        assert_eq!(data.text_at(&som_to_path("form[0].note[0]")), Some("after"));
+        let selected: Vec<(String, Option<String>)> = layout_xml(&packets.xdp)
+            .unwrap()
+            .pages
+            .iter()
+            .flat_map(|p| &p.items)
+            .filter_map(|item| match item {
+                Item::Widget(w) if w.name == "first" || w.name == "second" => Some((w.name.clone(), w.value.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(selected, vec![("first".into(), Some(value.into())), ("second".into(), None)], "{value:?}");
+    }
+}
+
 #[test]
 fn static_forms_read_their_values_from_the_datasets() {
     let doc = Document::open(Arc::new(static_shell("<form1><page1><name>Ada</name><agree>1</agree></page1></form1>"))).unwrap();

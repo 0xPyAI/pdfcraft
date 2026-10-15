@@ -302,6 +302,72 @@ pub fn set_alt(doc: &mut Document, obj: ObjRef, alt: Option<&str>) -> Result<(),
     Ok(())
 }
 
+/// The page's content entries: one stream, or the elements of a contents array.
+fn content_entries(doc: &Document, page: &Dict) -> Option<Vec<Object>> {
+    let c = page.get(b"Contents")?;
+    Some(match &*doc.resolve(c) {
+        Object::Array(a) => a.clone(),
+        Object::Stream(_) => vec![c.clone()],
+        _ => return None,
+    })
+}
+
+fn marked(doc: &Document, props: &Dict, op: &pdfcraft_content::Op, ids: &HashSet<i64>) -> bool {
+    op.op == b"BDC" && bdc_mcid(doc, props, op).is_some_and(|n| ids.contains(&n))
+}
+
+/// Turn the figure's marked-content blocks into artifacts, rewriting only the streams that
+/// contain them. Other content streams, and unknown entries on a rewritten stream, stay.
+fn artifact_marked_content(doc: &mut Document, page: &pdfcraft_model::Page, ids: &HashSet<i64>) -> Result<bool, AltError> {
+    let Some(entries) = content_entries(doc, &page.dict) else { return Ok(false) };
+    let props = page_properties(doc, &page.dict);
+    let mut next = Vec::with_capacity(entries.len());
+    let mut changed = false;
+    for entry in entries {
+        let Some(stream) = (match &*doc.resolve(&entry) {
+            Object::Stream(s) => Some(s.clone()),
+            _ => None,
+        }) else {
+            next.push(entry);
+            continue;
+        };
+        let mut ops = pdfcraft_content::parse(&stream.decoded().unwrap_or_default()).ops;
+        let mut ours = false;
+        for op in &mut ops {
+            if marked(doc, &props, op, ids) {
+                *op = pdfcraft_content::Op::new("BMC", vec![Object::name("Artifact")]);
+                ours = true;
+            }
+        }
+        if !ours {
+            next.push(entry);
+            continue;
+        }
+        changed = true;
+        let mut dict = stream.dict;
+        dict.remove(b"Length");
+        dict.remove(b"Filter");
+        dict.remove(b"DecodeParms");
+        let stream = Object::Stream(Stream::flate(dict, &pdfcraft_content::serialize_ops(&ops)));
+        let stored = match entry {
+            Object::Ref(r) => {
+                doc.set(r, stream);
+                Object::Ref(r)
+            }
+            _ => Object::Ref(doc.add(stream)),
+        };
+        next.push(stored);
+    }
+    if changed {
+        let contents = match next.as_slice() {
+            [one] => one.clone(),
+            _ => Object::Array(next),
+        };
+        doc.update_dict(page.obj, |p| p.set(b"Contents".to_vec(), contents))?;
+    }
+    Ok(changed)
+}
+
 /// Decorative figure: its marked content on the page becomes an artifact, and the element
 /// leaves the structure tree (and the parent tree).
 pub fn mark_decorative(doc: &mut Document, obj: ObjRef) -> Result<(), AltError> {
@@ -309,23 +375,12 @@ pub fn mark_decorative(doc: &mut Document, obj: ObjRef) -> Result<(), AltError> 
     let ids: HashSet<i64> = mcids(&d).into_iter().collect();
     let pages = pdfcraft_model::pages(doc);
     let pg = d.get(b"Pg").and_then(Object::as_ref).or_else(|| elements(doc).into_iter().find(|e| e.object == obj).and_then(|e| e.page));
-    if let Some(page) = pg.and_then(|p| pages.iter().find(|x| x.obj == p)).filter(|_| !ids.is_empty()) {
-        let props = page_properties(doc, &page.dict);
-        let mut ops = pdfcraft_content::parse(&page_content(doc, &page.dict)).ops;
-        let mut changed = false;
-        for op in ops.iter_mut() {
-            if op.op == b"BDC" && bdc_mcid(doc, &props, op).is_some_and(|n| ids.contains(&n)) {
-                *op = pdfcraft_content::Op::new("BMC", vec![Object::name("Artifact")]);
-                changed = true;
-            }
-        }
-        if changed {
-            let s = doc.add(Object::Stream(Stream::flate(Dict::new(), &pdfcraft_content::serialize_ops(&ops))));
-            doc.update_dict(page.obj, |p| p.set(b"Contents".to_vec(), Object::Ref(s)))?;
-            // The parent tree no longer points those ids at the figure.
-            if let Some(key) = page.dict.get(b"StructParents").and_then(Object::as_int) {
-                clear_parent_tree(doc, key, obj)?;
-            }
+    if let Some(page) = pg.and_then(|p| pages.iter().find(|x| x.obj == p)).filter(|_| !ids.is_empty())
+        && artifact_marked_content(doc, page, &ids)?
+    {
+        // The parent tree no longer points those ids at the figure.
+        if let Some(key) = page.dict.get(b"StructParents").and_then(Object::as_int) {
+            clear_parent_tree(doc, key, obj)?;
         }
     }
     // Out of its parent's kids.

@@ -484,14 +484,17 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 ui.add_space(8.0);
                 d.to = d.to.clamp(1, count);
                 d.from = d.from.clamp(1, d.to);
-                let n = d.to - d.from + 1;
                 ui.horizontal(|ui| {
                     ui.label(tl!("Original: replace pages"));
-                    ui.add(egui::DragValue::new(&mut d.from).range(1..=count));
+                    let from = ui.add(egui::DragValue::new(&mut d.from).range(1..=count));
                     ui.label(tl!("to"));
-                    ui.add(egui::DragValue::new(&mut d.to).range(1..=count));
+                    let to = ui.add(egui::DragValue::new(&mut d.to).range(1..=count));
+                    if from.changed() || to.changed() {
+                        d.range_edited = true;
+                    }
                     ui.label(egui::RichText::new(crate::i18n::fmt(tl!("of {name}"), &[("name", &count.to_string())])).color(t.text_muted));
                 });
+                let n = if d.range_edited { d.to - d.from + 1 } else { d.pages.len().max(1) };
                 let max_start = d.src_pages.saturating_sub(n) + 1;
                 d.src_from = d.src_from.clamp(1, max_start.max(1));
                 ui.horizontal(|ui| {
@@ -1229,9 +1232,10 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
         && let Some(d) = app.replace_draft.take()
         && app.still_pick_target(d.target)
     {
-        let n = d.to - d.from + 1;
+        let pages = if d.range_edited { (d.from - 1..d.to).collect() } else { d.pages.clone() };
+        let n = pages.len();
         app.apply_edit(Edit::ReplacePages {
-            pages: (d.from - 1..d.to).collect(),
+            pages,
             name: d.name.clone(),
             bytes: d.bytes.clone(),
             src_pages: (d.src_from - 1..d.src_from - 1 + n).collect(),
