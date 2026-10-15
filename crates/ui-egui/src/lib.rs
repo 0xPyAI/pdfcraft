@@ -2586,7 +2586,8 @@ impl PdfCraftApp {
             ("combine-zoom", _) => {
                 let percent = value.trim_end_matches('%').parse::<f32>().map_err(|e| e.to_string())?;
                 if !percent.is_finite() || !combine_grid::ZOOM_RANGE.contains(&(percent / 100.0)) {
-                    return Err("combine-zoom must be between 60 and 200".into());
+                    let (lo, hi) = (combine_grid::ZOOM_RANGE.start(), combine_grid::ZOOM_RANGE.end());
+                    return Err(format!("combine-zoom must be between {} and {}", lo * 100.0, hi * 100.0));
                 }
                 self.set_combine_zoom(percent / 100.0);
             }
