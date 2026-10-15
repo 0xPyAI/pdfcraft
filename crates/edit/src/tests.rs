@@ -294,6 +294,58 @@ fn flattening_fields_drops_the_ones_on_no_page() {
     assert_eq!(left, [pdfcraft_cos::ObjRef::new(7, 0)], "only the hidden field on the page stays");
 }
 
+/// #1794: a form field whose widget has no usable appearance (none stored, or none for its
+/// selected state) has nothing to draw. Flattening used to remove it anyway, losing its value
+/// with no ink in its place. It stays, in the page and in the form, like a comment that can't be
+/// drawn; a field with an appearance is still baked in and removed.
+#[test]
+fn flattening_keeps_a_valued_widget_it_cannot_draw() {
+    let page = stream("", " ");
+    let mut doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R 6 0 R 7 0 R] >> >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 4 0 R /Annots [5 0 R 6 0 R 7 0 R] >>",
+        &page,
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /V (Ada) /Rect [10 10 150 40] /F 4 >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /V /Yes /AS /Yes /Rect [10 50 30 70] /F 4 /AP << /N << /Off 8 0 R >> >> >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (drawn) /V (Bob) /Rect [10 90 150 120] /F 4 /AP << /N 8 0 R >> >>",
+        "<< /Type /XObject /Subtype /Form /BBox [0 0 140 30] /Length 0 >>\nstream\n\nendstream",
+    ]);
+    assert_eq!(flatten(&mut doc, &[0], false, true).unwrap(), 1, "only the field with an appearance is drawn");
+    let doc = reopen(&doc);
+    let refs = |o: &Object| -> Vec<u32> { doc.resolve(o).as_array().unwrap().iter().filter_map(|f| f.as_ref()).map(|r| r.num).collect() };
+    let p = &pdfcraft_model::pages(&doc)[0];
+    assert_eq!(refs(p.dict.get(b"Annots").unwrap()), [5, 6], "the undrawable widgets stay on the page");
+    let root = doc.root().unwrap();
+    let af = doc.resolve(doc.get(root).as_dict().unwrap().get(b"AcroForm").unwrap());
+    assert_eq!(refs(af.as_dict().unwrap().get(b"Fields").unwrap()), [5, 6], "and in the form");
+    let value = |n: u32| doc.get(pdfcraft_cos::ObjRef::new(n, 0)).as_dict().unwrap().get(b"V").cloned();
+    assert_eq!(value(5), Some(Object::String(pdfcraft_cos::PdfString::literal(b"Ada".to_vec()))));
+    assert_eq!(value(6), Some(Object::name("Yes")));
+}
+
+/// #1794: a reply this builder cannot draw stays on the page even when the comment it replies to
+/// is flattened; the comment's pop-up still goes with it.
+#[test]
+fn flattening_keeps_an_undrawn_reply_to_a_flattened_comment() {
+    let page = stream("", " ");
+    let mut doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << >> /Contents 4 0 R /Annots [5 0 R 6 0 R 7 0 R] >>",
+        &page,
+        "<< /Type /Annot /Subtype /Square /Rect [100 600 200 650] /C [1 0 0] /Contents (Synthetic comment) /AP << /N 8 0 R >> /Popup 7 0 R >>",
+        "<< /Type /Annot /Subtype /Square /Rect [100 500 200 550] /C [1 0 0] /Contents (Synthetic reply) /BE << /S /C /I 2 >> /IRT 5 0 R >>",
+        "<< /Type /Annot /Subtype /Popup /Rect [300 600 400 700] /Parent 5 0 R >>",
+        "<< /Type /XObject /Subtype /Form /BBox [100 600 200 650] /Length 28 >>\nstream\n1 0 0 RG 100 600 100 50 re S\nendstream",
+    ]);
+    assert_eq!(flatten(&mut doc, &[0], true, false).unwrap(), 1, "the comment is drawn; the cloudy reply cannot be");
+    let doc = reopen(&doc);
+    let p = &pdfcraft_model::pages(&doc)[0];
+    let left: Vec<u32> = doc.resolve(p.dict.get(b"Annots").unwrap()).as_array().unwrap().iter().filter_map(|f| f.as_ref()).map(|r| r.num).collect();
+    assert_eq!(left, [6], "the undrawn reply stays; the comment and its pop-up are gone");
+}
+
 /// Flattening never makes a `?` permanent: it refuses, changing nothing, a text box without an
 /// appearance whose text Helvetica can't draw (another program's), and a comment or form field
 /// whose appearance PdfCraft drew with `?` (marked `PCUndrawn`). A comment another program drew
