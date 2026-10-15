@@ -167,3 +167,54 @@ fn space_audit_tab_measures_the_file_and_stays_in_the_card() {
         assert!(pct.right() <= card.right() - 16.0, "Percentage {pct:?} in {card:?}");
     }
 }
+
+#[test]
+fn dialog_buttons_follow_the_content_after_a_taller_tab() {
+    use pdfcraft_ui_egui::{Dialog, PropsTab};
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("doc.pdf", None, fixture()).unwrap();
+        app.dialog = Some(Dialog::Properties(PropsTab::InitialView));
+        app
+    });
+    h.run_steps(4);
+    h.state_mut().dialog = Some(Dialog::Properties(PropsTab::Description));
+    h.run_steps(4);
+    // The card shrinks back to the shorter tab: Close sits under the last row, not halfway
+    // down the room the taller tab left behind.
+    let last = h.get_by_label("PDF producer").rect();
+    let close = h.get_by_role_and_label(Role::Button, "Close").rect();
+    assert!(close.top() - last.bottom() <= 40.0, "Close {close:?} under the last row {last:?}");
+    let card = card(&h, "dialog");
+    assert!(card.bottom() - close.bottom() <= 24.0, "Close {close:?} at the foot of {card:?}");
+}
+
+#[test]
+fn page_hover_cursors_stay_off_while_a_dialog_is_open() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("form.pdf", None, include_bytes!("data/form.pdf").to_vec()).unwrap();
+        // Small enough that the check box sits above the dialog card.
+        app.set_option("zoom", "100").unwrap();
+        app
+    });
+    for _ in 0..30 {
+        h.run_steps(2);
+    }
+    // The middle of the "agree" check box (/Rect [20 310 36 326] on a 300 × 400 page).
+    let page = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = page.width() / 300.0;
+    let check = page.min + egui::vec2(28.0 * k, (400.0 - 318.0) * k);
+    h.hover_at(check);
+    h.run_steps(2);
+    assert_eq!(h.output().platform_output.cursor_icon, egui::CursorIcon::PointingHand, "the check box takes clicks");
+    h.state_mut().set_option("dialog", "security").unwrap();
+    h.run_steps(4);
+    let card = card(&h, "dialog");
+    assert!(!card.contains(check), "the check box {check:?} is beside the dialog {card:?}, under its backdrop");
+    h.hover_at(check + egui::vec2(1.0, 0.0));
+    h.run_steps(2);
+    assert_eq!(h.output().platform_output.cursor_icon, egui::CursorIcon::Default, "nothing under the dialog's backdrop can be clicked");
+}

@@ -10,6 +10,12 @@ use crate::{CloseRequest, Dialog, PdfCraftApp, PropsTab, panels::human_size, wid
 const INFO_KEYS: [&str; 4] = ["Title", "Author", "Subject", "Keywords"];
 
 pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
+    // The page sets hover cursors from the raw pointer position (form fields, links, comments)
+    // before any dialog is drawn, and nothing under a modal's backdrop takes clicks. Start from
+    // the arrow; the modal's own widgets set theirs as they are drawn.
+    if app.modal_open() || ctx.memory(|m| m.top_modal_layer().is_some()) {
+        ctx.set_cursor_icon(egui::CursorIcon::Default);
+    }
     dialogs(app, ctx);
     // Last, so it sits above Document Properties when Security's Unlock… asked for it.
     unlock(app, ctx);
@@ -1201,43 +1207,47 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
         }
         ui.add_space(16.0);
         let changed = draft_changes(app).is_some_and(|c| !c.is_empty());
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if dialog == Dialog::Recovery {
-                if widgets::pill_button(ui, tl!("Recover"), true).clicked() {
-                    recover = Some(true);
+        // One row high: on its own, a right-to-left layout centres the buttons in all the height
+        // left, which after a taller Properties tab is the room that tab left behind.
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if dialog == Dialog::Recovery {
+                    if widgets::pill_button(ui, tl!("Recover"), true).clicked() {
+                        recover = Some(true);
+                        close = true;
+                    }
+                    if widgets::pill_button(ui, tl!("Discard"), false).clicked() {
+                        recover = Some(false);
+                        close = true;
+                    }
+                } else if dialog == Dialog::NumberPages {
+                    if widgets::pill_button(ui, tl!("OK"), true).clicked() {
+                        apply_number = true;
+                        close = true;
+                    }
+                    if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
+                        close = true;
+                    }
+                } else if dialog == Dialog::Split {
+                    if ui.add_enabled_ui(split_ready.is_some(), |ui| widgets::pill_button(ui, tl!("Split"), true)).inner.clicked() {
+                        split_now = split_ready.clone();
+                        close = true;
+                    }
+                    if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
+                        close = true;
+                    }
+                } else if changed {
+                    if widgets::pill_button(ui, tl!("OK"), true).clicked() {
+                        apply = true;
+                        close = true;
+                    }
+                    if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
+                        close = true;
+                    }
+                } else if widgets::pill_button(ui, tl!("Close"), true).clicked() {
                     close = true;
                 }
-                if widgets::pill_button(ui, tl!("Discard"), false).clicked() {
-                    recover = Some(false);
-                    close = true;
-                }
-            } else if dialog == Dialog::NumberPages {
-                if widgets::pill_button(ui, tl!("OK"), true).clicked() {
-                    apply_number = true;
-                    close = true;
-                }
-                if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
-                    close = true;
-                }
-            } else if dialog == Dialog::Split {
-                if ui.add_enabled_ui(split_ready.is_some(), |ui| widgets::pill_button(ui, tl!("Split"), true)).inner.clicked() {
-                    split_now = split_ready.clone();
-                    close = true;
-                }
-                if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
-                    close = true;
-                }
-            } else if changed {
-                if widgets::pill_button(ui, tl!("OK"), true).clicked() {
-                    apply = true;
-                    close = true;
-                }
-                if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
-                    close = true;
-                }
-            } else if widgets::pill_button(ui, tl!("Close"), true).clicked() {
-                close = true;
-            }
+            })
         });
     });
     if let Some(yes) = recover {
