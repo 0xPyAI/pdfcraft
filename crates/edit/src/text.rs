@@ -50,6 +50,10 @@ pub struct TextLine {
     pub visual_order: bool,
     /// The Japanese or Hebrew fallback face the font subsets, when the line is in one (see [`same_font`]).
     face: Option<String>,
+    /// Its box along and across its baseline, `[along0, across0, along1, across1]` (see
+    /// [`TextLine::frame_rect`]). Upright text has `rect`; turned text has its own box, which is
+    /// narrower than `rect` turned into the same frame.
+    frame: [f64; 4],
     /// The content stream piece the line starts in, and its operators (indices into the page's
     /// streams parsed joined).
     stream: usize,
@@ -470,12 +474,7 @@ impl TextLine {
 
     /// Its box in the same frame, `[along0, across0, along1, across1]` (for upright text, `rect`).
     fn frame_rect(&self) -> [f64; 4] {
-        let dir = self.direction();
-        let r = self.rect;
-        [(r[0], r[1]), (r[2], r[1]), (r[0], r[3]), (r[2], r[3])]
-            .into_iter()
-            .map(|p| to_frame(dir, p))
-            .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)])
+        self.frame
     }
 }
 
@@ -491,6 +490,11 @@ fn direction(m: &Matrix) -> (f64, f64) {
 /// same way (#1443).
 fn to_frame(dir: (f64, f64), p: (f64, f64)) -> (f64, f64) {
     (p.0 * dir.0 + p.1 * dir.1, p.1 * dir.0 - p.0 * dir.1)
+}
+
+/// The box covering both `[x0, y0, x1, y1]` boxes.
+fn union(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
+    [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]
 }
 
 /// What replacing a line did.
@@ -639,6 +643,8 @@ struct Shown {
     bt_state: Ts,
     text: String,
     rect: [f64; 4],
+    /// Its box along and across its baseline (see [`TextLine::frame`]).
+    frame: [f64; 4],
     /// The boxes of its words (see [`TextLine::ink`]).
     ink: Vec<[f64; 4]>,
     baseline: f64,
@@ -773,6 +779,7 @@ fn interpret(
                                 first.rect[2].max(shown.rect[2]),
                                 first.rect[3].max(shown.rect[3]),
                             ];
+                            first.frame = union(first.frame, shown.frame);
                             first.ink.extend(shown.ink);
                         }
                         first.extra_ops.extend([open, i]);
@@ -936,6 +943,13 @@ fn interpret(
                 let rect = corners
                     .iter()
                     .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)]);
+                // The same corners along and across the baseline: the run's own box, not its
+                // upright bounding box turned (which is wider by the box's height on a slant).
+                let dir = direction(&trm0);
+                let frame = corners
+                    .iter()
+                    .map(|&p| to_frame(dir, p))
+                    .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)]);
                 let ink = words
                     .iter()
                     .map(|&(a, b)| {
@@ -963,6 +977,7 @@ fn interpret(
                     bt_state: at_bt.1.clone(),
                     text,
                     rect,
+                    frame,
                     ink,
                     baseline: start.1,
                     start_x: start.0,
@@ -1040,6 +1055,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
             }
             l.text.push_str(&s.text);
             l.rect = [l.rect[0].min(s.rect[0]), l.rect[1].min(s.rect[1]), l.rect[2].max(s.rect[2]), l.rect[3].max(s.rect[3])];
+            l.frame = union(l.frame, s.frame);
             l.ink.extend(s.ink.iter().copied());
             l.ops.push(s.op);
             l.ops.extend(s.extra_ops.iter().copied());
@@ -1051,6 +1067,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
             lines.push(TextLine {
                 text: s.text.clone(),
                 rect: s.rect,
+                frame: s.frame,
                 ink: s.ink.clone(),
                 font: String::from_utf8_lossy(&s.font).into_owned(),
                 base_font: s.base_font.clone(),
@@ -1128,6 +1145,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
         }
         l.text.push_str(&s.text);
         l.rect = [l.rect[0].min(s.rect[0]), l.rect[1].min(s.rect[1]), l.rect[2].max(s.rect[2]), l.rect[3].max(s.rect[3])];
+        l.frame = union(l.frame, s.frame);
         l.ink.extend(s.ink.iter().copied());
         l.ops.push(s.op);
         l.ops.extend(s.extra_ops.iter().copied());
@@ -1138,6 +1156,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
         lines.push(TextLine {
             text: s.text.clone(),
             rect: s.rect,
+            frame: s.frame,
             ink: s.ink.clone(),
             font: String::from_utf8_lossy(&s.font).into_owned(),
             base_font: s.base_font.clone(),
