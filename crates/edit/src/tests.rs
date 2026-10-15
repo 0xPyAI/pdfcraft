@@ -1346,6 +1346,28 @@ fn independent_text_objects_with_different_transforms_stay_separate() {
     assert_eq!(text::text_lines(&doc, 0).unwrap().len(), 2);
 }
 
+/// A negative font size or `Tz` runs the glyphs backwards along the text matrix: each word's
+/// `ink` box still spans all its glyphs, not only the first.
+#[test]
+fn word_boxes_span_whole_words_when_glyphs_run_backwards() {
+    // "someone@example.com" in Helvetica 11 is 121.814 pt wide.
+    for content in [
+        "BT /F1 -11 Tf -1 0 0 1 300 742 Tm (Mail the team: someone@example.com) Tj ET",
+        "BT /F1 11 Tf -100 Tz 300 742 Td (Mail the team: someone@example.com) Tj ET",
+    ] {
+        let lines = text::text_lines(&text_page(content), 0).unwrap();
+        assert_eq!(lines.len(), 1, "{content}");
+        let ink = &lines[0].ink;
+        assert_eq!(ink.len(), 4, "{content}: {ink:?}");
+        let width = |r: &[f64; 4]| r[2] - r[0];
+        assert!(ink.iter().all(|r| width(r) > 5.0), "{content}: {ink:?}");
+        let address = ink.iter().map(width).fold(0.0, f64::max);
+        assert!((address - 121.814).abs() < 0.01, "{content}: {ink:?}");
+        let (x0, x1) = ink.iter().fold((f64::MAX, f64::MIN), |(a, b), r| (a.min(r[0]), b.max(r[2])));
+        assert!(x0 >= lines[0].rect[0] - 0.01 && x1 <= lines[0].rect[2] + 0.01, "{content}: {ink:?} {:?}", lines[0].rect);
+    }
+}
+
 #[test]
 fn text_lines_are_found_and_replaced_in_place() {
     let mut doc =

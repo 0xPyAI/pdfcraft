@@ -31,6 +31,10 @@ pub struct TextLine {
     pub text: String,
     /// Its box in user space.
     pub rect: [f64; 4],
+    /// The boxes of the words it draws, in user space: from each word's first glyph to the end of
+    /// its last, without the spaces and `TJ` adjustments around it. `rect` also spans gaps that
+    /// draw nothing, such as the adjustment an applied redaction leaves where text was removed.
+    pub ink: Vec<[f64; 4]>,
     /// The font's resource name and `/BaseFont` (or Type 3 descriptor's `/FontName`), and its size in text space.
     pub font: String,
     pub base_font: String,
@@ -473,6 +477,8 @@ struct Shown {
     bt_state: Ts,
     text: String,
     rect: [f64; 4],
+    /// The boxes of its words (see [`TextLine::ink`]).
+    ink: Vec<[f64; 4]>,
     baseline: f64,
     start_x: f64,
     end_x: f64,
@@ -567,6 +573,7 @@ fn interpret(
                                 first.rect[2].max(shown.rect[2]),
                                 first.rect[3].max(shown.rect[3]),
                             ];
+                            first.ink.extend(shown.ink);
                         }
                         first.extra_ops.extend([open, i]);
                         // Only right-to-left ActualText is already in typing order and must stay
@@ -667,16 +674,34 @@ fn interpret(
                 let mut text = String::new();
                 let mut decodable = true;
                 let mut x_text = 0.0;
+                // Where each word's glyphs start and end along the run (text space), and whether
+                // the next glyph continues the last word.
+                let mut words: Vec<(f64, f64)> = Vec::new();
+                let mut in_word = false;
                 let mut glyph_count = 0_usize;
                 for p in &pieces {
                     match p {
                         Object::String(s) => {
                             for (code, len) in m.codes(&s.bytes) {
                                 glyph_count = glyph_count.saturating_add(1);
-                                match m.text_of(code) {
+                                let shown = m.text_of(code);
+                                let blank =
+                                    m.is_space(code, len) || shown.as_deref().is_some_and(|t| !t.is_empty() && t.chars().all(char::is_whitespace));
+                                match shown {
                                     Some(t) => text.push_str(&t),
                                     None => decodable = false,
                                 }
+                                if !blank {
+                                    let ink_end = x_text + m.width(code) * ts.size * ts.scale;
+                                    // A negative font size or `Tz` runs the glyphs backwards:
+                                    // the word is the union of its glyphs, whichever way they go.
+                                    let (lo, hi) = (x_text.min(ink_end), x_text.max(ink_end));
+                                    match words.last_mut() {
+                                        Some(word) if in_word => *word = (word.0.min(lo), word.1.max(hi)),
+                                        _ => words.push((lo, hi)),
+                                    }
+                                }
+                                in_word = !blank;
                                 let w = m.width(code) * ts.size + ts.char_spacing + if m.is_space(code, len) { ts.word_spacing } else { 0.0 };
                                 x_text += w * ts.scale;
                             }
@@ -687,6 +712,11 @@ fn interpret(
                                 // A large gap inside TJ reads as a space.
                                 if dx > ts.size * 0.2 && !text.ends_with(' ') {
                                     text.push(' ');
+                                }
+                                // Kerning keeps a word together; a jump either way of more
+                                // than 0.2 em ends it (whatever the sign of the size or `Tz`).
+                                if dx.abs() > (ts.size * ts.scale).abs() * 0.2 {
+                                    in_word = false;
                                 }
                                 x_text += dx;
                             }
@@ -705,6 +735,15 @@ fn interpret(
                 let rect = corners
                     .iter()
                     .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)]);
+                let ink = words
+                    .iter()
+                    .map(|&(a, b)| {
+                        let (y0, y1) = (ts.rise + m.descent * ts.size, ts.rise + m.ascent * ts.size);
+                        [trm0.apply(a, y0), trm0.apply(b, y0), trm0.apply(a, y1), trm0.apply(b, y1)]
+                            .iter()
+                            .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |r, p| [r[0].min(p.0), r[1].min(p.1), r[2].max(p.0), r[3].max(p.1)])
+                    })
+                    .collect();
                 let size_user = (trm0.0[2].powi(2) + trm0.0[3].powi(2)).sqrt() * ts.size;
                 // A numeric-only TJ adjusts the current text matrix but paints no glyphs.
                 // It must not create a phantom editable line or enlarge its neighbours' boxes.
@@ -723,6 +762,7 @@ fn interpret(
                     bt_state: at_bt.1.clone(),
                     text,
                     rect,
+                    ink,
                     baseline: start.1,
                     start_x: start.0,
                     end_x: end.0,
@@ -798,6 +838,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
             }
             l.text.push_str(&s.text);
             l.rect = [l.rect[0].min(s.rect[0]), l.rect[1].min(s.rect[1]), l.rect[2].max(s.rect[2]), l.rect[3].max(s.rect[3])];
+            l.ink.extend(s.ink.iter().copied());
             l.ops.push(s.op);
             l.ops.extend(s.extra_ops.iter().copied());
             l.decodable &= s.decodable;
@@ -808,6 +849,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
             lines.push(TextLine {
                 text: s.text.clone(),
                 rect: s.rect,
+                ink: s.ink.clone(),
                 font: String::from_utf8_lossy(&s.font).into_owned(),
                 base_font: s.base_font.clone(),
                 size: s.size,
@@ -885,6 +927,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<(usize, f64, f64, f64)
         }
         l.text.push_str(&s.text);
         l.rect = [l.rect[0].min(s.rect[0]), l.rect[1].min(s.rect[1]), l.rect[2].max(s.rect[2]), l.rect[3].max(s.rect[3])];
+        l.ink.extend(s.ink.iter().copied());
         l.ops.push(s.op);
         l.ops.extend(s.extra_ops.iter().copied());
         l.decodable &= s.decodable;
@@ -894,6 +937,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<(usize, f64, f64, f64)
         lines.push(TextLine {
             text: s.text.clone(),
             rect: s.rect,
+            ink: s.ink.clone(),
             font: String::from_utf8_lossy(&s.font).into_owned(),
             base_font: s.base_font.clone(),
             size: s.size,

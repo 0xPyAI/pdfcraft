@@ -3137,7 +3137,11 @@ fn removing_hidden_information_through_tools() {
 
 /// A one-page PDF whose text "TOP SECRET" sits under an opaque black rectangle.
 fn faux_redacted_fixture() -> Vec<u8> {
-    let body = "BT /F1 24 Tf 100 700 Td (TOP SECRET) Tj ET\n0 g\n90 688 220 32 re f";
+    helvetica_page("BT /F1 24 Tf 100 700 Td (TOP SECRET) Tj ET\n0 g\n90 688 220 32 re f")
+}
+
+/// A one-page US Letter PDF drawing `body` with Helvetica as /F1.
+fn helvetica_page(body: &str) -> Vec<u8> {
     let objs: Vec<Vec<u8>> = vec![
         b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
         b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>".to_vec(),
@@ -3177,6 +3181,25 @@ fn auditing_faux_redactions_through_tools() {
     // A clean document audits clean.
     let clean = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
     assert_eq!(ok(&mut a, "doc_audit_redactions", json!({ "doc": clean }))["count"], 0);
+}
+
+/// An applied redaction at the end of a line leaves the words before it, then a gap the text
+/// matrix jumps over and the redaction box: nothing is under the box any more, so the audit must
+/// not report the words beside it as covered. In the middle of a line it never did.
+#[test]
+fn an_applied_redaction_at_the_end_of_a_line_audits_clean() {
+    let dir = workdir("audit-applied-end-of-line");
+    let body = "BT /F1 11 Tf 72 692 Td (Mail the team: someone@example.com) Tj ET\nBT /F1 11 Tf 72 662 Td (Account 0042-7788 is in the middle of this line.) Tj ET";
+    std::fs::write(dir.join("mail.pdf"), helvetica_page(body)).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "mail.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "redact_mark", json!({ "doc": doc, "pattern": "email" }));
+    ok(&mut a, "redact_mark", json!({ "doc": doc, "find": "0042-7788" }));
+    ok(&mut a, "redact_apply", json!({ "doc": doc }));
+    let text = ok(&mut a, "text_extract", json!({ "doc": doc }))["pages"][0]["text"].as_str().unwrap().to_string();
+    assert!(text.contains("Mail the team:") && !text.contains("someone") && !text.contains("0042"), "{text}");
+    let r = ok(&mut a, "doc_audit_redactions", json!({ "doc": doc }));
+    assert_eq!(r["count"], 0, "{r}");
 }
 
 #[test]

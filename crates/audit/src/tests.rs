@@ -228,6 +228,93 @@ fn self_drawing_form_fails_the_audit() {
     assert!(matches!(result, Err(crate::AuditError::TooDeep)), "{result:?}");
 }
 
+/// An applied redaction leaves the words around it and a `TJ` adjustment over the gap where the
+/// text was, then the redaction box. At the end of a line, the box covers most of the line's box
+/// (which spans the gap) but none of its words: nothing is hidden, so nothing is flagged.
+#[test]
+fn applied_redaction_at_the_end_of_a_line_is_not_flagged() {
+    let content = b"BT /F1 11 Tf 72 742 Td [(Mail the team:) -11354] TJ ET\n0 g\n144.138 739.8 121.814 11 re f\n";
+    let findings = audit_redactions(&open(one_page(content, ""))).expect("audit must run");
+    assert!(findings.is_empty(), "{findings:?}");
+    // The same gap between two words, wider than the words beside it.
+    let content = b"BT /F1 11 Tf 72 742 Td [(Card:) -14000 (ok)] TJ ET\n0 g\n101 739.8 150 11 re f\n";
+    let findings = audit_redactions(&open(one_page(content, ""))).expect("audit must run");
+    assert!(findings.is_empty(), "{findings:?}");
+}
+
+/// The control: the same box over text still drawn under it is a faux redaction, at the end of a
+/// line as in the middle of a short one.
+#[test]
+fn faux_redaction_at_the_end_of_a_line_is_found() {
+    let content = b"BT /F1 11 Tf 72 742 Td (Mail the team: someone@example.com) Tj ET\n0 g\n144.138 739.8 121.814 11 re f\n";
+    let findings = audit_redactions(&open(one_page(content, ""))).expect("audit must run");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].covered_text, "Mail the team: someone@example.com");
+    let content = b"BT /F1 11 Tf 72 742 Td [(Card:) -300 (4111111111111111) -300 (ok)] TJ ET\n0 g\n101 739.8 100 11 re f\n";
+    let findings = audit_redactions(&open(one_page(content, ""))).expect("audit must run");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+}
+
+/// A cover over a short value after a long label hides less than 40% of the line's words, but the
+/// whole of the words it covers, and most of the line's box: still a faux redaction. The value
+/// follows the label in the same `TJ` after a wide gap, or in a second run moved by `Td`.
+#[test]
+fn faux_redaction_over_a_short_value_after_a_long_label_is_found() {
+    let content = b"BT /F1 11 Tf 72 742 Td [(Social insurance number:) -8000 (123 456 789)] TJ ET\n0 g\n200 739.8 150 11 re f\n";
+    let findings = audit_redactions(&open(one_page(content, ""))).expect("audit must run");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].covered_text, "Social insurance number: 123 456 789");
+    let content = b"BT /F1 11 Tf 72 742 Td (Account:) Tj 70 0 Td (4111) Tj ET\n0 g\n115 739.8 55 11 re f\n";
+    let findings = audit_redactions(&open(one_page(content, ""))).expect("audit must run");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert!(findings[0].covered_text.contains("4111"), "{findings:?}");
+}
+
+/// Text set with a negative font size in a mirrored text matrix runs its glyphs backwards: a
+/// cover over the address it draws is still found.
+#[test]
+fn faux_redaction_over_mirrored_text_is_found() {
+    let content = b"BT /F1 -11 Tf -1 0 0 1 300 742 Tm (Mail the team: someone@example.com) Tj ET\n0 g\n365 733 130 14 re f\n";
+    let findings = audit_redactions(&open(one_page(content, ""))).expect("audit must run");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].covered_text, "Mail the team: someone@example.com");
+}
+
+/// A cover over less than half a value must retain the historical line-box detection.
+#[test]
+fn faux_redaction_over_a_partial_value_after_a_long_label_is_found() {
+    partial_value_is_found(false);
+}
+
+#[test]
+fn faux_redaction_over_a_partial_value_after_a_long_label_on_a_rotated_page_is_found() {
+    partial_value_is_found(true);
+}
+
+fn partial_value_is_found(rotated: bool) {
+    let bytes = one_page(
+        b"BT /F1 11 Tf 72 742 Td [(Social insurance number:) -8000 (123456789)] TJ ET\n0 g\n193 738 111 16 re f\n",
+        if rotated { "/Rotate 90" } else { "" },
+    );
+    let findings = audit_redactions(&open(bytes)).expect("audit must run");
+    assert_eq!(findings.len(), 1, "partial value, rotated={rotated}");
+}
+
+/// Keep the historic detections with several covers, lines and text-spacing states.
+#[test]
+fn faux_redactions_with_multiple_covers_lines_and_spacing_are_found() {
+    let cases: [&[u8]; 4] = [
+        b"BT /F1 11 Tf 72 742 Td (Account: 123456789) Tj ET\n0 g\n72 738 65 16 re f\n140 738 40 16 re f\n",
+        b"BT /F1 11 Tf 72 742 Td (Account: 123456789) Tj 0 -15 Td (Account: 987654321) Tj ET\n0 g\n115 723 100 30 re f\n",
+        b"BT /F1 11 Tf 8 Tc 72 742 Td (Account: 1234) Tj ET\n0 g\n145 738 90 16 re f\n",
+        b"BT /F1 11 Tf 250 Tz 72 742 Td (Account: 1234) Tj ET\n0 g\n100 738 160 16 re f\n",
+    ];
+    for content in cases {
+        let findings = audit_redactions(&open(one_page(content, ""))).expect("audit must run");
+        assert_eq!(findings.len(), 1, "{}: {findings:?}", String::from_utf8_lossy(content));
+    }
+}
+
 #[test]
 fn rectangle_drawn_as_a_path_covers_text_like_re() {
     // The same cover as `re`, built from `m`/`l` (closed with `h`, a repeated start point, or
