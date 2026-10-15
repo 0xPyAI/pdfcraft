@@ -26,7 +26,7 @@ pub use autotag::{AutoTagError, AutoTagResult, autotag_text};
 pub use autotag_fields::tag_form_fields;
 pub use headings::{Heading, headings};
 pub use report::{REPORT_WORDS, report_html};
-pub use tags::{TagError, TagInfo, TagPlacement, TagProperty, move_tag, set_tag_property, tags};
+pub use tags::{TagContentItem, TagError, TagInfo, TagPlacement, TagProperty, move_tag, set_tag_property, tag_content, tags};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Category {

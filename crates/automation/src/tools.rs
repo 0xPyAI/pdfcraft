@@ -1013,6 +1013,10 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc"],
             )),
+        t("accessibility_tag_content", "List tag content", "List the marked-content references directly owned by one reachable indirect structure tag, including page, MCID and extracted text.")
+            .ro()
+            .cmd("a11y.tags")
+            .with(schema(json!({ "doc": doc(), "object": { "type": "integer", "minimum": 1 }, "generation": { "type": "integer", "minimum": 0, "maximum": 65535 } }), &["doc", "object", "generation"])),
         t("accessibility_set_tag_property", "Edit tag property", "Set or clear one property of a reachable indirect structure tag. Use object and generation from accessibility_tags. Properties: type, title, actual_text, alternate_text, language. Empty or omitted value clears text properties; type requires a nonempty PDF name. Undoable.")
             .with(schema(json!({
                 "doc": doc(), "object": { "type": "integer", "minimum": 1 },

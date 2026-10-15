@@ -511,6 +511,16 @@ impl Automation {
         Ok(json!({ "count": count, "tags": tags, "next": next }))
     }
 
+    pub(crate) fn accessibility_tag_content(&self, a: &Args) -> Result<Value> {
+        let object = u32::try_from(a.int("object")?).map_err(|_| ToolError::InvalidArgs("object must be a positive tag object number".into()))?;
+        let generation =
+            u16::try_from(a.int("generation")?).map_err(|_| ToolError::InvalidArgs("generation must be a PDF object generation".into()))?;
+        let content = self.doc(a)?.tag_content(pdfcraft_cos::ObjRef { num: object, generation }).map_err(failed)?;
+        Ok(
+            json!({ "count": content.len(), "content": content.into_iter().map(|item| json!({ "page": item.page.map(|p| p + 1), "mcid": item.mcid, "text": item.text })).collect::<Vec<_>>() }),
+        )
+    }
+
     pub(crate) fn accessibility_set_tag_property(&mut self, a: &Args) -> Result<Value> {
         let object = u32::try_from(a.int("object")?).map_err(|_| ToolError::InvalidArgs("object must be a positive tag object number".into()))?;
         if object == 0 {

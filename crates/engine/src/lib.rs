@@ -594,6 +594,11 @@ impl Document {
         self.editor.as_ref().map(|e| a11y::tags(&e.cos)).unwrap_or_default()
     }
 
+    /// Marked-content items directly owned by one reachable indirect structure tag.
+    pub fn tag_content(&self, object: pdfcraft_cos::ObjRef) -> Result<Vec<a11y::TagContentItem>, a11y::TagError> {
+        self.editor.as_ref().map(|e| a11y::tag_content(&e.cos, object)).unwrap_or_else(|| Ok(Vec::new()))
+    }
+
     /// The edit that fixes `rule`, for the rules with an automatic fix: the document language
     /// (`value` is the language), the title (`value` replaces it; else the current title or the
     /// file name) and the tab order.

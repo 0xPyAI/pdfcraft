@@ -599,6 +599,16 @@ fn figures_are_listed_with_their_alt_text_and_place() {
 }
 
 #[test]
+fn tag_content_lists_direct_marked_content() {
+    let doc = figures_doc();
+    let tags = tags(&doc);
+    let first = tag_content(&doc, tags[1].object).unwrap();
+    let second = tag_content(&doc, tags[2].object).unwrap();
+    assert_eq!((first[0].page, first[0].mcid, first[0].text.as_str()), (Some(0), 0, ""));
+    assert_eq!((second[0].page, second[0].mcid, second[0].text.as_str()), (Some(0), 1, ""));
+}
+
+#[test]
 fn sibling_tags_move_in_reading_order_without_changing_content() {
     let mut doc = figures_doc();
     let before: Vec<_> = tags(&doc).into_iter().map(|tag| tag.object.num).collect();
@@ -799,6 +809,15 @@ fn headings_are_found_with_their_levels_titles_and_pages() {
             ("AB".to_string(), 3, 1, ref_(15)),
         ]
     );
+}
+
+#[test]
+fn tag_content_reads_the_text_of_each_marked_content_reference() {
+    let doc = pdf(&headings_doc(), "");
+    let items = |n| tag_content(&doc, ref_(n).unwrap()).unwrap().into_iter().map(|i| (i.page, i.mcid, i.text)).collect::<Vec<_>>();
+    assert_eq!(items(12), [(Some(0), 0, "Chapter One".to_string())]);
+    assert_eq!(items(13), [(Some(0), 2, "Sec A".to_string())]);
+    assert_eq!(items(15), [(Some(1), 1, "AB".to_string())]);
 }
 
 /// Helvetica advances (standard 14 metrics, per 1000 em) of the characters the tests below draw.

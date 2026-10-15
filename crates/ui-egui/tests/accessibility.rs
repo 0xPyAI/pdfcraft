@@ -327,6 +327,7 @@ fn tags_panel_edits_a_tag_property_and_undoes_it() {
     h.run_steps(2);
     h.get_by_label("Figure · 7").click();
     h.run_steps(2);
+    h.get_by_label("MCID 0 · Go to page 1");
     let title = h.get_by_role_and_label(Role::TextInput, "Title");
     title.focus();
     title.type_text("First figure");

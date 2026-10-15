@@ -8960,11 +8960,11 @@ title = "Content panel"
 area = "M"
 tier = "P2"
 milestone = "M12"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "partial"
+commands = ["a11y.tags"]
+tools = ["accessibility_tag_content"]
+evidence = ["crates/a11y/src/tests.rs::tag_content_lists_direct_marked_content", "crates/ui-egui/tests/accessibility.rs::tags_panel_edits_a_tag_property_and_undoes_it"]
+notes = "Selecting a tag in the Tags panel lists its direct marked-content references with MCID, page and extracted text, and selecting an item navigates to the page. The content tree is presented within the Tags panel; editing content objects and arbitrary inline structure nodes remain planned."
 
 [[feature]]
 id = "a11y.create-tag-from-selection"
