@@ -1191,6 +1191,45 @@ fn repeating_subforms_inside_positioned_content_get_their_instances() {
     assert!(((after.rect.y - rows[2].rect.y) - step).abs() < 0.01, "after: {:?}, last row: {:?}", after.rect, rows[2].rect);
 }
 
+/// A page area without an `<occur>` repeats for as long as the body needs pages. Before, it was
+/// treated like a subform (at most once), so once the first body page was out the layout fell
+/// back to the last page area, here one limited to a single use, and drew its content over every
+/// body page (and listed a copy of its fields per page).
+#[test]
+fn page_area_without_occur_serves_every_body_page() {
+    let section = |n: u32| {
+        format!(
+            r#"<subform name="s{n}" layout="tb"><breakBefore targetType="pageArea" startNew="1"/><field name="f{n}" w="2in" h="0.3in"><ui><textEdit/></ui></field></subform>"#
+        )
+    };
+    let xdp = format!(
+        r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet>
+  <pageArea name="Body"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea>
+  <pageArea name="Once"><occur min="1" max="1"/><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/>
+   <field name="PrintButton" x="1in" y="1in" w="1in" h="0.3in"><ui><button/></ui></field>
+  </pageArea>
+ </pageSet>
+ {}{}{}{}
+</subform>
+</template>
+</xdp:xdp>
+"##,
+        section(1),
+        section(2),
+        section(3),
+        section(4)
+    );
+    let form = layout_xml(&xdp).unwrap();
+    let soms: Vec<Vec<String>> = form.pages.iter().map(|p| widgets(p).iter().map(|w| w.som.clone()).collect()).collect();
+    assert_eq!(form.pages.len(), 4, "{soms:?}");
+    let buttons = soms.iter().flatten().filter(|s| s.contains("PrintButton")).count();
+    assert_eq!(buttons, 0, "the single-use page area is not drawn over body pages: {soms:?}");
+}
+
 /// Areas are named in SOM expressions but are not data scopes; unnamed subforms and areas have
 /// no segment at all. What the template doesn't have is kept as it is.
 #[test]
