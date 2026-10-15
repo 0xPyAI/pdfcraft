@@ -1075,8 +1075,13 @@ impl Renderer {
                         // become native gradients instead of a texture sampled pixel by pixel.
                         // Upstream also shifts by half a pixel for vello_cpu 0.3; 0.0.8 already
                         // evaluates gradients at pixel centres, like the texture below.
-                        if let Some(native) =
-                            encoded.as_svg_gradient(bbox, NATIVE_GRADIENT_TOLERANCE)
+                        // PdfCraft patch (#2128): vello_cpu 0.0.8 copies an opaque gradient
+                        // over fully covered tiles without applying the mask or blend mode, and
+                        // a gradient can't be flagged transparent like the texture below, so
+                        // under a soft mask or blend mode the shading is sampled instead.
+                        if !self.force_images_may_have_transparency()
+                            && let Some(native) =
+                                encoded.as_svg_gradient(bbox, NATIVE_GRADIENT_TOLERANCE)
                         {
                             self.ctx
                                 .set_paint_transform(path_transform.inverse() * native.transform);

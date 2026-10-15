@@ -6378,6 +6378,38 @@ trailer << /Root 1 0 R >>
         assert_eq!(px(75, 50), vec![255, 255, 255, 255], "outside the mask");
     }
 
+    /// Issue #2128: PowerPoint fades a gradient fill (an axial shading pattern) through a soft
+    /// mask. vello_cpu 0.0.8 copies an opaque gradient straight over fully covered tiles,
+    /// skipping the mask, so the fade came out solid. Images get around that by declaring
+    /// transparency while a mask or blend mode is set; native gradients can't, so they are
+    /// sampled as a texture then.
+    #[test]
+    fn soft_mask_applies_to_a_shading_pattern_fill() {
+        let content = "/Pattern cs /P0 scn /M gs 0 0 100 100 re f";
+        let pdf = format!(
+            "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R /Resources << /ExtGState << /M 5 0 R >> /Pattern << /P0 7 0 R >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /ExtGState /SMask << /Type /Mask /S /Alpha /G 6 0 R >> >> endobj
+6 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Group << /S /Transparency /CS /DeviceRGB >> /Length 20 >> stream
+0 g 0 0 50 100 re f
+endstream endobj
+7 0 obj << /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] /Extend [true true] /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [1 0 0] /N 1 >> >> >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+            content.len()
+        );
+        let mut r = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default());
+        let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+        let px = |x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..4].to_vec();
+        assert_eq!(px(25, 50), vec![255, 0, 0, 255], "inside the mask");
+        assert_eq!(px(75, 50), vec![255, 255, 255, 255], "outside the mask");
+    }
+
     /// ISO 32000-2 §8.5.4: `W` / `W*` clip with the current path once whichever path-painting
     /// operator ends it has painted it, `S`, `f` or `B` as much as `n`. The vendored interpreter
     /// applied the clip only on `n`: after `re W* S` everything later painted outside the clip,
