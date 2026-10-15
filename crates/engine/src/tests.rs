@@ -5126,6 +5126,50 @@ fn copy_image_finds_a_picture_inside_form_artwork_under_text() {
     assert!(d.page_image_copy_file(0, 1).is_err());
 }
 
+/// `fixture(2)` with the catalog pointing at a page tree object the file does not have (#1656).
+fn fixture_without_page_tree() -> Vec<u8> {
+    let bytes = fixture(2);
+    let catalog = b"<< /Type /Catalog /Pages 2 0 R >>";
+    let at = bytes.windows(catalog.len()).position(|w| w == catalog).unwrap();
+    let mut out = bytes.clone();
+    out[at..at + catalog.len()].copy_from_slice(b"<< /Type /Catalog /Pages 9 0 R >>");
+    out
+}
+
+#[test]
+fn a_recovered_page_tree_opens_unmodified_and_edits_the_pages_shown() {
+    let mut s = Session::new();
+    let id = s.open("damaged.pdf", None, Arc::new(fixture_without_page_tree()), None).unwrap();
+    let doc = s.get(id).unwrap();
+    assert_eq!(doc.info.pages.len(), 2);
+    assert!(!doc.editor.as_ref().unwrap().cos.is_modified(), "the repair is a revision of the opened file, not an unsaved edit");
+    assert!(doc.repair_log().iter().any(|l| l.contains("page tree is missing")), "{:?}", doc.repair_log());
+    s.apply(id, Edit::RotatePages { pages: vec![1], degrees: 90 }).unwrap();
+    assert_eq!(s.get(id).unwrap().info.pages.iter().map(|p| p.rotation).collect::<Vec<_>>(), [0, 90]);
+}
+
+#[test]
+fn a_signed_document_rebuilt_from_object_headers_refuses_edits() {
+    let p12 = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12")).unwrap();
+    let digital_id = sign::pkcs12::open(&p12, "test").unwrap();
+    let mut s = Session::new().with_clock(|| 1_800_000_000);
+    let id = s.open("fixture.pdf", None, Arc::new(fixture(2)), None).unwrap();
+    let opts = SignOptions { page: 1, rect: Some([20.0, 20.0, 180.0, 60.0]), ..SignOptions::default() };
+    let signed = s.sign(id, &digital_id, opts).unwrap();
+    s.mark_signed(id, signed, None).unwrap();
+    // A broken startxref: the file opens only by rebuilding from object headers, and any save
+    // of it is a full rewrite.
+    let mut bytes = s.get(id).unwrap().bytes.as_ref().clone();
+    let sx = bytes.windows(10).rposition(|w| w == b"startxref\n").unwrap() + 10;
+    let end = sx + bytes[sx..].iter().position(|b| !b.is_ascii_digit()).unwrap();
+    bytes.splice(sx..end, b"1".iter().copied());
+    let id = s.open("damaged.pdf", None, Arc::new(bytes), None).unwrap();
+    assert!(s.get(id).unwrap().is_signed());
+    assert!(s.get(id).unwrap().editor.as_ref().unwrap().cos.revisions().is_empty(), "the fixture must be rebuilt");
+    assert!(matches!(s.apply(id, rect_comment(0, [80.0, 80.0, 120.0, 120.0])), Err(EditError::SignedRewrite(_))));
+    assert!(!s.get(id).unwrap().dirty);
+}
+
 /// #1324: marking a figure decorative rewrites that figure only. The header, added text and an
 /// unknown entry on the original stream stay attached to the page. This lives in the engine tests
 /// because edit and a11y are the same layer and cannot depend on each other.

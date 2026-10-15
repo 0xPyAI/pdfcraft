@@ -875,6 +875,12 @@ fn is_placeholder_title(title: &str) -> bool {
 /// What is displayed: the working file, plus (in memory only, never saved) the appearances
 /// PdfCraft draws for comments that have none ([`pdfcraft_annot::with_missing_appearances`]).
 /// The working file is unchanged, and so is everything that reads it (saving, signatures, …).
+/// The reader shows the same pages in `a` and `b`: count, displayed size and rotation.
+fn same_pages(a: &[pdfcraft_render::PageInfo], b: &[pdfcraft_render::PageInfo]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| (x.width - y.width).abs() < 0.01 && (x.height - y.height).abs() < 0.01 && x.rotation == y.rotation)
+}
+
 fn display_bytes(editor: Option<&mut Editor>, bytes: &Arc<Vec<u8>>) -> Arc<Vec<u8>> {
     let Some(display) = editor.and_then(|e| pdfcraft_annot::with_missing_appearances_cached(&e.cos, &mut e.appearances)) else {
         return bytes.clone();
@@ -3452,6 +3458,31 @@ impl Session {
             },
             (_, cos) => (bytes, info, cos),
         };
+        // The catalog leads to no page, but the reader found pages by scanning: gather the page
+        // objects into a page tree as one more revision, or page edits address none of them
+        // (#1656). Kept only when the reader then shows the same pages, and never on a signed
+        // document, where writing the repair could rewrite the file under its signatures.
+        let (bytes, info, cos) = match cos {
+            Ok(Ok(cos)) if !info.pages.is_empty() && pdfcraft_organize::page_count(&cos).unwrap_or(0) == 0 => {
+                let mut work = cos.clone();
+                let signed = || pdfcraft_sign::pdf::list(&cos, &bytes, &context.trust).iter().any(|s| s.signed);
+                let rebuilt = match pdfcraft_organize::recover_page_tree(&mut work) {
+                    Ok(n) if n > 0 && !signed() => rebase(&work).ok().filter(|(_, i, _)| same_pages(&i.pages, &info.pages)),
+                    _ => None,
+                };
+                match rebuilt {
+                    Some((b, i, mut c)) => {
+                        for line in cos.repair_log() {
+                            c.note_repair(line.clone());
+                        }
+                        c.note_repair(format!("the page tree is missing; its {} pages were found by scanning the file", i.pages.len()));
+                        (b, i, Ok(Ok(c)))
+                    }
+                    None => (bytes, info, Ok(Ok(cos))),
+                }
+            }
+            cos => (bytes, info, cos),
+        };
         // XFA notes survive the document being re-read after edits.
         let xfa_warnings: Vec<String> = if info.xfa.is_some() { info.warnings.clone() } else { Vec::new() };
         let mut document = Self::build_document(&context.trust, name, path, bytes, info, cos, render_password, password, xfa);
@@ -3690,8 +3721,9 @@ impl Session {
         }
         // Signed documents are only ever saved incrementally: an edit that needs a full rewrite
         // (applying redactions, changing security, sanitizing) would invalidate the signatures.
+        // So does any edit to a file rebuilt from object headers: it has no chain to append to.
         let rewrites = |c: &pdfcraft_cos::Document| c.full_save_required() || c.encryption_changed();
-        if signed && rewrites(&next) && !rewrites(&editor.cos) {
+        if signed && ((rewrites(&next) && !rewrites(&editor.cos)) || (next.is_modified() && next.revisions().is_empty())) {
             return Err(EditError::SignedRewrite(edit.label().to_string()));
         }
         // What this edit drew with `?` (a value or comment text its font can't draw, stored as
