@@ -165,7 +165,38 @@ pub fn merge_data_files(files: &[(String, Vec<u8>)]) -> Result<String, String> {
 
 pub type SplitPart = (usize, usize, Arc<Vec<u8>>);
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+#[cfg(test)]
+thread_local! {
+    static SECONDARY_SCAN_COUNTS: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+#[cfg(test)]
+fn reset_secondary_scan_counts() {
+    SECONDARY_SCAN_COUNTS.with(|counts| counts.set((0, 0)));
+}
+
+#[cfg(test)]
+fn secondary_scan_counts() -> (usize, usize) {
+    SECONDARY_SCAN_COUNTS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+fn record_marker_scan() {
+    SECONDARY_SCAN_COUNTS.with(|counts| {
+        let (markers, links) = counts.get();
+        counts.set((markers + 1, links));
+    });
+}
+
+#[cfg(test)]
+fn record_link_scan() {
+    SECONDARY_SCAN_COUNTS.with(|counts| {
+        let (markers, links) = counts.get();
+        counts.set((markers, links + 1));
+    });
+}
 
 use pdfcraft_cos::{SaveOptions, write_full, write_incremental};
 use pdfcraft_render::{DocInfo, Layer, LayerOp, OpenError, ReadingColors, RenderConfig, RenderPool, inspect};
@@ -197,6 +228,8 @@ enum Scope {
     Comments,
     /// Only form field values (and their widget appearances).
     Form,
+    /// Link annotations; the full inspection is refreshed, but page-content indexes stay valid.
+    Links,
     /// Only page content streams, resources and added content/marks: the page tree,
     /// annotations, form fields, links, outline and fonts are unchanged, so the full
     /// re-inspection is skipped (seconds on very large files).
@@ -234,6 +267,7 @@ fn scope_of(edit: &Edit) -> Scope {
         | Edit::FillAnnotation { .. }
         | Edit::FontSizeAnnotation { .. }
         | Edit::SetAnnotationInfo { .. } => Scope::Comments,
+        Edit::AddLink { .. } | Edit::SetLink { .. } | Edit::DeleteLink { .. } | Edit::RemoveLinks { .. } | Edit::AddLinks { .. } => Scope::Links,
         Edit::SetFieldValue { .. } | Edit::ResetForm { .. } | Edit::SetFieldImage { .. } | Edit::ApplyScriptChanges { .. } => Scope::Form,
         // Page content, resources and added content/marks only: the page tree, annotations,
         // fields, links and document metadata are untouched (see `refresh_content`).
@@ -344,12 +378,8 @@ pub struct Document {
     pub read_only_reason: Option<String>,
     /// Interactive form fields of the current state (empty without a form).
     pub form: Arc<Vec<pdfcraft_forms::Field>>,
-    /// Page marks present (headers and footers, watermarks, backgrounds), for Update/Remove.
-    pub marks: Vec<MarkKind>,
-    /// Text and images added with Edit a PDF ▸ Add content (still editable).
-    pub added: Vec<pdfcraft_edit::Added>,
-    /// Link annotations, for Edit a PDF ▸ Link.
-    pub links: Vec<pdfcraft_annot::links::LinkItem>,
+    marker_scan: OnceLock<pdfcraft_edit::MarkerScan>,
+    links: OnceLock<Vec<pdfcraft_annot::links::LinkItem>>,
     /// Signature fields, validated against the session's trust store (Signatures panel).
     pub signatures: Arc<Vec<SignatureInfo>>,
     trust: Arc<TrustStore>,
@@ -658,6 +688,54 @@ impl Document {
     /// Redaction marks waiting to be applied.
     pub fn redaction_marks(&self) -> usize {
         self.info.annotations.iter().filter(|a| a.subtype == "Redact").count()
+    }
+
+    /// Page marks present (headers and footers, watermarks, backgrounds), for Update/Remove.
+    pub fn marks(&self) -> &[MarkKind] {
+        &self
+            .marker_scan
+            .get_or_init(|| {
+                self.editor
+                    .as_ref()
+                    .map(|e| {
+                        #[cfg(test)]
+                        record_marker_scan();
+                        pdfcraft_edit::scan_markers(&e.cos)
+                    })
+                    .unwrap_or_default()
+            })
+            .marks
+    }
+
+    /// Text and images added with Edit a PDF ▸ Add content (still editable).
+    pub fn added(&self) -> &[pdfcraft_edit::Added] {
+        &self
+            .marker_scan
+            .get_or_init(|| {
+                self.editor
+                    .as_ref()
+                    .map(|e| {
+                        #[cfg(test)]
+                        record_marker_scan();
+                        pdfcraft_edit::scan_markers(&e.cos)
+                    })
+                    .unwrap_or_default()
+            })
+            .added
+    }
+
+    /// Link annotations, for Edit a PDF ▸ Link.
+    pub fn links(&self) -> &[pdfcraft_annot::links::LinkItem] {
+        self.links.get_or_init(|| {
+            self.editor
+                .as_ref()
+                .map(|e| {
+                    #[cfg(test)]
+                    record_link_scan();
+                    pdfcraft_annot::links::list(&e.cos)
+                })
+                .unwrap_or_default()
+        })
     }
 
     /// Changes to content and document information are allowed.
@@ -3431,14 +3509,6 @@ impl Session {
             };
             e.cos.note_repair(line);
         }
-        let (marks, added) = editor
-            .as_ref()
-            .map(|e| {
-                let scan = pdfcraft_edit::scan_markers(&e.cos);
-                (scan.marks, scan.added)
-            })
-            .unwrap_or_default();
-        let links = editor.as_ref().map(|e| pdfcraft_annot::links::list(&e.cos)).unwrap_or_default();
         let sig_cache = Arc::new(pdfcraft_sign::DigestCache::default());
         let signatures = editor.as_ref().map(|e| signatures_of(&e.cos, &bytes, trust, &sig_cache)).unwrap_or_default();
         Document {
@@ -3455,9 +3525,8 @@ impl Session {
             snapshot_generation: 0,
             read_only_reason,
             form: Arc::new(form),
-            marks,
-            added,
-            links,
+            marker_scan: OnceLock::new(),
+            links: OnceLock::new(),
             signatures,
             trust: trust.clone(),
             sig_cache,
@@ -3725,6 +3794,9 @@ impl Session {
         if scope == Scope::Content {
             return Self::refresh_content(doc, None);
         }
+        if scope == Scope::Links {
+            return Self::refresh_links(doc);
+        }
         // Metadata edits keep the renderer, which holds the working file anyway.
         if scope != Scope::Metadata {
             Self::release_working(doc);
@@ -3762,7 +3834,11 @@ impl Session {
         let form = Arc::new(form);
         match scope {
             Scope::Metadata => return Ok(()),
-            Scope::Comments => doc.info.annotations = comment_list(&editor.cos),
+            Scope::Comments => {
+                doc.info.annotations = comment_list(&editor.cos);
+                // Link indexes are positions in /Annots, so comment insertion/deletion can move them.
+                doc.links = OnceLock::new();
+            }
             Scope::Form => {
                 // PERF: keystroke path, index once. A linear find per field is O(F^2);
                 // forms reach 10k fields.
@@ -3783,6 +3859,7 @@ impl Session {
                     }
                 }
             }
+            Scope::Links => return Self::refresh_links(doc),
             // Handled above; kept as a full refresh so the match stays total.
             Scope::Full => return Self::refresh(doc),
             // Handled above (content-only refresh); the arm keeps the match total.
@@ -3832,11 +3909,8 @@ impl Session {
         // The edit must still leave a file the viewer can open; anything else rolls back above.
         pdfcraft_render::check_pages(bytes.clone(), doc.password.as_deref(), doc.info.pages.len()).map_err(|e| EditError::Reopen(e.to_string()))?;
         let (touches_added, touches_marks) = Self::content_refresh_lists(edit);
-        if touches_added {
-            doc.added = pdfcraft_edit::list_added(&editor.cos);
-        }
-        if touches_marks {
-            doc.marks = pdfcraft_edit::marks_present(&editor.cos);
+        if touches_added || touches_marks {
+            doc.marker_scan = OnceLock::new();
         }
         doc.info.file_size = bytes.len();
         if !doc.signatures.is_empty() {
@@ -3873,6 +3947,15 @@ impl Session {
 
     /// Rebuild working bytes, inspection and renderer from the current edit state.
     fn refresh(doc: &mut Document) -> Result<(), EditError> {
+        Self::refresh_with_indexes(doc, true, true)
+    }
+
+    /// Reinspect a link edit while preserving the page-content marker scan cache.
+    fn refresh_links(doc: &mut Document) -> Result<(), EditError> {
+        Self::refresh_with_indexes(doc, false, true)
+    }
+
+    fn refresh_with_indexes(doc: &mut Document, invalidate_markers: bool, invalidate_links: bool) -> Result<(), EditError> {
         // A full refresh may follow structural or annotation changes: cached appearances
         // may be stale, so they are rebuilt below.
         if let Some(editor) = doc.editor.as_mut() {
@@ -3900,10 +3983,12 @@ impl Session {
         let mut form = pdfcraft_forms::fields(&editor.cos);
         xfa::mark_script_buttons(&editor.cos, &mut form);
         doc.form = Arc::new(form);
-        let marker_scan = pdfcraft_edit::scan_markers(&editor.cos);
-        doc.marks = marker_scan.marks;
-        doc.added = marker_scan.added;
-        doc.links = pdfcraft_annot::links::list(&editor.cos);
+        if invalidate_markers {
+            doc.marker_scan = OnceLock::new();
+        }
+        if invalidate_links {
+            doc.links = OnceLock::new();
+        }
         doc.signatures = signatures_of(&editor.cos, &bytes, &doc.trust, &doc.sig_cache);
         doc.display = display_bytes(Some(editor), &bytes);
         doc.renderer = RenderPool::new(doc.display.clone(), render_threads(), doc.config.clone());
@@ -4441,7 +4526,7 @@ impl Session {
                         ]
                     })
                     .filter(|r| {
-                        !doc.links.iter().any(|l| l.page == page && l.rect[0] < r[2] && r[0] < l.rect[2] && l.rect[1] < r[3] && r[1] < l.rect[3])
+                        !doc.links().iter().any(|l| l.page == page && l.rect[0] < r[2] && r[0] < l.rect[2] && l.rect[1] < r[3] && r[1] < l.rect[3])
                     })
                     .collect();
                 if !rects.is_empty() {

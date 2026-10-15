@@ -437,7 +437,7 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
     let image = app.active_ids().and_then(|(i, id)| {
         let (page, index) = app.views[i].content.selected?;
         let doc = app.session.get(id)?;
-        match &doc.added.iter().filter(|a| a.page == page).nth(index)?.content {
+        match &doc.added().iter().filter(|a| a.page == page).nth(index)?.content {
             pdfcraft_engine::AddedContent::Image(img) => Some((page, index, img.clone())),
             _ => None,
         }
@@ -457,7 +457,7 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
     let selected = app.active_ids().and_then(|(i, id)| {
         let (page, index) = app.views[i].content.selected?;
         let doc = app.session.get(id)?;
-        let a = doc.added.iter().filter(|a| a.page == page).nth(index)?;
+        let a = doc.added().iter().filter(|a| a.page == page).nth(index)?;
         match &a.content {
             pdfcraft_engine::AddedContent::Text(text) => Some((page, index, text.clone())),
             _ => None,

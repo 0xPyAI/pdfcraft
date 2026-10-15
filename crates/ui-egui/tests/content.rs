@@ -45,7 +45,7 @@ fn click(h: &mut Harness<'static, PdfCraftApp>, p: Pos2) {
 
 fn added(h: &Harness<'static, PdfCraftApp>) -> Vec<pdfcraft_engine::Added> {
     let s = h.state();
-    s.session.get(s.views[0].id).unwrap().added.clone()
+    s.session.get(s.views[0].id).unwrap().added().to_vec()
 }
 
 /// A click whose press and release arrive in the same frame, as a quick real mouse click does.

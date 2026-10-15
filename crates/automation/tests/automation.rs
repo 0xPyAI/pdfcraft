@@ -3557,7 +3557,7 @@ fn text_styling_on_an_image_is_refused_without_an_edit() {
     ok(&mut a, "doc_save", json!({ "doc": doc, "path": "saved.pdf" }));
     let state = |a: &Automation| {
         let d = a.session().docs().iter().find(|d| d.id.0 == doc).unwrap();
-        (format!("{:?}", d.added), d.dirty, d.edit_generation(), d.can_undo().map(str::to_owned), d.can_redo().map(str::to_owned))
+        (format!("{:?}", d.added()), d.dirty, d.edit_generation(), d.can_undo().map(str::to_owned), d.can_redo().map(str::to_owned))
     };
     let before = state(&a);
     assert!(!before.1 && before.4.is_some(), "a clean document with a step to redo: {before:?}");

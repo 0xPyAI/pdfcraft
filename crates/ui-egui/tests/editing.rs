@@ -3273,7 +3273,7 @@ fn check_added_text_drag(panel_open: bool) {
     h.run_steps(4);
     let added = |h: &Harness<'static, PdfCraftApp>| {
         let app = h.state();
-        app.session.get(app.views[0].id).unwrap().added.clone()
+        app.session.get(app.views[0].id).unwrap().added().to_vec()
     };
     let before_added = added(&h);
     assert_eq!(before_added.len(), 1);

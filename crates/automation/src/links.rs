@@ -67,7 +67,7 @@ impl Automation {
         let doc = self.doc(a)?;
         let targets: std::collections::HashMap<(usize, usize), &LinkTarget> = doc.info.links.iter().map(|t| ((t.page, t.index), &t.target)).collect();
         let items: Vec<Value> = doc
-            .links
+            .links()
             .iter()
             .map(|l| {
                 let p = &doc.info.pages[l.page];
@@ -179,7 +179,7 @@ impl Automation {
         let index = a.int("index")?;
         let doc = self.doc(a)?;
         let l = doc
-            .links
+            .links()
             .iter()
             .find(|l| l.page == page && l.index as i64 + 1 == index)
             .ok_or_else(|| failed(format!("page {} has no link {index} (see link_list)", page + 1)))?;
@@ -217,8 +217,8 @@ impl Automation {
             None => None,
         };
         let before = match &pages {
-            Some(ps) => self.doc(a)?.links.iter().filter(|l| ps.contains(&l.page)).count(),
-            None => self.doc(a)?.links.len(),
+            Some(ps) => self.doc(a)?.links().iter().filter(|l| ps.contains(&l.page)).count(),
+            None => self.doc(a)?.links().len(),
         };
         let mut out = self.apply(a, Edit::RemoveLinks { pages })?;
         out["removed"] = json!(before);

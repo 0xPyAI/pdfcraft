@@ -134,7 +134,7 @@ impl MoveBackground {
             *self = Self { key, ..Default::default() };
             if let Some((_, page, index)) = key {
                 self.renderer = doc.added_content_preview(page, index).ok().map(|p| p.renderer());
-                self.from = on_page(&doc.added, page).into_iter().find(|(i, _)| *i == index).map(|(_, a)| a.content.rect());
+                self.from = on_page(doc.added(), page).into_iter().find(|(i, _)| *i == index).map(|(_, a)| a.content.rect());
             }
         }
         if self.settling.is_some() {
@@ -727,7 +727,7 @@ impl crate::PdfCraftApp {
     pub fn add_image(&mut self, name: String, bytes: Vec<u8>) {
         let Some((i, id)) = self.active_ids() else { return };
         let page = self.views[i].current;
-        let before = self.session.get(id).map_or(0, |d| d.added.iter().filter(|a| a.page == page).count());
+        let before = self.session.get(id).map_or(0, |d| d.added().iter().filter(|a| a.page == page).count());
         if self.apply_edit(Edit::AddImage { page, rect: None, name, bytes: std::sync::Arc::new(bytes) }) {
             self.views[i].content.select_added = Some((page, before));
             self.left = crate::LeftPanel::Tool("edit");

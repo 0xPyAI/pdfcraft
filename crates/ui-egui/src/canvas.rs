@@ -2558,8 +2558,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     }
     view.objects.prepare(doc, tool == QuickTool::EditText && can_modify, ui.ctx());
     view.text_background.prepare(ui.ctx(), doc, view.line_editor.as_ref(), scale);
-    let added = doc.added.clone();
-    let doc_links = if tool == QuickTool::Link { doc.links.clone() } else { Vec::new() };
+    let added = if editing_content { doc.added().to_vec() } else { Vec::new() };
+    let doc_links = if tool == QuickTool::Link { doc.links().to_vec() } else { Vec::new() };
     if editing_content {
         crate::content_ui::after_refresh(view, &added);
     } else {
@@ -2961,7 +2961,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 && resp.secondary_clicked()
                 && can_modify
                 && let Some(p) = pointer.filter(|p| xf.rect.contains(*p))
-                && let Some(l) = doc.links.iter().find(|l| l.page == i && crate::link_ui::screen_rect(&xf, info, i, l.rect).expand(2.0).contains(p))
+                && let Some(l) = doc.links().iter().find(|l| l.page == i && crate::link_ui::screen_rect(&xf, info, i, l.rect).expand(2.0).contains(p))
             {
                 view.links.context = Some((i, l.index));
             }

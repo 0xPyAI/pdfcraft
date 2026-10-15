@@ -396,7 +396,7 @@ pub fn is_enabled(spec: &CommandSpec, session: &Session, active: Option<DocId>) 
         Annotate => doc.is_some_and(|d| d.allows_annotation()),
         Copying => doc.is_some_and(|d| d.allows_copying()),
         FillForms => doc.is_some_and(|d| d.allows_form_filling() && !d.form.is_empty()),
-        Marks(k) => doc.is_some_and(|d| d.allows_modification() && d.marks.contains(&k)),
+        Marks(k) => doc.is_some_and(|d| d.allows_modification() && d.marks().contains(&k)),
         HasComments => doc.is_some_and(|d| d.allows_modification() && !d.info.annotations.is_empty()),
         HasFields => doc.is_some_and(|d| d.allows_modification() && !d.form.is_empty()),
         HasRedactions => doc.is_some_and(|d| d.allows_modification() && d.redaction_marks() > 0),
