@@ -844,6 +844,7 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                     ui.ctx().input(|i| i.max_texture_side) as f32,
                 );
                 let view = &mut app.views[i];
+                view.set_print_grayscale(app.print_draft.grayscale);
                 view.queue_print_previews(&rasters);
                 let (go, cancel) = crate::print_ui::body(ui, &mut app.print_draft, &t, &sizes, &labels, &mut |p| {
                     view.need_thumbnail(p, true);

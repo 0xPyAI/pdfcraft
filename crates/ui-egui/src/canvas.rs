@@ -25,6 +25,9 @@ const THUMB_TAG: u64 = 1 << 63;
 const TEXT_TAG: u64 = 1 << 62;
 /// A page rendered for the organize grid at the size it is drawn there.
 const GRID_TAG: u64 = 1 << 61;
+/// Preview rasters tagged with this bit are converted to luminance on receipt, matching the
+/// monochrome print requested by Print ▸ Print in grayscale.
+const GRAYSCALE_TAG: u64 = 1 << 60;
 /// The tag of a raster that is out of date (shown until its replacement arrives).
 const STALE_TAG: u64 = u64::MAX;
 /// Pages whose raster would exceed this many device pixels on a side are drawn in tiles.
@@ -358,6 +361,8 @@ pub struct DocView {
     current_scale_tag: u64,
     /// Print dialog: the current sheet's pages at the preview pane's device resolution.
     print_pages: HashMap<usize, (u64, TextureHandle)>,
+    /// Print dialog: preview rasters become luminance when Print ▸ Print in grayscale is on.
+    grayscale: bool,
     /// Sharp tiles of large pages: (page, scale tag, tile x, tile y) → texture. Tiles of an
     /// earlier zoom stay, drawn stretched, until those of the current one cover the page.
     tiles: HashMap<(usize, u64, u32, u32), TextureHandle>,
@@ -638,6 +643,7 @@ impl DocView {
             stale_tiles: HashSet::new(),
             current_scale_tag: 0,
             print_pages: HashMap::new(),
+            grayscale: false,
             tiles: HashMap::new(),
             texts: HashMap::new(),
             text_failed: HashSet::new(),
@@ -1730,7 +1736,11 @@ impl DocView {
                 self.comments.page_rendered(page);
             }
         } else if r.request.tag & PRINT_TAG != 0 {
-            let tex = ctx.load_texture(format!("print-{:?}-{page}", self.id), img, TextureOptions::LINEAR);
+            let tex = ctx.load_texture(
+                format!("print-{:?}-{page}", self.id),
+                if r.request.tag & GRAYSCALE_TAG != 0 { grayscale(img) } else { img },
+                TextureOptions::LINEAR,
+            );
             self.print_pages.insert(page, (r.request.tag, tex));
         } else if r.request.tag & GRID_TAG != 0 {
             let tex = ctx.load_texture(format!("grid-{:?}-{page}", self.id), img, TextureOptions::LINEAR);
@@ -1866,6 +1876,15 @@ impl DocView {
         self.zoom * PT * ppp
     }
 
+    /// Set whether the print preview rasters become luminance before upload. Toggling it drops
+    /// the colour previews: new requests carry the grayscale tag, so stale ones are replaced.
+    pub(crate) fn set_print_grayscale(&mut self, grayscale: bool) {
+        if self.grayscale != grayscale {
+            self.grayscale = grayscale;
+            self.print_pages.clear();
+        }
+    }
+
     /// Queue sharp rasters for the print preview. Pages that leave the nearby sheets are dropped.
     /// Previews render with reading colours off (the request's tag tells the renderer): they must
     /// match the printout, which is imposed from the uncoloured document.
@@ -1875,7 +1894,7 @@ impl DocView {
             if self.errors.contains_key(&page) || !scale.is_finite() || scale <= 0.0 {
                 continue;
             }
-            let tag = scale_tag(scale) | PRINT_TAG;
+            let tag = scale_tag(scale) | PRINT_TAG | if self.grayscale { GRAYSCALE_TAG } else { 0 };
             let fresh = self.print_pages.get(&page).is_some_and(|(have, _)| *have == tag);
             if !fresh {
                 self.frame_queue.push(RenderRequest { page, kind: RequestKind::Pixels, tile: None, scale, tag, preview: false });
@@ -4814,6 +4833,28 @@ pub(crate) fn texture_image(size: [usize; 2], pixels: pdfcraft_render::Pixels) -
     }
 }
 
+/// A luminance preview for a monochrome print. `Color32` stores premultiplied pixels, so a
+/// non-opaque colour's alpha is restored after multiplying the unmultiplied RGB by its
+/// luminance. This uses the display gamma-space weights users expect in editors/print dialogs,
+/// not the linear-light coefficients of a colour-managed render.
+fn grayscale(mut img: egui::ColorImage) -> egui::ColorImage {
+    for c in img.pixels.iter_mut() {
+        let a = c.a();
+        let luminance = f32::from(c.r()) * 0.299_f32 + f32::from(c.g()) * 0.587_f32 + f32::from(c.b()) * 0.114_f32;
+        let gray = if a == 0 || a == 255 {
+            luminance.round() as u8
+        } else {
+            // Unmultiply first, so translucent content keeps its paper-relative luminance.
+            let f = f32::from(a) / 255.0;
+            let un = [f32::from(c.r()) / f, f32::from(c.g()) / f, f32::from(c.b()) / f];
+            let l = un[0] * 0.299_f32 + un[1] * 0.587_f32 + un[2] * 0.114_f32;
+            (f * l).round() as u8
+        };
+        *c = Color32::from_rgba_premultiplied(gray, gray, gray, a);
+    }
+    img
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -4876,6 +4917,26 @@ mod tests {
     fn hover_popup_skips_fill_and_sign_marks() {
         assert_eq!(annotation_hover_text(&annotation(false)).as_deref(), Some("FreeText\nHello"));
         assert_eq!(annotation_hover_text(&annotation(true)), None);
+    }
+
+    #[test]
+    fn grayscale_converts_colours_to_their_luminance() {
+        let img = egui::ColorImage::new([2, 1], vec![Color32::from_rgb(255, 0, 0), Color32::from_rgba_premultiplied(0, 51, 102, 128)]);
+        let gray = grayscale(img);
+        let opaque = gray.pixels[0];
+        assert_eq!(opaque.to_array(), [76, 76, 76, 255]);
+        // Unmultiply RGB first, so a translucent colour keeps its paper-relative luminance.
+        let translucent = gray.pixels[1];
+        assert_eq!(translucent.to_array(), [42, 42, 42, 128]);
+    }
+
+    #[test]
+    fn black_white_and_transparents_are_preserved_by_grayscale() {
+        let img = egui::ColorImage::new([3, 1], vec![Color32::BLACK, Color32::WHITE, Color32::TRANSPARENT]);
+        let gray = grayscale(img);
+        assert_eq!(gray.pixels[0].to_array(), [0, 0, 0, 255]);
+        assert_eq!(gray.pixels[1].to_array(), [255, 255, 255, 255]);
+        assert_eq!(gray.pixels[2].to_array(), [0, 0, 0, 0]);
     }
 
     #[test]
