@@ -914,6 +914,49 @@ impl Document {
         self.overlay.insert(r.num, Slot::Freed(r.generation.saturating_add(1)));
     }
 
+    /// Record `current`'s object graph as unsaved edits of this document.
+    ///
+    /// Used when the working snapshot was restored from an earlier revision and the next
+    /// incremental save must still append to this file (the last saved revision). Objects
+    /// that already match are left untouched. Reads go through private readers so neither
+    /// document's editing cache is filled.
+    pub fn overlay_changes_from(&mut self, current: &Document) -> Result<(), CosError> {
+        let saved_nums = self.object_numbers();
+        let current_nums = current.object_numbers();
+        let mut freed = Vec::new();
+        let mut changed = Vec::new();
+        {
+            let mut saved_reader = self.object_reader();
+            let mut current_reader = current.object_reader();
+            for &num in &saved_nums {
+                if current_nums.binary_search(&num).is_err() {
+                    freed.push(num);
+                }
+            }
+            for &num in &current_nums {
+                let generation = current.generation(num);
+                let same = saved_nums.binary_search(&num).is_ok()
+                    && self.generation(num) == generation
+                    && saved_reader.try_get(ObjRef::new(num, 0))? == current_reader.try_get(ObjRef::new(num, 0))?;
+                if !same {
+                    changed.push(num);
+                }
+            }
+        }
+        for num in freed {
+            let generation = self.generation(num);
+            self.free(ObjRef::new(num, generation));
+        }
+        let mut current_reader = current.object_reader();
+        for num in changed {
+            let generation = current.generation(num);
+            let object = current_reader.try_get(ObjRef::new(num, 0))?;
+            self.set(ObjRef::new(num, generation), (*object).clone());
+        }
+        *self.trailer_mut() = current.trailer().clone();
+        Ok(())
+    }
+
     /// Edit a dictionary (or stream dictionary) object in place.
     pub fn update_dict(&mut self, r: ObjRef, f: impl FnOnce(&mut Dict)) -> Result<(), CosError> {
         let mut obj = (*self.get(r)).clone();

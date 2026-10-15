@@ -247,6 +247,11 @@ type Snapshot = (Label, pdfcraft_cos::Document, Keys, Scope);
 #[derive(Clone)]
 struct Editor {
     cos: pdfcraft_cos::Document,
+    /// The file as last opened or saved. Incremental saves append to it, and Revert opens it.
+    /// Undo may restore a snapshot whose own base is an earlier revision; this does not follow it.
+    saved: Arc<Vec<u8>>,
+    /// Passwords that open [`Self::saved`].
+    saved_keys: Keys,
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
     keys: Keys,
@@ -743,9 +748,9 @@ impl Document {
     }
 
     /// The file as last opened or saved, without unsaved edits: what an incremental save appends
-    /// to.
+    /// to. This stays that file when undo has restored an older snapshot.
     pub fn saved_bytes(&self) -> Arc<Vec<u8>> {
-        self.editor.as_ref().map_or_else(|| self.bytes.clone(), |e| e.cos.bytes().clone())
+        self.editor.as_ref().map_or_else(|| self.bytes.clone(), |e| e.saved.clone())
     }
 
     /// Notes about damage repaired while opening (Document Properties ▸ Advanced, notices).
@@ -3205,9 +3210,12 @@ impl Session {
         let (mut editor, read_only_reason) = match cos {
             Ok(Ok(cos)) => {
                 let keys = Keys { render: render_password.clone(), reopen: password.map(str::to_owned) };
+                let saved = cos.bytes().clone();
                 (
                     Some(Editor {
                         cos,
+                        saved,
+                        saved_keys: keys.clone(),
                         undo: Vec::new(),
                         redo: Vec::new(),
                         keys,
@@ -3483,7 +3491,7 @@ impl Session {
         editor.redo.push((label.clone(), current, current_keys, scope));
         Self::adopt_keys(doc);
         Self::refresh_scoped(doc, scope).inspect_err(|_| Self::show_released(doc))?;
-        doc.dirty = true;
+        Self::sync_dirty(doc);
         doc.generation += 1;
         Ok(label)
     }
@@ -3498,9 +3506,16 @@ impl Session {
         editor.undo.push((label.clone(), current, current_keys, scope));
         Self::adopt_keys(doc);
         Self::refresh_scoped(doc, scope).inspect_err(|_| Self::show_released(doc))?;
-        doc.dirty = true;
+        Self::sync_dirty(doc);
         doc.generation += 1;
         Ok(label)
+    }
+
+    /// Unsaved when the working graph is not the last opened or saved file. Undo back to that
+    /// file is clean; undo past a later save is not, because the restored snapshot's own base
+    /// is an earlier revision.
+    fn sync_dirty(doc: &mut Document) {
+        doc.dirty = doc.editor.as_ref().is_some_and(|e| e.cos.is_modified() || !Arc::ptr_eq(e.cos.bytes(), &e.saved));
     }
 
     /// Use the current state's password for viewing (protection edits change it).
@@ -3723,11 +3738,27 @@ impl Session {
     pub fn save_bytes(&self, id: DocId) -> Result<Arc<Vec<u8>>, EditError> {
         let doc = self.get(id).ok_or(EditError::NoDocument)?;
         let Some(editor) = doc.editor.as_ref() else { return Ok(doc.bytes.clone()) };
-        if !editor.cos.is_modified() {
-            return Ok(editor.cos.bytes().clone());
+        let on_saved = Arc::ptr_eq(editor.cos.bytes(), &editor.saved);
+        if !editor.cos.is_modified() && on_saved {
+            return Ok(editor.saved.clone());
         }
         let opts = SaveOptions { mod_date: self.now().map(pdfcraft_cos::pdf_date), ..SaveOptions::default() };
-        guard(|| write_incremental(&editor.cos, &opts)).map_err(EditError::Write)?.map(Arc::new).map_err(|e| EditError::Write(e.to_string()))
+        // A restored snapshot can be based on an earlier revision. Append to the last saved
+        // file so that revision stays in the chain. A full rewrite (redaction, new encryption,
+        // a reconstructed file) still writes the current graph on its own.
+        let rewrite = editor.cos.full_save_required() || editor.cos.encryption_changed() || editor.cos.revisions().is_empty();
+        guard(|| {
+            if on_saved || rewrite {
+                write_incremental(&editor.cos, &opts)
+            } else {
+                let mut base = pdfcraft_cos::Document::open_with_password(editor.saved.clone(), editor.saved_keys.reopen.as_deref())?;
+                base.overlay_changes_from(&editor.cos)?;
+                write_incremental(&base, &opts)
+            }
+        })
+        .map_err(EditError::Write)?
+        .map(Arc::new)
+        .map_err(|e| EditError::Write(e.to_string()))
     }
 
     /// A compact, garbage-collected rewrite (Save As ▸ "Optimized" / Reduce File Size groundwork).
@@ -3758,8 +3789,11 @@ impl Session {
         if let Some(editor) = doc.editor.as_mut() {
             // An encrypted file needs the password it is protected with now (the owner
             // password when known, so saving never downgrades this session's rights).
-            editor.cos = pdfcraft_cos::Document::open_with_password(bytes.clone(), editor.keys.reopen.as_deref())
-                .map_err(|e| EditError::Reopen(e.to_string()))?;
+            let keys = editor.keys.clone();
+            editor.cos =
+                pdfcraft_cos::Document::open_with_password(bytes.clone(), keys.reopen.as_deref()).map_err(|e| EditError::Reopen(e.to_string()))?;
+            editor.saved = bytes;
+            editor.saved_keys = keys;
         }
         if let Some(p) = path {
             doc.name = std::path::Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.clone());
@@ -3808,10 +3842,10 @@ impl Session {
     pub fn revert(&mut self, id: DocId) -> Result<(), EditError> {
         let doc = self.doc_mut(id)?;
         let editor = doc.editor.as_mut().ok_or_else(|| EditError::ReadOnly(doc.read_only_reason.clone().unwrap_or_default()))?;
-        let base = editor.cos.bytes().clone();
-        // The saved file opens with the passwords of the state that was saved: try the current
-        // ones, then each earlier state's.
-        let mut candidates = vec![editor.keys.clone()];
+        let base = editor.saved.clone();
+        // The saved file opens with the passwords it was saved with. The current snapshot may
+        // be an older revision (undo past that save), so its own base is not the saved file.
+        let mut candidates = vec![editor.saved_keys.clone(), editor.keys.clone()];
         candidates.extend(editor.undo.iter().rev().map(|s| s.2.clone()));
         candidates.push(Keys::default());
         let (cos, keys) = candidates

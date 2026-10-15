@@ -296,7 +296,6 @@ fn the_open_recent_menu_lists_files_and_opens_one() {
     h.get_by_label_contains("recent.pdf").click();
     support::wait_until(&mut h, "recent document", |app| app.views.len() == 2 && app.password_prompt.is_none());
     let app = h.state();
-    assert_eq!(app.views.len(), 2, "the recent file opened in a new tab");
     let active = app.active.unwrap();
     assert_eq!(app.session.get(app.views[active].id).and_then(|d| d.path.as_deref()), Some(path.as_str()), "the active tab is the recent file");
     assert_eq!(app.session.get(app.views[active].id).unwrap().bytes.as_slice(), fixture(2).as_slice());
