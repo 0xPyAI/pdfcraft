@@ -250,9 +250,11 @@ fn read_grid_file((name, source): GridFile) -> Result<(String, Vec<u8>), (String
     Ok((name, bytes))
 }
 
-/// Files dropped on a document's page grid.
+/// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
     doc: pdfcraft_engine::DocId,
+    /// Dropped on the Pages panel (its gap decides where they go), not the page grid.
+    panel: bool,
     files: Vec<GridFile>,
     /// When to stop waiting for the pointer (egui time, seconds).
     deadline: f64,
@@ -1368,11 +1370,29 @@ impl PdfCraftApp {
         (self.dialog.is_none() && self.session.get(view.id)?.allows_assembly()).then_some(view.id)
     }
 
-    /// Files dropped while the page grid shows are inserted into it rather than opened: they
-    /// are kept until [`Self::finish_grid_drop`] knows the gap. Returns the files not taken.
+    /// The document whose Pages panel is under the pointer and may take pages, if any.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn panel_target(&self, ctx: &egui::Context) -> Option<pdfcraft_engine::DocId> {
+        let view = self.active.and_then(|i| self.views.get(i))?;
+        let pointer = ctx.input(|i| i.pointer.hover_pos())?;
+        let over = view.pages_panel.is_some_and(|panel| panel.contains(pointer));
+        (over && self.dialog.is_none() && self.session.get(view.id)?.allows_assembly()).then_some(view.id)
+    }
+
+    /// Files dropped on the Pages panel, or while the page grid shows, are inserted into the
+    /// document rather than opened: they are kept until [`Self::finish_grid_drop`] knows the
+    /// gap. Returns the files not taken.
     #[cfg(not(target_arch = "wasm32"))]
     fn drop_on_grid(&mut self, dropped: Vec<egui::DroppedFileHandle>, ctx: &egui::Context) -> Vec<egui::DroppedFileHandle> {
-        let Some(id) = self.grid_target().filter(|_| !dropped.is_empty()) else { return dropped };
+        if dropped.is_empty() {
+            return dropped;
+        }
+        // The panel first: the grid takes files dropped anywhere in the window.
+        let (id, panel) = match (self.panel_target(ctx), self.grid_target()) {
+            (Some(id), _) => (id, true),
+            (None, Some(id)) => (id, false),
+            (None, None) => return dropped,
+        };
         let mut files = Vec::new();
         for f in &dropped {
             let name = f.path().file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "dropped.pdf".into());
@@ -1389,22 +1409,29 @@ impl PdfCraftApp {
             // Where there is no telling where the pointer is during the drag, its place arrives
             // with the first move after the drop.
             ctx.request_repaint();
-            self.grid_drop = Some(GridDrop { doc: id, files, deadline: ctx.input(|i| i.time) + 1.0 });
+            self.grid_drop = Some(GridDrop { doc: id, panel, files, deadline: ctx.input(|i| i.time) + 1.0 });
         }
         Vec::new()
     }
 
-    /// Insert files dropped on the page grid at the gap under the pointer, or at the end when
-    /// the pointer hasn't shown up in time.
+    /// Insert files dropped on the page grid or the Pages panel at the gap under the pointer,
+    /// or at the end when the pointer hasn't shown up in time.
     fn finish_grid_drop(&mut self, ctx: &egui::Context) {
-        let Some(GridDrop { doc: id, deadline, .. }) = &self.grid_drop else { return };
-        let (id, deadline) = (*id, *deadline);
-        if self.grid_target() != Some(id) {
+        let Some(GridDrop { doc: id, panel, deadline, .. }) = &self.grid_drop else { return };
+        let (id, panel, deadline) = (*id, *panel, *deadline);
+        let still = if panel {
+            self.dialog.is_none()
+                && self.active_ids().map(|(_, active)| active) == Some(id)
+                && self.session.get(id).is_some_and(|d| d.allows_assembly())
+        } else {
+            self.grid_target() == Some(id)
+        };
+        if !still {
             self.grid_drop = None;
             return self.notify_tr("The document changed while you were choosing a file, so nothing was changed.");
         }
         let Some(view) = self.active.and_then(|i| self.views.get_mut(i)) else { return };
-        let gap = match view.grid_gap {
+        let gap = match if panel { view.panel_gap } else { view.grid_gap } {
             Some(gap) => gap,
             None if ctx.input(|i| i.time) >= deadline => usize::MAX,
             None => return ctx.request_repaint(),

@@ -1686,6 +1686,48 @@ fn files_dropped_outside_the_page_grid_still_open_as_documents() {
     assert_eq!(doc.bytes.as_slice(), fixture(1).as_slice());
 }
 
+/// The Pages panel's thumbnail of page `label` (the panel is right of the page view).
+fn panel_thumb_rect(h: &Harness<'static, PdfCraftApp>, label: &str) -> egui::Rect {
+    h.get_all_by_label(label).map(|n| n.rect()).max_by(|a, b| a.left().total_cmp(&b.left())).unwrap()
+}
+
+#[test]
+fn files_dropped_on_the_pages_panel_are_inserted_there() {
+    let mut h = harness(3, |app| app.right = Some(pdfcraft_ui_egui::RightPanel::Pages));
+    // The top half of page 2's thumbnail: between pages 1 and 2.
+    let thumb = panel_thumb_rect(&h, "Page 2");
+    h.hover_at(thumb.center() - egui::vec2(0.0, thumb.height() * 0.25));
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].panel_gap, Some(1));
+    drop_files(&mut h, vec![Dropped("extra.pdf", fixture(2)), Dropped("note.txt", b"a note".to_vec())]);
+    h.run_steps(4);
+    assert_eq!(h.state().views.len(), 1, "dropped files are not opened as documents");
+    assert_eq!(texts_of(h.state(), 0), ["Page 1", "Page 1", "Page 2", "a note", "Page 2", "Page 3"]);
+    assert_eq!(picked(&h), [1, 2, 3], "the inserted pages are selected");
+    // The bottom half of the last thumbnail: the end.
+    let mut h = harness(2, |app| app.right = Some(pdfcraft_ui_egui::RightPanel::Pages));
+    let last = panel_thumb_rect(&h, "Page 2");
+    h.hover_at(last.center() + egui::vec2(0.0, last.height() * 0.25));
+    h.run_steps(2);
+    drop_files(&mut h, vec![Dropped("note.txt", b"a note".to_vec())]);
+    h.run_steps(4);
+    assert_eq!(h.state().views.len(), 1);
+    assert_eq!(texts_of(h.state(), 0), ["Page 1", "Page 2", "a note"]);
+}
+
+#[test]
+fn files_dropped_beside_the_pages_panel_still_open_as_documents() {
+    let mut h = harness(2, |app| app.right = Some(pdfcraft_ui_egui::RightPanel::Pages));
+    // Over the page view, not the panel.
+    let thumb = panel_thumb_rect(&h, "Page 1");
+    h.hover_at(egui::pos2(thumb.left() - 300.0, thumb.center().y));
+    h.run_steps(2);
+    drop_files(&mut h, vec![Dropped("other.pdf", fixture(1))]);
+    h.run_steps(3);
+    assert_eq!(h.state().views.len(), 2);
+    assert_eq!(texts_of(h.state(), 0), ["Page 1", "Page 2"]);
+}
+
 fn grid_zoom(h: &Harness<'static, PdfCraftApp>) -> f32 {
     h.state().views[0].grid_zoom()
 }

@@ -449,6 +449,11 @@ pub struct DocView {
     /// The page-grid gap under the pointer this frame (where dropped files go), when it can
     /// take pages.
     pub grid_gap: Option<usize>,
+    /// The visible part of the Pages panel as last drawn, when it can take dropped files
+    /// (cleared each frame before the panels draw).
+    pub pages_panel: Option<Rect>,
+    /// The Pages-panel gap under the pointer (where dropped files go), when it can take pages.
+    pub panel_gap: Option<usize>,
     /// How large the page grid draws its pages (1.0 = the usual thumbnails).
     grid_zoom: f32,
     /// A zoom asked for this frame (toolbar, pinch, keys); the grid applies it once it has laid
@@ -649,6 +654,8 @@ impl DocView {
             pending_action: None,
             insert_at: None,
             grid_gap: None,
+            pages_panel: None,
+            panel_gap: None,
             grid_zoom: 1.0,
             grid_zoom_request: None,
             grid_anchor: None,
@@ -1315,6 +1322,8 @@ impl DocView {
 
     /// Start collecting demand from every consumer before scheduling or uploading results.
     pub(crate) fn begin_render_frame(&mut self) {
+        self.pages_panel = None;
+        self.panel_gap = None;
         self.thumb_demand.clear();
         self.frame_queue.clear();
         self.frame_visible.clear();
