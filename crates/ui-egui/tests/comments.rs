@@ -511,6 +511,28 @@ fn comments_are_selected_moved_and_deleted_with_the_select_tool() {
 }
 
 #[test]
+fn a_shape_just_drawn_resizes_from_its_handles_without_the_select_tool() {
+    // #2338: the new shape showed its handles, but only the Select tool answered them.
+    let square = QuickTool::Comment(pdfcraft_ui_egui::comments::CommentTool::Rectangle);
+    let mut h = harness(|app| app.set_option("quick", "square").unwrap());
+    drag_pt(&mut h, (40.0, 100.0), (140.0, 40.0));
+    assert_eq!(h.state().views[0].comments.selected, Some((0, 0)), "the new rectangle is selected");
+    let before = comments(&h)[0].rect;
+    // Drag its bottom-right handle 40 pt right and 20 pt down.
+    drag_pt(&mut h, (before[2], before[1]), (before[2] + 40.0, before[1] - 20.0));
+    let c = comments(&h);
+    assert_eq!(c.len(), 1, "the handle resized the rectangle instead of drawing another: {c:?}");
+    let r = c[0].rect;
+    assert!((r[2] - (before[2] + 40.0)).abs() < 3.0 && (r[1] - (before[1] - 20.0)).abs() < 3.0, "resized: {before:?} → {r:?}");
+    assert!((r[0] - before[0]).abs() < 1.0 && (r[3] - before[3]).abs() < 1.0, "the opposite corner stays: {before:?} → {r:?}");
+    assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Resize comment"));
+    assert_eq!(h.state().quick_tool, square, "the rectangle tool stays on");
+    // Away from the handles the tool still draws, over the shape too.
+    drag_pt(&mut h, (60.0, 90.0), (120.0, 60.0));
+    assert_eq!(comments(&h).len(), 2, "a drag inside the rectangle draws a second one");
+}
+
+#[test]
 fn the_panel_posts_comments_and_replies() {
     let mut h = harness(|app| app.set_option("panel", "comments").unwrap());
     field(&h, "Add a comment").click();
