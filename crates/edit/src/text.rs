@@ -450,6 +450,47 @@ impl TextLine {
         let m = Matrix(self.origin.tm).then(&Matrix(self.origin.ctm)).0;
         m[1].atan2(m[0]).to_degrees()
     }
+
+    /// The unit direction its baseline runs in, in user space.
+    fn direction(&self) -> (f64, f64) {
+        direction(&Matrix(self.origin.tm).then(&Matrix(self.origin.ctm)))
+    }
+
+    /// Whether it reads left to right along the page's x axis (most text; a page drawn
+    /// turned a quarter, as landscape pages often are, isn't).
+    pub(crate) fn upright(&self) -> bool {
+        let (x, y) = self.direction();
+        (x - 1.0).abs() < 1e-3 && y.abs() < 1e-3
+    }
+
+    /// Where it starts as `(along, across)` its baseline: user space turned to the text's direction.
+    fn frame_origin(&self) -> (f64, f64) {
+        to_frame(self.direction(), (self.origin.x, self.origin.baseline))
+    }
+
+    /// Its box in the same frame, `[along0, across0, along1, across1]` (for upright text, `rect`).
+    fn frame_rect(&self) -> [f64; 4] {
+        let dir = self.direction();
+        let r = self.rect;
+        [(r[0], r[1]), (r[2], r[1]), (r[0], r[3]), (r[2], r[3])]
+            .into_iter()
+            .map(|p| to_frame(dir, p))
+            .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)])
+    }
+}
+
+/// The unit x axis of a text rendering matrix in user space (`(1, 0)` when it is degenerate).
+fn direction(m: &Matrix) -> (f64, f64) {
+    let (x, y) = (m.0[0], m.0[1]);
+    let length = x.hypot(y);
+    if length.is_finite() && length > 1e-9 { (x / length, y / length) } else { (1.0, 0.0) }
+}
+
+/// User-space point `p` as `(along, across)` a baseline running in unit direction `dir`. Upright
+/// text (`dir` = `(1, 0)`) keeps its coordinates, so lines and rows of turned text are found the
+/// same way (#1443).
+fn to_frame(dir: (f64, f64), p: (f64, f64)) -> (f64, f64) {
+    (p.0 * dir.0 + p.1 * dir.1, p.1 * dir.0 - p.0 * dir.1)
 }
 
 /// What replacing a line did.
@@ -603,6 +644,7 @@ struct Shown {
     baseline: f64,
     start_x: f64,
     end_x: f64,
+    end_y: f64,
     bt: usize,
     font: Vec<u8>,
     base_font: String,
@@ -615,6 +657,43 @@ struct Shown {
     scope: Option<usize>,
     logical_order: bool,
     actual_text: bool,
+}
+
+impl Shown {
+    /// The unit direction of its baseline, where it starts and ends along it, and the baseline's
+    /// offset across it (for upright text: the user-space x, x and y).
+    fn span(&self) -> ((f64, f64), f64, f64, f64) {
+        let dir = direction(&self.tm.then(&self.state.ctm));
+        let (start, across) = to_frame(dir, (self.start_x, self.baseline));
+        (dir, start, to_frame(dir, (self.end_x, self.end_y)).0, across)
+    }
+}
+
+/// Where the previous run of a line ended: its text object, baseline direction, offset across
+/// the baseline, end along it and size.
+#[derive(Clone, Copy)]
+struct Pen {
+    bt: usize,
+    dir: (f64, f64),
+    across: f64,
+    end: f64,
+    size: f64,
+}
+
+impl Pen {
+    fn after(s: &Shown) -> Self {
+        let (dir, _, end, across) = s.span();
+        Pen { bt: s.bt, dir, across, end, size: s.size.max(1.0) }
+    }
+
+    /// Whether `s` could continue the same line on geometry alone: on the same baseline, starting
+    /// at most a word gap (`reach` sizes) after it. Also the gap along the baseline.
+    fn continues(&self, s: &Shown, reach: f64) -> (bool, f64) {
+        let (dir, start, _, across) = s.span();
+        let gap = start - self.end;
+        let same_dir = (dir.0 - self.dir.0).abs() < 1e-3 && (dir.1 - self.dir.1).abs() < 1e-3;
+        (same_dir && (across - self.across).abs() < self.size * 0.3 && gap > -self.size && gap < self.size * reach, gap)
+    }
 }
 
 /// The graphics state carried from one of a page's content streams to the next: the streams
@@ -705,6 +784,7 @@ fn interpret(
                         first.text = logical;
                         first.start_x = first.rect[0];
                         first.end_x = first.rect[2];
+                        first.end_y = first.baseline;
                         first.advance = (first.end_x - first.start_x) / first.tm.then(&first.state.ctm).0[0].abs().max(1e-6);
                         out.push(first);
                     }
@@ -887,6 +967,7 @@ fn interpret(
                     baseline: start.1,
                     start_x: start.0,
                     end_x: end.0,
+                    end_y: end.1,
                     bt,
                     font: name,
                     base_font: m.base_font.clone(),
@@ -923,7 +1004,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
     let pieces = Pieces::join(&content_streams(doc, &p.dict).into_iter().map(|(_, d)| d).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
     let shown = interpret(doc, &ops, &fonts_res, &mut cache, &mut carry, None, true);
-    let mut last: Option<(usize, usize, f64, f64, f64)> = None; // (piece, bt, baseline, end_x, size)
+    let mut last: Option<(usize, Pen)> = None; // the stream piece and where its last run ended
     for mut s in shown {
         // A single RTL glyph's ActualText (e.g. lam-alef) is an inline ligature, not a
         // separate logical line. Put its letters into visual order before joining the
@@ -936,7 +1017,9 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
         // A line belongs to one stream piece. Within it, PDF producers often put every word
         // in its own BT/ET: geometry and text state, not object boundaries, define a line.
         let si = ops.get(s.op).map_or(0, |op| pieces.pieces_of(op).0);
-        let joins = last.is_some_and(|(piece, bt, base, end, size)| {
+        let joins = last.is_some_and(|(piece, pen)| {
+            let bt = pen.bt;
+            let (near, gap) = pen.continues(&s, if bt == s.bt { 3.0 } else { 1.5 });
             piece == si
                 && lines.last().is_some_and(|l| l.scope == s.scope && l.logical_order == s.logical_order)
                 && (bt == s.bt || lines.last().is_some_and(|l| compatible_word(l, &s)))
@@ -945,15 +1028,13 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
                     || lines.last().is_some_and(|l| {
                         (s.size - l.size).abs() < 0.01 && s.bold == l.bold && s.italic == l.italic && fill_color(&s.state.fill) == l.color
                     }))
-                && (s.baseline - base).abs() < size * 0.3
-                && s.start_x > end - size
-                && s.start_x - end < size * if bt == s.bt { 3.0 } else { 1.5 }
+                && near
                 // An OCR layer is one text object over the whole scan: its words continue a line
                 // only across a word space, not across a table cell or a tab stop.
-                && (s.state.render_mode != 3 || s.start_x - end < size * 0.6)
+                && (s.state.render_mode != 3 || gap < pen.size * 0.6)
         });
         if joins && let Some(l) = lines.last_mut() {
-            let gap = s.start_x - last.map_or(s.start_x, |x| x.3);
+            let gap = last.map_or(0.0, |(_, pen)| pen.continues(&s, 0.0).1);
             if gap > l.size * 0.2 && !l.text.ends_with(' ') && !s.text.starts_with(' ') {
                 l.text.push(' ');
             }
@@ -998,7 +1079,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
                 },
             });
         }
-        last = Some((si, s.bt, s.baseline, s.end_x, s.size.max(1.0)));
+        last = Some((si, Pen::after(&s)));
     }
     // Content streams draw right-to-left lines in visual order; the editor works in typing order.
     for l in lines.iter_mut().filter(|l| !l.logical_order) {
@@ -1028,8 +1109,9 @@ fn compatible_word(line: &TextLine, shown: &Shown) -> bool {
 
 /// The line `s` continues, or a new one: `last` is the previous run of the same stream
 /// (`bt`, baseline, end x, size).
-fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<(usize, f64, f64, f64)>, s: Shown, stream: usize) {
-    let joins = last.is_some_and(|(bt, base, end, size)| {
+fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream: usize) {
+    let joins = last.is_some_and(|pen| {
+        let bt = pen.bt;
         lines.last().is_some_and(|l| l.scope == s.scope && l.logical_order == s.logical_order)
             && (bt == s.bt || lines.last().is_some_and(|l| compatible_word(l, &s)))
             && (s.text.trim().is_empty() || lines.last().is_some_and(|l| same_font(l, &s.font, s.face.as_deref())))
@@ -1037,12 +1119,10 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<(usize, f64, f64, f64)
                 || lines.last().is_some_and(|l| {
                     (s.size - l.size).abs() < 0.01 && s.bold == l.bold && s.italic == l.italic && fill_color(&s.state.fill) == l.color
                 }))
-            && (s.baseline - base).abs() < size * 0.3
-            && s.start_x > end - size
-            && s.start_x - end < size * if bt == s.bt { 3.0 } else { 1.5 }
+            && pen.continues(&s, if bt == s.bt { 3.0 } else { 1.5 }).0
     });
     if joins && let Some(l) = lines.last_mut() {
-        let gap = s.start_x - last.map_or(s.start_x, |x| x.2);
+        let gap = last.map_or(0.0, |pen| pen.continues(&s, 0.0).1);
         if gap > l.size * 0.2 && !l.text.ends_with(' ') && !s.text.starts_with(' ') {
             l.text.push(' ');
         }
@@ -1086,7 +1166,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<(usize, f64, f64, f64)
             },
         });
     }
-    *last = Some((s.bt, s.baseline, s.end_x, s.size.max(1.0)));
+    *last = Some(Pen::after(&s));
 }
 
 /// How deep form XObjects nest before reading stops (they may also refer to themselves).
@@ -1817,28 +1897,32 @@ fn paragraph_separator(c: char) -> bool {
     c.is_whitespace() && c != '\u{3000}'
 }
 
-/// Greedy word wrapping to `width` with `advance` giving a string's width. A row may also end
-/// inside a word of Chinese or Japanese text ([`crate::linebreak`]); those pieces join without a space.
+/// Greedy word wrapping to `width` with `advance` giving a string's width. Each `\n` starts a
+/// new line. A row may also end inside a word of Chinese or Japanese text ([`crate::linebreak`]);
+/// those pieces join without a space.
 fn wrap(text: &str, width: f64, advance: impl Fn(&str) -> f64) -> Vec<String> {
     let mut out = Vec::new();
-    let mut line = String::new();
-    for word in text.split(paragraph_separator).filter(|word| !word.is_empty()) {
-        for (i, piece) in crate::linebreak::pieces(word).into_iter().enumerate() {
-            let candidate = match (line.is_empty(), i) {
-                (true, _) => piece.to_string(),
-                (false, 0) => format!("{line} {piece}"),
-                (false, _) => format!("{line}{piece}"),
-            };
-            if !line.is_empty() && advance(&candidate) > width {
-                out.push(std::mem::take(&mut line));
-                line = piece.to_string();
-            } else {
-                line = candidate;
+    for row in text.split('\n') {
+        let mut line = String::new();
+        let start = out.len();
+        for word in row.split(paragraph_separator).filter(|word| !word.is_empty()) {
+            for (i, piece) in crate::linebreak::pieces(word).into_iter().enumerate() {
+                let candidate = match (line.is_empty(), i) {
+                    (true, _) => piece.to_string(),
+                    (false, 0) => format!("{line} {piece}"),
+                    (false, _) => format!("{line}{piece}"),
+                };
+                if !line.is_empty() && advance(&candidate) > width {
+                    out.push(std::mem::take(&mut line));
+                    line = piece.to_string();
+                } else {
+                    line = candidate;
+                }
             }
         }
-    }
-    if !line.is_empty() || out.is_empty() {
-        out.push(line);
+        if !line.is_empty() || out.len() == start {
+            out.push(line);
+        }
     }
     out
 }
@@ -1938,8 +2022,15 @@ fn rewrite_block_from(
             "formatting part of right-to-left (Hebrew) text, or choosing a document font for it, isn't supported yet".into(),
         ));
     }
+    // Text turned on the page (a landscape page drawn a quarter turn round) is rewritten in its
+    // own text space below; the styled region path lays rows out along the page's x axis.
+    let upright = members.iter().all(|line| line.upright());
+    if !upright && (!style.ranges.is_empty() || style.resource.is_some()) {
+        return Err(EditError::Invalid("formatting part of turned text, or choosing a document font for it, isn't supported yet".into()));
+    }
     let visual_indic = members.iter().any(|line| line.visual_order);
-    if !hebrew
+    if upright
+        && !hebrew
         && !visual_indic
         && (!style.ranges.is_empty()
             || style.resource.is_some()
@@ -1959,7 +2050,15 @@ fn rewrite_block_from(
     let streams = content_streams(doc, &p.dict);
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
-    let text = text.unwrap_or(&b.text).split(paragraph_separator).filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" ");
+    // Explicit line breaks stay (#1443); within a line, runs of white space become one space.
+    let text = text
+        .unwrap_or(&b.text)
+        .split('\n')
+        .map(|row| row.split(paragraph_separator).filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    // The characters to show, for choosing fonts: the breaks are moves, not glyphs.
+    let flat = text.replace('\n', " ");
     let o = &first.origin;
     let (font_name, old_size) = o.state.font.clone().ok_or_else(|| EditError::Invalid("the paragraph has no font".into()))?;
     let k = o.k.max(1e-6);
@@ -1976,7 +2075,7 @@ fn rewrite_block_from(
     let o_state = ts_state.clone();
     let metrics = fonts_res.get(font_name.as_bytes()).and_then(|f| doc.resolve(f).as_dict().cloned()).map(|d| Metrics::from_dict(doc, &d));
     let visual_indic = metrics.as_ref().is_some_and(|m| m.visual_order) || first.visual_order;
-    let indic_text = if visual_indic { crate::indic::to_visual(&text) } else { text.clone() };
+    let indic_text = if visual_indic { crate::indic::to_visual(&flat) } else { flat.clone() };
     let reuse = style.family.is_none() && style.bold.is_none() && metrics.as_ref().is_some_and(|m| source_encodes(m, &indic_text));
     let space = metrics.as_ref().map_or(0.33, |m| source_space(doc, &fonts_res, m));
     // The chosen style also determines the real Japanese fallback outlines and advances.
@@ -1991,14 +2090,22 @@ fn rewrite_block_from(
     }
     // Right-to-left text (more Hebrew or Arabic letters than Latin) is right-aligned unless an
     // alignment is asked for, and a single right-to-left line keeps its right edge as it grows.
-    let rtl = crate::bidi::rtl_base(&text);
-    let anchored_right = rtl && style.width.is_none() && members.len() == 1;
+    let rtl = crate::bidi::rtl_base(&flat);
+    let anchored_right = rtl && upright && style.width.is_none() && members.len() == 1;
+    // The paragraph's width along its lines: in user space unless it is turned.
+    let frame = if upright {
+        b.rect
+    } else {
+        members.iter().map(|l| l.frame_rect()).reduce(|a, f| [a[0].min(f[0]), a[1].min(f[1]), a[2].max(f[2]), a[3].max(f[3])]).unwrap_or(b.rect)
+    };
     // A paragraph keeps its width (or takes the one asked for); a single line grows to the right
     // (to the left when right-to-left), up to the page's margin.
     let width = match style.width {
         // Capped at the largest page PDF allows (14 400 pt).
         Some(w) if w.is_finite() => w.clamp(size * k, 14_400.0),
         Some(_) => return Err(EditError::Invalid("the paragraph's width must be a number".into())),
+        // Turned text: the page's margins are along another axis. A single line grows (below).
+        None if !upright => (frame[2] - frame[0]).max(size * k),
         None if anchored_right => (b.rect[2] - b.rect[0]).max(size * k).max(b.rect[2] + dx - (p.crop(doc)[0] + 36.0)),
         None if members.len() == 1 => (b.rect[2] - b.rect[0]).max(size * k).max(p.crop(doc)[2] - 36.0 - (b.rect[0] + dx)),
         None => (b.rect[2] - b.rect[0]).max(size * k),
@@ -2021,7 +2128,7 @@ fn rewrite_block_from(
     } else {
         None
     };
-    let type3 = if !reuse && needs_type3(&text) { Some(type3_font(doc, &mut fonts_res, &text, family, bold, max_glyphs)?) } else { None };
+    let type3 = if !reuse && needs_type3(&flat) { Some(type3_font(doc, &mut fonts_res, &flat, family, bold, max_glyphs)?) } else { None };
     let advance = |s: &str| -> f64 {
         let t = match (&metrics, reuse) {
             (Some(m), true) => {
@@ -2042,6 +2149,13 @@ fn rewrite_block_from(
         };
         t * o_state.scale * k
     };
+    // A turned single line grows to fit, as far as the largest page PDF allows.
+    let width = if !upright && style.width.is_none() && members.len() == 1 {
+        text.split('\n').map(&advance).fold(width, f64::max).min(14_400.0)
+    } else {
+        width
+    };
+    let right_edge = if anchored_right { right_edge } else { width };
     let wrapped = wrap(&text, width + 0.5, advance);
     let mut substituted = None;
     let new_font = !reuse;
@@ -2053,11 +2167,11 @@ fn rewrite_block_from(
         let first = fallback.names.first().cloned().ok_or_else(no_japanese_font)?;
         (first, Box::new(move |s: &str| type3_encode(&fallback, s)))
     } else {
-        let win = pdfcraft_fonts::win_ansi(&text);
+        let win = pdfcraft_fonts::win_ansi(&flat);
         let back: String = win.iter().map(|c| char::from_u32(u32::from(*c)).unwrap_or('?')).collect();
         let base = family.base_font(bold, italic);
-        if text.chars().zip(back.chars()).any(|(a, c)| c == '?' && a != '?') {
-            return Err(EditError::Invalid(format!("\"{text}\" has characters neither {} nor {base} can show", b.base_font)));
+        if flat.chars().zip(back.chars()).any(|(a, c)| c == '?' && a != '?') {
+            return Err(EditError::Invalid(format!("\"{flat}\" has characters neither {} nor {base} can show", b.base_font)));
         }
         let mut f = Dict::new();
         f.set(b"Type".to_vec(), Object::name("Font"));
@@ -2075,7 +2189,16 @@ fn rewrite_block_from(
     // Line spacing in text space: the paragraph's own (scaled with the size), or 1.2 × the size.
     let lead = match style.line_spacing {
         Some(m) => size * m.clamp(0.5, 5.0),
-        None if members.len() > 1 => (members[0].origin.baseline - members[1].origin.baseline) / k * size / old_size,
+        // From the first two rows (a row may hold several runs).
+        None if let Some((upper, lower)) = b
+            .rows
+            .first()
+            .zip(b.rows.get(1))
+            .and_then(|(upper, lower)| upper.first().zip(lower.first()))
+            .and_then(|(upper, lower)| lines.get(*upper).zip(lines.get(*lower))) =>
+        {
+            (upper.frame_origin().1 - lower.frame_origin().1) / k * size / old_size
+        }
         None if o_state.leading > 0.0 => o_state.leading,
         None => size * 1.2,
     };

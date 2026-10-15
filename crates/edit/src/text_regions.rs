@@ -25,6 +25,12 @@ fn row_rect(row: &[usize], lines: &[TextLine]) -> Option<[f64; 4]> {
     row.iter().filter_map(|i| lines.get(*i)).map(|l| l.rect).reduce(union)
 }
 
+/// [`row_rect`] in its text's own frame ([`TextLine::frame_rect`]), so rows of turned text
+/// compare along and across their baselines.
+fn frame_row_rect(row: &[usize], lines: &[TextLine]) -> Option<[f64; 4]> {
+    row.iter().filter_map(|i| lines.get(*i)).map(TextLine::frame_rect).reduce(union)
+}
+
 pub(super) fn group_blocks(lines: &[TextLine]) -> Vec<TextBlock> {
     group_layout(lines, true)
 }
@@ -62,14 +68,14 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
     let mut rows: Vec<Vec<usize>> = Vec::new();
     for (i, line) in lines.iter().enumerate() {
         let joins = rows.last().and_then(|r| r.last()).and_then(|i| lines.get(*i)).is_some_and(|prev| {
-            let gap = line.rect[0] - prev.rect[2];
+            let gap = line.frame_rect()[0] - prev.frame_rect()[2];
             // OCR words (invisible text over a scan) join only across a word space: a wider gap
             // is a table cell or a tab stop, which a rewrite would close up.
             let scanned = !mixed || (invisible(prev) == invisible(line) && (!invisible(line) || gap < prev.size.max(line.size) * 0.6));
             scanned
                 && (mixed || same_style(prev, line))
                 && same_plane(prev, line)
-                && (prev.origin.baseline - line.origin.baseline).abs() < prev.size.min(line.size) * 0.2
+                && (prev.frame_origin().1 - line.frame_origin().1).abs() < prev.size.min(line.size) * 0.2
                 && gap >= -prev.size.min(line.size) * 0.2
                 && gap < prev.size.max(line.size) * 1.5
                 // Separate same-style text objects that merely touch or overlap, with no space
@@ -90,14 +96,15 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
     let mut blocks: Vec<TextBlock> = Vec::new();
     for row in rows {
         let Some(first) = row.first().and_then(|i| lines.get(*i)) else { continue };
-        let Some(rect) = row_rect(&row, lines) else { continue };
+        let (Some(rect), Some(frame)) = (row_rect(&row, lines), frame_row_rect(&row, lines)) else { continue };
         let joins = blocks.last().is_some_and(|block| {
             let Some(prev_row) = block.rows.last() else { return false };
             let Some(prev) = prev_row.first().and_then(|i| lines.get(*i)) else { return false };
-            let Some(pr) = row_rect(prev_row, lines) else { return false };
-            let gap = prev.origin.baseline - first.origin.baseline;
+            let Some(pr) = frame_row_rect(prev_row, lines) else { return false };
+            let gap = prev.frame_origin().1 - first.frame_origin().1;
             let tol = prev.size.max(first.size).max(1.0);
-            let aligned = (pr[0] - rect[0]).abs() < tol || ((pr[0] + pr[2] - rect[0] - rect[2]) / 2.0).abs() < tol || (pr[2] - rect[2]).abs() < tol;
+            let aligned =
+                (pr[0] - frame[0]).abs() < tol || ((pr[0] + pr[2] - frame[0] - frame[2]) / 2.0).abs() < tol || (pr[2] - frame[2]).abs() < tol;
             // OCR lines stay apart: the scan fixes where each one is, so they never rewrap together.
             (!mixed || !(invisible(prev) || invisible(first)))
                 && (mixed || same_style(prev, first))
@@ -135,7 +142,7 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
             if let Some(prev) = block.lines.last().filter(|i| row.contains(i)).and_then(|i| lines.get(*i))
                 && !row_text.ends_with(char::is_whitespace)
                 && !line.text.starts_with(char::is_whitespace)
-                && line.rect[0] - prev.rect[2] > line.size * 0.12
+                && line.frame_rect()[0] - prev.frame_rect()[2] > line.size * 0.12
             {
                 row_text.push(' ');
                 block.editor_text.push(' ');

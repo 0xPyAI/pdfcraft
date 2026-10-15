@@ -37,6 +37,9 @@ pub struct Metrics {
     /// Code → CID for embedded non-identity CMaps (`cidrange` / `cidchar`).
     cid_map: Vec<(u32, u32, u32)>,
     default: f64,
+    /// Composite fonts with an explicit `/DW`: `/W` may leave out the glyphs that have that
+    /// width (Chrome and Skia do), so a CID missing from `/W` is not a missing glyph.
+    explicit_default: bool,
     /// The standard-14 face to measure with when the dictionary carries no `/Widths`.
     std14: Option<crate::Std14>,
     /// Glyph units → text space (0.001, or `/FontMatrix[0]` for Type 3).
@@ -560,6 +563,7 @@ impl Metrics {
             cid_ranges: Vec::new(),
             cid_map: Vec::new(),
             default: 500.0,
+            explicit_default: false,
             std14: Some(crate::Std14::Helvetica),
             scale: 0.001,
             ascent: 0.9,
@@ -650,6 +654,7 @@ impl Metrics {
                 .unwrap_or_default();
             if let Some(dw) = desc.get(b"DW").and_then(|d| doc.resolve(d).as_f64()) {
                 m.default = dw;
+                m.explicit_default = true;
             }
             if let Some(w) = desc.get(b"W").map(|w| doc.resolve(w)).and_then(|w| w.as_array().cloned()) {
                 let mut i = 0;
@@ -788,6 +793,8 @@ impl Metrics {
     }
 
     /// Whether the font has a glyph for `code` (subset fonts lack the glyphs they don't use).
+    /// Only asked for codes the font's Unicode mapping gives: a subset's `ToUnicode` lists the
+    /// glyphs it kept, while its `/W` leaves out those of the default width (#1443).
     fn has_glyph(&self, code: u32) -> bool {
         if self.composite {
             let cid = self.cid(code);
@@ -796,7 +803,10 @@ impl Metrics {
             return self.cid_widths.contains_key(&cid)
                 || self.cid_ranges.iter().any(|(a, b, _)| cid >= *a && cid <= *b)
                 || !self.subset
-                || self.outlined_cids.get(cid as usize / 64).is_some_and(|w| (*w >> (cid % 64)) & 1 == 1);
+                || self.outlined_cids.get(cid as usize / 64).is_some_and(|w| (*w >> (cid % 64)) & 1 == 1)
+                // No readable TrueType program to ask (e.g. CFF or missing): an explicit /DW
+                // still says /W may leave out glyphs of that width (#1443).
+                || (self.outlined_cids.is_empty() && self.explicit_default);
         }
         match code.checked_sub(self.first).and_then(|i| self.widths.get(i as usize)) {
             Some(w) => *w > 0.0 || code == 32,
@@ -1372,6 +1382,48 @@ mod tests {
         assert_eq!(m.decode(&[0, 0x24, 0, 0x25, 0, 3, 0, 0x30, 0, 0x31, 0, 0x10]), "AB Hié");
         assert_eq!(m.encode("Hi A").as_deref(), Some(&[0, 0x30, 0, 0x31, 0, 3, 0, 0x24][..]));
         assert_eq!(m.encode("Z"), None);
+    }
+
+    /// Chrome's subsets leave the glyphs of `/DW` width out of `/W` (#1443): "s" (CID 0x56) is
+    /// still in the font, but nothing is when the font gives no default width to point at.
+    #[test]
+    fn composite_subset_glyphs_of_the_default_width_are_present() {
+        let metrics = |dw: bool| {
+            let mut doc = Document::new_empty();
+            let cmap = b"/CIDInit /ProcSet findresource begin 1 begincodespacerange <0000> <FFFF> endcodespacerange \
+                1 beginbfrange <0055> <0057> <0072> endbfrange end";
+            let tu = doc.add(Object::Stream(Stream::from_raw(Dict::new(), cmap.to_vec())));
+            let mut desc = Dict::new();
+            desc.set(b"Subtype".to_vec(), Object::name("CIDFontType2"));
+            if dw {
+                desc.set(b"DW".to_vec(), Object::Int(500));
+            }
+            desc.set(
+                b"W".to_vec(),
+                Object::Array(vec![
+                    Object::Int(0x55),
+                    Object::Array(vec![Object::Int(333)]),
+                    Object::Int(0x57),
+                    Object::Array(vec![Object::Int(277)]),
+                ]),
+            );
+            let f = font(
+                &mut doc,
+                vec![
+                    ("Subtype", Object::name("Type0")),
+                    ("BaseFont", Object::name("AAAAAA+LiberationSans")),
+                    ("Encoding", Object::name("Identity-H")),
+                    ("DescendantFonts", Object::Array(vec![Object::Dict(desc)])),
+                    ("ToUnicode", Object::Ref(tu)),
+                ],
+            );
+            Metrics::from_dict(&doc, &f)
+        };
+        let chrome = metrics(true);
+        assert_eq!(chrome.encode("rst").as_deref(), Some(&[0, 0x55, 0, 0x56, 0, 0x57][..]));
+        assert_eq!(chrome.width(0x56), 0.5);
+        assert_eq!(chrome.encode("x"), None, "a character the ToUnicode map doesn't give");
+        assert_eq!(metrics(false).encode("s"), None);
     }
 
     /// A `/W` run that starts at the last CID stops there instead of overflowing onto CID 0.

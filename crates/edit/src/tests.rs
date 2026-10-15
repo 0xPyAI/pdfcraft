@@ -3838,6 +3838,104 @@ fn subset_indic_font_without_legacy_name_keeps_logical_text() {
     assert_eq!(lines[0].text, "\u{092C}\u{0922}\u{093C}\u{093F}\u{092F}\u{093E}");
 }
 
+/// Lines of a paragraph drawn turned on the page (a landscape page drawn a quarter turn round)
+/// are separate rows, and adding a word keeps them apart (#1443).
+#[test]
+fn turned_paragraph_keeps_its_line_breaks_when_a_word_is_added() {
+    for cm in ["0 1 -1 0 600 0", "0 -1 1 0 0 800", "-1 0 0 -1 600 800"] {
+        let original =
+            text_page(&format!("q {cm} cm BT /F1 12 Tf 72 500 Td (First line here) Tj 0 -14 Td (Second line) Tj 0 -14 Td (Third) Tj ET Q"));
+        let block = text::text_blocks(&original, 0).unwrap().remove(0);
+        assert_eq!(block.editor_text, "First line here\nSecond line\nThird", "{cm}");
+        let mut doc = original.clone();
+        text::rewrite_block(&mut doc, 0, 0, Some("First line here\nSecond line\nThird added"), &text::BlockStyle::default()).unwrap();
+        let reopened = reopen(&doc);
+        assert_eq!(text::text_blocks(&reopened, 0).unwrap()[0].editor_text, "First line here\nSecond line\nThird added", "{cm}");
+        let (before, after) = (text::text_lines(&original, 0).unwrap(), text::text_lines(&reopened, 0).unwrap());
+        assert_eq!(after.len(), 3, "{cm}");
+        for (a, b) in after.iter().zip(&before).take(2) {
+            assert!(close(a.rect, b.rect), "{cm}: untouched rows stay put: {:?} {:?}", a.rect, b.rect);
+        }
+        // The last row grows along its own baseline from where it started.
+        let (grown, old) = (after[2].rect, before[2].rect);
+        assert!((0..2).all(|i| grown[i] <= old[i] + 0.01) && (2..4).all(|i| grown[i] >= old[i] - 0.01), "{cm}: {grown:?} {old:?}");
+        assert!((after[2].origin_baseline() - before[2].origin_baseline()).abs() < 0.01, "{cm}");
+    }
+    // A turned single line grows rather than wrapping across the page's other axis.
+    let mut doc = text_page("BT /F1 12 Tf 0 1 -1 0 300 300 Tm (Only line) Tj ET");
+    text::rewrite_block(&mut doc, 0, 0, Some("Only line with several more words added"), &text::BlockStyle::default()).unwrap();
+    let blocks = text::text_blocks(&reopen(&doc), 0).unwrap();
+    assert_eq!(blocks[0].editor_text, "Only line with several more words added");
+    // Formatting part of turned text isn't laid out yet: refused, not drawn along the page's x axis.
+    let mut doc = text_page("BT /F1 12 Tf 0 1 -1 0 300 300 Tm (Only line) Tj ET");
+    let range = text::RangeStyle {
+        range: 0..4,
+        family: None,
+        resource: None,
+        size: Some(20.0),
+        color: None,
+        underline: None,
+        char_spacing: None,
+        scale: None,
+    };
+    let style = text::BlockStyle { ranges: vec![range], ..Default::default() };
+    assert!(text::rewrite_block(&mut doc, 0, 0, Some("Only line"), &style).is_err());
+}
+
+/// A paragraph in a Chrome-style subset font: `/W` leaves out the glyphs of the `/DW` width.
+/// Adding a word keeps every row as it was and shows the word in the page's own font (#1443).
+#[test]
+fn default_width_subset_paragraph_keeps_its_rows_when_a_word_is_added() {
+    let hex = |s: &str| s.chars().map(|c| format!("00{:02X}", u32::from(c))).collect::<String>();
+    let rows = ["This is the first line", "the second", "and third"];
+    let content = rows
+        .iter()
+        .enumerate()
+        .map(|(i, row)| format!("BT /F3 12 Tf 1 0 0 1 72 {} Tm <{}> Tj ET", 700 - 14 * i, hex(row)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut doc = text_page(&content);
+    let cmap = b"/CIDInit /ProcSet findresource begin 1 begincodespacerange <0000> <FFFF> endcodespacerange \
+        1 beginbfrange <0020> <007E> <0020> endbfrange end";
+    let to_unicode = doc.add(Object::Stream(Stream::from_raw(Dict::new(), cmap.to_vec())));
+    let mut cid = Dict::new();
+    cid.set(b"Type".to_vec(), Object::name("Font"));
+    cid.set(b"Subtype".to_vec(), Object::name("CIDFontType2"));
+    cid.set(b"BaseFont".to_vec(), Object::name("AAAAAA+LiberationSans"));
+    cid.set(b"CIDToGIDMap".to_vec(), Object::name("Identity"));
+    cid.set(b"DW".to_vec(), Object::Int(500));
+    cid.set(
+        b"W".to_vec(),
+        Object::Array(vec![Object::Int(32), Object::Array(vec![Object::Int(278)]), Object::Int(84), Object::Array(vec![Object::Int(611)])]),
+    );
+    let mut font = Dict::new();
+    font.set(b"Type".to_vec(), Object::name("Font"));
+    font.set(b"Subtype".to_vec(), Object::name("Type0"));
+    font.set(b"BaseFont".to_vec(), Object::name("AAAAAA+LiberationSans"));
+    font.set(b"Encoding".to_vec(), Object::name("Identity-H"));
+    font.set(b"DescendantFonts".to_vec(), Object::Array(vec![Object::Dict(cid)]));
+    font.set(b"ToUnicode".to_vec(), Object::Ref(to_unicode));
+    let font = doc.add(Object::Dict(font));
+    let page = pdfcraft_model::pages(&doc)[0].clone();
+    let mut resources = doc.resolve(page.dict.get(b"Resources").unwrap()).as_dict().unwrap().clone();
+    let mut fonts = doc.resolve(resources.get(b"Font").unwrap()).as_dict().unwrap().clone();
+    fonts.set(b"F3".to_vec(), Object::Ref(font));
+    resources.set(b"Font".to_vec(), Object::Dict(fonts));
+    doc.update_dict(page.obj, |d| d.set(b"Resources".to_vec(), Object::Dict(resources))).unwrap();
+    let block = text::text_blocks(&doc, 0).unwrap().remove(0);
+    assert_eq!(block.editor_text, rows.join("\n"));
+    let before = text::text_lines(&doc, 0).unwrap();
+    let edit = text::rewrite_block(&mut doc, 0, 0, Some(&format!("{} added", block.editor_text)), &text::BlockStyle::default()).unwrap();
+    assert_eq!(edit.substituted, None, "the subset shows every letter of the new word");
+    let reopened = reopen(&doc);
+    assert_eq!(text::text_blocks(&reopened, 0).unwrap()[0].editor_text, "This is the first line\nthe second\nand third added");
+    let after = text::text_lines(&reopened, 0).unwrap();
+    for (a, b) in after.iter().zip(&before).take(2) {
+        assert_eq!(a.text, b.text);
+        assert!(close(a.rect, b.rect), "untouched rows keep their place and width: {:?} {:?}", a.rect, b.rect);
+    }
+}
+
 /// An added item is written out as a specific standard-14 face (`/Times-Italic`, `/Helvetica-Bold`
 /// …), so it has to be *measured* with that same face. Measuring the upright face while writing
 /// the italic one mis-sizes every box: Times-Italic `A` is 611 against Times-Roman's 722.

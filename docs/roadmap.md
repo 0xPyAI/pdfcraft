@@ -179,6 +179,7 @@ M2 (renderer), M7 (content editing), M10 (OCR and Office), M11 (Preflight and st
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-12 | minor | M1 #1338: a full rewrite keeps unknown trailer entries and objects reachable only from them. Estimates unchanged. |
+| 2026-10-12 | minor | M7 #1443: adding a word to a multi-line paragraph keeps its line breaks. Composite subset fonts whose `/W` leaves out default-width glyphs (Chrome, Skia) no longer measure those letters as missing, and paragraphs drawn turned on the page group into rows along their own baselines. Estimates unchanged. |
 | 2026-10-14 | minor | M14: Italian catalog completed (2,528 entries) and dropped from the ≈ 2,000–2,140-entry group; estimates unchanged |
 | 2026-10-12 | minor | M4 #1310 #1311 #1312: undo back to the opened file is clean, Revert returns to the last saved file, and the next save keeps that revision. Estimates unchanged. |
 | 2026-10-14 | minor | M5: reconciled PR #1457 with upstream main, preserving comment submission shortcuts and upstream roadmap progress. Estimates unchanged. |
