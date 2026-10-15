@@ -961,6 +961,26 @@ mod tests {
         }
     }
 
+    /// Polish translates every `tl!("…")` literal in the UI source, as Japanese does.
+    #[test]
+    fn polish_covers_ui_literals() {
+        let pl = Lang::from_code("pl").expect("pl registered");
+        let missing: Vec<_> = ui_literals().into_iter().filter(|label| !has(pl, label)).collect();
+        assert!(missing.is_empty(), "untranslated Polish UI literals: {missing:#?}");
+    }
+
+    /// Polish says everything a signature's validation says, and the changes after signing it
+    /// names, keeping each sentence's holes: a Polish signature panel listed these in English.
+    #[test]
+    fn polish_says_what_a_signature_says() {
+        let pl = Lang::from_code("pl").expect("pl registered");
+        for wording in pdfcraft_engine::sign::pdf::WORDINGS.iter().chain(pdfcraft_engine::sign::pdf::kind::ALL) {
+            assert!(has(pl, wording), "missing signature wording: {wording}");
+            let said = tr(pl, wording);
+            assert_eq!(wording.matches("{}").count(), said.matches("{}").count(), "the Polish of {wording:?} loses a hole: {said:?}");
+        }
+    }
+
     /// Japanese translates every `tl!("…")` literal in the UI source, so a new string can't ship in
     /// English by accident (the same check French, German, Russian and Simplified Chinese have).
     #[test]
