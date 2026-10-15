@@ -58,6 +58,18 @@ fn plural_none(_: u64) -> usize {
     0
 }
 
+/// Romanian (CLDR `ro`): 1 is `one`; 0 and numbers whose last two digits are 1–19 (2, 19, 101,
+/// 119) are `few`; everything else (20, 100, 120) is `other`, the form with "de" ("20 de pagini").
+fn plural_ro(n: u64) -> usize {
+    if n == 1 {
+        0
+    } else if n == 0 || (1..=19).contains(&(n % 100)) {
+        1
+    } else {
+        2
+    }
+}
+
 /// Lithuanian: one (ending in 1 except 11), few (ending in 2–9 except 12–19), other otherwise.
 fn plural_lithuanian(n: u64) -> usize {
     match (n % 10, n % 100) {
@@ -147,7 +159,7 @@ fn plural_sl(n: u64) -> usize {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 23] = [
+pub static LANGUAGES: [LangInfo; 24] = [
     LangInfo { code: "en", name: "English", source: "", plural: plural_one_other, rtl: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Simplified Chinese; `zh`, `zh-CN`, `zh-SG` and `zh-Hans-*` locales resolve here (see `candidates`).
@@ -210,6 +222,8 @@ pub static LANGUAGES: [LangInfo; 23] = [
     // Vietnamese; every `vi-*` locale (`vi-VN`, `vi_VN.UTF-8`) resolves here. CLDR `vi` counts have
     // one form ("other"), so `@plural` entries list a single form.
     LangInfo { code: "vi", name: "Tiếng Việt", source: include_str!("vi.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
+    // Romanian; every `ro-*` locale (`ro-RO`, `ro_RO.UTF-8`, `ro-MD`) resolves here. Three plural forms (one, few, other).
+    LangInfo { code: "ro", name: "Română", source: include_str!("ro.tsv"), plural: plural_ro, rtl: false, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
@@ -2448,6 +2462,46 @@ mod tests {
         ] {
             assert_ne!(tr_ctx(vi, "certificate", field), field, "certificate field remains untranslated: {field}");
         }
+    }
+
+    #[test]
+    fn romanian_is_registered_with_three_plural_forms() {
+        let ro = Lang::from_code("ro").expect("ro registered");
+        for tag in ["ro", "ro-RO", "ro_RO.UTF-8", "RO-ro", "ro-MD"] {
+            assert_eq!(lang_from_tag(tag), Some(ro), "{tag}");
+        }
+        assert_eq!(normalize_pref("Ro"), Some("ro"));
+        let info = LANGUAGES.iter().find(|language| language.code == "ro").expect("ro row");
+        assert_eq!(info.plural_forms(), 3);
+        // one: 1; few: 0 and n % 100 in 1..=19 ("2 pagini", "101 pagini"); other: the "de" form ("20 de pagini").
+        for (n, form) in [(1, 0), (0, 1), (2, 1), (19, 1), (101, 1), (119, 1), (20, 2), (100, 2), (120, 2), (1000, 2)] {
+            assert_eq!(plural_ro(n), form, "{n}");
+        }
+        assert_eq!(trn(ro, 1, "{n} page", "{n} pages"), "1 pagină");
+        assert_eq!(trn(ro, 5, "{n} page", "{n} pages"), "5 pagini");
+        assert_eq!(trn(ro, 25, "{n} page", "{n} pages"), "25 de pagini");
+    }
+
+    #[test]
+    fn romanian_covers_bundled_catalog_keys() {
+        let ro = Lang::from_code("ro").expect("ro registered");
+        let mut missing = std::collections::BTreeSet::new();
+        for reference in LANGUAGES.iter().filter(|language| language.code != "ro") {
+            let (entries, errors) = catalog::parse_entries(reference.source, reference.plural_forms());
+            assert!(errors.is_empty(), "{}: invalid reference catalog: {errors:?}", reference.code);
+            for entry in entries {
+                let translated = match entry.context.as_str() {
+                    "" => ro.catalog().plain(&entry.source),
+                    "@id" => ro.catalog().id(&entry.source),
+                    "@plural" => entry.source.split_once('|').and_then(|(one, other)| ro.catalog().plural(one, other, 0)),
+                    context => ro.catalog().contextual(context, &entry.source),
+                };
+                if translated.is_none() {
+                    missing.insert((entry.context, entry.source));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "Romanian misses bundled catalog keys: {missing:#?}");
     }
 
     #[test]

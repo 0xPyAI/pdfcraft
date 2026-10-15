@@ -141,8 +141,8 @@ union). Detail and script notes: [localization-parity.md](docs/localization-pari
 | Vietnamese | `vi` | 100% of current union | partial (dialogs / tooltips; no help) |
 
 Also shipped: Traditional Chinese, Russian, Bulgarian, Telugu, Hungarian, Ukrainian, Italian,
-Kazakh, Polish, Slovenian, Greek, Turkish, Lithuanian and Czech (menus only): **14 more catalogs**
-(23 interface languages including English).
+Kazakh, Polish, Slovenian, Greek, Turkish, Lithuanian, Romanian and Czech (menus only): **15 more catalogs**
+(24 interface languages including English).
 
 ## Upcoming
 
@@ -174,6 +174,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 - **2026-10-12 (M3, drawing markups):** While a comment is being drawn, the pointer in a band along any edge of the view (or just past it) scrolls the view up, down, left or right, so points beyond what is shown can be reached. A polygon, cloud or run of connected lines takes back its last point with Backspace, Delete or Undo (the first point's removal cancels it). Edge scrolling has unit tests of its maths only; it has not been exercised end to end in the app by an automated test.
 - **2026-10-12 (gap 6, #1319, #1305, #1324):** Editing an XFA form keeps a radio item's stored text when it contains a space, so a later layout still selects it. Replace Pages on a split selection replaces those pages and leaves the gap; editing the dialog range still replaces the span. Marking a figure decorative rewrites only that figure's content stream, so a header, added text and unknown stream entries stay. Estimates unchanged.
 - **2026-10-15 (M14, gap 24):** `misc.localization` and `misc.installers` move from planned to partial. Localization: 22 catalogs ship, but Chinese shows tofu in releases, Telugu has no release font and Arabic is not mirrored. Installers: macOS and Windows releases are signed, Linux packages are not. The Acrobat menu diff itself remains open. Estimates unchanged.
+- **2026-10-15 (G14, Romanian localization):** Added Romanian (`ro`, Română) as an interface and date language with a 2,673-entry catalog covering every bundled key, and a CLDR plural rule (`plural_ro`: one / few / other, "20 de pagini"). Locale tags `ro` / `ro-RO` / `ro_RO.UTF-8` / `ro-MD` resolve, so Auto picks it on Romanian Windows. Coverage and plural tests added. Status `partial` like the other catalogs (no translated help).
 - **2026-10-13 (G14, Vietnamese localization):** Added Vietnamese (`vi`, Tiếng Việt) as an interface and date language with a 2,591-entry catalog (`plural_none`) covering 100% of the current localizable key union (plus `theme`/`Appearance`). Locale tags `vi` / `vi-VN` / `vi_VN.UTF-8` resolve; calendar months use numeric `Tháng 1`…`12` / `tháng 1`…`12`. Native-speaker community review recorded. The twelve-language localization mean moves from ≈59% to ≈68%; weighted readiness ≈49% → ≈50%. Status stays `partial`: engine/OS details, document contents, filenames, CLI/MCP and external help stay outside the catalog by design.
 
 - **2026-10-13 (M6, data exchange fidelity):** XML and XFDF exports preserve tabs and line breaks in field names and comment metadata using character references. Saved-PDF regressions cover distinct names that XML would normalize to the same attribute value, restored field values and replacement of the original comment identities. Estimates unchanged.
