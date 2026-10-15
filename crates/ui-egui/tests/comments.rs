@@ -858,6 +858,46 @@ fn polygons_clouds_connected_lines_callouts_and_inserted_text() {
     assert_eq!(h.state().quick_tool, QuickTool::Select);
 }
 
+fn drawn_points(h: &Harness<'static, PdfCraftApp>) -> usize {
+    match &h.state().views[0].comments.gesture {
+        Some(pdfcraft_ui_egui::comments::Gesture::Draw { points, .. }) => points.len(),
+        _ => 0,
+    }
+}
+
+#[test]
+fn a_wrong_polygon_point_is_taken_back_with_backspace_or_undo() {
+    let mut h = harness(|app| app.set_option("quick", "polygon").unwrap());
+    for p in [(40.0, 40.0), (120.0, 40.0), (200.0, 150.0)] {
+        click_pt(&mut h, p);
+    }
+    assert_eq!(drawn_points(&h), 3);
+    // Backspace takes back the wrong click, then Undo takes back the one before it.
+    h.key_press(egui::Key::Backspace);
+    h.run_steps(2);
+    assert_eq!(drawn_points(&h), 2);
+    h.state_mut().undo();
+    h.run_steps(2);
+    assert_eq!(drawn_points(&h), 1);
+    // The right corner goes where the wrong one was, and the polygon finishes with all three.
+    click_pt(&mut h, (80.0, 110.0));
+    click_pt(&mut h, (120.0, 40.0));
+    assert_eq!(drawn_points(&h), 3);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    let c = comments(&h);
+    assert_eq!(c.len(), 1);
+    assert_eq!(c[0].subtype, "Polygon");
+    // Taking back the only point cancels the drawing without making a comment.
+    h.state_mut().set_option("quick", "polygon").unwrap();
+    click_pt(&mut h, (200.0, 200.0));
+    h.key_press(egui::Key::Backspace);
+    h.run_steps(2);
+    assert_eq!(drawn_points(&h), 0);
+    assert!(h.state().views[0].comments.gesture.is_none());
+    assert_eq!(comments(&h).len(), 1);
+}
+
 #[test]
 fn inserted_text_snaps_to_the_gap_between_characters_on_the_baseline() {
     let mut h = harness(|app| app.set_option("quick", "caret").unwrap());

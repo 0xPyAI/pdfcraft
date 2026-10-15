@@ -493,6 +493,22 @@ pub struct CommentView {
     pub tool_done: bool,
 }
 
+impl CommentView {
+    /// Takes back the last point of a polygon, cloud or connected lines being drawn; the first
+    /// point's removal cancels the drawing. Returns whether there was such a drawing.
+    pub fn undo_point(&mut self) -> bool {
+        let Some(Gesture::Draw { tool, points, .. }) = self.gesture.as_mut() else { return false };
+        if !tool.clicks_points() {
+            return false;
+        }
+        points.pop();
+        if points.is_empty() {
+            self.gesture = None;
+        }
+        true
+    }
+}
+
 /// Comments panel order (Acrobat: Sort by page, author, date, type, colour).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SortBy {
@@ -779,6 +795,17 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, cx: &PageCx<'_>, 
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
             }
             let finish = resp.double_clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter));
+            // Backspace (or Delete) takes back the last point, e.g. after a wrong click; Undo does too.
+            // Only while a drawing is in progress: otherwise Delete belongs to the selected comment.
+            if matches!(cv.gesture, Some(Gesture::Draw { page, .. }) if page == cx.page)
+                && !ui.ctx().egui_wants_keyboard_input()
+                && ui.input_mut(|i| {
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace) || i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+                })
+            {
+                cv.undo_point();
+                return true;
+            }
             if resp.clicked()
                 && over_page
                 && let Some(p) = pointer

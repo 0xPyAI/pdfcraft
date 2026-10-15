@@ -172,6 +172,13 @@ impl PdfCraftApp {
 
     /// Undo the last change: to the Combine files list while its tab shows, else the document.
     pub fn undo(&mut self) {
+        // While a polygon, cloud or run of connected lines is being drawn, Undo takes back its
+        // last point instead of the last finished edit.
+        if let Some((i, _)) = self.active_ids()
+            && self.views[i].comments.undo_point()
+        {
+            return;
+        }
         if self.combine_showing() {
             self.combine_history_step(true);
         } else {
