@@ -798,6 +798,81 @@ fn validates_signatures_written_with_ber_indefinite_lengths() {
     }
 }
 
+/// A signed attribute: the attribute type and a SET holding its one value.
+fn attribute(oid: &str, value: &[u8]) -> Vec<u8> {
+    der::seq(&[&der::oid(oid), &der::set_of(&[value])])
+}
+
+/// `signed` with its signature made again by `id` over the signed attributes `attrs`, the rest of
+/// the CMS built as the signer builds it, so only the attributes differ.
+fn resigned_with_attributes(signed: &[u8], id: &pkcs12::DigitalId, attrs: &[Vec<u8>]) -> Vec<u8> {
+    use pdfcraft_sign::DigestAlg;
+    use pdfcraft_sign::der::tag;
+    let alg = DigestAlg::Sha256;
+    let refs: Vec<&[u8]> = attrs.iter().map(Vec::as_slice).collect();
+    let set = der::set_of(&refs);
+    let signature = id.key.sign(alg, &set).unwrap();
+    let mut signed_attrs = set.clone();
+    signed_attrs[0] = tag::ctx(0);
+    let cert = &id.certificate;
+    let sid = der::seq(&[&cert.issuer.raw, &der::uint(&cert.serial)]);
+    let signer = der::seq(&[&der::int(1), &sid, &alg.algorithm(), &signed_attrs, &id.key.signature_algorithm(alg), &der::octets(&signature)]);
+    let encap = der::seq(&[&der::oid(DATA)]);
+    let signed_data =
+        der::seq(&[&der::int(1), &der::set_of(&[&alg.algorithm()]), &encap, &der::tlv(tag::ctx(0), &cert.raw), &der::set_of(&[&signer])]);
+    let cms = der::seq(&[&der::oid("1.2.840.113549.1.7.2"), &der::explicit(0, &signed_data)]);
+    let (a, b) = contents_span(signed);
+    assert!(cms.len() * 2 <= b - a, "the CMS fits the /Contents placeholder");
+    let hex: String = cms.iter().chain(std::iter::repeat(&0)).take((b - a) / 2).map(|x| format!("{x:02x}")).collect();
+    let mut out = signed.to_vec();
+    out[a..b].copy_from_slice(hex.as_bytes());
+    out
+}
+
+const DATA: &str = "1.2.840.113549.1.7.1";
+const CONTENT_TYPE: &str = "1.2.840.113549.1.9.3";
+const MESSAGE_DIGEST: &str = "1.2.840.113549.1.9.4";
+
+/// RFC 5652 §5.3: signed attributes carry the message digest, which ties the signature to the
+/// document, and the content type (data, for a document). A signature over attributes without
+/// the digest covers nothing of the document and is invalid; another content type is not a
+/// document signature; a missing content type is read anyway, with a note.
+#[test]
+fn signed_attributes_must_bind_the_document() {
+    let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    let trust = TrustStore { certs: vec![id.certificate.clone()] };
+    let signed = pdfcraft_sign::sign(&open(&fixture()), &id, &opts()).unwrap();
+    let (a, b) = contents_span(&signed);
+    let digest = pdfcraft_sign::DigestAlg::Sha256.digest(&[&signed[..a - 1], &signed[b + 1..]]);
+    let data_type = attribute(CONTENT_TYPE, &der::oid(DATA));
+    let message_digest = attribute(MESSAGE_DIGEST, &der::octets(&digest));
+    let check = |attrs: &[Vec<u8>]| {
+        let pdf = resigned_with_attributes(&signed, &id, attrs);
+        signatures(&open(&pdf), &pdf, &trust).into_iter().find(|s| s.signed).unwrap()
+    };
+    let said = |s: &pdfcraft_sign::SignatureInfo, sentence: &str| s.details.iter().any(|d| d.message == sentence);
+
+    // Both attributes, as a signer writes them: valid, so the cases below differ only in them.
+    let s = check(&[data_type.clone(), message_digest.clone()]);
+    assert_eq!(s.status, Status::Valid, "{:?}", s.details);
+
+    let s = check(std::slice::from_ref(&data_type));
+    assert_eq!(s.status, Status::Invalid, "{:?}", s.details);
+    assert!(said(&s, "The signature's signed attributes have no message digest, so the signature does not cover the document."), "{:?}", s.details);
+
+    let s = check(&[attribute(CONTENT_TYPE, &der::oid("1.2.840.113549.1.9.16.1.4")), message_digest.clone()]);
+    assert_eq!(s.status, Status::Invalid, "{:?}", s.details);
+    assert!(
+        said(&s, "The signature's signed attributes name a content type other than data, so it is not a signature of the document."),
+        "{:?}",
+        s.details
+    );
+
+    let s = check(std::slice::from_ref(&message_digest));
+    assert_eq!(s.status, Status::Valid, "{:?}", s.details);
+    assert!(said(&s, "The signature's signed attributes have no content type, which CMS requires; it was read anyway."), "{:?}", s.details);
+}
+
 #[test]
 fn validation_data_and_xmp_added_after_signing_are_not_tampering() {
     let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();

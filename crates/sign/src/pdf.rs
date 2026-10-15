@@ -354,10 +354,14 @@ pub const WORDINGS: &[&str] = &[
     "The ECDSA signature is not in canonical DER (trailing bytes, padding or a missing sign byte); it was read anyway.",
     "The ECDSA signature is the raw r and s values instead of a DER sequence; it was read anyway.",
     "The signature algorithm and the SignerInfo's digest algorithm name different hashes; the signature was made with the SignerInfo's.",
-    // What a signature that validates with an old hash still does not prove.
+    "The signature's signed attributes have no content type, which CMS requires; it was read anyway.",
+    // What a signature that validates with an old hash or a small key still does not prove.
     "This signature uses SHA-1, a weak hash algorithm: collisions in it have been demonstrated. It still validates because many documents signed years ago use it, but it should not be relied on.",
     "This signature uses RIPEMD-160, a legacy 160-bit hash algorithm that is no longer recommended for signatures. It still validates, but it should not be relied on.",
+    "This signature uses an RSA key shorter than 2048 bits, which is no longer considered strong enough for signatures. It still validates, but it should not be relied on.",
     // Whether the signed bytes and the signature still agree.
+    "The signature's signed attributes have no message digest, so the signature does not cover the document.",
+    "The signature's signed attributes name a content type other than data, so it is not a signature of the document.",
     "The document has been altered or corrupted since the signature was applied.",
     "The signer's certificate is not in the signature.",
     "The signature value does not match the signer's certificate: the signature is corrupt.",
@@ -787,6 +791,29 @@ fn validate_into(doc: &Document, bytes: &[u8], trust: &TrustStore, v: &Dict, inf
         }
         None => cache.digest(s.digest, bytes, l0, o1, covered),
     };
+    // With signed attributes the signature is made over them, not over the document: their
+    // message digest is what ties it to the signed bytes, and their content type says what those
+    // bytes are (data, for a document). RFC 5652 §5.3 requires both.
+    if s.signed_attrs.is_some() {
+        match s.content_type.as_deref() {
+            Some(crate::cms::DATA) => {}
+            Some(_) => {
+                return invalid(
+                    info,
+                    Detail::plain("The signature's signed attributes name a content type other than data, so it is not a signature of the document."),
+                );
+            }
+            None => {
+                info.details.push(Detail::plain("The signature's signed attributes have no content type, which CMS requires; it was read anyway."))
+            }
+        }
+        if s.message_digest.is_none() {
+            return invalid(
+                info,
+                Detail::plain("The signature's signed attributes have no message digest, so the signature does not cover the document."),
+            );
+        }
+    }
     if let Some(md) = &s.message_digest
         && *md != content_digest
     {

@@ -547,6 +547,25 @@ fn weak_digests_say_so_in_words_that_are_pinned() {
 }
 
 #[test]
+fn small_rsa_keys_say_so_and_others_do_not() {
+    let rsa = |n: Vec<u8>| PublicKey::Rsa { n, e: vec![1, 0, 1] };
+    let note = Some(
+        "This signature uses an RSA key shorter than 2048 bits, which is no longer considered strong enough for signatures. It still validates, but it should not be relied on.",
+    );
+    // 1024 bits, with and without the leading zero byte of a DER INTEGER.
+    assert_eq!(rsa(vec![0xC0; 128]).weakness(), note);
+    assert_eq!(rsa([vec![0], vec![0xC0; 128]].concat()).weakness(), note);
+    // 2047 bits is still short; 2048 bits and more are not.
+    assert_eq!(rsa([vec![0x7F], vec![0xFF; 255]].concat()).weakness(), note);
+    assert_eq!(rsa([vec![0, 0x80], vec![0; 255]].concat()).weakness(), None);
+    assert_eq!(rsa(vec![0xFF; 512]).weakness(), None);
+    assert_eq!(rsa(Vec::new()).weakness(), note, "an empty modulus is not a strong key");
+    assert_eq!(PublicKey::P256(vec![4; 65]).weakness(), None);
+    let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    assert_eq!(id.certificate.public_key.weakness(), None, "the 2048-bit test identity");
+}
+
+#[test]
 fn an_rsa_signature_value_not_below_the_modulus_is_refused() {
     use pdfcraft_sign::keys::{DigestAlg, PssParams, Scheme};
     // RFC 8017 §5.2.2 (RSAVP1): a signature representative s must be below n. Otherwise s and
