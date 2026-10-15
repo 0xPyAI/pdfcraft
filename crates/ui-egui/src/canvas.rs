@@ -2823,7 +2823,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 view.current = i;
                 open_boxes = true;
             }
-            let on_field = if preparing {
+            // `over_field`: a form field is under the pointer and has set its cursor.
+            let (on_field, over_field) = if preparing {
                 let field_tool = match tool {
                     QuickTool::Field(f) => Some(f),
                     _ => None,
@@ -2831,11 +2832,15 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 let o = crate::prepare::page_input(ui, &resp, &xf, i, info, &form, field_tool, can_modify, view);
                 field_props |= o.properties;
                 field_placed |= o.placed;
-                o.consumed || field_tool.is_some()
+                (o.consumed || field_tool.is_some(), false)
             } else {
-                tool == QuickTool::Select
-                    && !comments::select_grabs(ui, &pcx, view)
-                    && crate::forms_ui::page_input(ui, &resp, &xf, i, info, &form, can_fill, view)
+                use crate::forms_ui::FieldPointer;
+                let field = if tool == QuickTool::Select && !comments::select_grabs(ui, &pcx, view) {
+                    crate::forms_ui::page_input(ui, &resp, &xf, i, info, &form, can_fill, view)
+                } else {
+                    FieldPointer::Away
+                };
+                (field == FieldPointer::Owned, field == FieldPointer::Over)
             };
             // Redact draws boxes off text; so does Highlight (an area highlight, as in Acrobat).
             let area_tool = tool == QuickTool::Redact && can_modify || tool == QuickTool::Comment(comments::CommentTool::Highlight) && allowed;
@@ -2937,9 +2942,12 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     // Column select (#740): the Column select tool, or Alt (Option on macOS) held
                     // while a drag starts, as in Acrobat.
                     let column = tool == QuickTool::ColumnSelect || ui.input(|inp| inp.modifiers.alt);
-                    if column && !over_link {
+                    // A link or a form field under the pointer keeps its own cursor: a check box
+                    // drawn with a glyph, or set on printed text, shows the hand, not the I-beam.
+                    let cursor_free = !over_link && !over_field;
+                    if column && cursor_free {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
-                    } else if over_text && !over_link {
+                    } else if over_text && cursor_free {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
                     }
                     let press_here = ui.input(|inp| inp.pointer.press_origin()).is_some_and(|o| r.contains(o));

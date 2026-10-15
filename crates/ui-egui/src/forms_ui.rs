@@ -84,7 +84,20 @@ fn open_focus(f: &FormField, widget: usize) -> Focus {
     }
 }
 
-/// Clicks on form widgets of one page. Returns `true` when the click belongs to a field.
+/// Where the pointer is relative to one page's form widgets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FieldPointer {
+    /// Not over a field.
+    Away,
+    /// Over a field, which has set the cursor. Nothing is pressed, so the layers below still see
+    /// the hover, but they must not replace the cursor: a check box drawn with a glyph, or set
+    /// on printed text, is a button, not text to select.
+    Over,
+    /// The field owns the press or click.
+    Owned,
+}
+
+/// Clicks on form widgets of one page.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn page_input(
     ui: &egui::Ui,
@@ -95,9 +108,9 @@ pub(crate) fn page_input(
     form: &[FormField],
     allowed: bool,
     view: &mut DocView,
-) -> bool {
+) -> FieldPointer {
     let pointer = ui.input(|i| i.pointer.hover_pos());
-    let Some(p) = pointer.filter(|p| xf.rect.contains(*p)) else { return false };
+    let Some(p) = pointer.filter(|p| xf.rect.contains(*p)) else { return FieldPointer::Away };
     let hit = form.iter().find_map(|f| {
         f.widgets
             .iter()
@@ -105,7 +118,7 @@ pub(crate) fn page_input(
             .find(|(_, w)| w.page == Some(page) && !w.hidden && widget_rect(xf, info, page, w.rect).contains(p))
             .map(|(i, w)| (f, i, w))
     });
-    let Some((f, wi, w)) = hit else { return false };
+    let Some((f, wi, w)) = hit else { return FieldPointer::Away };
     // Empty signature fields are signed by clicking them (Use a certificate); push buttons run
     // their action.
     let pressable = f.kind == FormFieldKind::PushButton && !f.read_only() && f.button.is_some();
@@ -116,11 +129,11 @@ pub(crate) fn page_input(
         _ => egui::CursorIcon::PointingHand,
     });
     if !resp.clicked() {
-        return resp.is_pointer_button_down_on();
+        return if resp.is_pointer_button_down_on() { FieldPointer::Owned } else { FieldPointer::Over };
     }
     if !allowed {
         view.forms.notice = Some(FormNotice::Security);
-        return true;
+        return FieldPointer::Owned;
     }
     match f.kind {
         _ if f.read_only() => view.forms.notice = Some(FormNotice::ReadOnly(f.name.clone())),
@@ -149,7 +162,7 @@ pub(crate) fn page_input(
             }
         }
     }
-    true
+    FieldPointer::Owned
 }
 
 /// The edit the focused field's draft makes, if it differs from the field's value.
