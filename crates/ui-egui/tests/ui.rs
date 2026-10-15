@@ -878,6 +878,15 @@ fn files_and_quit_from_the_operating_system() {
     std::fs::remove_file(&path).ok();
     assert_eq!(h.state().views.len(), 1, "the file opens in a tab");
     h.get_by_label_contains(&name);
+    // A file opened while the app runs brings its window forward, even minimized or full screen
+    // on another Space.
+    std::fs::write(&path, FIXTURE).unwrap();
+    queue.borrow_mut().push(OsEvent::Open(vec![path.to_string_lossy().into_owned()]));
+    h.step();
+    std::fs::remove_file(&path).ok();
+    let commands: Vec<_> = h.output().viewport_output.values().flat_map(|v| v.commands.clone()).collect();
+    assert!(commands.contains(&egui::ViewportCommand::Minimized(false)), "{commands:?}");
+    assert!(commands.contains(&egui::ViewportCommand::Focus), "{commands:?}");
     // Quit closes the window like the close button, so unsaved changes are asked about.
     queue.borrow_mut().push(OsEvent::Quit);
     h.step();

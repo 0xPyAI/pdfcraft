@@ -3047,7 +3047,13 @@ impl eframe::App for PdfCraftApp {
         for e in os_events {
             match e {
                 #[cfg(not(target_arch = "wasm32"))]
-                OsEvent::Open(paths) => paths.iter().for_each(|p| self.open_path(p)),
+                OsEvent::Open(paths) => {
+                    paths.iter().for_each(|p| self.open_path(p));
+                    // Files handed to the running app (Finder, or another launch): bring its
+                    // window to the front, also when minimized or full screen on another Space.
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
                 #[cfg(target_arch = "wasm32")]
                 OsEvent::Open(_) => {}
                 // Like closing the window: `guard_quit` asks about unsaved changes.
