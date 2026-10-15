@@ -80,6 +80,8 @@ fn harness(path: &str) -> Harness<'static, PdfCraftApp> {
         app.set_option("language", "en").unwrap();
         // The labels looked for are English, whatever the machine's language.
         app.set_option("language", "en").unwrap();
+        // The labels below are English whatever the developer's system language is.
+        app.set_option("language", "en").unwrap();
         app.run_inline = true;
         app.open_path(&path);
         app
