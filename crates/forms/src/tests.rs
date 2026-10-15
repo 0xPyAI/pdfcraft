@@ -896,6 +896,34 @@ fn formats_validation_and_calculations_run_like_acrobat() {
 }
 
 #[test]
+fn new_text_fields_fit_their_box() {
+    // #1888: a fixed 12 pt was clipped in a short box. New text and date fields take Acrobat's
+    // Auto size: 12 pt where there is room, smaller where there isn't.
+    let mut doc = one_page();
+    let tf_size = |ap: &str| {
+        ap.split("/Helv ")
+            .nth(1)
+            .and_then(|s| s.split(' ').next())
+            .and_then(|n| n.parse::<f64>().ok())
+            .unwrap_or_else(|| panic!("no /Helv size in {ap}"))
+    };
+    for (kind, name, value) in [(NewField::Text { multiline: false }, "short", "Hello world"), (NewField::Date, "date", "10/13/2026")] {
+        add_field(&mut doc, 0, [20.0, 20.0, 200.0, 28.0], &kind, Some(name)).unwrap();
+        set_value(&mut doc, name, &FieldValue::Text(value.into())).unwrap();
+        let f = field(&fields(&doc), name).clone();
+        assert_eq!(f.da, "/Helv 0 Tf 0 g", "{name}");
+        let size = tf_size(&ap(&doc, &f.widgets[0]));
+        assert!(size > 0.0 && size <= 8.0, "{name}: {size} pt in an 8 pt box");
+    }
+    add_field(&mut doc, 0, [20.0, 50.0, 200.0, 72.0], &NewField::Text { multiline: false }, Some("tall")).unwrap();
+    set_value(&mut doc, "tall", &FieldValue::Text("Hello world".into())).unwrap();
+    assert_eq!(tf_size(&ap(&doc, &field(&fields(&doc), "tall").widgets[0])), 12.0, "a box with room keeps the 12 pt look");
+    // An explicit size still wins.
+    set_props(&mut doc, "short", &FieldProps { font_size: Some(12.0), ..FieldProps::default() }).unwrap();
+    assert_eq!(tf_size(&ap(&doc, &field(&fields(&doc), "short").widgets[0])), 12.0);
+}
+
+#[test]
 fn appearance_properties_restyle_every_widget() {
     let mut doc = one_page();
     add_field(&mut doc, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: false }, Some("name")).unwrap();
