@@ -34,6 +34,10 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     if let (Dialog::Properties(PropsTab::Fonts), Some((_, id))) = (dialog, app.active_ids()) {
         app.session.refresh_fonts(id);
     }
+    // Properties ▸ Space Audit walks the whole file, so it is measured once per edit, not per frame.
+    if dialog == Dialog::Properties(PropsTab::SpaceAudit) {
+        app.refresh_space_audit();
+    }
     // Seed the editable Description fields from the document when the dialog opens.
     if let (Dialog::Properties(_), Some((_, id))) = (dialog, app.active_ids())
         && app.props_draft.as_ref().is_none_or(|(d, _)| *d != id)
@@ -107,6 +111,7 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                         (PropsTab::Security, tl!("Security")),
                         (PropsTab::Fonts, tl!("Fonts")),
                         (PropsTab::Advanced, tl!("Advanced")),
+                        (PropsTab::SpaceAudit, tl!("Space Audit")),
                     ] {
                         if widgets::mode_tab(ui, label, tab == tb).clicked() {
                             next = Dialog::Properties(tb);
@@ -133,6 +138,11 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                     ui.end_row();
                 };
                 egui::ScrollArea::vertical().max_height(460.0).auto_shrink([false, true]).show(ui, |ui| {
+                    if tab == PropsTab::SpaceAudit {
+                        ui.add_space(4.0);
+                        crate::optimize_ui::audit_table(ui, &app.space_audit, &t);
+                        return;
+                    }
                     egui::Grid::new("props").num_columns(2).spacing([18.0, 8.0]).min_col_width(140.0).show(ui, |ui| match tab {
                         PropsTab::Description => {
                             row(ui, "File", crate::bidi::visual(&doc.name).into_owned());
@@ -409,7 +419,9 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                                 ui.end_row();
                             }
                         }
-                    })
+                        // Laid out above, outside the two-column grid.
+                        PropsTab::SpaceAudit => {}
+                    });
                 });
             }
             Dialog::Split => {
@@ -727,7 +739,7 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 optimize_now = ok;
                 close = ok || cancel;
                 if std::mem::take(&mut app.optimize_draft.audit) {
-                    app.space_audit = app.active_ids().and_then(|(_, id)| app.session.get(id)).map(|d| d.audit_space()).unwrap_or_default();
+                    app.refresh_space_audit();
                     next = Dialog::AuditSpace;
                 }
                 return;

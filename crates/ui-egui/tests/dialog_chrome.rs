@@ -129,3 +129,41 @@ fn document_properties_values_line_up_and_long_fields_wrap() {
     let subject = h.get_by_role_and_label(Role::MultilineTextInput, "Subject").rect();
     assert!(subject.height() > title.height() + 8.0, "subject field {subject:?}, title field {title:?}");
 }
+
+#[test]
+fn space_audit_tab_measures_the_file_and_stays_in_the_card() {
+    use pdfcraft_ui_egui::{Dialog, PropsTab};
+    let open = |dialog: Dialog| {
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+            let mut app = PdfCraftApp::new();
+            app.set_option("language", "en").unwrap();
+            app.open_bytes("doc.pdf", None, fixture()).unwrap();
+            app.dialog = Some(dialog);
+            app
+        });
+        h.run_steps(4);
+        h
+    };
+    let fonts = card(&open(Dialog::Properties(PropsTab::Fonts)), "dialog");
+    // The tab is reachable by name, like the other Properties tabs.
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("doc.pdf", None, fixture()).unwrap();
+        app.set_option("dialog", "space-audit").unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert_eq!(h.state().dialog, Some(Dialog::Properties(PropsTab::SpaceAudit)));
+    assert!(!h.state().space_audit.is_empty(), "the tab measures the file when it opens");
+    h.get_by_label("Total");
+    // Switching tabs keeps the dialog the same size, and the table stays inside its padding,
+    // in the tab and in the Optimizer's own Audit Space Usage dialog.
+    let tab = card(&h, "dialog");
+    assert!((tab.width() - fonts.width()).abs() < 0.5, "space audit card {tab:?}, fonts card {fonts:?}");
+    for h in [h, open(Dialog::AuditSpace)] {
+        let card = card(&h, "dialog");
+        let pct = h.get_by_label("Percentage").rect();
+        assert!(pct.right() <= card.right() - 16.0, "Percentage {pct:?} in {card:?}");
+    }
+}
