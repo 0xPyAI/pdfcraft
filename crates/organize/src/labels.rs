@@ -385,7 +385,9 @@ pub fn set_page_label_ranges(doc: &mut Document, ranges: &[LabelRange]) -> Resul
             spec.set(b"St".to_vec(), Object::Int(i64::from(r.first)));
         }
         nums.push(Object::Int(r.start as i64));
-        nums.push(Object::Dict(spec));
+        // Indirect, as Acrobat writes them: a direct dictionary is valid too, but some readers
+        // (pdfannots2json, through unipdf) skip it and show physical page numbers (#1763).
+        nums.push(Object::Ref(doc.add(Object::Dict(spec))));
     }
     let mut tree = Dict::new();
     tree.set(b"Nums".to_vec(), Object::Array(nums));

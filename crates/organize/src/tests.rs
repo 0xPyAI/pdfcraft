@@ -1550,6 +1550,38 @@ fn page_label_limits_validate_the_same_ranges_that_are_written() {
     assert_eq!(nums[2].as_int(), Some(1));
 }
 
+/// Each label dictionary is its own object, referenced from `/Nums`, as Acrobat writes them. A
+/// direct dictionary is just as valid, but some readers (pdfannots2json, through unipdf) skip it
+/// and fall back to physical page numbers (#1763).
+#[test]
+fn page_labels_are_written_as_indirect_dictionaries() {
+    use crate::{LabelRange, LabelStyle};
+    let mut d = doc_a();
+    let ranges = [
+        LabelRange { start: 0, style: LabelStyle::LowerRoman, prefix: String::new(), first: 1 },
+        LabelRange { start: 1, style: LabelStyle::Decimal, prefix: "A-".into(), first: 324 },
+        LabelRange { start: 2, style: LabelStyle::None, prefix: "Cover".into(), first: 1 },
+    ];
+    crate::set_page_label_ranges(&mut d, &ranges).unwrap();
+    let back = full_roundtrip(&d);
+    let catalog = back.get(back.root().unwrap());
+    let tree = back.resolve(catalog.as_dict().unwrap().get(b"PageLabels").unwrap());
+    let nums = tree.as_dict().unwrap().get(b"Nums").unwrap().as_array().unwrap();
+    assert_eq!(nums.len(), 6);
+    let expected = [(0, Some(b"r".as_slice()), None, None), (1, Some(b"D".as_slice()), Some("A-"), Some(324)), (2, None, Some("Cover"), None)];
+    for (pair, (start, style, prefix, first)) in nums.chunks(2).zip(expected) {
+        assert_eq!(pair[0].as_int(), Some(start));
+        let Object::Ref(r) = &pair[1] else { panic!("the label of page {start} is not an indirect object: {:?}", pair[1]) };
+        let spec = back.get(*r);
+        let spec = spec.as_dict().unwrap();
+        assert_eq!(spec.name(b"S"), style);
+        assert_eq!(spec.get(b"P").and_then(|p| p.as_string()).map(|p| p.to_text()).as_deref(), prefix);
+        assert_eq!(spec.int(b"St"), first);
+    }
+    assert_eq!(crate::page_label_ranges(&back), ranges);
+    assert_eq!(crate::page_labels(&back).unwrap(), ["i", "A-324", "Cover"]);
+}
+
 #[test]
 fn page_label_duplicate_starts_keep_the_later_range() {
     let mut d = doc_a();
