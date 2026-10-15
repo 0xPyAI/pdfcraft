@@ -327,3 +327,68 @@ fn page_tree_loops_in_object_streams_do_not_crash_readers() {
     assert!(String::from_utf8_lossy(&packed).contains("/ObjStm"));
     assert_eq!(hayro_pages(&packed), 1);
 }
+
+/// Catalog, empty page tree, and trailer entries a reader must not invent: a direct name, a
+/// direct string, and a string object reachable only from the trailer.
+fn trailer_fixture() -> Vec<u8> {
+    let mut out = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, body) in ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [] /Count 0 >>", "(only from the trailer)"].iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(b"xref\n0 4\n0000000000 65535 f \n");
+    for offset in offsets {
+        out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(
+        format!("trailer\n<< /Size 4 /Root 1 0 R /Version /1.7 /Custom (keep me) /Note 3 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+    );
+    out
+}
+
+fn trailer_custom(doc: &Document) -> Option<Vec<u8>> {
+    doc.trailer().get(b"Custom").and_then(Object::as_string).map(|s| s.bytes.clone())
+}
+
+fn trailer_note(doc: &Document) -> Option<Vec<u8>> {
+    doc.trailer().get(b"Note").map(|o| doc.resolve(o)).and_then(|o| o.as_string().map(|s| s.bytes.clone()))
+}
+
+#[test]
+fn full_save_preserves_unknown_trailer_data() {
+    let input = trailer_fixture();
+    let doc = Document::open(Arc::new(input)).unwrap();
+    assert_eq!(trailer_custom(&doc), Some(b"keep me".to_vec()));
+    assert_eq!(trailer_note(&doc).as_deref(), Some(b"only from the trailer".as_slice()));
+    assert_eq!(doc.trailer().get(b"Version").and_then(Object::as_name), Some(&b"1.7"[..]));
+    assert!(doc.repair_log().is_empty());
+    assert!(!doc.full_save_required());
+
+    let inc = Document::open(Arc::new(write_incremental(&doc, &SaveOptions::default()).unwrap())).unwrap();
+    assert_eq!(trailer_custom(&inc), trailer_custom(&doc));
+    assert_eq!(trailer_note(&inc), trailer_note(&doc));
+    assert_eq!(inc.trailer().get(b"Version"), doc.trailer().get(b"Version"));
+    assert!(inc.repair_log().is_empty());
+
+    for object_streams in [true, false] {
+        let opts = SaveOptions { object_streams, ..SaveOptions::default() };
+        let bytes = write_full(&doc, &opts).unwrap();
+        let back = Document::open(Arc::new(bytes)).unwrap();
+        assert!(back.root().is_some());
+        assert!(back.repair_log().is_empty(), "{:?}", back.repair_log());
+        assert_eq!(trailer_custom(&back), trailer_custom(&doc));
+        assert_eq!(trailer_note(&back), trailer_note(&doc));
+        assert_eq!(back.trailer().get(b"Version"), doc.trailer().get(b"Version"));
+    }
+
+    let mut required = doc.clone();
+    required.require_full_save();
+    let back = Document::open(Arc::new(write_incremental(&required, &SaveOptions::default()).unwrap())).unwrap();
+    assert!(back.root().is_some());
+    assert!(back.repair_log().is_empty(), "{:?}", back.repair_log());
+    assert_eq!(trailer_custom(&back), trailer_custom(&doc));
+    assert_eq!(trailer_note(&back), trailer_note(&doc));
+    assert_eq!(back.trailer().get(b"Version"), doc.trailer().get(b"Version"));
+}
