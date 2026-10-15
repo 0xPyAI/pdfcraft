@@ -1548,7 +1548,7 @@ impl Document {
                 if !valid_xref_range(start, count) || count > 10_000_000 {
                     return Err(CosError::Syntax { offset: lx.pos, detail: "invalid xref object range".into() });
                 }
-                let shifted = subsection_start(data, lx.pos, start, count);
+                let shifted = subsection_start(data, self.header_offset, lx.pos, start, count);
                 renumbered |= shifted != start;
                 let start = shifted;
                 let Some(next_rows) = usize::try_from(count).ok().and_then(|count| row_count.checked_add(count)) else { return Ok(None) };
@@ -1824,7 +1824,7 @@ impl Document {
                 if !valid_xref_range(start, count) || count > 10_000_000 {
                     return Err(CosError::Syntax { offset: lx.pos, detail: "invalid xref object range".into() });
                 }
-                let shifted = subsection_start(data, lx.pos, start, count);
+                let shifted = subsection_start(data, self.header_offset, lx.pos, start, count);
                 if shifted != start {
                     log.push(format!("xref subsection at {off} is numbered from 1 but begins with object 0's entry; read from 0"));
                 }
@@ -2085,9 +2085,10 @@ fn generated_id(seed: &[u8; 32]) -> Vec<u8> {
 /// The object number a classic xref subsection really starts at. A common producer bug heads the
 /// table `1 n` and then writes object 0's free entry (`0000000000 65535 f`) as its first row, so
 /// every row would be read one number too high and object 1 as free. Such a subsection is read
-/// from 0 when its second row, read that way, locates an object that is indeed numbered 1. `rows`
-/// is the position just after the subsection header.
-fn subsection_start(data: &[u8], rows: usize, start: i64, count: i64) -> i64 {
+/// from 0 when its second row, read that way, locates an object that is indeed numbered 1, at
+/// that offset or, as `load` reads offsets, relative to a header shifted by `header_offset`.
+/// `rows` is the position just after the subsection header.
+fn subsection_start(data: &[u8], header_offset: usize, rows: usize, start: i64, count: i64) -> i64 {
     if start != 1 || count < 2 {
         return start;
     }
@@ -2102,12 +2103,15 @@ fn subsection_start(data: &[u8], rows: usize, start: i64, count: i64) -> i64 {
     };
     let (Some(0), Some(65535), true) = row() else { return start };
     let (Some(second), _, false) = row() else { return start };
-    let Some(at) = usize::try_from(second).ok().filter(|at| *at < data.len()) else { return start };
-    let mut obj = Lexer::new(data, at);
-    match (obj.object(), obj.object()) {
-        (Ok(Object::Int(1)), Ok(Object::Int(_))) if obj.eat_keyword(b"obj") => 0,
-        _ => start,
-    }
+    let object_one = |at: usize| {
+        if at >= data.len() {
+            return false;
+        }
+        let mut obj = Lexer::new(data, at);
+        matches!((obj.object(), obj.object()), (Ok(Object::Int(1)), Ok(Object::Int(_)))) && obj.eat_keyword(b"obj")
+    };
+    let Ok(second) = usize::try_from(second) else { return start };
+    if object_one(second) || (header_offset != 0 && object_one(second.saturating_add(header_offset))) { 0 } else { start }
 }
 
 /// Object numbers must fit the representation used by references and the xref map.
@@ -2460,6 +2464,73 @@ endobj
         assert!(matches!(&*doc.get(ObjRef::new(4, 0)), Object::Stream(_)), "the gap is filled");
         assert_eq!(*doc.get(ObjRef::new(5, 0)), Object::Null, "the freed image stays freed");
         assert_eq!(doc.xref_entry(5), Some(XrefEntry::Free { next_generation: 1 }));
+    }
+
+    /// The image the first page draws as `/Im1`, followed through the page tree.
+    fn first_page_image(doc: &Document) -> Arc<Object> {
+        let catalog = doc.get(doc.root().unwrap());
+        let pages = doc.resolve(catalog.as_dict().unwrap().get(b"Pages").unwrap());
+        let page = doc.resolve(&pages.as_dict().unwrap().get(b"Kids").unwrap().as_array().unwrap()[0]);
+        let resources = doc.resolve(page.as_dict().unwrap().get(b"Resources").unwrap());
+        let xobjects = doc.resolve(resources.as_dict().unwrap().get(b"XObject").unwrap());
+        doc.resolve(xobjects.as_dict().unwrap().get(b"Im1").unwrap())
+    }
+
+    /// The opposite off-by-one (#1628): the subsection says it starts at 1, but its first entry
+    /// is object 0's free-list head, so every entry lands one number too high and object 1, the
+    /// image, reads as free. The offset the table gives object 2 holds `1 0 obj`, so the
+    /// subsection is read from 0, and the image survives a full save.
+    #[test]
+    fn a_subsection_from_one_that_opens_with_the_free_list_head_is_read_from_zero() {
+        let base = build(
+            &[
+                "<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length 12 >>\nstream\nABCDEFGHIJKL\nendstream",
+                "<< /Length 29 >>\nstream\nq 72 0 0 72 0 0 cm /Im1 Do Q\nendstream",
+                "<< /Type /Page /Parent 4 0 R /MediaBox [0 0 72 72] /Resources << /XObject << /Im1 1 0 R >> >> /Contents 2 0 R >>",
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+                "<< /Type /Catalog /Pages 4 0 R >>",
+                "<< /Subject (synthetic) >>",
+            ],
+            "/Root 5 0 R /Info 6 0 R",
+        );
+        // /Size 7 is one short of the shifted numbers; /Size 8 covers them all. Junk before the
+        // header moves every object past the offsets the table gives; it is not a comment, which
+        // the lexer would skip on its way to `1 0 obj` anyway.
+        for (size, junk) in [(7, ""), (8, ""), (7, "Content-Type: application/pdf\n\n")] {
+            let text = String::from_utf8_lossy(&base).replace("\nxref\n0 7\n", "\nxref\n1 7\n").replace("/Size 7 ", &format!("/Size {size} "));
+            let doc = Document::open(Arc::new(format!("{junk}{text}").into_bytes())).unwrap();
+            let image = first_page_image(&doc);
+            assert_eq!(image.as_dict().and_then(|d| d.name(b"Subtype")), Some(&b"Image"[..]), "/Size {size} {junk:?}: {image:?}");
+            assert_eq!(doc.xref_entry(0), Some(XrefEntry::Free { next_generation: 65535 }), "/Size {size} {junk:?}");
+            assert!(doc.repair_log().iter().any(|l| l.contains("from 0")), "/Size {size} {junk:?}: {:?}", doc.repair_log());
+            let saved = Document::open(Arc::new(crate::write_full(&doc, &crate::SaveOptions::default()).unwrap())).unwrap();
+            let image = first_page_image(&saved);
+            assert!(matches!(&*image, Object::Stream(s) if &s.raw[..] == b"ABCDEFGHIJKL"), "/Size {size} {junk:?}: {image:?}");
+        }
+    }
+
+    /// Object 1 really freed: the subsection from 1 opens with a free entry, but the next entry's
+    /// offset holds object 2, not object 1. The table is taken as it is, and the old body of
+    /// object 1 still in the file stays freed.
+    #[test]
+    fn a_subsection_from_one_whose_next_offset_holds_object_two_is_taken_as_it_is() {
+        let base = build(&["(freed)", "<< /Type /Catalog /Pages 3 0 R >>", "<< /Type /Pages /Kids [] /Count 0 >>"], "/Root 2 0 R");
+        let entries = table_entries(&base);
+        let mut table = vec!["1 3".to_string(), "0000000000 65535 f ".to_string()];
+        table.extend(entries[2..].iter().cloned());
+        let text = String::from_utf8_lossy(&base).into_owned();
+        let at = text.rfind("\nxref\n").unwrap() + 1;
+        for junk in ["", "Content-Type: application/pdf\n\n"] {
+            let mut bytes = junk.as_bytes().to_vec();
+            bytes.extend_from_slice(&base[..at]);
+            bytes.extend_from_slice(format!("xref\n{}\ntrailer\n<< /Size 4 /Root 2 0 R >>\nstartxref\n{at}\n%%EOF\n", table.join("\n")).as_bytes());
+            let doc = Document::open(Arc::new(bytes)).unwrap();
+            assert_eq!(doc.xref_entry(1), Some(XrefEntry::Free { next_generation: 65535 }), "{junk:?}");
+            assert_eq!(*doc.get(ObjRef::new(1, 0)), Object::Null, "{junk:?}: the freed object stays freed");
+            assert!(matches!(&*doc.get(ObjRef::new(2, 0)), Object::Dict(d) if d.name(b"Type") == Some(&b"Catalog"[..])), "{junk:?}");
+            assert!(!doc.repair_log().iter().any(|l| l.contains("from 0")), "{junk:?}: {:?}", doc.repair_log());
+            assert!(!junk.is_empty() || doc.repair_log().is_empty(), "{:?}", doc.repair_log());
+        }
     }
 
     #[test]
