@@ -51,7 +51,8 @@ pub struct PrintDraft {
     pub copies: u32,
     pub collate: bool,
     pub grayscale: bool,
-    pub duplex: spool::Duplex,
+    /// `None` = the printer's own default (its Properties), as Acrobat does.
+    pub duplex: Option<spool::Duplex>,
     pub which: Which,
     pub range: String,
     /// The pages `Which::Selected` prints (0-based, in page order); empty when none were picked.
@@ -106,7 +107,7 @@ impl Default for PrintDraft {
             copies: 1,
             collate: true,
             grayscale: false,
-            duplex: spool::Duplex::Off,
+            duplex: None,
             which: Which::All,
             range: String::new(),
             selected: Vec::new(),
@@ -145,7 +146,7 @@ impl Default for PrintDraft {
 impl PrintDraft {
     /// The engine settings for this draft (page count and labels from the document).
     pub fn settings(&self, count: usize, labels: &[String]) -> Result<print::Settings, String> {
-        if self.handling == Handling::Multiple && self.order == PageOrder::CutStack && self.duplex != spool::Duplex::Off {
+        if self.cut_and_stack() && matches!(self.duplex, Some(spool::Duplex::LongEdge | spool::Duplex::ShortEdge)) {
             return Err("Cut and stack needs Two-sided: Off. Print single-sided sheets.".into());
         }
         let range = match self.which {
@@ -188,12 +189,17 @@ impl PrintDraft {
         })
     }
 
+    fn cut_and_stack(&self) -> bool {
+        self.handling == Handling::Multiple && self.order == PageOrder::CutStack
+    }
+
     pub fn job(&self, title: &str) -> spool::Job {
         spool::Job {
             printer: self.printer.clone(),
             copies: self.copies.max(1),
             collate: self.collate,
-            duplex: Some(self.duplex),
+            // Cut and stack needs single-sided sheets, whatever the printer's default.
+            duplex: if self.cut_and_stack() { Some(spool::Duplex::Off) } else { self.duplex },
             scaling: spool::Scaling::Exact,
             grayscale: self.grayscale,
             title: title.to_string(),
@@ -895,9 +901,10 @@ pub(crate) fn body(
                         "duplex",
                         &mut d.duplex,
                         &[
-                            (spool::Duplex::Off, tl!("Off")),
-                            (spool::Duplex::LongEdge, tl!("Flip on long edge")),
-                            (spool::Duplex::ShortEdge, tl!("Flip on short edge")),
+                            (None, tl!("Printer default")),
+                            (Some(spool::Duplex::Off), tl!("Off")),
+                            (Some(spool::Duplex::LongEdge), tl!("Flip on long edge")),
+                            (Some(spool::Duplex::ShortEdge), tl!("Flip on short edge")),
                         ],
                         160.0,
                     );
@@ -1274,11 +1281,25 @@ mod tests {
 
     #[test]
     fn composed_sheets_keep_exact_scaling_and_the_dialogs_duplex_choice() {
-        let draft = PrintDraft { duplex: spool::Duplex::LongEdge, ..PrintDraft::default() };
+        let draft = PrintDraft { duplex: Some(spool::Duplex::LongEdge), ..PrintDraft::default() };
         let job = draft.job("report.pdf");
         assert_eq!(job.scaling, spool::Scaling::Exact);
         assert_eq!(job.duplex, Some(spool::Duplex::LongEdge));
-        assert_eq!(PrintDraft::default().job("report.pdf").duplex, Some(spool::Duplex::Off));
+        let off = PrintDraft { duplex: Some(spool::Duplex::Off), ..PrintDraft::default() };
+        assert_eq!(off.job("report.pdf").duplex, Some(spool::Duplex::Off));
+    }
+
+    /// Untouched, Two-sided sends nothing, so the duplex set in the printer's Properties applies
+    /// (#2422); cut and stack still asks for single-sided sheets.
+    #[test]
+    fn two_sided_follows_the_printer_until_chosen() {
+        assert_eq!(PrintDraft::default().duplex, None);
+        assert_eq!(PrintDraft::default().job("report.pdf").duplex, None);
+        let mut cut = PrintDraft { handling: Handling::Multiple, order: PageOrder::CutStack, ..PrintDraft::default() };
+        assert_eq!(cut.job("report.pdf").duplex, Some(spool::Duplex::Off));
+        assert!(cut.settings(4, &[]).is_ok(), "the printer's default doesn't block cut and stack");
+        cut.duplex = Some(spool::Duplex::ShortEdge);
+        assert!(cut.settings(4, &[]).is_err());
     }
 
     /// A job being spooled holds the progress card, counting its sheets as the spooler reports
