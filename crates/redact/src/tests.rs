@@ -631,6 +631,57 @@ fn hidden_information_is_counted_and_removed() {
     assert!(shown, "the field's value stays visible as page content");
 }
 
+/// Issue #2447: in a tagged PDF the structure tree points at the link and the comment it tags
+/// (`/OBJR`). Removing them must drop those references too, or the full rewrite keeps the
+/// annotations, the URL and the comment text included, while the page no longer lists them.
+#[test]
+fn removed_links_and_comments_leave_the_structure_tree_and_the_saved_file() {
+    use crate::sanitize::{Hidden, remove_hidden};
+    let objs: Vec<Vec<u8>> = vec![
+        // 1 catalog, with a structure tree
+        b"<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 8 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        // 3 page: a tagged paragraph (MCID 0), a link and a comment, both tagged
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R 7 0 R] /StructParents 0 >>".to_vec(),
+        stream("", b"/P << /MCID 0 >> BDC BT /F1 10 Tf 10 230 Td (See the site) Tj ET EMC"),
+        FONT.replace("95 0 R", "13 0 R").into_bytes(),
+        // 6 link, 7 comment
+        b"<< /Type /Annot /Subtype /Link /Rect [10 228 80 240] /StructParent 1 /A << /S /URI /URI (https://secret.example/token=ZX81) >> >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Text /Rect [200 200 220 220] /StructParent 2 /Contents (COMMENTSECRETNOTE) >>".to_vec(),
+        // 8 struct tree root, 9 document element, 10 paragraph, 11 link element (direct OBJR),
+        // 12 annotation element (OBJR by reference, as K's only kid)
+        b"<< /Type /StructTreeRoot /K 9 0 R /ParentTree << /Nums [0 [10 0 R] 1 11 0 R 2 12 0 R] >> /ParentTreeNextKey 3 >>".to_vec(),
+        b"<< /Type /StructElem /S /Document /P 8 0 R /K [10 0 R 11 0 R 12 0 R] >>".to_vec(),
+        b"<< /Type /StructElem /S /P /P 9 0 R /Pg 3 0 R /K 0 >>".to_vec(),
+        b"<< /Type /StructElem /S /Link /P 9 0 R /Pg 3 0 R /K [<< /Type /OBJR /Obj 6 0 R /Pg 3 0 R >>] >>".to_vec(),
+        b"<< /Type /StructElem /S /Annot /P 9 0 R /Pg 3 0 R /K 14 0 R >>".to_vec(),
+        widths(),
+        b"<< /Type /OBJR /Obj 7 0 R /Pg 3 0 R >>".to_vec(),
+    ];
+    let mut doc = pdf(objs);
+    let done = remove_hidden(&mut doc, &[Hidden::LinksActionsScripts, Hidden::Comments]).unwrap();
+    assert!(done.contains(&(Hidden::LinksActionsScripts, 1)) && done.contains(&(Hidden::Comments, 1)), "{done:?}");
+    let bytes = write_full(&doc, &SaveOptions::default()).unwrap();
+    let has = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
+    assert!(!has(b"secret.example"), "the removed link's URL survived the save");
+    assert!(!has(b"COMMENTSECRETNOTE"), "the removed comment's text survived the save");
+    // The tagged paragraph and its content stay; the elements lose only the references.
+    let saved = Document::open(Arc::new(bytes)).unwrap();
+    assert!(content(&saved, 0).contains("(See the site)"));
+    let objrs = saved.object_numbers().into_iter().filter(|&n| {
+        let o = saved.get(ObjRef::new(n, saved.generation(n)));
+        let direct = o.as_dict().is_some_and(|d| d.name(b"Type") == Some(b"OBJR"));
+        let nested = o.as_dict().and_then(|d| d.get(b"K")).is_some_and(|k| match &*saved.resolve(k) {
+            Object::Array(a) => a.iter().any(|x| saved.resolve(x).as_dict().is_some_and(|d| d.name(b"Type") == Some(b"OBJR"))),
+            _ => false,
+        });
+        direct || nested
+    });
+    assert_eq!(objrs.count(), 0, "no object reference to a removed annotation is left");
+    let root = saved.get(saved.root().unwrap()).as_dict().cloned().unwrap();
+    assert!(root.contains(b"StructTreeRoot"), "the structure tree itself stays");
+}
+
 /// Issue #1325: removing comments keeps the annotations that are not comments: the multimedia
 /// and print-production ones (Watermark, PrinterMark, TrapNet, Screen, Movie, RichMedia, 3D).
 #[test]
