@@ -5107,6 +5107,7 @@ trailer << /Root 1 0 R >>
     fn explicit_search_jumps_record_history_and_keep_match_destination() {
         for step in [None, Some(true), Some(false)] {
             let mut v = history_search_view();
+            v.page_input = "draft in progress".into();
             v.goto_point = Some((3, Some(0.8), Some(0.9), Vec2::ZERO));
             if let Some(forward) = step {
                 v.find_step(forward);
@@ -5115,7 +5116,11 @@ trailer << /Root 1 0 R >>
             }
             assert_eq!(v.back, vec![0], "explicit search jump must remember its origin");
             assert_eq!(v.goto, Some((3, 0.5)), "keep the match offset instead of the page top");
-            assert_eq!(v.page_input, "4");
+            assert_eq!(v.current, 3);
+            assert_eq!(v.current_page_label(None), "4");
+            // Chrome refreshes the idle page box; navigation must not overwrite a draft
+            // that may still be focused. DocView does not own the editor's focus state.
+            assert_eq!(v.page_input, "draft in progress");
             assert!(v.goto_point.is_none(), "an earlier link destination cannot override the search offset");
             v.go_to_match(1);
             assert_eq!(v.back, vec![0], "same-page matches do not duplicate history");
