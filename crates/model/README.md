@@ -14,5 +14,9 @@ L3/L4 crates need:
   `view_matrix_for(rotation, rect)` is the same matrix for any rectangle, e.g. to draw a
   comment's picture upright inside its user-space `/Rect` on a turned page.
 
+The page-tree walk keeps one cursor per ancestor and shares inherited attribute owners.
+Repeated child references are skipped before copying attributes, with first depth-first
+occurrence order preserved. Returned page dictionaries still own their effective attributes.
+
 `organize`, `annot` and `forms` still carry their own small walkers; they move here as the model
 grows (ADR-0004).
