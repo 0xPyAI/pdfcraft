@@ -37,6 +37,9 @@ set). Without that variable `CRAFT_FONTS` is empty and everything below copes:
   Hebrew interface text, and the face whose outlines become the Type 3 fallback for Hebrew text
   written by Edit text (Bold when asked for and present, else Regular). `None` without a
   craft-fonts input that has one; the editor then reports a clear error.
+- `shape_hebrew` / `hebrew_has`: the Regular `Hebr` face shaped with harfrust for Hebrew Add
+  Text content, one cluster per letter with its points and cantillation marks (positioned by the
+  face), drawn by the same Type 3 writer as Arabic and Thai. `GlyphError::NoFont` without the face.
 - `document_japanese_font` / `japanese_glyph`: the face (Shippori Mincho, then BIZ UDMincho) whose
   outlines become the Type 3 fallback font for Japanese text written into PDFs. Without it,
   `japanese_glyph` returns `GlyphError::NoFont` and the editor reports a clear error.

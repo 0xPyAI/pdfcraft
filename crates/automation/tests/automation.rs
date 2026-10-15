@@ -5661,6 +5661,33 @@ fn thai_text_through_tools_saves_reopens_extracts_and_renders() {
 }
 
 #[test]
+fn hebrew_text_through_tools_saves_reopens_extracts_and_renders() {
+    let dir = workdir("hebrew-content");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path": "a.pdf"}))["doc"].as_u64().unwrap();
+    let text = "שם משפחה: שרון, טל׳ 052-1234567 (נייד)";
+    let args = json!({"doc": doc, "page": 1, "text": text, "rect": [10, 20, 400, 40], "size": 11, "align": "right"});
+    if pdfcraft_fonts::document_hebrew_font(false).is_none() {
+        assert!(a.call("page_add_text", &args).unwrap_err().to_string().contains("U+05E9"));
+        assert_eq!(ok(&mut a, "content_list", json!({"doc": doc}))["count"], 0);
+        return;
+    }
+    ok(&mut a, "page_add_text", args);
+    // Extraction gives back the typing order, not the drawing order.
+    assert!(page_text(&mut a, doc)[0].contains(text), "{:?}", page_text(&mut a, doc));
+    ok(&mut a, "doc_save", json!({"doc": doc, "path": "hebrew.pdf"}));
+    let reopened = ok(&mut a, "doc_open", json!({"path": "hebrew.pdf"}))["doc"].as_u64().unwrap();
+    assert_eq!(ok(&mut a, "content_list", json!({"doc": reopened}))["items"][0]["text"], text);
+    assert!(page_text(&mut a, reopened)[0].contains(text));
+    let found = ok(&mut a, "text_find", json!({"doc": reopened, "query": "שרון"}));
+    assert_eq!(found["matches"].as_array().map(Vec::len), Some(1), "{found}");
+    let rendered = a.call("page_render", &json!({"doc": reopened, "page": 1, "dpi": 144})).unwrap();
+    assert!(rendered.iter().any(|c| matches!(c, Content::Png { data, width, height } if !data.is_empty() && *width > 0 && *height > 0)));
+    ok(&mut a, "content_update", json!({"doc": reopened, "page": 1, "index": 1, "text": "מיכאל שָׁלוֹם"}));
+    assert!(page_text(&mut a, reopened)[0].contains("מיכאל"));
+}
+
+#[test]
 fn mixed_objects_move_through_tools_with_generation_and_one_undo() {
     let dir = workdir("mixed-object-move");
     let mut a = auto(&dir);

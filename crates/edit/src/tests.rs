@@ -693,6 +693,82 @@ fn added_arabic_text_is_shaped_in_display_order_and_stays_searchable() {
     }
 }
 
+#[test]
+fn added_hebrew_text_is_drawn_right_to_left_and_stays_searchable() {
+    let mut doc = fixture();
+    let text = AddedText {
+        rect: [72.0, 600.0, 400.0, 700.0],
+        text: "שלום (עולם) 2026 World".into(),
+        size: 14.0,
+        align: Align::Right,
+        ..AddedText::default()
+    };
+    if pdfcraft_fonts::document_hebrew_font(false).is_none() {
+        eprintln!("skipping the Hebrew drawing checks: built without a craft-fonts Hebr face (set CRAFT_FONTS_DIR)");
+        assert_eq!(first_undrawable(&text), Some('ש'));
+        let err = add_content(&mut doc, 0, &Content::Text(text)).unwrap_err();
+        assert!(matches!(&err, EditError::Invalid(m) if m.contains("U+05E9")), "{err:?}");
+        assert!(!doc.is_modified(), "nothing is written when the font is missing");
+        return;
+    }
+    assert_eq!(first_undrawable(&text), None);
+    add_content(&mut doc, 0, &Content::Text(text.clone())).unwrap();
+    // Points stay on their letters; a Hebrew line in an Arabic item and Arabic in a Hebrew one.
+    for other in ["שָׁלוֹם", "שלום مرحبا"] {
+        let other = AddedText { text: other.into(), rect: [72.0, 500.0, 400.0, 520.0], ..text.clone() };
+        if other.text.chars().any(|c| ('\u{0600}'..='\u{06FF}').contains(&c)) && pdfcraft_fonts::document_arabic_font().is_none() {
+            continue;
+        }
+        add_content(&mut doc, 0, &Content::Text(other)).unwrap();
+    }
+    let doc = reopen(&doc);
+    let added = list_added(&doc);
+    let Content::Text(t) = &added[0].content else { panic!() };
+    assert_eq!(t.text, "שלום (עולם) 2026 World", "the logical text is kept for editing");
+    let s = streams(&doc, 0);
+    let item = s.iter().find(|s| s.contains("(World) Tj")).unwrap();
+    // A right-to-left paragraph: "World", typed last, is drawn left of the Hebrew.
+    let x_before = |s: &str, at: usize| -> f64 {
+        let tm = s[..at].rfind("1 0 0 1 ").unwrap() + 8;
+        s[tm..].split(' ').next().unwrap().parse().unwrap()
+    };
+    let latin_x = x_before(item, item.find("(World) Tj").unwrap());
+    let hebrew_at = item.find("/PCAr").unwrap();
+    let hebrew_x = x_before(item, item[hebrew_at..].find(" Tj").unwrap() + hebrew_at);
+    assert!(latin_x < hebrew_x, "{item}");
+    // Copy and search get the typing order back.
+    let logical: String = t.text.encode_utf16().map(|u| format!("{u:04X}")).collect();
+    assert!(item.contains(&format!("/ActualText <FEFF{logical}>")), "{item}");
+    // The Hebrew glyphs come from a Type 3 font named after the face, whose ToUnicode map gives
+    // back each letter.
+    let p = &pdfcraft_model::pages(&doc)[0];
+    let res = doc.resolve(p.dict.get(b"Resources").unwrap());
+    let fonts = doc.resolve(res.as_dict().unwrap().get(b"Font").unwrap()).as_dict().unwrap().clone();
+    let shaped: Vec<_> = fonts.iter().filter(|(k, _)| k.starts_with(b"PCAr")).map(|(_, v)| doc.resolve(v).as_dict().unwrap().clone()).collect();
+    let mut mapped = String::new();
+    for f in &shaped {
+        assert_eq!(f.name(b"Subtype"), Some(&b"Type3"[..]));
+        mapped += &String::from_utf8_lossy(&stream_bytes(&doc, f.get(b"ToUnicode").unwrap()).unwrap());
+    }
+    for letter in ["05E9", "05DC", "05D5", "05DD", "05E2"] {
+        assert!(mapped.contains(&format!("<{letter}>")), "{letter} in {mapped}");
+    }
+    let font_name = |f: &Dict| doc.resolve(f.get(b"FontDescriptor").unwrap()).as_dict().unwrap().name(b"FontName").map(<[u8]>::to_vec);
+    assert!(shaped.iter().any(|f| font_name(f).as_deref() == Some(&b"NotoSansHebrew"[..])));
+    // A pointed letter is one glyph with its points, mapped back whole.
+    assert!(mapped.contains("<05E905"), "{mapped}");
+}
+
+#[test]
+fn odd_hebrew_text_never_panics() {
+    let mut doc = fixture();
+    let long = "שלום עולם ".repeat(2_000);
+    for s in ["\u{202E}ש\u{05B8}\u{05B8} (]", "\u{05B8}", "א\u{200F}\u{2067}b\u{2069}", "א\n\nב\tc", "׳״ 456", long.as_str()] {
+        let r = add_content(&mut doc, 0, &Content::Text(AddedText { rect: [0.0, 800.0, 300.0, 780.0], text: s.into(), ..AddedText::default() }));
+        assert_eq!(r.is_ok(), pdfcraft_fonts::document_hebrew_font(false).is_some(), "{:?}: {r:?}", s.chars().take(12).collect::<String>());
+    }
+}
+
 /// The `PCAr` font names in page `page`'s resources.
 fn arabic_font_names(doc: &Document, page: usize) -> Vec<String> {
     let p = &pdfcraft_model::pages(doc)[page];
