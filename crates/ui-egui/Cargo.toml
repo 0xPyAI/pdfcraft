@@ -11,6 +11,8 @@ workspace = true
 
 [dependencies]
 craft-ui = { workspace = true }
+# macOS: a window close quits through `terminate:` (the Touch Bar crash, #1136); elsewhere a no-op.
+craft-quit = { workspace = true, features = ["egui"] }
 pdfcraft-fonts = { workspace = true }
 pdfcraft-engine = { workspace = true }
 pdfcraft-cos = { workspace = true }
