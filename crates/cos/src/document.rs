@@ -1476,7 +1476,7 @@ impl Document {
                 }
             }
             sections.push(XrefRevisionSection { primary, hybrid });
-            next = sect_trailer.int(b"Prev").filter(|p| *p >= 0).map(|p| p as u64);
+            next = prev_offset(&sect_trailer, off, log);
             if trailer.is_none() {
                 trailer = Some(sect_trailer);
             }
@@ -1764,7 +1764,7 @@ impl Document {
             for (num, e) in sect {
                 entries.entry(num).or_insert(e);
             }
-            next = sect_trailer.int(b"Prev").filter(|p| *p >= 0).map(|p| p as u64);
+            next = prev_offset(&sect_trailer, off, log);
             if trailer.is_none() {
                 trailer = Some(sect_trailer);
             }
@@ -1987,6 +1987,25 @@ impl Document {
         self.revisions = Arc::new(Vec::new());
         log.push(format!("rebuilt cross-reference index from {object_count} object headers"));
         Ok(())
+    }
+}
+
+/// The offset of the section before the one whose trailer this is (`/Prev`), if any. Some writers
+/// (tiff2pdf; JHOVE's PDF-HUL-157 files) give it as a reference, `N 0 R`: other readers rebuild
+/// such a file, and the sections before are at N, so it is read as that, with a note. Any other
+/// value that is not an offset is noted and ends the chain.
+fn prev_offset(trailer: &Dict, off: u64, log: &mut Vec<String>) -> Option<u64> {
+    match trailer.get(b"Prev") {
+        Some(Object::Int(p)) if *p >= 0 => Some(*p as u64),
+        Some(Object::Ref(r)) => {
+            log.push(format!("the trailer at {off} gives /Prev as the reference {} 0 R; reading it as offset {}", r.num, r.num));
+            Some(u64::from(r.num))
+        }
+        Some(_) => {
+            log.push(format!("the trailer at {off} has a /Prev that is not an offset; the sections before it are unreachable"));
+            None
+        }
+        None => None,
     }
 }
 
@@ -2832,6 +2851,43 @@ endobj
             let outlines = catalog.as_dict().unwrap().get(b"Outlines").map(|o| back.resolve(o));
             assert!(outlines.as_ref().is_none_or(|o| matches!(**o, Object::Null)), "the full save keeps it out: {outlines:?}");
         }
+    }
+
+    /// A trailer whose /Prev is written as the reference `N 0 R` (tiff2pdf did this; the files
+    /// are JHOVE's PDF-HUL-157 cases, #2366) used to end the cross-reference chain silently, so
+    /// every object of the earlier sections read as null: a four-page file showed one page, and
+    /// a full save wrote the three missing kids as null. The offset is read from the reference.
+    #[test]
+    fn a_prev_written_as_a_reference_still_reaches_the_earlier_sections() {
+        let base = build(
+            &["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R >>"],
+            "/Root 1 0 R",
+        );
+        let prev = String::from_utf8_lossy(&base).rfind("xref\n0 4").unwrap();
+        let update = |prev_entry: &str| {
+            let mut bytes = base.clone();
+            let at = bytes.len();
+            bytes.extend_from_slice(b"4 0 obj\n<< /Title (Update) >>\nendobj\n");
+            let xref = bytes.len();
+            bytes.extend_from_slice(
+                format!(
+                    "xref\n4 1\n{at:010} 00000 n \ntrailer\n<< /Size 5 /Root 1 0 R /Info 4 0 R /Prev {prev_entry} >>\nstartxref\n{xref}\n%%EOF\n"
+                )
+                .as_bytes(),
+            );
+            Document::open(Arc::new(bytes)).unwrap()
+        };
+        let good = update(&prev.to_string());
+        let bad = update(&format!("{prev} 0 R"));
+        assert!(good.repair_log().is_empty(), "{:?}", good.repair_log());
+        assert_eq!(bad.revisions().len(), 2, "{:?}", bad.repair_log());
+        assert_eq!(bad.repair_log().len(), 1, "a note about the /Prev: {:?}", bad.repair_log());
+        assert_eq!(bad.xref_entry(3), good.xref_entry(3), "the page of the first section is reached");
+        assert_eq!(bad.get(ObjRef::new(3, 0)).as_dict().and_then(|d| d.name(b"Type")), Some(&b"Page"[..]));
+        assert_eq!(
+            bad.get(ObjRef::new(4, 0)).as_dict().and_then(|d| d.get(b"Title").and_then(|t| t.as_string().map(|s| s.to_text()))),
+            Some("Update".into())
+        );
     }
 
     #[test]
