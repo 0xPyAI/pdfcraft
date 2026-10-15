@@ -1311,6 +1311,89 @@ fn is_type3_fallback(font: &Dict) -> bool {
         && font.name(b"Name").is_some_and(|n| n == JAPANESE_FONT_NAME.as_bytes() || n == HEBREW_FONT_NAME.as_bytes())
 }
 
+/// Drops the generated fallback fonts ([`is_type3_fallback`]) that nothing on `page` shows any more.
+/// Each rewrite generates its own, with the outlines of every character it draws, so without this
+/// an earlier rewrite's fonts stay in the page's resources and the file. Only a font dictionary the
+/// page owns is changed (a rewrite gives the page its own), and nothing is dropped unless every
+/// content stream that may name the page's fonts can be read: the page's own, and those of form
+/// XObjects and Type 3 glyphs that have no resources of their own and so use the page's.
+fn drop_unused_fallback_fonts(doc: &mut Document, page: usize) {
+    let Ok(p) = page_dict(doc, page) else { return };
+    let Some(Object::Dict(mut resources)) = p.dict.get(b"Resources").cloned() else { return };
+    let Some(mut fonts) = resources.get(b"Font").and_then(|f| doc.dict(f)) else { return };
+    let generated: Vec<Vec<u8>> =
+        fonts.iter().filter(|(_, f)| doc.dict(f).is_some_and(|d| is_type3_fallback(&d))).map(|(name, _)| name.clone()).collect();
+    if generated.is_empty() {
+        return;
+    }
+    let Some(shown) = fonts_shown(doc, &p.dict, &resources) else { return };
+    let unused: Vec<&Vec<u8>> = generated.iter().filter(|name| !shown.contains(*name)).collect();
+    if unused.is_empty() {
+        return;
+    }
+    for name in unused {
+        fonts.remove(name);
+    }
+    resources.set(b"Font".to_vec(), Object::Dict(fonts));
+    // Nothing is lost if this fails: the fonts just stay.
+    let _ = doc.update_dict(p.obj, |d| d.set(b"Resources".to_vec(), Object::Dict(resources)));
+}
+
+/// The font resource names `Tf` selects in the page's content and in the content that uses the
+/// page's resources (see [`drop_unused_fallback_fonts`]), or `None` if any of it can't be read.
+fn fonts_shown(doc: &Document, page: &Dict, resources: &Dict) -> Option<std::collections::HashSet<Vec<u8>>> {
+    let mut streams: Vec<Object> = match page.get(b"Contents") {
+        None => Vec::new(),
+        Some(c) => match &*doc.resolve(c) {
+            Object::Array(a) => a.clone(),
+            _ => vec![c.clone()],
+        },
+    };
+    // Form XObjects without their own resources use the page's, however deeply they are nested
+    // (ISO 32000-1 §7.8.3), so every form the page can reach is visited.
+    let mut pending: Vec<Dict> = vec![resources.clone()];
+    let mut seen = std::collections::HashSet::new();
+    while let Some(res) = pending.pop() {
+        for (_, x) in res.get(b"XObject").and_then(|x| doc.dict(x)).unwrap_or_default().iter() {
+            let Some(r) = x.as_ref() else { continue };
+            if !seen.insert(r) {
+                continue;
+            }
+            if seen.len() > 4096 {
+                return None;
+            }
+            let Object::Stream(s) = &*doc.get(r) else { continue };
+            if s.dict.name(b"Subtype") != Some(b"Form") {
+                continue;
+            }
+            match s.dict.get(b"Resources").and_then(|r| doc.dict(r)) {
+                Some(own) => pending.push(own),
+                None => streams.push(x.clone()),
+            }
+        }
+    }
+    // And so do Type 3 glyph procedures without their own (the generated fonts' are outlines only).
+    for (_, f) in resources.get(b"Font").and_then(|f| doc.dict(f)).unwrap_or_default().iter() {
+        if let Some(font) = doc.dict(f).filter(|d| d.name(b"Subtype") == Some(b"Type3") && !d.contains(b"Resources") && !is_type3_fallback(d)) {
+            streams.extend(font.get(b"CharProcs").and_then(|c| doc.dict(c)).unwrap_or_default().iter().map(|(_, proc)| proc.clone()));
+        }
+    }
+    let mut shown = std::collections::HashSet::new();
+    for stream in streams {
+        let Object::Stream(s) = &*doc.resolve(&stream) else { return None };
+        // Strict: a stream only partly read might name a font in the part that wasn't.
+        let data = s.decoded_strict().ok()?;
+        for op in parse(&data).ops {
+            if op.is("Tf")
+                && let Some(name) = op.operands.first().and_then(|n| n.as_name())
+            {
+                shown.insert(name.to_vec());
+            }
+        }
+    }
+    Some(shown)
+}
+
 /// Whether a run shown in `font` (a resource name, and the Japanese or Hebrew fallback face it subsets, if
 /// any) continues `line`: the same font resource, or another subset of the same face.
 fn same_font(line: &TextLine, font: &[u8], face: Option<&str>) -> bool {
@@ -1689,7 +1772,9 @@ fn source_show(metrics: &Metrics, text: &str, size: f64, space: f64, char_spacin
 
 /// Replace the text of line `line` (an index into [`text_lines`]) on `page` with `text`.
 pub fn replace_line(doc: &mut Document, page: usize, line: usize, text: &str) -> Result<LineEdit, EditError> {
-    replace_line_with_limit(doc, page, line, text, MAX_TYPE3_GLYPHS)
+    let edit = replace_line_with_limit(doc, page, line, text, MAX_TYPE3_GLYPHS)?;
+    drop_unused_fallback_fonts(doc, page);
+    Ok(edit)
 }
 
 /// [`replace_line`] with the most unique characters one generated font may hold (tests lower it).
@@ -1980,7 +2065,9 @@ pub struct RangeStyle {
 
 /// Rewrite paragraph `block` with new text (or its own) and formatting, rewrapped to its width.
 pub fn rewrite_block(doc: &mut Document, page: usize, block: usize, text: Option<&str>, style: &BlockStyle) -> Result<LineEdit, EditError> {
-    rewrite_block_with_limit(doc, page, block, text, style, MAX_TYPE3_GLYPHS)
+    let edit = rewrite_block_with_limit(doc, page, block, text, style, MAX_TYPE3_GLYPHS)?;
+    drop_unused_fallback_fonts(doc, page);
+    Ok(edit)
 }
 
 /// [`rewrite_block`] with the most unique characters one generated font may hold (tests lower it).

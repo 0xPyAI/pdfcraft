@@ -1109,6 +1109,87 @@ fn covered_japanese_chars(n: usize) -> String {
         .collect()
 }
 
+#[test]
+fn fallback_fonts_nothing_shows_any_more_leave_with_a_rewrite() {
+    // `PCJp1` is selected by the page, `PCJp2` only by a form that uses the page's resources, `PCJp`
+    // by nothing; `PCJpOther` is a Type 3 font of the file's own that only shares the prefix.
+    let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Some text) Tj ET BT /PCJp1 12 Tf ET q /Fm0 Do Q");
+    let generated = |doc: &mut Document, name: &str| {
+        doc.add(Object::Dict(Dict::from_iter([
+            (b"Type".to_vec(), Object::name("Font")),
+            (b"Subtype".to_vec(), Object::name("Type3")),
+            (b"Name".to_vec(), Object::name(name)),
+        ])))
+    };
+    let (unused, page_shown, form_shown, own) =
+        (generated(&mut doc, "PCJapanese"), generated(&mut doc, "PCJapanese"), generated(&mut doc, "PCJapanese"), generated(&mut doc, "Other"));
+    let form = doc.add(Object::Stream(Stream::from_raw(
+        Dict::from_iter([(b"Subtype".to_vec(), Object::name("Form")), (b"BBox".to_vec(), Object::Array(vec![Object::Int(0); 4]))]),
+        b"BT /PCJp2 12 Tf ET".to_vec(),
+    )));
+    let p = pdfcraft_model::pages(&doc)[0].obj;
+    let mut fonts = Dict::from_iter([(b"F1".to_vec(), Object::Ref(pdfcraft_cos::ObjRef::new(5, 0)))]);
+    for (name, font) in [("PCJp", unused), ("PCJp1", page_shown), ("PCJp2", form_shown), ("PCJpOther", own)] {
+        fonts.set(name.as_bytes().to_vec(), Object::Ref(font));
+    }
+    let resources = Dict::from_iter([
+        (b"Font".to_vec(), Object::Dict(fonts)),
+        (b"XObject".to_vec(), Object::Dict(Dict::from_iter([(b"Fm0".to_vec(), Object::Ref(form))]))),
+    ]);
+    doc.update_dict(p, |d| d.set(b"Resources".to_vec(), Object::Dict(resources.clone()))).unwrap();
+    let names = |doc: &Document| {
+        let page = pdfcraft_model::pages(doc).remove(0);
+        let res = doc.resolve(page.dict.get(b"Resources").unwrap()).as_dict().unwrap().clone();
+        let mut names: Vec<String> =
+            doc.resolve(res.get(b"Font").unwrap()).as_dict().unwrap().iter().map(|(n, _)| String::from_utf8_lossy(n).into_owned()).collect();
+        names.sort();
+        names
+    };
+    // A rewrite that doesn't reach the fallback fonts still drops the one nothing shows.
+    text::rewrite_block(&mut doc, 0, 0, Some("Other text"), &text::BlockStyle::default()).unwrap();
+    assert_eq!(names(&reopen(&doc)), ["F1", "PCJp1", "PCJp2", "PCJpOther"]);
+
+    // A form using the page's resources whose content can't be read might show any of them: they
+    // all stay.
+    let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Some text) Tj ET q /Fm0 Do Q");
+    let unused = generated(&mut doc, "PCJapanese");
+    let broken = doc.add(Object::Stream(Stream::from_raw(
+        Dict::from_iter([
+            (b"Subtype".to_vec(), Object::name("Form")),
+            (b"BBox".to_vec(), Object::Array(vec![Object::Int(0); 4])),
+            (b"Filter".to_vec(), Object::name("FlateDecode")),
+        ]),
+        b"not deflate data".to_vec(),
+    )));
+    let p = pdfcraft_model::pages(&doc)[0].obj;
+    let fonts = Dict::from_iter([(b"F1".to_vec(), Object::Ref(pdfcraft_cos::ObjRef::new(5, 0))), (b"PCJp".to_vec(), Object::Ref(unused))]);
+    let resources = Dict::from_iter([
+        (b"Font".to_vec(), Object::Dict(fonts)),
+        (b"XObject".to_vec(), Object::Dict(Dict::from_iter([(b"Fm0".to_vec(), Object::Ref(broken))]))),
+    ]);
+    doc.update_dict(p, |d| d.set(b"Resources".to_vec(), Object::Dict(resources))).unwrap();
+    text::rewrite_block(&mut doc, 0, 0, Some("Other text"), &text::BlockStyle::default()).unwrap();
+    assert_eq!(names(&doc), ["F1", "PCJp"]);
+}
+
+#[test]
+fn rewriting_japanese_twice_keeps_only_the_fallback_fonts_it_shows() {
+    let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Hello) Tj ET");
+    if text::rewrite_block(&mut doc, 0, 0, Some("日本語の文章"), &text::BlockStyle::default()).is_err() {
+        assert!(pdfcraft_fonts::document_japanese_font().is_none());
+        eprintln!("built without a craft-fonts Japanese face: the Type 3 path is checked with CRAFT_FONTS_DIR");
+        return;
+    }
+    let first: Vec<_> = fallback_fonts(&doc).into_iter().map(|(_, f)| f).collect();
+    text::rewrite_block(&mut doc, 0, 0, Some("別の文章です"), &text::BlockStyle::default()).unwrap();
+    let doc = reopen(&doc);
+    let after = fallback_fonts(&doc);
+    assert!(!after.is_empty());
+    assert!(after.iter().all(|(_, f)| !first.contains(f)), "the first rewrite's fonts are gone");
+    let content = String::from_utf8_lossy(&page_content_bytes(&doc, 0)).into_owned();
+    assert!(after.iter().all(|(name, _)| content.contains(&format!("/{} ", String::from_utf8_lossy(name)))), "{content}");
+}
+
 /// The page's Type 3 fallback fonts (`PCJp`, `PCJp1`, ...) by resource name.
 fn fallback_fonts(doc: &Document) -> Vec<(Vec<u8>, Dict)> {
     let p = pdfcraft_model::pages(doc).swap_remove(0);

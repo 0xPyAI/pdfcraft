@@ -31,7 +31,10 @@ no open-licence declaration are refused. Interface fallback fonts are never expo
 The full selected program, glyph mappings, widths and Unicode text are embedded in the PDF.
 Saving and reopening therefore needs no locally installed font. Editing the same text again
 reuses the font resource the page already has, and every resource made from one program
-shares a single copy of it. Original subset bytes are
+shares a single copy of it. The Type 3 fonts generated for Japanese or Hebrew characters the
+page's fonts lack are made anew by each edit; after an edit, those nothing on the page shows any
+more leave the page's resources, unless some content that could name them can't be read.
+Original subset bytes are
 preserved. Optional matching faces from `CRAFT_FONTS_DIR` can also complete source subsets;
 this works only when that build input actually contains the full face. This change does not
 add a font binary or change the release font pin. Fonts shared by releases belong in
