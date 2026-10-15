@@ -1971,3 +1971,29 @@ fn page_shapes_closes_only_last_stroked_subpath_but_all_filled_subpaths() {
     assert_eq!(filled.boxes, [[50.0, 100.0, 170.0, 140.0], [200.0, 100.0, 320.0, 140.0]]);
     assert!(filled.rules.is_empty());
 }
+
+#[test]
+fn auto_text_size_fits_single_and_multiline_text() {
+    use crate::appearance::auto_text_size;
+    use pdfcraft_fonts::{helvetica_width, wrap_with};
+    let long = "Weekly progress and diligence: CoBank refi, IL and Redwood Falls";
+    // Single line: the height's size for short text, shrunk to the width for long text.
+    assert_eq!(auto_text_size("Hi", 94.0, 8.0, false, helvetica_width), 8.0 / 1.15);
+    let s = auto_text_size(long, 194.0, 8.0, false, helvetica_width);
+    assert!(s > 4.0 && s < 8.0 / 1.15 && helvetica_width(long, s) <= 194.0 + 1e-9, "{s}");
+    // Never past 12 pt or under 4 pt.
+    assert_eq!(auto_text_size("Hi", 500.0, 500.0, false, helvetica_width), 12.0);
+    assert_eq!(auto_text_size(&long.repeat(20), 20.0, 8.0, false, helvetica_width), 4.0);
+    // Multiline: the largest size whose wrapped lines fit the height.
+    let m = auto_text_size(long, 114.0, 44.0, true, helvetica_width);
+    assert!(wrap_with(long, m, 114.0, helvetica_width).len() as f64 * m * 1.15 <= 44.0, "{m}");
+    assert!(wrap_with(long, m + 0.5, 114.0, helvetica_width).len() as f64 * (m + 0.5) * 1.15 > 44.0, "{m} is the largest that fits");
+    // Hostile boxes and measurements don't panic or return nonsense.
+    for (w, h) in [(f64::NAN, 10.0), (10.0, f64::INFINITY), (-5.0, -5.0), (0.0, 0.0)] {
+        for multiline in [false, true] {
+            let s = auto_text_size(long, w, h, multiline, helvetica_width);
+            assert!((4.0..=12.0).contains(&s), "{w}×{h}: {s}");
+        }
+    }
+    assert_eq!(auto_text_size(long, 50.0, 10.0, false, |_, _| f64::NAN), 10.0 / 1.15);
+}

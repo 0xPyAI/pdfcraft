@@ -701,3 +701,69 @@ fn the_fields_panel_lists_a_field_on_a_missing_page_as_unplaced() {
     h.get_by_label("Unplaced");
     assert_eq!(h.query_all_by_label("orphan").count(), 1);
 }
+
+/// Auto-size (`0 Tf`, inherited from the AcroForm) single-line and multiline fields, and a fixed 10 pt one.
+fn auto_size_form() -> Vec<u8> {
+    pdf_from_objects(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 6 0 R 7 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >> >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>",
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 6 0 R 7 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (short) /Rect [20 350 220 364] /P 3 0 R /F 4 >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (notes) /Ff 4096 /Rect [20 270 140 320] /P 3 0 R /F 4 >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (fixed) /DA (/Helv 10 Tf 0 g) /Rect [20 220 120 234] /P 3 0 R /F 4 >>",
+    ])
+}
+
+fn auto_size_harness() -> Harness<'static, PdfCraftApp> {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("auto.pdf", None, auto_size_form()).unwrap();
+        app.set_option("left", "closed").unwrap();
+        app.set_option("zoom", "150").unwrap();
+        app
+    });
+    h.run_steps(6);
+    h
+}
+
+/// The on-screen size for `text` in the field, and how wide (single-line) or tall (multiline,
+/// wrapped at the box) that text is in the screen font, against the room inside the box (pt).
+fn on_screen_fit(h: &Harness<'static, PdfCraftApp>, name: &str, text: &str) -> (f32, f32, f32) {
+    let s = h.state();
+    let f = s.session.get(s.views[0].id).unwrap().form.iter().find(|f| f.name == name).unwrap().clone();
+    let w = f.widgets[0].clone();
+    let painter = egui::Painter::new(h.ctx.clone(), egui::LayerId::background(), egui::Rect::EVERYTHING);
+    let size = pdfcraft_ui_egui::forms_ui::field_text_size(&painter, &f, &w, text);
+    let (bw, bh) = ((w.rect[2] - w.rect[0]) as f32 - 6.0, (w.rect[3] - w.rect[1]) as f32 - 6.0);
+    let font = egui::FontId::proportional(size);
+    if f.has(pdfcraft_engine::field_flags::MULTILINE) {
+        (size, painter.layout(text.to_string(), font, egui::Color32::BLACK, bw).size().y, bh)
+    } else {
+        (size, painter.layout_no_wrap(text.to_string(), font, egui::Color32::BLACK).size().x, bw)
+    }
+}
+
+#[test]
+fn auto_size_fields_shrink_and_wrap_typed_text_to_fit_their_box() {
+    let mut h = auto_size_harness();
+    let long = "Weekly progress and diligence: CoBank refi, IL and Redwood Falls";
+    click_field(&mut h, "short", 0);
+    h.event(egui::Event::Text(long.into()));
+    h.run_steps(2);
+    let typed = h.state().views[0].forms.focus.clone().expect("the editor is open").text;
+    assert_eq!(typed, long);
+    let (size, used, room) = on_screen_fit(&h, "short", &typed);
+    assert!(size > 4.0 && size < 8.0 / 1.15, "a long value shrinks in the short box: {size} pt");
+    assert!(used <= room + 0.5, "and fits its width: {used} > {room}");
+    let (short_size, ..) = on_screen_fit(&h, "short", "Hi");
+    assert!(short_size > size, "short text keeps a larger size: {short_size}");
+
+    let (size, used, room) = on_screen_fit(&h, "notes", long);
+    assert!(used <= room + 0.5, "multiline text wraps and shrinks to the box height: {used} > {room} at {size} pt");
+    assert!(size >= 6.0, "without shrinking further than it must: {size} pt");
+
+    // An explicit size is kept, as in Acrobat: the text may then run past the box.
+    assert_eq!(on_screen_fit(&h, "fixed", long).0, 10.0);
+}

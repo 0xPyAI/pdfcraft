@@ -57,7 +57,7 @@ pub use pdfcraft_edit::{
 pub use pdfcraft_forms::{
     BorderStyle, CheckStyle, Field as FormField, FieldAction, FieldChange, FieldFont, FieldKind as FormFieldKind, FieldProps, FieldValue,
     Look as FieldLook, LookPatch as FieldLookPatch, NewField, TabOrder, Trigger as FieldTrigger, Widget as FormWidget, af as form_scripts,
-    flags as field_flags,
+    appearance::auto_text_size_by as field_auto_text_size_by, flags as field_flags,
 };
 
 pub use pdfcraft_a11y as a11y;
