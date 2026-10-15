@@ -3544,3 +3544,99 @@ fn page_marks_and_added_content_preserve_fractional_user_unit_matrices() {
         }
     }
 }
+
+#[test]
+fn rows_the_edit_does_not_reach_keep_their_source_operators() {
+    // Word gaps in TJ, as justified text from a layout program has; the text state alone
+    // can't reproduce them, so a rewritten row would lose them.
+    let rows = [
+        "[(justified) -400 ( text) -400 ( uses) -400 ( wide) -400 ( gaps)] TJ",
+        "[(between) -400 ( every) -400 ( single) -400 ( word) -400 ( here)] TJ",
+        "(last line.) Tj",
+    ];
+    let content = format!("BT /F1 12 Tf 14.4 TL 1 0 0 1 72 700 Tm {} T* {} T* {} ET", rows[0], rows[1], rows[2]);
+    let row_texts = |doc: &Document| -> Vec<(String, [f64; 2])> {
+        text::text_lines(doc, 0).unwrap().into_iter().map(|l| (l.text.clone(), l.baseline())).collect()
+    };
+    let source = row_texts(&text_page(&content));
+    assert_eq!(source.len(), 3);
+    for (row, from, to) in [(2, "last line.", "last line!"), (0, "justified", "justify"), (1, "single", "lone")] {
+        let mut doc = text_page(&content);
+        let block = text::text_blocks(&doc, 0).unwrap().into_iter().position(|b| b.text.contains("justified")).unwrap();
+        let draft = text::text_blocks(&doc, 0).unwrap()[block].editor_text.replacen(from, to, 1);
+        text::rewrite_block(&mut doc, 0, block, Some(&draft), &text::BlockStyle::default()).unwrap();
+        let doc = reopen(&doc);
+        let bytes = String::from_utf8_lossy(&page_content_bytes(&doc, 0)).into_owned();
+        let after = row_texts(&doc);
+        assert_eq!(after.len(), 3, "{to}: {after:?}");
+        for (i, ((text, at), (old, was))) in after.iter().zip(&source).enumerate() {
+            assert!((at[0] - was[0]).abs() < 0.01 && (at[1] - was[1]).abs() < 0.01, "{to}: row {i} stays at {was:?}, not {at:?}");
+            if i == row {
+                assert_eq!(*text, old.replacen(from, to, 1), "{to}: the edited row");
+                assert!(!bytes.contains(rows[i]), "{to}: the edited row is rewritten");
+            } else {
+                assert_eq!(text, old, "{to}: row {i}");
+                assert_eq!(bytes.matches(rows[i]).count(), 1, "{to}: row {i} keeps its own operator, kerning included:\n{bytes}");
+            }
+        }
+    }
+    // Colouring a selection in the last row leaves the rows above it as they were.
+    let mut doc = text_page(&content);
+    let block = text::text_blocks(&doc, 0).unwrap().into_iter().position(|b| b.text.contains("justified")).unwrap();
+    let draft = text::text_blocks(&doc, 0).unwrap()[block].editor_text.clone();
+    let at = draft.find("line").unwrap();
+    let range = text::RangeStyle {
+        range: at..at + 4,
+        family: None,
+        resource: None,
+        size: None,
+        color: Some([1.0, 0.0, 0.0]),
+        underline: None,
+        char_spacing: None,
+        scale: None,
+    };
+    text::rewrite_block(&mut doc, 0, block, Some(&draft), &text::BlockStyle { ranges: vec![range], ..Default::default() }).unwrap();
+    let bytes = String::from_utf8_lossy(&page_content_bytes(&doc, 0)).into_owned();
+    assert!(rows[..2].iter().all(|row| bytes.matches(row).count() == 1) && !bytes.contains(rows[2]), "{bytes}");
+    assert!(bytes.contains("1 0 0 rg"), "{bytes}");
+    // The coloured word is its own run now, so only the rows above compare whole.
+    assert_eq!(row_texts(&reopen(&doc))[..2], source[..2]);
+}
+
+#[test]
+fn kept_rows_stay_in_place_when_rows_wrap_or_move_with_quote_operators() {
+    let lines_of = |doc: &Document| -> Vec<(String, [f64; 2])> {
+        text::text_lines(doc, 0).unwrap().into_iter().map(|l| (l.text.clone(), l.baseline())).collect()
+    };
+    let edit = |content: &str, from: &str, to: &str| {
+        let mut doc = text_page(content);
+        let block = text::text_blocks(&doc, 0).unwrap().into_iter().position(|b| b.editor_text.contains(from)).unwrap();
+        let draft = text::text_blocks(&doc, 0).unwrap()[block].editor_text.replacen(from, to, 1);
+        text::rewrite_block(&mut doc, 0, block, Some(&draft), &text::BlockStyle::default()).unwrap();
+        reopen(&doc)
+    };
+    // `'` moves to the next line as it shows: a row after a rewritten `'` row can't stay as it is.
+    for (quoted, from, to) in [
+        ("BT /F1 12 Tf 14 TL 72 700 Td (first row here) Tj (second row here) ' (third row here) ' ET", "second", "2nd"),
+        ("BT /F1 12 Tf 14 TL 72 700 Td (first row here) Tj (second row here) ' (third row here) ' ET", "third", "3rd"),
+        // Here the first row's own `'` makes the step down that the rows after it build on.
+        ("BT /F1 12 Tf 14 TL 72 714 Td (first row here) ' (second row here) ' (third row here) ' ET", "first", "1st"),
+    ] {
+        let source = lines_of(&text_page(quoted));
+        let after = lines_of(&edit(quoted, from, to));
+        assert_eq!(after.len(), 3, "{to}: {after:?}");
+        for ((text, at), (old, was)) in after.iter().zip(&source) {
+            assert_eq!(*text, old.replacen(from, to, 1));
+            assert!((at[0] - was[0]).abs() < 0.01 && (at[1] - was[1]).abs() < 0.01, "{to}: {text} stays at {was:?}, not {at:?}");
+        }
+    }
+    // A row that grows past the paragraph's width wraps and pushes the rows below it down;
+    // those are rewritten in their new places, never left behind as well.
+    let rows = "BT /F1 12 Tf 14.4 TL 72 700 Td (one two three four) Tj T* (five six seven eight) Tj T* (nine ten eleven twelve) Tj ET";
+    let doc = edit(rows, "two", "two and a great many more words");
+    let text: String = lines_of(&doc).into_iter().map(|(t, _)| t + " ").collect();
+    for word in ["one", "five", "nine", "twelve"] {
+        assert_eq!(text.matches(word).count(), 1, "{word} appears once: {text}");
+    }
+    assert!(lines_of(&doc).len() > 3, "the edited row wrapped: {text}");
+}

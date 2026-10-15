@@ -4,6 +4,11 @@ Click a text region in **Edit a PDF → Edit text and images**. One editor conta
 source rows and mixed styles. Embedded TrueType and OpenType/CFF faces are used in memory;
 source font programs, colour, size and baseline anchors stay intact. A textless preview
 prevents a second copy underneath. The frame shows the live extent as text grows or shrinks.
+Rows a text edit doesn't reach keep their original operators, so their kerning, `TJ` word
+gaps and glyph widths stay exactly as they were. Only rows whose characters changed, or that
+moved because an earlier row wrapped, are rewritten, and formatting a selection rewrites
+only the rows it covers. Changing the whole paragraph's formatting, width or position rewrites
+every row.
 
 A subset font contains only some of the original face's glyphs. A new character cannot be
 reconstructed from a glyph the PDF does not contain. **Load font…** imports an openly licensed,
