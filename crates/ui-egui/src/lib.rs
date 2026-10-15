@@ -2813,6 +2813,13 @@ impl PdfCraftApp {
             {
                 object_ui::nudge_keys(ctx, &mut self.views[i], doc);
             }
+            // A selected field moves with the arrows too (Prepare a form, #2608), before the view
+            // turns the page with them.
+            if self.is_preparing()
+                && let Some(doc) = self.session.get(self.views[i].id).filter(|d| d.allows_modification())
+            {
+                prepare::nudge_keys(ctx, &mut self.views[i], doc);
+            }
             canvas::shortcuts(&mut self.views[i], ctx, self.scroll_speed);
             self.copy_key(i, ctx);
             self.image_pick_keys(i, ctx);
