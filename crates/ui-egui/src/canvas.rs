@@ -1135,20 +1135,27 @@ impl DocView {
     /// page of the spread is already on screen, so stepping to it wouldn't move the view (#70).
     pub fn step_page(&mut self, forward: bool) {
         let c = self.current;
-        let target = match self.layout {
+        let last = self.page_count.saturating_sub(1);
+        let (target, first) = match self.layout {
             PageLayout::TwoUp => {
                 // Spreads are [0, 1], [2, 3], … or, with a cover page, [0], [1, 2], [3, 4], ….
                 let first = if self.cover { c.saturating_sub((c + 1) % 2) } else { c - c % 2 };
-                match (forward, self.cover && c == 0) {
+                let target = match (forward, self.cover && c == 0) {
                     (true, true) => 1,
                     (true, false) => first.saturating_add(2),
                     (false, _) if self.cover && first <= 1 => 0,
                     (false, _) => first.saturating_sub(2),
-                }
+                };
+                (target, first)
             }
-            PageLayout::Single if forward => c + 1,
-            PageLayout::Single => c.saturating_sub(1),
+            PageLayout::Single if forward => (c + 1, c),
+            PageLayout::Single => (c.saturating_sub(1), c),
         };
+        // Past either end there is nowhere to go: stay put rather than re-align the view, which
+        // would scroll the page back to its top.
+        if if forward { target > last } else { first == 0 } {
+            return;
+        }
         self.go_to_page(target);
     }
 
@@ -1282,6 +1289,33 @@ impl DocView {
         let before = self.current;
         self.step_page(forward);
         self.current != before
+    }
+
+    /// One wheel event in a non-continuous view whose page is taller than the window, where the
+    /// wheel pans (#1924). Once the view is at the bottom (top) edge, scrolling on turns to the
+    /// next (previous) page, which shows its top (bottom). A smooth gesture that panned the page
+    /// has to end first (see `WheelPager::feed_edge`). `can_turn` is false when something else
+    /// owns the wheel. Returns whether the page turned.
+    pub fn single_page_wheel_edge(&mut self, unit: egui::MouseWheelUnit, dy: f32, phase: egui::TouchPhase, now: f64, can_turn: bool) -> bool {
+        if self.continuous {
+            return false;
+        }
+        // Only an up-to-date view counts: the page drawn is the shown one, with no jump pending.
+        let edge = self.goto.is_none()
+            && self.goto_point.is_none()
+            && self.single_edges.is_some_and(|(page, top, bottom)| page == self.current && if dy < 0.0 { bottom } else { top });
+        let Some(forward) = self.wheel.feed_edge(unit, dy, phase, now, can_turn && edge) else { return false };
+        let before = self.current;
+        self.step_page(forward);
+        if self.current == before {
+            return false;
+        }
+        if !forward {
+            // Going back lands on the bottom of the previous page.
+            self.goto = Some((self.current, 1.0));
+        }
+        self.single_edges = None;
+        true
     }
 
     /// Displayed page size in points for this view rotation.
@@ -2231,17 +2265,19 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     };
     let middle_gesture = view.auto_scroll.blocks_input();
     // Not scrolling: when the whole page or spread fits, the wheel would do nothing, so it turns
-    // pages instead; zoomed in far enough to pan, it pans. Touch drags are untouched: with
+    // pages instead; zoomed in far enough to pan, it pans, and at the edge it turns the page on
+    // (#1924, `single_page_wheel_edge`). Touch drags are untouched: with
     // nothing to pan, touch users turn pages with the rail buttons, the page box and the arrow
     // keys. Runs before `visible_pages` so the frame that turns the page draws it.
     let mut single_paging = false;
+    let mut edge_turned = false;
     if !view.continuous {
         // The row's bounding box on screen (one page, or a two-page spread).
         let row_rect = row.iter().filter_map(|&i| rects.get(i)).copied().reduce(Rect::union);
         // Within a point, so layout rounding can't stop a fitting page from turning.
         let fits = row_rect.is_some_and(|r| r.height() + 2.0 * MARGIN <= avail.height() + 1.0);
-        let can_turn = fits && !middle_gesture && unobstructed && ui.rect_contains_pointer(avail);
-        single_paging = can_turn;
+        let can_turn = !middle_gesture && unobstructed && ui.rect_contains_pointer(avail);
+        single_paging = can_turn && fits;
         // Every wheel event goes to the pager, so it follows each trackpad touch to its end
         // even while the page can't turn.
         ui.input(|i| {
@@ -2249,11 +2285,15 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 if let egui::Event::MouseWheel { unit, delta, phase, modifiers } = e {
                     // Zooming (⌘ or Ctrl) and sideways scrolling (Shift) never turn pages.
                     let dy = if modifiers.command || modifiers.ctrl || modifiers.shift { 0.0 } else { delta.y };
-                    view.single_page_wheel(*unit, dy, *phase, i.time, can_turn);
+                    if fits {
+                        view.single_page_wheel(*unit, dy, *phase, i.time, can_turn);
+                    } else {
+                        edge_turned |= view.single_page_wheel_edge(*unit, dy, *phase, i.time, can_turn);
+                    }
                 }
             }
         });
-        if can_turn {
+        if single_paging {
             // Paging owns vertical wheel motion here. A diagonal gesture keeps its sideways
             // part, as `ScrollArea` itself handles each axis.
             ui.input_mut(|i| i.smooth_scroll_delta.y = 0.0);
@@ -2290,8 +2330,15 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             view.precise_scroll_until = now + 0.25;
         }
     }
+    if edge_turned {
+        // The turn leaves egui's eased copy of the notch to decay for a few frames; it must not
+        // scroll the page just shown away from its top (or bottom).
+        view.precise_scroll_until = now + 0.25;
+    }
     // Paging owns the vertical axis in single-page view; leave it to the pager.
-    if single_paging {
+    // The rest of a gesture that turned the page is swallowed too, or it would pan the new page
+    // away from the edge it was shown at.
+    if single_paging || (!view.continuous && view.wheel.gesture_turned()) {
         precise_scroll.y = 0.0;
     }
     if now < view.precise_scroll_until {
@@ -2338,6 +2385,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     });
     // Each document keeps its own scroll position when switching tabs (#189).
     scroll = scroll.id_salt(("page-view", view.id));
+    // Every scroll here asks for no animation. An animated area would still queue a zero-length
+    // offset target for the next frame, which overwrites the jump a page turn just set.
+    scroll = scroll.animated(false);
     // A newly opened document starts at the top. eframe saves egui's memory with the settings
     // and document ids start again at 1 every launch, so the offset stored under this id can be
     // where an earlier session left another document.
@@ -2351,6 +2401,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         let r = rects[page.min(rects.len() - 1)];
         let point = pos2(r.left() + fx * r.width(), r.top() - y_shift + fy * r.height());
         scroll = scroll.scroll_offset(vec2((point.x - rel.x).max(0.0), (point.y - rel.y).max(0.0)));
+    } else if edge_turned {
+        // The row above was laid out for the page before the turn: place the new one next frame.
+        ui.ctx().request_repaint();
     } else if let Some((page, frac)) = view.goto.take() {
         let page = page.min(rects.len() - 1);
         let r = rects[page];

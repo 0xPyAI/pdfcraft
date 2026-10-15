@@ -199,6 +199,95 @@ fn single_page_wheel_pans_instead_when_zoomed_in() {
 }
 
 #[test]
+fn single_page_wheel_at_the_bottom_edge_turns_to_the_next_page_top_and_back() {
+    // #1924: zoomed in so the page is taller than the window, the wheel pans; at the bottom
+    // edge one more notch shows the next page at its top, and at the top edge one notch up
+    // shows the previous page at its bottom.
+    let mut h = harness_stepping(1.0 / 60.0, &[("layout", "single"), ("zoom", "200")]);
+    let at = h.state().views[0].viewport_rect().center();
+    h.hover_at(at);
+    h.run_steps(4);
+    // Notches pan page 1 down; the page turns only after the view stopped at the bottom.
+    let (mut notches, mut stalled) = (0, 0);
+    let mut last = rect(&h, 0).expect("page 1 on screen").min.y;
+    while h.state().views[0].current == 0 && notches < 80 {
+        h.event(wheel(MouseWheelUnit::Line, -1.0, TouchPhase::Move));
+        h.run_steps(12);
+        notches += 1;
+        if let Some(r) = rect(&h, 0) {
+            stalled = if (r.min.y - last).abs() < 0.01 { stalled + 1 } else { 0 };
+            last = r.min.y;
+        }
+    }
+    assert!(notches > 2, "the page panned before it turned: {notches} notches");
+    assert_eq!(h.state().views[0].current, 1, "a notch at the bottom edge shows the next page");
+    assert!(stalled <= 1, "no notch was wasted at the edge");
+    let top = rect(&h, 1).expect("page 2 on screen").min.y;
+    assert!(top > h.state().views[0].viewport_rect().min.y, "page 2 shows its top edge: {top}");
+    h.event(wheel(MouseWheelUnit::Line, 1.0, TouchPhase::Move));
+    h.run_steps(30);
+    assert_eq!(h.state().views[0].current, 0, "a notch at the top edge shows the previous page");
+    let r = rect(&h, 0).expect("page 1 on screen");
+    assert!(r.max.y < h.state().views[0].viewport_rect().max.y + 40.0, "page 1 shows its bottom edge: {r:?}");
+}
+
+#[test]
+fn single_page_swipe_that_reaches_the_edge_does_not_turn_but_a_fresh_one_does() {
+    // Momentum that carries a swipe to the bottom edge must not go on to turn the page.
+    let mut h = harness_stepping(1.0 / 60.0, &[("layout", "single"), ("zoom", "200")]);
+    let at = h.state().views[0].viewport_rect().center();
+    h.hover_at(at);
+    h.run_steps(4);
+    let send = |h: &mut Harness<'static, PdfCraftApp>, phase, dy| {
+        h.event(wheel(MouseWheelUnit::Point, dy, phase));
+        h.step();
+    };
+    // One long swipe: far more motion than the page has, in one gesture.
+    send(&mut h, TouchPhase::Start, 0.0);
+    for _ in 0..120 {
+        send(&mut h, TouchPhase::Move, -40.0);
+    }
+    send(&mut h, TouchPhase::End, 0.0);
+    h.run_steps(30);
+    assert_eq!(h.state().views[0].current, 0, "the swipe that panned to the edge does not turn");
+    // A new swipe at the edge turns exactly one page.
+    send(&mut h, TouchPhase::Start, 0.0);
+    for _ in 0..6 {
+        send(&mut h, TouchPhase::Move, -25.0);
+    }
+    send(&mut h, TouchPhase::End, 0.0);
+    h.run_steps(30);
+    assert_eq!(h.state().views[0].current, 1, "a fresh swipe at the edge turns one page");
+    let top = rect(&h, 1).expect("page 2 on screen").min.y;
+    assert!(
+        top >= h.state().views[0].viewport_rect().min.y,
+        "page 2 starts at its top after the swipe: {top} in {:?}",
+        h.state().views[0].viewport_rect()
+    );
+}
+
+#[test]
+fn stepping_past_either_end_leaves_the_view_alone() {
+    // Paging on past the first or last page must not jump the page back to its top.
+    for (page, forward) in [(2, true), (0, false)] {
+        let mut h = harness_stepping(1.0 / 60.0, &[("layout", "single"), ("zoom", "200")]);
+        h.state_mut().views[0].go_to_page(page);
+        h.run_steps(20);
+        let at = h.state().views[0].viewport_rect().center();
+        h.hover_at(at);
+        h.run_steps(4);
+        // Pan the page off its edge so a jump would show.
+        h.event(wheel(MouseWheelUnit::Line, -1.0, TouchPhase::Move));
+        h.run_steps(30);
+        let before = rect(&h, page).expect("page on screen");
+        h.state_mut().views[0].step_page(forward);
+        h.run_steps(30);
+        assert_eq!(h.state().views[0].current, page);
+        assert_eq!(rect(&h, page), Some(before), "stepping past the end (forward={forward}) moved the page");
+    }
+}
+
+#[test]
 fn wheel_turns_one_page_per_notch_and_per_trackpad_swipe() {
     // At a real frame rate: brisk notches each turn a page, and one trackpad swipe turns one
     // page, its momentum included (macOS sends the momentum as a second Start…End).
