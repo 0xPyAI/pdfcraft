@@ -13,6 +13,9 @@ use std::sync::{Arc, OnceLock};
 
 use egui::FontData;
 
+#[cfg(all(unix, not(target_os = "macos"), not(target_arch = "wasm32")))]
+mod fontconfig;
+
 /// Larger files are not read: a font path is still untrusted input.
 const MAX_BYTES: u64 = 32 << 20;
 /// Chinese system faces are big collections (PingFang, STHeiti), so they get a higher cap.
@@ -291,7 +294,37 @@ fn windows_fonts() -> PathBuf {
 }
 
 fn unix_fonts(files: &'static [&'static str]) -> Vec<PathBuf> {
-    ["/usr/share/fonts", "/usr/local/share/fonts"].iter().flat_map(|dir| files.iter().map(move |f| Path::new(dir).join(f))).collect()
+    #[cfg(all(unix, not(target_os = "macos"), not(target_arch = "wasm32")))]
+    static INSTALLED: OnceLock<Vec<PathBuf>> = OnceLock::new();
+    #[cfg(all(unix, not(target_os = "macos"), not(target_arch = "wasm32")))]
+    // Read once per process, and not at all when installed fonts are turned off.
+    let installed = INSTALLED
+        .get_or_init(|| {
+            if std::env::var_os("PDFCRAFT_SYSTEM_FONTS").is_some_and(|v| v == "0") {
+                return Vec::new();
+            }
+            fontconfig::font_files(&fontconfig::config_path())
+        })
+        .as_slice();
+    #[cfg(not(all(unix, not(target_os = "macos"), not(target_arch = "wasm32"))))]
+    let installed: &[PathBuf] = &[];
+    unix_candidates(files, installed)
+}
+
+fn unix_candidates(files: &[&str], installed: &[PathBuf]) -> Vec<PathBuf> {
+    let mut paths: Vec<_> =
+        ["/usr/share/fonts", "/usr/local/share/fonts"].iter().flat_map(|dir| files.iter().map(move |f| Path::new(dir).join(f))).collect();
+    // Fontconfig may point into /nix/store or a user's font directory. Keep the existing
+    // candidate names and their preference order; this does not select arbitrary fonts.
+    for file in files {
+        let name = Path::new(file).file_name();
+        for path in installed.iter().filter(|p| p.file_name() == name) {
+            if !paths.contains(path) {
+                paths.push(path.clone());
+            }
+        }
+    }
+    paths
 }
 
 fn read(path: &Path, probe: char, max: u64) -> Option<Arc<FontData>> {
@@ -317,6 +350,17 @@ fn face_with(bytes: &[u8], c: char) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configured_candidates_preserve_names_order_and_existing_paths() {
+        let names = ["noto/NotoSansArabic-Regular.ttf", "truetype/dejavu/DejaVuSans.ttf"];
+        let noto = PathBuf::from("/custom/fonts/NotoSansArabic-Regular.ttf");
+        let dejavu = PathBuf::from("/nix/store/font/share/fonts/truetype/DejaVuSans.ttf");
+        let installed = [dejavu.clone(), PathBuf::from("/custom/fonts/SourceHanSans.ttf"), noto.clone(), dejavu.clone()];
+        let mut expected = unix_candidates(&names, &[]);
+        expected.extend([noto, dejavu]);
+        assert_eq!(unix_candidates(&names, &installed), expected);
+    }
 
     #[test]
     fn broken_and_missing_files_are_skipped() {

@@ -133,3 +133,17 @@ copies retain their current preferences locations.
 | `PDFCRAFT_BUILD_LABEL` | Build time: a label for a local or patched build (letters, digits, inner dots), shown after the version in `--version`, About and the log (`0.7.1 (titlebar)`). `packaging/linux/package.sh` also puts it in the file names and the .rpm/.deb release (`1.titlebar`), which upgrades over the release of the same version |
 | `CRAFT_FONTS_DIR` | Build time: a [craft-fonts](https://github.com/storytold/craft-fonts) checkout to embed (Japanese fonts) |
 | `PDFCRAFT_SYSTEM_FONTS` | `0` stops the desktop app from using an installed font for characters its embedded fonts lack (`cargo xtask screenshots` sets it) |
+| `FONTCONFIG_FILE` | On Linux/Unix, the Fontconfig configuration file used to discover installed UI fallback fonts (default: `/etc/fonts/fonts.conf`); relative filenames are resolved under `FONTCONFIG_PATH` |
+| `FONTCONFIG_PATH` | Directory for a relative `FONTCONFIG_FILE` (default: `/etc/fonts`; the first entry of a search path is used) |
+
+On Linux/Unix, the UI's existing fallback filenames are also searched in Fontconfig's configured
+directories and their subdirectories. This finds fonts in Nix store paths and user font directories
+without invoking `fc-match` or linking libfontconfig. The scan is cached and bounded; missing or
+malformed configuration leaves the ordinary `/usr/share/fonts` and `/usr/local/share/fonts`
+candidates available. Font size and glyph-coverage checks still apply. This only reads installed
+fonts for the interface; it does not embed them into PDFs or packages.
+
+Relative includes resolve beside the config that contains them. Included directories load only
+digit-prefixed `*.conf` files, in lexical order; backups and disabled files are ignored. The scan
+limits each config to 1 MiB, visits at most 256 config files/directories, and bounds include depth
+to 16 and directory entries to 32,768. Cyclic includes are skipped.
