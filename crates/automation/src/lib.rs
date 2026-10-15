@@ -2258,6 +2258,13 @@ fn info(d: &Document) -> Value {
             },
         })).collect::<Vec<_>>(),
         "layers": i.layers.iter().map(|l| json!({ "name": l.name, "visible": l.visible })).collect::<Vec<_>>(),
+        // Full-screen presentation settings a page carries (ISO 32000-2 §12.4.4): only pages with
+        // a `/Trans` or `/Dur` appear; `style` is null for a display time alone.
+        "transitions": i.transitions.iter().map(|t| json!({
+            "page": page1(t.page), "style": t.style.map(pdfcraft_render::TransitionStyle::name), "duration": t.duration,
+            "horizontal": t.horizontal, "inward": t.inward, "direction": t.direction, "scale": t.scale, "opaque": t.opaque,
+            "display": t.display,
+        })).collect::<Vec<_>>(),
         "attachments": i.attachments.iter().map(|a| json!({ "name": a.name, "description": a.description, "size": a.size })).collect::<Vec<_>>(),
         // `substitute` names the face standing in for a program the document does not embed, and
         // `substitution` says why. Both are null for an embedded font: nothing stands in. A null

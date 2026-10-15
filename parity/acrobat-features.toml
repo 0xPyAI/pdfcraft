@@ -3193,11 +3193,11 @@ title = "Page transitions"
 area = "D"
 tier = "P2"
 milestone = "M4"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["doc_info"]
+evidence = ["crates/render/src/inspect.rs::page_transitions_and_display_times_are_read", "crates/automation/tests/automation.rs::doc_info_lists_page_transitions_and_display_times"]
+notes = "Read only: each page's /Trans (style, duration, dimension, motion, direction, Fly scale and backdrop) and /Dur display time are read with the spec's defaults for what is missing or out of range, and doc_info lists them (DocInfo::transitions). Not yet: playing them in full screen, auto-advancing on /Dur, or the Page Transitions dialog that sets them"
 
 [[feature]]
 id = "organize.page-tab-order"

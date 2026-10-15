@@ -115,6 +115,45 @@ fn auto(dir: &Path) -> Automation {
     Automation::new().with_root(dir).unwrap().with_clock(|| 1_700_000_000)
 }
 
+/// Full-screen presentation settings (`/Trans`, `/Dur`) reach `doc_info`, 1-based pages, only
+/// for the pages that carry them.
+#[test]
+fn doc_info_lists_page_transitions_and_display_times() {
+    let dir = workdir("transitions");
+    let objects: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 200 300] >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Trans << /S /Fade /D 0.5 >> /Dur 4 >>".to_vec(),
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, object) in objects.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        bytes.extend_from_slice(object);
+        bytes.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+    std::fs::write(dir.join("slides.pdf"), bytes).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "slides.pdf" }))["doc"].as_u64().unwrap();
+    let info = ok(&mut a, "doc_info", json!({ "doc": doc }));
+    let t = info["transitions"].as_array().unwrap();
+    assert_eq!(t.len(), 1, "{}", info["transitions"]);
+    assert_eq!(
+        (t[0]["page"].as_u64(), t[0]["style"].as_str(), t[0]["duration"].as_f64(), t[0]["display"].as_f64()),
+        (Some(2), Some("Fade"), Some(0.5), Some(4.0)),
+        "{}",
+        t[0]
+    );
+}
+
 #[test]
 fn autotag_preview_proposes_text_without_changing_the_pdf() {
     let dir = workdir("autotag-preview");
