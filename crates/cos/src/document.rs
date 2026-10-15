@@ -257,6 +257,15 @@ impl XrefIndex {
         }
     }
 
+    /// Drop an entry for object number 4294967295, which no incremental `/Size` can cover.
+    /// Only a materialized index can hold one: the compact reader requires `max_num < /Size`.
+    fn remove_exhausted(&mut self) -> bool {
+        match self {
+            Self::Compact { .. } => false,
+            Self::Materialized(entries) => Arc::make_mut(entries).remove(&u32::MAX).is_some(),
+        }
+    }
+
     fn max_num(&self) -> u32 {
         match self {
             Self::Compact { max_num, .. } => *max_num,
@@ -593,9 +602,15 @@ impl Document {
         {
             doc.authenticate(&enc, &credentials)?;
         }
+        if Arc::make_mut(&mut doc.entries).remove_exhausted() {
+            Arc::make_mut(&mut doc.repair_log).push("skipped exhausted xref object number 4294967295".into());
+        }
         let max = doc.entries.max_num();
-        let size = doc.trailer.int(b"Size").unwrap_or(0).max(0) as u32;
-        doc.next_num = max.max(size.saturating_sub(1)) + 1;
+        let size = u32::try_from(doc.trailer.int(b"Size").unwrap_or(0).max(0)).unwrap_or(u32::MAX);
+        if size == u32::MAX {
+            Arc::make_mut(&mut doc.repair_log).push("exhausted trailer /Size; new objects use unused object numbers".into());
+        }
+        doc.next_num = max.saturating_add(1).max(size).max(1);
         Ok(doc)
     }
 
@@ -1155,17 +1170,27 @@ impl Document {
         let obj = self.adopt(obj.into());
         self.overlay.insert(r.num, Slot::Set(r.generation, Arc::new(obj)));
         if r.num >= self.next_num {
-            self.next_num = r.num + 1;
+            self.next_num = r.num.saturating_add(1);
         }
     }
 
     /// Add a new indirect object and return its reference.
     pub fn add(&mut self, obj: impl Into<Object>) -> ObjRef {
-        let r = ObjRef::new(self.next_num, 0);
-        self.next_num += 1;
+        let r = ObjRef::new(self.allocate_num(), 0);
         let obj = self.adopt(obj.into());
         self.overlay.insert(r.num, Slot::Set(0, Arc::new(obj)));
         r
+    }
+
+    /// Find a never-used number, retaining the high-water mark for incremental /Size.
+    /// Exhausted hints fall back to gaps without replacing source or overlay objects.
+    fn allocate_num(&mut self) -> u32 {
+        let mut num = if self.next_num == u32::MAX { 1 } else { self.next_num.max(1) };
+        while self.entries.lookup(num, &self.data).is_some() || self.overlay.contains_key(&num) {
+            num = if num == u32::MAX - 1 { 1 } else { num + 1 };
+        }
+        self.next_num = self.next_num.max(num.saturating_add(1));
+        num
     }
 
     /// Delete an object (its number becomes free with the next generation).
@@ -2061,6 +2086,75 @@ mod tests {
         assert_eq!(doc.get(ObjRef { num: 3, generation: 0 }).as_string().map(|s| s.bytes.clone()), Some(b"three".to_vec()));
         assert!(!doc.xref_entry_is_exact(3));
         assert!(doc.xref_entry_is_exact(1) && doc.xref_entry_is_exact(2));
+    }
+
+    #[test]
+    fn opening_an_exhausted_classic_xref_repairs_and_allocates() {
+        // The extra in-use row need not be loaded to exhaust the next object number.
+        let bytes = b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n4294967295 1\n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF\n";
+        assert_eq!(bytes.len(), 266);
+        let mut doc = Document::open(Arc::new(bytes.to_vec())).unwrap();
+        assert_eq!(doc.root(), Some(ObjRef::new(1, 0)));
+        assert!(doc.repair_log().iter().any(|line| line.contains("exhausted xref")));
+        assert_eq!(doc.add(Object::Null), ObjRef::new(3, 0));
+    }
+
+    #[test]
+    fn opening_an_exhausted_xref_stream_repairs_and_allocates() {
+        let mut bytes =
+            b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n".to_vec();
+        let offset = bytes.len();
+        bytes.extend_from_slice(b"3 0 obj\n<< /Type /XRef /Size 4 /Root 1 0 R /W [1 4 2] /Index [0 3 4294967295 1] /Length 28 >>\nstream\n");
+        for (kind, position, generation) in [(0_u8, 0_u32, 65535_u16), (1, 9, 0), (1, 58, 0), (1, 58, 0)] {
+            bytes.push(kind);
+            bytes.extend_from_slice(&position.to_be_bytes());
+            bytes.extend_from_slice(&generation.to_be_bytes());
+        }
+        bytes.extend_from_slice(format!("\nendstream\nendobj\nstartxref\n{offset}\n%%EOF\n").as_bytes());
+        let mut doc = Document::open(Arc::new(bytes)).unwrap();
+        assert_eq!(doc.root(), Some(ObjRef::new(1, 0)));
+        assert!(doc.repair_log().iter().any(|line| line.contains("exhausted xref")));
+        assert_eq!(doc.add(Object::Null), ObjRef::new(4, 0));
+    }
+
+    #[test]
+    fn exhausted_size_and_high_edits_allocate_without_overwriting_objects() {
+        let ordinary = build(&["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [] /Count 0 >>"], "/Root 1 0 R");
+        for size in ["4294967295", "4294967296", "9223372036854775807"] {
+            let bytes = String::from_utf8(ordinary.clone()).unwrap().replace("/Size 3", &format!("/Size {size}"));
+            let mut doc = Document::open(Arc::new(bytes.into_bytes())).unwrap();
+            assert!(doc.repair_log().iter().any(|line| line.contains("exhausted trailer")));
+            assert_eq!(doc.add(Object::Int(42)), ObjRef::new(3, 0));
+            doc.set(ObjRef::new(u32::MAX, 0), Object::Int(99));
+            doc.set(ObjRef::new(u32::MAX - 1, 0), Object::Int(98));
+            assert_eq!(doc.add(Object::Int(43)), ObjRef::new(4, 0));
+            assert_eq!(doc.get(ObjRef::new(3, 0)).as_int(), Some(42));
+            assert_eq!(doc.get(ObjRef::new(u32::MAX, 0)).as_int(), Some(99));
+            assert_eq!(doc.get(ObjRef::new(1, 0)).as_dict().unwrap().name(b"Type"), Some(b"Catalog".as_slice()));
+        }
+        let mut doc = Document::new_empty();
+        doc.set(ObjRef::new(u32::MAX - 2, 0), Object::Null);
+        assert_eq!(doc.add(Object::Null), ObjRef::new(u32::MAX - 1, 0));
+        assert_eq!(doc.add(Object::Null), ObjRef::new(3, 0));
+        assert_eq!(doc.add(Object::Null), ObjRef::new(4, 0));
+    }
+
+    #[test]
+    fn exhausted_xref_controls_preserve_ordinary_ignored_and_repaired_entries() {
+        let ordinary = build(&["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [] /Count 0 >>"], "/Root 1 0 R");
+        for (extra, repaired) in
+            [("", false), ("4294967295 1\n0000000000 00000 n \n", false), ("4294967295 2\n0000000058 00000 n \n0000000058 00000 n \n", true)]
+        {
+            let bytes = String::from_utf8(ordinary.clone()).unwrap().replacen("trailer\n", &format!("{extra}trailer\n"), 1);
+            let mut doc = Document::open(Arc::new(bytes.into_bytes())).unwrap();
+            assert_eq!(doc.root(), Some(ObjRef::new(1, 0)));
+            assert_eq!(doc.get(ObjRef::new(1, 0)).as_dict().unwrap().name(b"Type"), Some(b"Catalog".as_slice()));
+            assert_eq!(!doc.repair_log().is_empty(), repaired);
+            if repaired {
+                assert!(doc.repair_log().iter().any(|line| line.contains("xref") && line.contains("range")));
+            }
+            assert_eq!(doc.add(Object::Null), ObjRef::new(3, 0));
+        }
     }
 
     #[test]
