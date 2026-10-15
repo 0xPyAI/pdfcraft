@@ -60,6 +60,9 @@ pub(crate) struct FormXObject<'a> {
     pub(crate) matrix: Affine,
     pub(crate) bbox: [f32; 4],
     is_transparency_group: bool,
+    // PdfCraft patch: the group's /I and /K (ISO 32000-2 §11.6.6, both false by default).
+    is_isolated: bool,
+    is_knockout: bool,
     pub(crate) dict: Dict<'a>,
     resources: Dict<'a>,
 }
@@ -77,12 +80,17 @@ impl<'a> FormXObject<'a> {
                 .unwrap_or([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]),
         );
         let bbox = dict.get::<[f32; 4]>(BBOX)?;
-        let is_transparency_group = dict.get::<Dict<'_>>(GROUP).is_some();
+        let group = dict.get::<Dict<'_>>(GROUP);
+        let is_transparency_group = group.is_some();
+        let is_isolated = group.as_ref().and_then(|g| g.get::<bool>(I)).unwrap_or(false);
+        let is_knockout = group.as_ref().and_then(|g| g.get::<bool>(K)).unwrap_or(false);
 
         Some(Self {
             decoded,
             matrix,
             is_transparency_group,
+            is_isolated,
+            is_knockout,
             bbox,
             dict: dict.clone(),
             resources,
@@ -134,7 +142,26 @@ pub(crate) fn draw_form_xobject<'a, 'b>(
     context.pre_concat_affine(x_object.matrix);
     context.push_root_transform();
 
-    if x_object.is_transparency_group {
+    // PdfCraft patch: a transparency group that is neither isolated nor knockout composites
+    // its elements with the backdrop already on the page (§11.4.7), so when it is entered at
+    // full opacity with no soft mask and Normal blending there is nothing for a layer of its
+    // own to add, and drawing straight onto the page is the exact result. A layer here was
+    // wrong, not just slower: a blend mode inside the group (the `/BM /Multiply` of a highlight
+    // appearance written by other editors) saw the layer's transparent backdrop instead of the
+    // text, and the layer then covered the page as an opaque block (#1968). An isolated group
+    // starts from a blank backdrop by definition, and a knockout group or one entered at partial
+    // opacity, under a soft mask or with a blend mode keeps its layer, where the group's
+    // elements still composite with a blank backdrop (an approximation of §11.4.7 for them).
+    let neutral = !x_object.is_isolated && !x_object.is_knockout && {
+        let state = &context.get().graphics_state;
+        state.non_stroke_alpha >= 1.0
+            && state.stroke_alpha >= 1.0
+            && state.soft_mask.is_none()
+            && state.blend_mode == BlendMode::Normal
+    };
+    let own_layer = x_object.is_transparency_group && !neutral;
+
+    if own_layer {
         device.push_transparency_group(
             context.get().graphics_state.non_stroke_alpha,
             std::mem::take(&mut context.get_mut().graphics_state.soft_mask),
@@ -169,7 +196,7 @@ pub(crate) fn draw_form_xobject<'a, 'b>(
 
     device.pop_clip_path();
 
-    if x_object.is_transparency_group {
+    if own_layer {
         device.pop_transparency_group();
     }
 

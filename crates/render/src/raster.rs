@@ -2976,6 +2976,67 @@ trailer << /Root 1 0 R >>
         }
     }
 
+    /// #1968: the highlight appearance other editors write, a transparency group whose content is
+    /// filled with `/BM /Multiply`, drew as an opaque block over the text. Every `/Group` form
+    /// got a layer of its own, so the Multiply blended with that layer's transparent backdrop
+    /// and the layer then covered the page. Vendored hayro-interpret patch: a group that is not
+    /// isolated (ISO 32000-2 §11.4.7: its elements composite with what is already on the page)
+    /// and is entered at full opacity, with no soft mask and Normal blending, has no backdrop of
+    /// its own to offer, so its content is drawn straight onto the page. An isolated group
+    /// (`/I true`) keeps its blank backdrop, and a group entered at partial opacity still gets
+    /// its layer so that opacity applies to the group as a whole.
+    #[test]
+    fn a_multiply_highlight_inside_a_transparency_group_keeps_the_text() {
+        // `annots`: the form drawn as the highlight's appearance; `page`: drawn from the page
+        // content instead, with the extra graphics state in front of the `Do`.
+        let render = |group: &str, annots: &str, page: &str| {
+            let content = format!("0 g 100 40 10 20 re f {page}");
+            let form = "/GS0 gs 1 1 0 rg 15 35 105 30 re f";
+            let pdf = format!(
+                "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R {annots} /Resources << /XObject << /Fx 6 0 R >> /ExtGState << /Half << /ca 0.5 >> >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /Annot /Subtype /Highlight /Rect [15 35 120 65] /QuadPoints [15 65 120 65 15 35 120 35] /C [1 1 0] /AP << /N 6 0 R >> >> endobj
+6 0 obj << /Type /XObject /Subtype /Form /BBox [15 35 120 65] {group} /Resources << /ExtGState << /GS0 << /BM /Multiply /CA 1 /ca 1 >> >> >> /Length {} >> stream
+{form}
+endstream endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+                content.len(),
+                form.len()
+            );
+            let mut r = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default());
+            let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(p.error.is_none(), "{group}: {:?}", p.error);
+            p
+        };
+        let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..4].to_vec();
+        let (white, black, yellow) = (vec![255, 255, 255, 255], vec![0, 0, 0, 255], vec![255, 255, 0, 255]);
+        let annots = "/Annots [5 0 R]";
+        let plain = "/Group << /S /Transparency /CS /DeviceRGB >>";
+        let explicit = "/Group << /S /Transparency /CS /DeviceRGB /I false /K false >>";
+        for group in [plain, explicit, ""] {
+            for (annots, page) in [(annots, ""), ("", "/Fx Do")] {
+                let p = render(group, annots, page);
+                assert_eq!(px(&p, 30, 50), yellow, "{group} {page}: filled with the highlight colour");
+                assert_eq!(px(&p, 105, 50), black, "{group} {page}: Multiply keeps the text underneath");
+                assert_eq!(px(&p, 150, 50), white, "{group} {page}: outside the appearance");
+            }
+        }
+        // Isolated: the group's own transparent backdrop is all the Multiply sees (§11.4.7).
+        let p = render("/Group << /S /Transparency /CS /DeviceRGB /I true >>", annots, "");
+        assert_eq!(px(&p, 105, 50), yellow, "an isolated group starts from a blank backdrop");
+        // Entered at half opacity, the group is still composited as one: half yellow over white.
+        let p = render(plain, "", "/Half gs /Fx Do");
+        let half = px(&p, 30, 50);
+        assert!(half[0] == 255 && half[1] == 255 && (120..=136).contains(&half[2]), "{half:?}");
+        assert_eq!(px(&p, 150, 50), white);
+    }
+
     /// A Highlight annotation without an appearance stream (common in older and generated files)
     /// was not drawn at all. Vendored hayro-interpret patch: its /QuadPoints are filled with /C at
     /// /CA, blended with Multiply, as PdfCraft draws its own highlights (pdfcraft-annot); MuPDF,

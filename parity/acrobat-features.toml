@@ -746,8 +746,8 @@ milestone = "M2"
 status = "partial"
 commands = []
 tools = []
-evidence = ["crates/render/src/raster.rs::soft_mask_without_group_colour_space_is_applied"]
-notes = "via hayro bootstrap"
+evidence = ["crates/render/src/raster.rs::soft_mask_without_group_colour_space_is_applied", "crates/render/src/raster.rs::a_multiply_highlight_inside_a_transparency_group_keeps_the_text"]
+notes = "via hayro bootstrap. A transparency group that is neither isolated nor knockout and is entered at full opacity, with no soft mask and Normal blending, is drawn straight onto the page, so a blend mode inside it (the Multiply of a highlight appearance written by other editors) sees the page content (#1968). Missing: a non-isolated group that needs a layer (partial opacity, a soft mask or a blend mode on the group itself) still composites its elements against a blank backdrop, and knockout groups are drawn as ordinary ones"
 
 [[feature]]
 id = "view.render-knockout"
