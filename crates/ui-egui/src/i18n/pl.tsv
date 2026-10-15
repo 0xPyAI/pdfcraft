@@ -2357,3 +2357,7 @@ animation effects	Off	Wyłączone
 	Mobile	Urządzenie mobilne
 	Merge image fragments	Scal fragmenty obrazów
 	Optimizing… merging image fragments	Optymalizacja… scalanie fragmentów obrazów
+	Side by side	Obok siebie
+	New file only	Tylko nowy plik
+	Old file: {name}	Stary plik: {name}
+	New file: {name}	Nowy plik: {name}

@@ -491,7 +491,9 @@ pub struct DocView {
     /// interpret, so a drag would otherwise queue a storm of them (one per frame) while the
     /// in-flight ones cannot be cancelled mid-operator. Older tiles and the backdrop stay
     /// stretched meanwhile; fresh tiles go out once the pan settles.
-    last_scroll: Vec2,
+    pub(crate) last_scroll: Vec2,
+    /// Side-by-side compare: scroll to here this frame, following the other half.
+    pub(crate) sync_scroll: Option<Vec2>,
     pan_hold_until: f64,
     /// Pages whose raster proved slow (see `SLOW_MILLIS`): only these get the zoom/pan
     /// settle holds. Fast pages render straight through, with no added latency.
@@ -679,6 +681,7 @@ impl DocView {
             last_scale: 0.0,
             sharp_hold_until: 0.0,
             last_scroll: Vec2::ZERO,
+            sync_scroll: None,
             pan_hold_until: 0.0,
             slow_pages: HashSet::new(),
             comments: Default::default(),
@@ -2325,6 +2328,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // where an earlier session left another document.
     if !std::mem::replace(&mut view.shown, true) {
         scroll = scroll.scroll_offset(Vec2::ZERO);
+    }
+    if let Some(v) = view.sync_scroll.take() {
+        scroll = scroll.scroll_offset(v);
     }
     if let Some((page, fx, fy, rel)) = view.zoom_anchor.take() {
         let r = rects[page.min(rects.len() - 1)];

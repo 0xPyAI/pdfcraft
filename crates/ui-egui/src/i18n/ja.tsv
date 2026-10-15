@@ -2377,3 +2377,7 @@ animation effects	Off	オフ
 	Mobile	モバイル
 	Merge image fragments	画像の断片を結合
 	Optimizing… merging image fragments	最適化中… 画像の断片を結合しています
+	Side by side	並べて表示
+	New file only	新しいファイルのみ
+	Old file: {name}	古いファイル: {name}
+	New file: {name}	新しいファイル: {name}

@@ -2978,7 +2978,10 @@ impl eframe::App for PdfCraftApp {
                 ui,
                 |ui| {
                     if let Some(i) = self.active {
-                        canvas::document_area(self, i, ui);
+                        match compare_ui::side_by_side(self, i) {
+                            Some((old, new)) => compare_ui::compare_area(self, old, new, ui),
+                            None => canvas::document_area(self, i, ui),
+                        }
                     }
                 },
             );
@@ -3015,7 +3018,10 @@ impl eframe::App for PdfCraftApp {
                 match self.active {
                     None if self.combine_showing() => combine_ui::page(self, ui),
                     None => home::show(self, ui),
-                    Some(index) => canvas::document_area(self, index, ui),
+                    Some(index) => match compare_ui::side_by_side(self, index) {
+                        Some((old, new)) => compare_ui::compare_area(self, old, new, ui),
+                        None => canvas::document_area(self, index, ui),
+                    },
                 }
             } else {
                 docking::show(self, ui);
@@ -3036,17 +3042,22 @@ impl PdfCraftApp {
         self.combine_thumbs_frame(ctx);
         // Retire hidden documents before admitting the visible document's textures, so the
         // three cache limits apply to the application, regardless of how many tabs are open.
+        // Side by side: the comparison's old file renders alongside the active one.
+        let partner = self.active.and_then(|i| compare_ui::side_by_side(self, i)).map(|(old, _)| old);
         for (i, view) in self.views.iter_mut().enumerate() {
             if Some(i) != self.active
+                && Some(i) != partner
                 && let Some(doc) = self.session.get(view.id)
             {
                 view.suspend_rendering(&doc.renderer);
             }
         }
-        if let Some(view) = self.active.and_then(|i| self.views.get_mut(i))
-            && let Some(doc) = self.session.get(view.id)
-        {
-            view.finish_render_frame(ctx, &doc.info, &doc.renderer);
+        for i in self.active.into_iter().chain(partner) {
+            if let Some(view) = self.views.get_mut(i)
+                && let Some(doc) = self.session.get(view.id)
+            {
+                view.finish_render_frame(ctx, &doc.info, &doc.renderer);
+            }
         }
     }
 }

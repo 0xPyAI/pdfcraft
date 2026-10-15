@@ -2387,3 +2387,7 @@ animation effects	Off	Ανενεργά
 	Mobile	Κινητό
 	Merge image fragments	Συγχώνευση τμημάτων εικόνας
 	Optimizing… merging image fragments	Βελτιστοποίηση… συγχώνευση τμημάτων εικόνας
+	Side by side	Δίπλα-δίπλα
+	New file only	Μόνο το νέο αρχείο
+	Old file: {name}	Παλιό αρχείο: {name}
+	New file: {name}	Νέο αρχείο: {name}

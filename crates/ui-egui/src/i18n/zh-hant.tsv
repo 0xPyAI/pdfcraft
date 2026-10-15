@@ -2331,3 +2331,7 @@ animation effects	Off	關
 	Mobile	行動裝置
 	Merge image fragments	合併影像片段
 	Optimizing… merging image fragments	正在最佳化… 正在合併影像片段
+	Side by side	並排
+	New file only	僅新檔案
+	Old file: {name}	舊檔案：{name}
+	New file: {name}	新檔案：{name}

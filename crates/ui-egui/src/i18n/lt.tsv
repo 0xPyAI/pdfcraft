@@ -2621,3 +2621,7 @@ key	Space	Tarpas
 	Mobile	Mobilusis
 	Merge image fragments	Sujungti vaizdo fragmentus
 	Optimizing… merging image fragments	Optimizuojama… jungiami vaizdo fragmentai
+	Side by side	Greta
+	New file only	Tik naujas failas
+	Old file: {name}	Senas failas: {name}
+	New file: {name}	Naujas failas: {name}

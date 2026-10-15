@@ -2340,3 +2340,7 @@ animation effects	Off	Изключени
 	Mobile	Мобилни устройства
 	Merge image fragments	Обединяване на фрагменти от изображения
 	Optimizing… merging image fragments	Оптимизиране… обединяване на фрагменти от изображения
+	Side by side	Един до друг
+	New file only	Само новият файл
+	Old file: {name}	Стар файл: {name}
+	New file: {name}	Нов файл: {name}

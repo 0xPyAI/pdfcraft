@@ -2341,3 +2341,7 @@ animation effects	Off	关
 	Mobile	移动设备
 	Merge image fragments	合并图像碎片
 	Optimizing… merging image fragments	正在优化… 正在合并图像碎片
+	Side by side	并排
+	New file only	仅新文件
+	Old file: {name}	旧文件：{name}
+	New file: {name}	新文件：{name}

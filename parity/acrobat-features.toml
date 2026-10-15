@@ -9155,11 +9155,11 @@ title = "Side-by-side compare view with synchronised scrolling"
 area = "N"
 tier = "P1"
 milestone = "M12"
-status = "planned"
-commands = []
+status = "shipped"
+commands = ["doc.compare"]
 tools = []
-evidence = []
-notes = ""
+evidence = ["crates/ui-egui/tests/compare.rs::compare_two_versions"]
+notes = "After Compare files the document area splits (when the old version is open in a tab and the window is at least 1000 px wide; the Compare panel's Side by side / New file only toggles it): the old file on the left, the new on the right, each a page view of its own with its shading (deleted and replaced on the old, inserted and replaced on the new, visual differences on both). The half the pointer is over leads: the other takes its zoom, fit, layout, rotation and scroll offset; a change clicked in the panel jumps both halves to their side of it. Clear ends it. Still missing against Acrobat: scrolling by matching content rather than by offset (pages of different sizes drift), and the comparison kept when the old file's tab closes."
 
 [[feature]]
 id = "misc.compare-report"

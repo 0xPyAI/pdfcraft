@@ -2391,3 +2391,7 @@ animation effects	Off	Desativados
 	Mobile	Celular
 	Merge image fragments	Mesclar fragmentos de imagem
 	Optimizing… merging image fragments	Otimizando… mesclando fragmentos de imagem
+	Side by side	Lado a lado
+	New file only	Somente o arquivo novo
+	Old file: {name}	Arquivo antigo: {name}
+	New file: {name}	Arquivo novo: {name}
