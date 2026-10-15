@@ -317,8 +317,12 @@ impl PdfCraftApp {
                 self.apply_edit(Edit::ResetForm { names: None });
             }
             "page.organize" => {
-                if let Some(i) = active {
-                    self.views[i].organize = !self.views[i].organize;
+                if let Some(v) = active.and_then(|i| self.views.get_mut(i)) {
+                    if v.organize {
+                        v.organize = false;
+                    } else {
+                        v.open_organize();
+                    }
                 }
             }
             "page.rotate" => {

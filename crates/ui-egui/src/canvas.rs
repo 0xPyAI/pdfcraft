@@ -476,6 +476,8 @@ pub struct DocView {
     /// The page to keep in place after a grid zoom, and how far below the top of the grid its
     /// cell was.
     grid_anchor: Option<(usize, f32)>,
+    /// The page the grid scrolls into view on its next frame (Organize just opened on it).
+    grid_reveal: Option<usize>,
     /// Sharp renders of the pages the grid shows larger than a thumbnail: only those in view,
     /// at the size drawn (device pixels wide).
     grid_pages: HashMap<usize, (u32, TextureHandle)>,
@@ -677,6 +679,7 @@ impl DocView {
             grid_zoom: 1.0,
             grid_zoom_request: None,
             grid_anchor: None,
+            grid_reveal: None,
             grid_pages: HashMap::new(),
             last_scale: 0.0,
             sharp_hold_until: 0.0,
@@ -763,6 +766,18 @@ impl DocView {
         self.document_changed(info);
         self.page_input = self.current_page_label(info.pages.get(self.current).map(|page| page.label.as_str()));
         self.page_input_reselect = true;
+    }
+
+    /// Open Organize Pages on the page being read (issue #1910). An empty selection means the
+    /// current page, so a selection left from earlier that does not include it is dropped, and
+    /// the grid scrolls its cell into view. Every way into the grid goes through here; closing
+    /// it is a plain `organize = false`.
+    pub fn open_organize(&mut self) {
+        self.organize = true;
+        if !self.selected.is_empty() && !self.selected.contains(&self.current) {
+            self.clear_page_selection(Some(self.current));
+        }
+        self.grid_reveal = Some(self.current);
     }
 
     /// Pages an organize command acts on: the selection, or the current page.
@@ -4333,6 +4348,7 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
     // The page image scales with the zoom; the padding and the page number don't.
     let cell = vec2(146.0 * view.grid_zoom + 44.0, 194.0 * view.grid_zoom + 88.0);
     let anchor = view.grid_anchor.take();
+    let reveal = view.grid_reveal.take();
     let mut open_page = None;
     organize_toolbar(view, info, editable, dirty, unobstructed, ui, t);
     let viewport = ui.available_rect_before_wrap();
@@ -4364,6 +4380,14 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
         let rows = info.pages.len().div_ceil(cols);
         let left = (ui.available_width() - cols as f32 * cell.x) / 2.0;
         let (grid, _) = ui.allocate_exact_size(vec2(ui.available_width(), rows as f32 * cell.y), Sense::hover());
+        // The page Organize opened on may lie in a row the virtualized grid has not laid out,
+        // so its cell is computed rather than found.
+        if let Some(page) = reveal.filter(|p| *p < info.pages.len()) {
+            let row = page / cols;
+            let col = page % cols;
+            let c = Rect::from_min_size(pos2(grid.left() + left + col as f32 * cell.x, grid.top() + row as f32 * cell.y), cell);
+            ui.scroll_to_rect_animation(c, Some(egui::Align::Center), egui::style::ScrollAnimation::none());
+        }
         for row in thumbnail_rows(clip.top() - 20.0, clip.bottom() - 20.0, cell.y, rows) {
             let row_rect = Rect::from_min_size(grid.min + vec2(0.0, row as f32 * cell.y), vec2(grid.width(), cell.y));
             for col in 0..cols {
@@ -4447,7 +4471,9 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
                 check.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, checked, label.clone()));
                 if check.on_hover_text(label).changed() {
                     view.click_page(i, egui::Modifiers::COMMAND, false);
-                    view.current = i;
+                    // The document shows the page picked here when the grid closes, as after a
+                    // Pages-panel click, so reopening the grid keeps the pick (issue #1910).
+                    view.go_to_page(i);
                 }
                 // Local actions always target the labelled page. The toolbar above the grid
                 // remains the place for actions on the whole selection.
@@ -4477,7 +4503,7 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
                 if resp.clicked() {
                     let m = ui.input(|i| i.modifiers);
                     view.click_page(i, m, false);
-                    view.current = i;
+                    view.go_to_page(i);
                 }
                 if resp.double_clicked() {
                     open_page = Some(i);
@@ -4486,7 +4512,7 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
                 resp.context_menu(|ui| {
                     if !view.selected.contains(&i) {
                         view.selected = [i].into();
-                        view.current = i;
+                        view.go_to_page(i);
                     }
                     if ui.button(tl!("Extract pages")).clicked() {
                         view.pending_action = Some(ViewAction::Extract);

@@ -149,6 +149,53 @@ fn organize_tool_opens_the_overview_directly_and_can_be_reentered() {
     assert!(!h.state().views[0].organize, "another tool returns to the document");
 }
 
+/// Issue #1910: the page grid opens on the page the user was reading: it is selected and
+/// scrolled into view, whether the document was on a middle page, its last page or a page
+/// other than an earlier grid selection.
+#[test]
+fn organize_opens_on_the_current_page() {
+    let mut h = harness(60, |_| {});
+    let in_view = |h: &Harness<'static, PdfCraftApp>, page: usize| {
+        let viewport = h.state().views[0].viewport_rect();
+        let label = format!("Page {}", page + 1);
+        h.query_by_label(&label).is_some_and(|n| viewport.contains_rect(n.rect()))
+    };
+    // From a middle page.
+    h.state_mut().views[0].go_to_page(30);
+    h.run_steps(2);
+    assert!(h.state_mut().execute("page.organize"));
+    h.run_steps(4);
+    assert!(h.state().views[0].organize);
+    assert_eq!(h.state().views[0].target_pages(), [30]);
+    assert!(h.state().views[0].selected.is_empty(), "an empty selection is the current page, so checkboxes still toggle");
+    assert!(in_view(&h, 30), "the current page is scrolled into view");
+    assert!(!in_view(&h, 0), "the grid does not open on page 1");
+    // An earlier grid selection on another page does not win over the page the user went to.
+    h.get_by_label("Select page 32").click();
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].target_pages(), [31]);
+    h.get_by_label("Close").click();
+    h.run_steps(2);
+    assert!(!h.state().views[0].organize);
+    h.state_mut().views[0].go_to_page(45);
+    h.run_steps(2);
+    h.state_mut().set_option("tool", "organize").unwrap();
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].target_pages(), [45]);
+    assert!(in_view(&h, 45));
+    assert!(!in_view(&h, 1));
+    // From the last page.
+    h.get_by_label("Close").click();
+    h.run_steps(2);
+    h.state_mut().views[0].go_to_page(59);
+    h.run_steps(2);
+    h.state_mut().set_option("organize", "on").unwrap();
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].target_pages(), [59]);
+    assert!(in_view(&h, 59));
+    assert!(!in_view(&h, 0));
+}
+
 #[test]
 fn organize_tool_chosen_before_opening_a_document_shows_its_pages() {
     let mut app = PdfCraftApp::new();

@@ -2608,8 +2608,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["page.organize"]
 tools = []
-evidence = ["crates/ui-egui/tests/editing.rs::shift_click_selects_a_range_and_moves_it", "crates/ui-egui/tests/editing.rs::organize_tool_opens_the_overview_directly_and_can_be_reentered", "crates/ui-egui/tests/control.rs::organize_overview_is_reachable_through_the_control_channel"]
-notes = "Opening the Organize pages tool enters the overview directly. Hovered, focused and selected pages expose individual rotate/delete actions; the toolbar acts on the selection."
+evidence = ["crates/ui-egui/tests/editing.rs::shift_click_selects_a_range_and_moves_it", "crates/ui-egui/tests/editing.rs::organize_tool_opens_the_overview_directly_and_can_be_reentered", "crates/ui-egui/tests/editing.rs::organize_opens_on_the_current_page", "crates/ui-egui/tests/control.rs::organize_overview_is_reachable_through_the_control_channel"]
+notes = "Opening the Organize pages tool enters the overview directly, on the current page: selected and scrolled into view (#1910). Hovered, focused and selected pages expose individual rotate/delete actions; the toolbar acts on the selection."
 
 [[feature]]
 id = "organize.multi-select-pages"

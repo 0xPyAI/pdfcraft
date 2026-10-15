@@ -1315,7 +1315,7 @@ impl PdfCraftApp {
             && self.left == LeftPanel::Tool("organize")
             && let Some(view) = self.views.last_mut()
         {
-            view.organize = true;
+            view.open_organize();
         }
         if activate && let Some(mode) = self.mode_override {
             // Explicit mode options do not reset independent --tool / --left choices.
@@ -2067,7 +2067,11 @@ impl PdfCraftApp {
         self.left = LeftPanel::Tool(id);
         self.reveal_tools();
         if let Some(view) = self.active.and_then(|i| self.views.get_mut(i)) {
-            view.organize = id == "organize";
+            if id == "organize" {
+                view.open_organize();
+            } else {
+                view.organize = false;
+            }
         }
     }
 
@@ -2506,7 +2510,13 @@ impl PdfCraftApp {
                 "right" => true,
                 _ => return Err("tools-side must be left or right".into()),
             })?,
-            ("organize", Some(v)) => v.organize = value != "off",
+            ("organize", Some(v)) => {
+                if value == "off" {
+                    v.organize = false;
+                } else {
+                    v.open_organize();
+                }
+            }
             // `--grid-zoom 150`: the size of the pages in the organize grid, in percent.
             ("grid-zoom", Some(v)) => {
                 let percent = value.trim_end_matches('%').parse::<f32>().map_err(|e| e.to_string())?;
