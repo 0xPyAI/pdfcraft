@@ -470,32 +470,12 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
     // 3b. An XFA form mirrors its field values in the /XFA datasets packet, and a relayout
     // rebuilds fields and pages from that packet, so deleting the AcroForm field alone leaves the
     // redacted value in the file and lets a later relayout put it back. Once redactions are
-    // applied the form stops being XFA: drop /AcroForm /XFA (template and datasets), the catalog's
-    // /NeedsRendering, and PdfCraft's own layout mark (pdfcraft_xfa::LAYOUT_KEY), leaving a plain
-    // already-laid-out AcroForm that neither the saved file nor a relayout can restore from.
-    if let Some(root) = doc.root() {
-        let strip_xfa = |d: &mut Dict| {
-            d.remove(b"XFA");
-            d.remove(b"PCXfaLayout");
-        };
-        match doc.get(root).as_dict().and_then(|d| d.get(b"AcroForm").cloned()) {
-            Some(Object::Ref(af)) if doc.get(af).as_dict().is_some_and(|d| d.contains(b"XFA")) => {
-                doc.update_dict(af, strip_xfa)?;
-                doc.update_dict(root, |d| {
-                    d.remove(b"NeedsRendering");
-                })?;
-                report.xfa_removed = true;
-            }
-            Some(Object::Dict(mut af)) if af.contains(b"XFA") => {
-                strip_xfa(&mut af);
-                doc.update_dict(root, |d| {
-                    d.set(b"AcroForm".to_vec(), Object::Dict(af));
-                    d.remove(b"NeedsRendering");
-                })?;
-                report.xfa_removed = true;
-            }
-            _ => {}
-        }
+    // applied the form stops being XFA: the packets, /NeedsRendering, the layout mark and the
+    // rest go (pdfcraft_xfa::strip), leaving a plain already-laid-out AcroForm that neither the
+    // saved file nor a relayout can restore from.
+    if pdfcraft_xfa::xfa_shape(doc).is_some() {
+        let r = pdfcraft_xfa::strip(doc).map_err(|e| pdfcraft_edit::EditError::Invalid(e.to_string()))?;
+        report.xfa_removed = !r.packets.is_empty();
     }
 
     // 4. The boxes.

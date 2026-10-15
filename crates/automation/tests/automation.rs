@@ -4752,6 +4752,33 @@ fn hundreds_of_xfa_calculations_open_and_recalculate_within_their_budgets() {
 }
 
 #[test]
+fn xfa_forms_flatten_and_convert_to_static_through_tools() {
+    let dir = workdir("xfa-flat");
+    let data = "<form><page1><country>JP</country></page1></form>";
+    std::fs::write(dir.join("fields.pdf"), pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::fields_template(data))).unwrap();
+    let mut a = auto(&dir);
+    // Convert to static: the fields stay, the XFA goes.
+    let doc = ok(&mut a, "doc_open", json!({ "path": "fields.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(ok(&mut a, "doc_info", json!({ "doc": doc }))["xfa"], "dynamic");
+    let before = ok(&mut a, "form_fields", json!({ "doc": doc }))["fields"].as_array().unwrap().len();
+    ok(&mut a, "xfa_to_static", json!({ "doc": doc }));
+    let info = ok(&mut a, "doc_info", json!({ "doc": doc }));
+    assert!(info["xfa"].is_null(), "{info}");
+    assert_eq!(ok(&mut a, "form_fields", json!({ "doc": doc }))["fields"].as_array().unwrap().len(), before);
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "static.pdf" }));
+    let again = ok(&mut a, "doc_open", json!({ "path": "static.pdf" }))["doc"].as_u64().unwrap();
+    assert!(ok(&mut a, "doc_info", json!({ "doc": again }))["xfa"].is_null());
+    assert!(a.call("xfa_to_static", &json!({ "doc": again })).is_err(), "not an XFA form");
+    // Flatten the fields: a plain PDF with the values as page content.
+    let doc = ok(&mut a, "doc_open", json!({ "path": "fields.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_flatten", json!({ "doc": doc, "comments": false, "fields": true }));
+    assert!(ok(&mut a, "doc_info", json!({ "doc": doc }))["xfa"].is_null());
+    assert_eq!(ok(&mut a, "form_fields", json!({ "doc": doc }))["fields"].as_array().unwrap().len(), 0);
+    let text = ok(&mut a, "text_extract", json!({ "doc": doc, "pages": [1] }));
+    assert!(text.to_string().contains("Japan"), "{text}");
+}
+
+#[test]
 fn xfa_data_files_export_and_import_through_tools() {
     let dir = workdir("xfa-data");
     let data = "<form><page1><country>JP</country></page1></form>";

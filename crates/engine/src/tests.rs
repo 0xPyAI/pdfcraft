@@ -3919,6 +3919,113 @@ fn a_value_a_script_sets_reaches_every_field_bound_to_the_same_data_node() {
 }
 
 #[test]
+fn flattening_an_xfa_form_bakes_its_pages_and_takes_the_xfa_out() {
+    let data = "<form><page1><country>JP</country><langs>English\nSpanish</langs></page1></form>";
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::fields_template(data)));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("fields.pdf", None, bytes, None).expect("opens");
+    assert_eq!(s.get(id).unwrap().info.xfa, Some(pdfcraft_render::Xfa::Dynamic));
+    s.apply(id, Edit::SetFieldValue { name: "other".into(), value: FieldValue::Text("typed here".into()) }).unwrap();
+    s.apply(id, Edit::Flatten { comments: false, fields: true }).unwrap();
+    let d = s.get(id).unwrap();
+    assert!(d.form.is_empty(), "no fields remain");
+    assert_eq!(d.info.xfa, None, "no longer an XFA form: Adobe's viewers show the baked pages");
+    assert!(d.xfa.is_none());
+    let texts = page_texts(&s, id).join("\n");
+    for want in ["Japan", "typed here", "Country: JP", "12345"] {
+        assert!(texts.contains(want), "{want} is page content now: {texts}");
+    }
+    // Saved and reopened: a plain PDF, the same page content, nothing of the XFA left.
+    let saved = s.save_bytes(id).unwrap();
+    let cos = pdfcraft_cos::Document::open(saved.clone()).unwrap();
+    assert!(pdfcraft_xfa::read_packets(&cos).unwrap().is_none());
+    let id2 = s.open("flat.pdf", None, saved, None).unwrap();
+    let d2 = s.get(id2).unwrap();
+    assert_eq!((d2.info.xfa, d2.form.len()), (None, 0));
+    assert!(page_texts(&s, id2).join("\n").contains("typed here"));
+    // Undone, the form is a laid-out XFA form again.
+    s.undo(id).unwrap();
+    let d = s.get(id).unwrap();
+    assert_eq!(d.info.xfa, Some(pdfcraft_render::Xfa::Dynamic));
+    assert_eq!(d.form.iter().find(|f| f.name == "other").unwrap().value, vec!["typed here".to_string()]);
+    // Flattening comments alone leaves the XFA form as it is.
+    s.apply(id, Edit::Flatten { comments: true, fields: false }).unwrap();
+    assert_eq!(s.get(id).unwrap().info.xfa, Some(pdfcraft_render::Xfa::Dynamic));
+}
+
+#[test]
+fn a_dynamic_xfa_form_that_was_never_laid_out_keeps_its_xfa_and_the_user_is_told_what_went() {
+    // A template that can't be read: the form keeps its placeholder page and its XFA.
+    let broken = "<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\"><template xmlns=\"http://www.xfa.org/schema/xfa-template/3.3/\"><subform name=\"form\"</template></xdp:xdp>";
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("broken.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(broken)), None).expect("opens");
+    assert_eq!(s.get(id).unwrap().info.xfa, Some(pdfcraft_render::Xfa::Dynamic));
+    assert!(s.get(id).unwrap().xfa.is_none(), "not laid out");
+    assert!(s.apply(id, Edit::XfaToStatic).is_err(), "nothing to keep");
+    s.apply(id, Edit::Flatten { comments: false, fields: true }).unwrap();
+    let d = s.get(id).unwrap();
+    assert_eq!(d.info.xfa, Some(pdfcraft_render::Xfa::Dynamic), "the XFA stays: Adobe can still render the form");
+    assert!(d.info.warnings.iter().any(|w| w.contains("The XFA was kept")), "{:?}", d.info.warnings);
+    // A laid-out form with data no field holds: converting says what went with the XFA, and
+    // the note stays on the document, while the XFA's own warnings go; undo brings those back.
+    let data = "<form><page1><country>JP</country><nobody>holds this</nobody></page1></form>";
+    let id = s.open("fields.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::fields_template(data))), None).unwrap();
+    let before: Vec<String> = s.get(id).unwrap().info.warnings.clone();
+    assert!(before.iter().any(|w| w.contains("scripts changed it on opening")), "an XFA-only warning: {before:?}");
+    s.apply(id, Edit::XfaToStatic).unwrap();
+    let w = s.get(id).unwrap().info.warnings.clone();
+    assert!(w.iter().any(|n| n.starts_with("XFA removed: The XFA was taken out") && n.contains("template, datasets")), "{w:?}");
+    assert!(w.iter().any(|n| n.contains("1 value(s) the form's XFA data held that no field showed")), "{w:?}");
+    assert!(w.iter().any(|n| n.contains("1 image field(s) do nothing now")), "{w:?}");
+    assert!(!w.iter().any(|n| n.contains("scripts changed it on opening")), "the XFA's own warning is gone: {w:?}");
+    let js = s.take_js_output(id);
+    assert!(js.errors.is_empty(), "{js:?}");
+    s.undo(id).unwrap();
+    let w = s.get(id).unwrap().info.warnings.clone();
+    assert!(!w.iter().any(|n| n.starts_with("XFA removed")), "{w:?}");
+    assert_eq!(s.get(id).unwrap().info.xfa, Some(pdfcraft_render::Xfa::Dynamic));
+}
+
+#[test]
+fn an_xfa_form_converts_to_a_static_form_that_keeps_its_fields() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("scripted.pdf", None, bytes, None).expect("opens");
+    let value = |s: &Session, id: DocId, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).map(|f| f.value.clone()).unwrap_or_default();
+    assert_eq!(value(&s, id, "total"), vec!["10".to_string()], "the scripts ran on open");
+    let fields_before = s.get(id).unwrap().form.len();
+    s.apply(id, Edit::XfaToStatic).unwrap();
+    let d = s.get(id).unwrap();
+    assert_eq!(d.info.xfa, None);
+    assert_eq!(d.form.len(), fields_before, "the fields stay");
+    assert_eq!(value(&s, id, "qty"), vec!["2".to_string()]);
+    assert_eq!(value(&s, id, "total"), vec!["10".to_string()]);
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Convert to a static form"));
+    // The form is an ordinary one now: a change no longer runs the XFA calculation.
+    s.apply(id, Edit::SetFieldValue { name: "qty".into(), value: FieldValue::Text("7".into()) }).unwrap();
+    assert_eq!(value(&s, id, "total"), vec!["10".to_string()]);
+    assert!(s.take_js_output(id).is_empty());
+    // Saved: no XFA, no private keys on the fields, the pages as laid out.
+    let saved = s.save_bytes(id).unwrap();
+    let cos = pdfcraft_cos::Document::open(saved.clone()).unwrap();
+    assert!(pdfcraft_xfa::read_packets(&cos).unwrap().is_none());
+    assert!(pdfcraft_xfa::fields_by_som(&cos).is_empty(), "no /PCSom left");
+    let id2 = s.open("static.pdf", None, saved, None).unwrap();
+    let d2 = s.get(id2).unwrap();
+    assert_eq!(d2.info.xfa, None);
+    assert_eq!(value(&s, id2, "qty"), vec!["7".to_string()]);
+    assert_eq!(d2.info.pages.len(), 1);
+    // Not an XFA form: refused.
+    assert!(s.apply(id2, Edit::XfaToStatic).is_err());
+    // Undone, the XFA form is back and its scripts run again.
+    s.undo(id).unwrap();
+    s.undo(id).unwrap();
+    assert_eq!(s.get(id).unwrap().info.xfa, Some(pdfcraft_render::Xfa::Dynamic));
+    s.apply(id, Edit::SetFieldValue { name: "qty".into(), value: FieldValue::Text("3".into()) }).unwrap();
+    assert_eq!(value(&s, id, "total"), vec!["15".to_string()]);
+}
+
+#[test]
 fn dynamic_xfa_forms_run_formcalc_scripts() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::formcalc_template()));
     let mut s = Session::new().with_clock(|| 1_700_000_000);
