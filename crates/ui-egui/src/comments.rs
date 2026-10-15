@@ -511,6 +511,9 @@ pub(crate) struct PageCx<'a> {
     pub info: &'a DocInfo,
     pub tool: QuickTool,
     pub prefs: &'a CommentPrefs,
+    /// A redaction mark's fill while the pointer is over it, and its opacity (Redaction Tool
+    /// Properties).
+    pub redact_mark: ([f64; 3], f64),
     /// The document allows commenting.
     pub allowed: bool,
     /// Comments are hidden (Hide all comments): nothing to select.
@@ -554,6 +557,23 @@ impl PageCx<'_> {
         } else {
             vec![self.screen_rect(a)]
         }
+    }
+
+    /// A redaction mark's areas: one per marked quad, or its rectangle.
+    fn redact_rects(&self, a: &Annotation) -> Vec<Rect> {
+        if a.quads.is_empty() {
+            return vec![self.screen_rect(a)];
+        }
+        a.quads
+            .iter()
+            .map(|q| {
+                let xs = [q[0], q[2], q[4], q[6]];
+                let ys = [q[1], q[3], q[5], q[7]];
+                let (x0, x1) = (xs.iter().copied().fold(f32::MAX, f32::min), xs.iter().copied().fold(f32::MIN, f32::max));
+                let (y0, y1) = (ys.iter().copied().fold(f32::MAX, f32::min), ys.iter().copied().fold(f32::MIN, f32::max));
+                self.xf.user_rect(self.info, self.page, [x0, y0, x1, y1])
+            })
+            .collect()
     }
 
     /// The topmost comment under `p`.
@@ -1071,6 +1091,18 @@ pub(crate) fn page_after_text(resp: &egui::Response, cx: &PageCx<'_>, view: &mut
 pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, cx: &PageCx<'_>, view: &DocView) {
     let cv = &view.comments;
     let pointer = ui.input(|i| i.pointer.hover_pos());
+    // A redaction mark shows its fill while the pointer is over it, as Acrobat's does, so the
+    // marked area reads before anything is applied.
+    if cv.gesture.is_none()
+        && let Some(a) = pointer.and_then(|p| cx.hit(p))
+        && a.subtype == "Redact"
+    {
+        let ([r, g, b], opacity) = cx.redact_mark;
+        let fill = Color32::from_rgba_unmultiplied((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8, (opacity.clamp(0.0, 1.0) * 255.0) as u8);
+        for rect in cx.redact_rects(a) {
+            painter.rect_filled(rect, CornerRadius::ZERO, fill);
+        }
+    }
     if cv.gesture.is_none()
         && let Some(a) = pointer.and_then(|p| cx.hit(p))
         && (cx.tool == QuickTool::Select || matches!(cx.tool, QuickTool::Fill(_)) && a.fill_sign)
@@ -1231,7 +1263,7 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
         // Scrolled away: keep the draft until the page is back.
         return None;
     };
-    let cx = PageCx { page, xf: &xf, info, tool: QuickTool::Select, prefs, allowed: true, hidden: false };
+    let cx = PageCx { page, xf: &xf, info, tool: QuickTool::Select, prefs, allowed: true, hidden: false, redact_mark: ([0.89, 0.13, 0.13], 1.0) };
     let anchor = cx.to_screen(c.at);
     let t = Tokens::get(ctx);
     let mut post = false;

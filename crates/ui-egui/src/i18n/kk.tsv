@@ -2392,3 +2392,9 @@ animation effects	Off	Өшірулі
 	Crop Image	Суретті қию
 	Remove Crop	Қиюды алып тастау
 	Trim the picture with its handles; Enter or Done applies	Суретті тұтқаларымен қиыңыз; Enter немесе Дайын қолданады
+	Redaction mark appearance	Жасыру белгісінің көрінісі
+	Outline colour:	Контур түсі:
+	Fill colour:	Толтыру түсі:
+	Shown while the pointer is over a mark.	Меңзер белгінің үстінде тұрғанда көрсетіледі.
+	Opacity:	Мөлдірсіздік:
+	Make properties default	Қасиеттерді әдепкі ету

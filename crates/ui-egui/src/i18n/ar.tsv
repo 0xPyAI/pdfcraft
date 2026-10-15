@@ -2415,3 +2415,9 @@ animation effects	Off	معطّلة
 	Crop Image	قص الصورة
 	Remove Crop	إزالة القص
 	Trim the picture with its handles; Enter or Done applies	قص الصورة بمقابضها؛ يطبّق Enter أو تم
+	Redaction mark appearance	مظهر علامة الحجب
+	Outline colour:	لون الحد الخارجي:
+	Fill colour:	لون التعبئة:
+	Shown while the pointer is over a mark.	يظهر أثناء وجود المؤشر فوق علامة.
+	Opacity:	العتامة:
+	Make properties default	جعل الخصائص افتراضية

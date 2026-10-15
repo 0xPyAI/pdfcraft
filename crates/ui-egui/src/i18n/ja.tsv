@@ -2394,3 +2394,9 @@ animation effects	Off	オフ
 	Crop Image	画像を切り抜き
 	Remove Crop	切り抜きを解除
 	Trim the picture with its handles; Enter or Done applies	ハンドルで画像を切り抜きます。Enter または完了で適用
+	Redaction mark appearance	墨消しマークの外観
+	Outline colour:	枠線の色:
+	Fill colour:	塗りの色:
+	Shown while the pointer is over a mark.	ポインターがマーク上にあるときに表示されます。
+	Opacity:	不透明度:
+	Make properties default	プロパティをデフォルトに設定

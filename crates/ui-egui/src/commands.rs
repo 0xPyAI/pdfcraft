@@ -454,7 +454,10 @@ impl PdfCraftApp {
                 self.redact_search.found = None;
                 self.dialog = Some(Dialog::RedactSearch);
             }
-            "redact.properties" => self.dialog = Some(Dialog::RedactProps),
+            "redact.properties" => {
+                self.redact_before = Some(self.redact_prefs.clone());
+                self.dialog = Some(Dialog::RedactProps);
+            }
             "redact.apply" => {
                 let marks = active.and_then(|i| self.session.get(self.views[i].id)).map_or(0, |d| d.redaction_marks());
                 if marks == 0 {

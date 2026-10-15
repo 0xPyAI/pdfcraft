@@ -2404,3 +2404,9 @@ animation effects	Off	Ανενεργά
 	Crop Image	Περικοπή εικόνας
 	Remove Crop	Κατάργηση περικοπής
 	Trim the picture with its handles; Enter or Done applies	Περικόψτε την εικόνα με τις λαβές της· Enter ή Τέλος για εφαρμογή
+	Redaction mark appearance	Εμφάνιση σήμανσης απαλοιφής
+	Outline colour:	Χρώμα περιγράμματος:
+	Fill colour:	Χρώμα γεμίσματος:
+	Shown while the pointer is over a mark.	Εμφανίζεται όσο ο δείκτης είναι πάνω από μια σήμανση.
+	Opacity:	Αδιαφάνεια:
+	Make properties default	Ορισμός ιδιοτήτων ως προεπιλογή

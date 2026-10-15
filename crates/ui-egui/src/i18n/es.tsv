@@ -2524,3 +2524,9 @@ animation effects	Off	Desactivados
 	Crop Image	Recortar imagen
 	Remove Crop	Quitar recorte
 	Trim the picture with its handles; Enter or Done applies	Recorta la imagen con sus tiradores; Intro o Hecho lo aplica
+	Redaction mark appearance	Aspecto de la marca de censura
+	Outline colour:	Color del contorno:
+	Fill colour:	Color de relleno:
+	Shown while the pointer is over a mark.	Se muestra mientras el puntero está sobre una marca.
+	Opacity:	Opacidad:
+	Make properties default	Usar como propiedades predeterminadas

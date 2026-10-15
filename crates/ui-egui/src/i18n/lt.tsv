@@ -2638,3 +2638,9 @@ key	Space	Tarpas
 	Crop Image	Apkarpyti vaizdą
 	Remove Crop	Pašalinti apkarpymą
 	Trim the picture with its handles; Enter or Done applies	Apkarpykite paveikslėlį rankenėlėmis; Enter arba Atlikta pritaiko
+	Redaction mark appearance	Užtamsinimo žymės išvaizda
+	Outline colour:	Kontūro spalva:
+	Fill colour:	Užpildo spalva:
+	Shown while the pointer is over a mark.	Rodoma, kol žymeklis yra virš žymės.
+	Opacity:	Nepermatomumas:
+	Make properties default	Nustatyti ypatybes kaip numatytąsias

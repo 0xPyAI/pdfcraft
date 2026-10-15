@@ -2357,3 +2357,9 @@ animation effects	Off	Изключени
 	Crop Image	Изрязване на изображението
 	Remove Crop	Премахване на изрязването
 	Trim the picture with its handles; Enter or Done applies	Изрежете картината чрез дръжките; Enter или Готово прилага
+	Redaction mark appearance	Вид на маркировката за заличаване
+	Outline colour:	Цвят на контура:
+	Fill colour:	Цвят на запълването:
+	Shown while the pointer is over a mark.	Показва се, докато показалецът е над маркировка.
+	Opacity:	Непрозрачност:
+	Make properties default	Задаване като свойства по подразбиране

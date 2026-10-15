@@ -2395,3 +2395,9 @@ animation effects	Off	Aus
 	Crop Image	Bild zuschneiden
 	Remove Crop	Zuschnitt entfernen
 	Trim the picture with its handles; Enter or Done applies	Bild mit den Griffen zuschneiden; Eingabe oder Fertig übernimmt
+	Redaction mark appearance	Aussehen der Schwärzungsmarkierung
+	Outline colour:	Konturfarbe:
+	Fill colour:	Füllfarbe:
+	Shown while the pointer is over a mark.	Wird angezeigt, solange der Zeiger über einer Markierung ist.
+	Opacity:	Deckkraft:
+	Make properties default	Eigenschaften als Standard festlegen

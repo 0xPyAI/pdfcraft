@@ -2307,3 +2307,9 @@ animation effects	Off	Выкл
 	Crop Image	Обрезать изображение
 	Remove Crop	Убрать обрезку
 	Trim the picture with its handles; Enter or Done applies	Обрежьте изображение за маркеры; Enter или «Готово» применяет
+	Redaction mark appearance	Вид метки скрытия
+	Outline colour:	Цвет контура:
+	Fill colour:	Цвет заливки:
+	Shown while the pointer is over a mark.	Показывается, пока указатель над меткой.
+	Opacity:	Непрозрачность:
+	Make properties default	Сделать свойства стандартными

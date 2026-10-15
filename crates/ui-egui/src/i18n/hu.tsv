@@ -2393,3 +2393,9 @@ animation effects	Off	Ki
 	Crop Image	Kép körülvágása
 	Remove Crop	Körülvágás eltávolítása
 	Trim the picture with its handles; Enter or Done applies	Vágja körül a képet a fogantyúival; Enter vagy Kész alkalmazza
+	Redaction mark appearance	Kitakarási jelölés megjelenése
+	Outline colour:	Körvonal színe:
+	Fill colour:	Kitöltés színe:
+	Shown while the pointer is over a mark.	Akkor látszik, amikor a mutató egy jelölés fölött van.
+	Opacity:	Átlátszatlanság:
+	Make properties default	Tulajdonságok beállítása alapértelmezettként

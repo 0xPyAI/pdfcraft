@@ -537,6 +537,15 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 let mut prefs = app.redact_prefs.clone();
                 let (ok, cancel) = crate::redact_ui::props_body(ui, &mut prefs, &t);
                 app.redact_prefs = prefs;
+                if ok && app.redact_prefs.remember {
+                    app.redact_defaults = app.redact_prefs.clone();
+                }
+                if cancel && let Some(before) = app.redact_before.take() {
+                    app.redact_prefs = before;
+                }
+                if ok {
+                    app.redact_before = None;
+                }
                 close = ok || cancel;
                 return;
             }

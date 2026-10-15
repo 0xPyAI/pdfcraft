@@ -2390,3 +2390,9 @@ animation effects	Off	Kapalı
 	Crop Image	Resmi kırp
 	Remove Crop	Kırpmayı kaldır
 	Trim the picture with its handles; Enter or Done applies	Resmi tutamaçlarıyla kırpın; Enter veya Bitti uygular
+	Redaction mark appearance	Karartma işareti görünümü
+	Outline colour:	Kenar rengi:
+	Fill colour:	Dolgu rengi:
+	Shown while the pointer is over a mark.	İşaretçi bir işaretin üzerindeyken gösterilir.
+	Opacity:	Opaklık:
+	Make properties default	Özellikleri varsayılan yap

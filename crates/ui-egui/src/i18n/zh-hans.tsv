@@ -2358,3 +2358,9 @@ animation effects	Off	关
 	Crop Image	裁剪图像
 	Remove Crop	移除裁剪
 	Trim the picture with its handles; Enter or Done applies	用控制柄裁剪图片;按 Enter 或“完成”应用
+	Redaction mark appearance	涂黑标记外观
+	Outline colour:	轮廓颜色:
+	Fill colour:	填充颜色:
+	Shown while the pointer is over a mark.	指针位于标记上方时显示。
+	Opacity:	不透明度:
+	Make properties default	将属性设为默认
