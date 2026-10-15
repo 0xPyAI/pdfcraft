@@ -186,6 +186,21 @@ fn single_page_layout_shows_one_page_at_a_time() {
 }
 
 #[test]
+fn single_page_jump_draws_a_fitting_page_where_it_stays() {
+    // A page that fits has nothing to scroll, but the jump to it asked for the gap above it:
+    // drawn that much too high for a frame, it then hopped into place.
+    let mut h = harness_stepping(1.0 / 60.0, &[("layout", "single")]);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num0); // fit page
+    h.run_steps(4);
+    h.state_mut().set_option("page", "2").unwrap();
+    h.step();
+    let first = rect(&h, 1).expect("page 2 drawn in the frame after the jump");
+    h.run_steps(4);
+    let settled = rect(&h, 1).expect("page 2");
+    assert!((first.min.y - settled.min.y).abs() < 0.5, "page 2 drawn where it settles: {first:?} then {settled:?}");
+}
+
+#[test]
 fn single_page_wheel_pans_instead_when_zoomed_in() {
     // The zoomed-in guard: with room to pan, the wheel pans and must not turn pages.
     let mut h = harness(&[("layout", "single"), ("zoom", "200")]);
