@@ -196,6 +196,59 @@ fn rubber_stamps_point_left_as_displayed_on_rotated_pages() {
     }
 }
 
+/// Fill & Sign text and text boxes read across as displayed on turned pages (scanned forms are
+/// often stored sideways with `/Rotate`), including after save.
+#[test]
+fn typed_text_reads_across_as_displayed_on_rotated_pages() {
+    for degrees in [0, 90, 180, 270] {
+        let (mut session, id) = rotated_blank(degrees);
+        let info = session.get(id).unwrap().info.pages[0].clone();
+        // Displayed top-left of the text at (40, 60): a wide first line, then one letter below
+        // its start.
+        let at = info.view_to_user(40.0, 60.0);
+        let at = [f64::from(at[0]), f64::from(at[1])];
+        let rect = text_box_at(degrees, at, 120.0, 2.0 * 12.0 * 1.2 + 6.0).unwrap();
+        let shape = Shape::Typewriter { rect, font_size: 12.0 };
+        let style = Style::default_for(&shape);
+        session
+            .apply(
+                id,
+                Edit::AddAnnotation(NewAnnotation {
+                    page: 0,
+                    style,
+                    shape,
+                    contents: "MMMMMMMM
+I"
+                    .into(),
+                    author: "Test".into(),
+                }),
+            )
+            .unwrap();
+        let check = |session: &Session, id: DocId| {
+            let rendered = render_page(session, id);
+            let dark = |x: u32, y: u32| stamp_pixel(&rendered, x, y)[..3].iter().all(|c| *c < 128);
+            let ink: Vec<(u32, u32)> =
+                (0..rendered.height).flat_map(|y| (0..rendered.width).map(move |x| (x, y))).filter(|&(x, y)| dark(x, y)).collect();
+            assert!(!ink.is_empty(), "rotation {degrees}: no text drawn");
+            let (x0, x1) = (ink.iter().map(|p| p.0).min().unwrap(), ink.iter().map(|p| p.0).max().unwrap());
+            let (y0, y1) = (ink.iter().map(|p| p.1).min().unwrap(), ink.iter().map(|p| p.1).max().unwrap());
+            // Rendered at scale 2: the text starts at the clicked point and runs to the right.
+            assert!((x1 - x0) > 2 * (y1 - y0), "rotation {degrees}: ink {x0}..{x1} x {y0}..{y1} should be wide, not tall");
+            assert!(x0.abs_diff(80) < 16 && y0.abs_diff(120) < 16, "rotation {degrees}: text starts at ({x0}, {y0}), not near (80, 120)");
+            // The lone "I" is on the second line under the start of the first, not upside down
+            // (above the end).
+            let mid = (y0 + y1) / 2;
+            let lower: Vec<u32> = ink.iter().filter(|p| p.1 > mid + 2).map(|p| p.0).collect();
+            assert!(!lower.is_empty() && lower.iter().all(|x| *x < x0 + (x1 - x0) / 4), "rotation {degrees}: second line is not under the start");
+        };
+        check(&session, id);
+        let saved = session.save_bytes(id).unwrap();
+        let mut reopened = Session::new().with_clock(|| 1_700_000_000);
+        let again = reopened.open("drawing.pdf", None, saved, None).unwrap();
+        check(&reopened, again);
+    }
+}
+
 /// A one-page PDF whose left half is red and whose right half is white, as displayed.
 fn half_red_page() -> Vec<u8> {
     let content = "1 0 0 rg 0 0 40 40 re f";

@@ -107,6 +107,19 @@ pub fn typed_signature_shape(at: [f64; 2], text: &str, height: f64, rotation: i6
     let contours = o.contours.iter().map(|c| c.iter().map(|p| to_user((p[0] - left) / width, (p[1] - bottom) / span)).collect()).collect();
     Some(Shape::TypedSignature { rect, contours })
 }
+/// `at` moved `right` and `up` points as displayed on a page turned by `rotation` (its `/Rotate`).
+pub fn displayed_offset(rotation: i64, at: [f64; 2], right: f64, up: f64) -> [f64; 2] {
+    let [a, b, c, d, ..] = pdfcraft_model::view_matrix_for(rotation, [0.0; 4]);
+    [at[0] + a * right + c * up, at[1] + b * right + d * up]
+}
+
+/// The user-space box `width` x `height` points as displayed on a page turned by `rotation`,
+/// with its displayed top-left corner at `at`: where typed text and text boxes go. `None` for a
+/// non-finite point.
+pub fn text_box_at(rotation: i64, at: [f64; 2], width: f64, height: f64) -> Option<[f64; 4]> {
+    signature_image::upright_box(rotation, displayed_offset(rotation, at, 0.0, -height / 2.0), width, height)
+}
+
 /// `text` in the script font as the graphic of a visible digital signature, as Fill & Sign types
 /// it. `None` for text with no outlines.
 pub fn typed_signature_graphic(text: &str) -> Option<pdfcraft_sign::Graphic> {

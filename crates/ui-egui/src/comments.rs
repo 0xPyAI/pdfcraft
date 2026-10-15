@@ -1252,11 +1252,17 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
         }
         ComposerKind::TextBox => {
             view.comments.tool_done = true;
-            Some(new_comment(&cx, CommentTool::TextBox, Shape::TextBox { rect: text_box_rect(c.at, &text, 12.0), font_size: 12.0 }, text))
+            Some(new_comment(
+                &cx,
+                CommentTool::TextBox,
+                Shape::TextBox { rect: text_box_rect(c.at, &text, 12.0, page_rotation(info, page)), font_size: 12.0 },
+                text,
+            ))
         }
         ComposerKind::Callout { point } => {
             view.comments.tool_done = true;
-            let rect = text_box_rect(c.at, &text, 10.0);
+            // A callout's leader and box stay in user-space axes (its appearance isn't turned).
+            let rect = text_box_rect(c.at, &text, 10.0, 0);
             let side = if point[0] < rect[0] {
                 rect[0]
             } else if point[0] > rect[2] {
@@ -1361,14 +1367,21 @@ pub(crate) fn caret_snap(text: &PageText, vx: f32, vy: f32) -> Option<([f32; 2],
 }
 
 /// A text box sized to its text (at most 300 pt wide), hanging from its top-left corner.
-pub fn text_box_rect(at: [f64; 2], text: &str, size: f64) -> [f64; 4] {
+/// The box for `text` at `size` with its displayed top-left corner at `at`, on a page turned by
+/// `rotation` (its `/Rotate`): on a quarter-turned page it is taller than wide in user space.
+pub fn text_box_rect(at: [f64; 2], text: &str, size: f64, rotation: i64) -> [f64; 4] {
     use pdfcraft_engine::annot_text::{text_width, wrap};
     let pad = 2.0;
     let longest = text.lines().map(|l| text_width(l, size)).fold(0.0, f64::max);
     let w = (longest + 2.0 * pad + 4.0).clamp(40.0, 300.0);
     let lines = wrap(text, size, w - 2.0 * pad).len().max(1);
     let h = lines as f64 * size * 1.2 + 2.0 * pad + 2.0;
-    [at[0], at[1] - h, at[0] + w, at[1]]
+    pdfcraft_engine::text_box_at(rotation, at, w, h).unwrap_or([at[0], at[1] - h, at[0] + w, at[1]])
+}
+
+/// The `/Rotate` of `page` (0 when it is unknown).
+pub(crate) fn page_rotation(info: &DocInfo, page: usize) -> i64 {
+    info.pages.get(page).map_or(0, |p| i64::from(p.rotation))
 }
 
 /// Delete / Escape handling for comments (only while no text field has focus).
@@ -1920,10 +1933,10 @@ mod tests {
 
     #[test]
     fn text_boxes_fit_their_text() {
-        let r = text_box_rect([100.0, 500.0], "Hi", 12.0);
+        let r = text_box_rect([100.0, 500.0], "Hi", 12.0, 0);
         assert_eq!((r[0], r[3]), (100.0, 500.0));
         assert!(r[2] - r[0] < 60.0);
-        let long = text_box_rect([0.0, 500.0], &"word ".repeat(80), 12.0);
+        let long = text_box_rect([0.0, 500.0], &"word ".repeat(80), 12.0, 0);
         assert_eq!(long[2], 300.0);
         assert!(long[3] - long[1] > 50.0);
     }

@@ -509,7 +509,8 @@ impl PdfCraftApp {
             return true;
         }
         let author = self.comment_prefs.author.clone();
-        let edit = crate::fill_sign::typed(tb.page, tb.at, &text, tb.size, &author);
+        let rotation = self.session.get(id).map_or(0, |doc| crate::comments::page_rotation(&doc.info, tb.page));
+        let edit = crate::fill_sign::typed(tb.page, tb.at, &text, tb.size, rotation, &author);
         if self.apply_edit(edit) {
             if let Some(view) = self.views.get_mut(i) {
                 view.fill_text = None;

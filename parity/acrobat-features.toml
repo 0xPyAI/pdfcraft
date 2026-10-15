@@ -5244,8 +5244,8 @@ milestone = "M5"
 status = "shipped"
 commands = ["sign.fill.text"]
 tools = ["fill_sign_add"]
-evidence = ["crates/ui-egui/tests/fill_sign.rs::text_marks_and_date", "crates/annot/src/tests.rs::fill_and_sign_items_are_drawn", "crates/automation/tests/automation.rs::fill_and_sign_through_tools"]
-notes = "typewriter FreeText, 10 pt Helvetica"
+evidence = ["crates/ui-egui/tests/fill_sign.rs::text_marks_and_date", "crates/annot/src/tests.rs::fill_and_sign_items_are_drawn", "crates/automation/tests/automation.rs::fill_and_sign_through_tools", "crates/engine/src/tests.rs::typed_text_reads_across_as_displayed_on_rotated_pages"]
+notes = "typewriter FreeText, 10 pt Helvetica. Reads across as displayed on pages with /Rotate (sideways-stored scans): the box follows the displayed axes and the appearance is turned back (PdfCraft key /PCTextRotate); other apps that regenerate the appearance from /DA draw it unturned. A later page rotation does not re-turn it. Field detection does not work on scanned (image-only) forms yet"
 
 [[feature]]
 id = "form.fill-sign-marks"
