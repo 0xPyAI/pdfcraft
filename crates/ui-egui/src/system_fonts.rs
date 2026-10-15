@@ -304,7 +304,7 @@ fn read(path: &Path, probe: char, max: u64) -> Option<Arc<FontData>> {
     let mut data = FontData::from_owned(bytes);
     data.index = index;
     log::info!("interface font fallback: {} (face {index})", path.display());
-    Some(Arc::new(data))
+    Some(Arc::new(crate::theme::on_interface_baseline(data)))
 }
 
 /// The first face of the file that parses and maps `c`. egui parses fonts with the same skrifa,
