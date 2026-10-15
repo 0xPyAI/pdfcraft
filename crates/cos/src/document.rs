@@ -307,6 +307,10 @@ pub struct Revision {
     pub xref_offset: u64,
     /// `true` if the section is a cross-reference stream.
     pub is_stream: bool,
+    /// `true` if `xref_offset` counts from the `%PDF-` header rather than from the start of the
+    /// file. The two differ only in a file with bytes before its header, and an update appended
+    /// to such a file must count the same way as the section it points back to.
+    pub header_relative: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -815,6 +819,11 @@ impl Document {
 
     pub fn revisions(&self) -> &[Revision] {
         &self.revisions
+    }
+
+    /// Position of the `%PDF-` header in the file: 0 unless bytes come before it.
+    pub fn header_offset(&self) -> usize {
+        self.header_offset
     }
 
     /// Where each revision of the file ends (oldest first): the byte after the `%%EOF` (and its
@@ -1345,13 +1354,13 @@ impl Document {
                 log.push(format!("cross-reference chain loops at offset {off}; stopped"));
                 break;
             }
-            let (primary, sect_trailer, is_stream) = match self.read_compact_section(off as usize) {
-                Ok(Some(v)) => v,
+            let ((primary, sect_trailer, is_stream), header_relative) = match self.read_compact_section(off as usize) {
+                Ok(Some(v)) => (v, false),
                 Ok(None) => return Ok(None),
                 Err(e) if self.header_offset > 0 => {
                     log.push(format!("xref at {off} unreadable ({e}); retrying relative to the header"));
                     match self.read_compact_section(off as usize + self.header_offset)? {
-                        Some(v) => v,
+                        Some(v) => (v, true),
                         None => return Ok(None),
                     }
                 }
@@ -1359,7 +1368,7 @@ impl Document {
                 // materialized reader logs it and the file is rebuilt from object headers (#1656).
                 Err(e) => return Err(e),
             };
-            revisions.push(Revision { xref_offset: off, is_stream });
+            revisions.push(Revision { xref_offset: off, is_stream, header_relative });
             let Some(rows) = retained_rows.checked_add(primary.row_count).filter(|rows| *rows <= MAX_COMPACT_XREF_ROWS) else { return Ok(None) };
             let Some(bytes) = retained_bytes.checked_add(primary.retained_bytes()).filter(|bytes| *bytes <= MAX_COMPACT_XREF_BYTES) else {
                 return Ok(None);
@@ -1636,13 +1645,13 @@ impl Document {
             let mut sect = BTreeMap::new();
             // Object numbers whose entry in this section was set aside ([`Self::xref_oddities`]).
             let mut odd = Vec::new();
-            let (sect_trailer, is_stream) = match self.read_section(off as usize, &mut sect, &mut odd) {
-                Ok(v) => v,
+            let ((sect_trailer, is_stream), header_relative) = match self.read_section(off as usize, &mut sect, &mut odd) {
+                Ok(v) => (v, false),
                 Err(e) if self.header_offset > 0 => {
                     log.push(format!("xref at {off} unreadable ({e}); retrying relative to the header"));
                     sect.clear();
                     odd.clear();
-                    self.read_section(off as usize + self.header_offset, &mut sect, &mut odd)?
+                    (self.read_section(off as usize + self.header_offset, &mut sect, &mut odd)?, true)
                 }
                 Err(e) => {
                     // An unreadable older section loses every object only it locates (the page
@@ -1653,7 +1662,7 @@ impl Document {
                     return Err(e);
                 }
             };
-            revisions.push(Revision { xref_offset: off, is_stream });
+            revisions.push(Revision { xref_offset: off, is_stream, header_relative });
             // Hybrid files (§7.5.8.4): the /XRefStm entries supplement the table and replace the
             // free entries it gives objects only a cross-reference stream can locate.
             if let Some(x) = sect_trailer.int(b"XRefStm").filter(|x| *x >= 0) {
