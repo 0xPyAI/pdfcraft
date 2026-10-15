@@ -558,10 +558,30 @@ pub fn export_fdf(doc: &Document, comments: bool, fields: bool, file: &str) -> V
     let _ = write!(out, "trailer\n<< /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
     out
 }
-/// The XML element name for a field name (letters, digits, `_`, `-`, `.`).
+/// XML 1.0 fifth-edition NameStartChar, excluding `:` for an unprefixed NCName.
+/// https://www.w3.org/TR/2008/REC-xml-20081126/#NT-NameStartChar
+fn xml_name_start(c: char) -> bool {
+    matches!(
+        c,
+        '_' | 'A'..='Z' | 'a'..='z'
+            | '\u{C0}'..='\u{D6}' | '\u{D8}'..='\u{F6}' | '\u{F8}'..='\u{2FF}'
+            | '\u{370}'..='\u{37D}' | '\u{37F}'..='\u{1FFF}'
+            | '\u{200C}'..='\u{200D}' | '\u{2070}'..='\u{218F}'
+            | '\u{2C00}'..='\u{2FEF}' | '\u{3001}'..='\u{D7FF}'
+            | '\u{F900}'..='\u{FDCF}' | '\u{FDF0}'..='\u{FFFD}'
+            | '\u{10000}'..='\u{EFFFF}'
+    )
+}
+
+fn xml_name_char(c: char) -> bool {
+    xml_name_start(c) || matches!(c, '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')
+}
+
+/// Keep the existing letters/digits/`_`/`-`/`.` normalization, constrained to valid NCNames.
 fn xml_name(name: &str) -> String {
-    let mut s: String = name.chars().map(|c| if c.is_alphanumeric() || matches!(c, '_' | '-' | '.') { c } else { '_' }).collect();
-    if !s.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_') {
+    let mut s: String =
+        name.chars().map(|c| if (c.is_alphanumeric() && xml_name_char(c)) || matches!(c, '_' | '-' | '.') { c } else { '_' }).collect();
+    if !s.chars().next().is_some_and(|c| (c.is_alphabetic() && xml_name_start(c)) || c == '_') {
         s.insert(0, '_');
     }
     s
