@@ -537,6 +537,12 @@
 	Windows store  ·  	Windows 证书存储 · 
 	Issued by: 	颁发者：
 	, Expires: 	，有效期至：
+	Digitally signed by	数字签名者
+	DN: 	DN：
+	Reason: 	原因：
+	Location: 	位置：
+	Date: 	日期：
+	The labels are in English: the signature's font can't draw them in this language.	签名所用的字体无法显示此语言的标签，因此标签使用英文。
 	No digital IDs yet.	尚无数字 ID。
 	Configure New Digital ID	配置新数字 ID
 	Remove "{name}" from this list? The file itself is not deleted.	从此列表中移除“{name}”？文件本身不会被删除。

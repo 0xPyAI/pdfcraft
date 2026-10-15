@@ -856,6 +856,12 @@
 	Windows store  ·  	Windows 証明書ストア · 
 	Issued by: 	発行者: 
 	, Expires: 	、有効期限: 
+	Digitally signed by	デジタル署名者
+	DN: 	DN: 
+	Reason: 	理由: 
+	Location: 	場所: 
+	Date: 	日付: 
+	The labels are in English: the signature's font can't draw them in this language.	署名のフォントではこの言語のラベルを描画できないため、ラベルは英語になります。
 	No digital IDs yet.	デジタル ID はまだありません。
 	Configure New Digital ID	新しいデジタル ID を設定
 	Remove "{name}" from this list? The file itself is not deleted.	「{name}」をこの一覧から削除しますか？ファイル自体は削除されません。

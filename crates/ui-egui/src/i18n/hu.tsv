@@ -826,6 +826,12 @@
 	Windows store  ·  	Windows-tároló  ·  
 	Issued by: 	Kiállította: 
 	, Expires: 	, lejár: 
+	Digitally signed by	Digitálisan aláírta
+	DN: 	DN: 
+	Reason: 	Indok: 
+	Location: 	Hely: 
+	Date: 	Dátum: 
+	The labels are in English: the signature's font can't draw them in this language.	A címkék angolul jelennek meg: az aláírás betűtípusa ezen a nyelven nem tudja megjeleníteni őket.
 	No digital IDs yet.	Még nincs digitális azonosító.
 	Configure New Digital ID	Új digitális azonosító beállítása
 	Remove "{name}" from this list? The file itself is not deleted.	Eltávolítja a(z) „{name}” elemet erről a listáról? Maga a fájl nem törlődik.

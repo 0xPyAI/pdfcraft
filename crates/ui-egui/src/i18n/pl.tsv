@@ -847,6 +847,12 @@
 	Windows store  ·  	Magazyn Windows  ·  
 	Issued by: 	Wystawca: 
 	, Expires: 	, Wygasa: 
+	Digitally signed by	Podpisany cyfrowo przez
+	DN: 	DN: 
+	Reason: 	Powód: 
+	Location: 	Lokalizacja: 
+	Date: 	Data: 
+	The labels are in English: the signature's font can't draw them in this language.	Etykiety są po angielsku: czcionka podpisu nie potrafi ich wyświetlić w tym języku.
 	No digital IDs yet.	Brak identyfikatorów cyfrowych.
 	Configure New Digital ID	Skonfiguruj nowy identyfikator cyfrowy
 	Remove "{name}" from this list? The file itself is not deleted.	Usunąć „{name}” z tej listy? Sam plik nie zostanie usunięty.

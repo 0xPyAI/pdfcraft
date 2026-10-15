@@ -929,6 +929,12 @@ key	Space	Mezerník
 	Windows store  ·  	Úložiště Windows  ·  
 	Issued by: 	Vydal: 
 	, Expires: 	, platnost do: 
+	Digitally signed by	Digitálně podepsal
+	DN: 	DN: 
+	Reason: 	Důvod: 
+	Location: 	Místo: 
+	Date: 	Datum: 
+	The labels are in English: the signature's font can't draw them in this language.	Popisky jsou v angličtině: písmo podpisu je v tomto jazyce nedokáže vykreslit.
 	No digital IDs yet.	Zatím žádná digitální ID.
 	Configure New Digital ID	Nastavit nové digitální ID
 	Remove "{name}" from this list? The file itself is not deleted.	Odebrat „{name}“ z tohoto seznamu? Samotný soubor se nesmaže.

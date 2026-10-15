@@ -489,6 +489,12 @@
 	Windows store  ·  	Windows 憑證存放區 · 
 	Issued by: 	頒發者：
 	, Expires: 	，有效期至：
+	Digitally signed by	數位簽署者
+	DN: 	DN：
+	Reason: 	原因：
+	Location: 	位置：
+	Date: 	日期：
+	The labels are in English: the signature's font can't draw them in this language.	簽名使用的字型無法顯示此語言的標籤，因此標籤以英文顯示。
 	No digital IDs yet.	尚無數位 ID。
 	Configure New Digital ID	配置新數位 ID
 	Remove "{name}" from this list? The file itself is not deleted.	從此清單中移除「{name}」？檔案本身不會被刪除。

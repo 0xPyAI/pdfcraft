@@ -484,6 +484,12 @@
 	Keychain  ·  	Chaveiro  ·  
 	Issued by: 	Emitido por: 
 	, Expires: 	, Expira em: 
+	Digitally signed by	Assinado digitalmente por
+	DN: 	DN: 
+	Reason: 	Motivo: 
+	Location: 	Local: 
+	Date: 	Data: 
+	The labels are in English: the signature's font can't draw them in this language.	Os rótulos estão em inglês: a fonte da assinatura não consegue desenhá-los neste idioma.
 	No digital IDs yet.	Nenhuma ID digital ainda.
 	Configure New Digital ID	Configurar nova ID digital
 	Remove "{name}" from this list? The file itself is not deleted.	Remover "{name}" desta lista? O arquivo em si não é excluído.

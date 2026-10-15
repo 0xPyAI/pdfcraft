@@ -4194,6 +4194,89 @@ fn digital_ids_signing_and_validation_through_tools() {
     assert_eq!(ok(&mut a, "sign_list", json!({ "doc": doc }))["signatures"][0]["status"], "unknown");
 }
 
+/// The decoded text of every visible signature appearance (Helvetica forms) in a signed file.
+fn signature_appearances(path: &Path) -> String {
+    use pdfcraft_cos::{Document, ObjRef, Object};
+    let doc = Document::open(std::sync::Arc::new(std::fs::read(path).unwrap())).unwrap();
+    let mut text = String::new();
+    for num in doc.object_numbers() {
+        if let Object::Stream(s) = &*doc.get(ObjRef { num, generation: 0 })
+            && s.dict.name(b"Subtype") == Some(b"Form")
+        {
+            let content = String::from_utf8_lossy(&s.decoded().unwrap()).into_owned();
+            if content.contains("/Helv") {
+                text.push_str(&content);
+            }
+        }
+    }
+    text
+}
+
+/// `sign_document` takes the words of a visible signature's labels (say, in German) and which
+/// items it shows, as the interface does. A label the signature's font can't draw is refused,
+/// naming the label, the character and what is allowed, before anything is written.
+#[test]
+fn signing_with_translated_labels_through_tools() {
+    let dir = workdir("signing-labels");
+    let mut a = auto(&dir);
+    ok(&mut a, "sign_id_create", json!({ "name": "Ada Lovelace", "key": "p256", "password": "secret1", "path": "ada.p12" }));
+    let open = |a: &mut Automation| ok(a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let doc = open(&mut a);
+    let args = |doc: u64, extra: Value, out: &str| {
+        let mut args = json!({ "doc": doc, "id": "ada.p12", "password": "secret1", "page": 1, "rect": [10, 150, 190, 290], "reason": "Genehmigt", "location": "Berlin", "out": out });
+        for (k, v) in extra.as_object().unwrap() {
+            args[k] = v.clone();
+        }
+        args
+    };
+    for (extra, why, says) in [
+        (
+            json!({ "labels": { "signed_by": "数字签名者" } }),
+            "a label Helvetica can't draw",
+            "labels.signed_by: the standard fonts can't draw \"数\" (U+6570)",
+        ),
+        (json!({ "labels": { "reason": "Причина: " } }), "even one this signature doesn't show", "labels.reason"),
+        (json!({ "labels": { "signer": "Von" } }), "an unknown label", "unknown label \"signer\""),
+        (json!({ "labels": { "date": 1 } }), "not a string", "labels.date must be a string"),
+        (json!({ "labels": "Datum" }), "not an object", "labels must be an object"),
+        (json!({ "labels": { "date": "x".repeat(201) } }), "too long", "longer than 200"),
+        (json!({ "appearance": { "reason": "yes" } }), "not true or false", "appearance.reason must be true or false"),
+        (json!({ "appearance": { "logo": true } }), "an unknown item", "unknown appearance item"),
+        (json!({ "rect": null, "labels": { "date": "Datum: " } }), "labels for an invisible signature", "needs a visible signature"),
+        (json!({ "rect": null, "appearance": { "reason": true } }), "an appearance for an invisible one", "needs a visible signature"),
+    ] {
+        let r = a.call("sign_document", &args(doc, extra, "bad.pdf"));
+        assert!(matches!(&r, Err(ToolError::InvalidArgs(m)) if m.contains(says)), "{why}: {r:?}");
+    }
+    let r = a.call("sign_document", &args(doc, json!({ "labels": { "signed_by": "数字签名者" } }), "bad.pdf"));
+    assert!(matches!(&r, Err(ToolError::InvalidArgs(m)) if m.contains("signed_by label") && m.contains("Western European")), "{r:?}");
+    assert!(!dir.join("bad.pdf").exists(), "nothing is written for a refused call");
+
+    // German labels, with the reason and the location shown: stamped as given.
+    let german = json!({
+        "labels": { "signed_by": "Digital signiert von", "reason": "Grund: ", "location": "Ort: ", "date": "Datum: " },
+        "appearance": { "reason": true, "location": true },
+    });
+    let r = ok(&mut a, "sign_document", args(doc, german, "de.pdf"));
+    assert_eq!(r["signature"]["reason"], "Genehmigt");
+    let stamped = signature_appearances(&dir.join("de.pdf"));
+    // Each line starts with its label (a long one wraps after it).
+    for word in ["(Digital", "(Grund:", "Genehmigt", "(Ort:", "Berlin", "(Datum:"] {
+        assert!(stamped.contains(word), "{word}: {stamped}");
+    }
+    assert!(!stamped.contains("Reason") && !stamped.contains("Date:"), "{stamped}");
+
+    // Labels omitted keep the English; the labels turned off show the values alone.
+    let doc = open(&mut a);
+    ok(&mut a, "sign_document", args(doc, json!({ "labels": { "date": "Datum: " }, "appearance": { "reason": true } }), "mixed.pdf"));
+    let stamped = signature_appearances(&dir.join("mixed.pdf"));
+    assert!(stamped.contains("(Reason:") && stamped.contains("(Datum:") && !stamped.contains("Berlin"), "{stamped}");
+    let doc = open(&mut a);
+    ok(&mut a, "sign_document", args(doc, json!({ "appearance": { "reason": true, "labels": false } }), "bare.pdf"));
+    let stamped = signature_appearances(&dir.join("bare.pdf"));
+    assert!(stamped.contains("(Genehmigt)") && !stamped.contains("Reason") && !stamped.contains("Date"), "{stamped}");
+}
+
 #[test]
 fn optimizing_through_tools() {
     let dir = workdir("optimize");

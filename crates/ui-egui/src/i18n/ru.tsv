@@ -849,6 +849,12 @@
 	Windows store  ·  	Хранилище Windows  ·
 	Issued by: 	Выдан:
 	, Expires: 	, Истекает:
+	Digitally signed by	Цифровая подпись
+	DN: 	DN: 
+	Reason: 	Причина: 
+	Location: 	Местоположение: 
+	Date: 	Дата: 
+	The labels are in English: the signature's font can't draw them in this language.	Метки на английском: шрифт подписи не может отобразить их на этом языке.
 	No digital IDs yet.	Нет цифровых идентификаторов.
 	Configure New Digital ID	Настроить новый цифровой идентификатор
 	Remove "{name}" from this list? The file itself is not deleted.	Убрать «{name}» из этого списка? Сам файл не удаляется.

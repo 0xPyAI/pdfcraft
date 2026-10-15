@@ -810,6 +810,12 @@
 	Windows store  ·  	Windows depolama alanı  ·  
 	Issued by: 	Veren: 
 	, Expires: 	, Son kullanma tarihi: 
+	Digitally signed by	Dijital olarak imzalayan
+	DN: 	DN: 
+	Reason: 	Neden: 
+	Location: 	Konum: 
+	Date: 	Tarih: 
+	The labels are in English: the signature's font can't draw them in this language.	Etiketler İngilizce: imzanın yazı tipi bu dilde onları çizemiyor.
 	No digital IDs yet.	Henüz dijital kimlik yok.
 	Configure New Digital ID	Yeni Dijital Kimlik Yapılandır
 	Remove "{name}" from this list? The file itself is not deleted.	"{name}" bu listeden kaldırılsın mı? Dosyanın kendisi silinmez.

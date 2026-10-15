@@ -1852,6 +1852,58 @@ fn visible_appearance_text_helvetica_cannot_draw_is_refused() {
     assert_eq!(s.reason.as_deref(), Some("同意此文件"));
 }
 
+/// The labels are the caller's words (a translation), so they are checked as the details are: a
+/// label Helvetica can't draw is refused with the label and the character, never drawn as `?`.
+/// Only labels that are drawn count: one whose detail is hidden, or empty, or with the labels
+/// turned off or the signature invisible, signs. Labels it can draw are what the stamp says.
+#[test]
+fn appearance_labels_helvetica_cannot_draw_are_refused() {
+    use pdfcraft_sign::{Appearance, AppearanceLabels};
+    let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
+    assert_eq!(AppearanceLabels::default().first_undrawable(), None, "the English labels are drawable");
+    let chinese = AppearanceLabels { signed_by: "数字签名者".into(), reason: "原因：".into(), ..AppearanceLabels::default() };
+    assert_eq!(chinese.first_undrawable(), Some(("signed_by", '数')));
+    let sign = |labels: AppearanceLabels, appearance: Appearance, o: SignOptions| {
+        pdfcraft_sign::sign(&open(&fixture()), &id, &SignOptions { appearance_labels: labels, appearance, ..o })
+    };
+
+    // The name is shown with its label (the default appearance): refused, saying which and what.
+    let err = sign(chinese.clone(), Appearance::default(), opts()).unwrap_err();
+    let m = err.to_string();
+    assert!(matches!(err, SignError::Unsupported(_)), "{err:?}");
+    assert!(m.contains("\"数\" (U+6570)") && m.contains("the signed_by label") && m.contains("leave the labels out"), "{m}");
+    let russian_date = AppearanceLabels { date: "Дата: ".into(), ..AppearanceLabels::default() };
+    let m = sign(russian_date.clone(), Appearance::default(), opts()).unwrap_err().to_string();
+    assert!(m.contains("the date label") && m.contains("U+0414"), "{m}");
+    let reason_only = AppearanceLabels { reason: "原因：".into(), ..AppearanceLabels::default() };
+    let shown = Appearance { reason: true, ..Appearance::default() };
+    assert!(sign(reason_only.clone(), shown.clone(), opts()).unwrap_err().to_string().contains("the reason label"));
+
+    // Not drawn: the reason hidden, or empty; the labels off; the signature invisible.
+    sign(reason_only.clone(), Appearance::default(), opts()).unwrap();
+    sign(reason_only.clone(), shown.clone(), SignOptions { reason: None, ..opts() }).unwrap();
+    sign(reason_only, shown, SignOptions { reason: Some(String::new()), ..opts() }).unwrap();
+    sign(chinese.clone(), Appearance { labels: false, ..Appearance::default() }, opts()).unwrap();
+    sign(russian_date, Appearance { date: false, ..Appearance::default() }, opts()).unwrap();
+    sign(chinese, Appearance::default(), SignOptions { rect: None, ..opts() }).unwrap();
+
+    // Labels Helvetica can draw are stamped as given, in place of the English ones.
+    let german = AppearanceLabels {
+        signed_by: "Digital signiert von".into(),
+        distinguished_name: "DN: ".into(),
+        reason: "Grund: ".into(),
+        location: "Ort: ".into(),
+        date: "Datum: ".into(),
+    };
+    let all = Appearance { reason: true, location: true, ..Appearance::default() };
+    let signed = sign(german, all, opts()).unwrap();
+    let (content, _) = appearance_of(&signed, "Signature1");
+    for word in ["(Digital", "(Grund:", "(Ort:", "(Datum:"] {
+        assert!(content.contains(word), "{word}: {content}");
+    }
+    assert!(!content.contains("Reason") && !content.contains("Date:") && !content.contains('?'), "{content}");
+}
+
 /// Every sentence this crate says about a signature is listed in `WORDINGS`, and every sentence on
 /// that list is one it still says: the details are written as `Detail::plain`/`Detail::of`, the
 /// sentences the modules that read a signature word for themselves are pushed as notes and quirks,

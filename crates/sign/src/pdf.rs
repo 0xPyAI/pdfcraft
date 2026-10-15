@@ -1607,6 +1607,27 @@ impl Default for AppearanceLabels {
     }
 }
 
+impl AppearanceLabels {
+    /// Each label with its field name (`signed_by`, `distinguished_name`, `reason`, `location`,
+    /// `date`), in the order the visible signature shows them.
+    pub fn fields(&self) -> [(&'static str, &str); 5] {
+        [
+            ("signed_by", self.signed_by.as_str()),
+            ("distinguished_name", self.distinguished_name.as_str()),
+            ("reason", self.reason.as_str()),
+            ("location", self.location.as_str()),
+            ("date", self.date.as_str()),
+        ]
+    }
+
+    /// The first label, with its field name, that has a character the visible signature's font
+    /// can't draw, and that character. Signing refuses such a label when it is shown, so an
+    /// interface checks its translated labels here and falls back to [`Default`] if one fails.
+    pub fn first_undrawable(&self) -> Option<(&'static str, char)> {
+        self.fields().into_iter().find_map(|(field, text)| pdfcraft_fonts::first_undrawable(text).map(|c| (field, c)))
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SignOptions {
     /// Sign this existing, unsigned signature field.
@@ -1950,6 +1971,7 @@ pub fn display_date(pdf: &str) -> String {
 /// Helvetica (the signer's name, the certificate's subject, the reason or the location) has a
 /// character Helvetica can't draw: signing invisibly, or leaving that part out, still works. A
 /// graphic doesn't change this: the name it replaces on the left is still among the details.
+/// A label that is drawn ([`AppearanceLabels`], the caller's words) is refused the same way.
 fn appearance(doc: &mut Document, rect: [f64; 4], name: &str, cert: &Certificate, opts: &SignOptions) -> Result<Stream, SignError> {
     use pdfcraft_fonts::{first_undrawable, helvetica_width, literal, undrawable_message, win_ansi, wrap};
     let (w, h) = ((rect[2] - rect[0]).max(0.0), (rect[3] - rect[1]).max(0.0));
@@ -1969,6 +1991,17 @@ fn appearance(doc: &mut Document, rect: [f64; 4], name: &str, cert: &Certificate
                     undrawable_message(&format!("{what} of the visible signature"), c)
                 )));
             }
+        }
+        // The labels are the caller's words (a translation), checked as the details are: only
+        // those that are drawn, as each is drawn only beside its detail.
+        let has = |v: Option<&str>| v.is_some_and(|v| !v.is_empty());
+        let drawn = [a.name, a.distinguished_name, a.reason && has(opts.reason.as_deref()), a.location && has(opts.location.as_deref()), a.date];
+        let mut labels = opts.appearance_labels.fields().into_iter().zip(drawn).filter(|&(_, on)| a.labels && on);
+        if let Some((field, c)) = labels.find_map(|((field, text), _)| first_undrawable(text).map(|c| (field, c))) {
+            return Err(SignError::Unsupported(format!(
+                "{}; pass that label in Western European characters, or leave the labels out of the visible signature",
+                undrawable_message(&format!("the {field} label of the visible signature"), c)
+            )));
         }
     }
     let mut lines: Vec<String> = Vec::new();

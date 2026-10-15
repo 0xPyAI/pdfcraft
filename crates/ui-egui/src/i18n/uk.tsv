@@ -853,6 +853,12 @@
 	Windows store  ·  	Сховище Windows  ·  
 	Issued by: 	Видавець: 
 	, Expires: 	, Дійсний до: 
+	Digitally signed by	Цифровий підпис
+	DN: 	DN: 
+	Reason: 	Причина: 
+	Location: 	Місце: 
+	Date: 	Дата: 
+	The labels are in English: the signature's font can't draw them in this language.	Мітки англійською: шрифт підпису не може відобразити їх цією мовою.
 	No digital IDs yet.	Ще немає цифрових посвідчень.
 	Configure New Digital ID	Налаштувати нове цифрове посвідчення
 	Remove "{name}" from this list? The file itself is not deleted.	Прибрати «{name}» з цього списку? Сам файл не видаляється.

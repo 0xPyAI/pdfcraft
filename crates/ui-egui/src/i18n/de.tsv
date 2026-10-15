@@ -833,6 +833,12 @@
 	Windows store  ·  	Windows-Zertifikatspeicher  ·  
 	Issued by: 	Ausgestellt von: 
 	, Expires: 	, läuft ab: 
+	Digitally signed by	Digital signiert von
+	DN: 	DN: 
+	Reason: 	Grund: 
+	Location: 	Ort: 
+	Date: 	Datum: 
+	The labels are in English: the signature's font can't draw them in this language.	Die Beschriftungen sind auf Englisch: Die Schrift der Signatur kann sie in dieser Sprache nicht darstellen.
 	No digital IDs yet.	Noch keine digitalen IDs.
 	Configure New Digital ID	Neue digitale ID einrichten
 	Remove "{name}" from this list? The file itself is not deleted.	„{name}“ aus dieser Liste entfernen? Die Datei selbst wird nicht gelöscht.

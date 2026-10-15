@@ -811,6 +811,12 @@
 	Windows store  ·  	Windows қоймасы  ·  
 	Issued by: 	Шығарушы: 
 	, Expires: 	, Жарамдылық мерзімі: 
+	Digitally signed by	Цифрлық қолтаңба қойған
+	DN: 	DN: 
+	Reason: 	Себебі: 
+	Location: 	Орны: 
+	Date: 	Күні: 
+	The labels are in English: the signature's font can't draw them in this language.	Белгілер ағылшын тілінде: қолтаңба қаріпі оларды бұл тілде сала алмайды.
 	No digital IDs yet.	Әзірге цифрлық ID жоқ.
 	Configure New Digital ID	Жаңа цифрлық ID теңшеу
 	Remove "{name}" from this list? The file itself is not deleted.	«{name}» осы тізімнен алып тасталсын ба? Файлдың өзі жойылмайды.

@@ -829,6 +829,12 @@
 	Windows store  ·  	Magasin Windows  ·  
 	Issued by: 	Émis par : 
 	, Expires: 	, expire : 
+	Digitally signed by	Signé numériquement par
+	DN: 	DN : 
+	Reason: 	Motif : 
+	Location: 	Lieu : 
+	Date: 	Date : 
+	The labels are in English: the signature's font can't draw them in this language.	Les libellés sont en anglais : la police de la signature ne peut pas les afficher dans cette langue.
 	No digital IDs yet.	Aucun ID numérique pour l'instant.
 	Configure New Digital ID	Configurer un nouvel ID numérique
 	Remove "{name}" from this list? The file itself is not deleted.	Retirer « {name} » de cette liste ? Le fichier lui-même n’est pas supprimé.

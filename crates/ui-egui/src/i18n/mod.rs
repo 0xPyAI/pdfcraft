@@ -941,6 +941,26 @@ mod tests {
         }
     }
 
+    /// Every catalog says the labels of a visible signature, which are looked up by the sign
+    /// crate's own English words (so the `tl!` scan can't see them), and the note shown when they
+    /// fall back to English. Each label that runs into its value keeps a separator at its end.
+    #[test]
+    fn signature_appearance_labels_are_in_every_catalog() {
+        let english = pdfcraft_engine::sign::AppearanceLabels::default();
+        let note = "The labels are in English: the signature's font can't draw them in this language.";
+        for language in LANGUAGES.iter().filter(|language| !language.source.is_empty()) {
+            let lang = Lang::from_code(language.code).expect("registered language");
+            assert!(has(lang, note), "{} lacks the labels note", language.code);
+            for (field, label) in english.fields() {
+                assert!(has(lang, label), "{} lacks the signature label {field}: {label:?}", language.code);
+                let said = tr(lang, label);
+                if field != "signed_by" && !lang.rtl() {
+                    assert!(said.ends_with(' ') || said.ends_with('：'), "{}: the {field} label runs into its value: {said:?}", language.code);
+                }
+            }
+        }
+    }
+
     /// Japanese translates every `tl!("…")` literal in the UI source, so a new string can't ship in
     /// English by accident (the same check French, German, Russian and Simplified Chinese have).
     #[test]
@@ -1370,6 +1390,8 @@ mod tests {
             "ΔLOC",
             "+Bin",
             "−Bin",
+            // The distinguished name of a certificate, abbreviated as in X.500.
+            "DN: ",
         ];
         let (entries, errors) = parse_entries(cs.0.source, cs.0.plural_forms());
         assert!(errors.is_empty(), "{errors:?}");
@@ -1482,6 +1504,8 @@ mod tests {
             "−Bin",
             "Model",
             "Home / End",
+            // The distinguished name of a certificate, abbreviated as in X.500.
+            "DN: ",
         ];
         let (entries, errors) = parse_entries(tr_lang.0.source, tr_lang.0.plural_forms());
         assert!(errors.is_empty(), "Turkish catalog errors: {errors:?}");
@@ -2934,6 +2958,8 @@ mod tests {
             "ΔLOC",
             "+Bin",
             "−Bin",
+            // The distinguished name of a certificate, abbreviated as in X.500.
+            "DN: ",
         ];
         let unchanged: Vec<_> = entries
             .iter()
@@ -3012,6 +3038,8 @@ mod tests {
             "ΔLOC",
             "+Bin",
             "−Bin",
+            // The distinguished name of a certificate, abbreviated as in X.500.
+            "DN: ",
         ];
         let unchanged: Vec<_> = entries
             .iter()

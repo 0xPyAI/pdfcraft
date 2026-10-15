@@ -828,6 +828,12 @@ comment menu	Edit	సవరించు
 	Keychain  ·  	Keychain  ·  
 	Issued by: 	జారీ చేసినవారు: 
 	, Expires: 	, గడువు: 
+	Digitally signed by	డిజిటల్ సంతకం చేసినవారు
+	DN: 	DN: 
+	Reason: 	కారణం: 
+	Location: 	స్థానం: 
+	Date: 	తేదీ: 
+	The labels are in English: the signature's font can't draw them in this language.	లేబుళ్లు ఆంగ్లంలో ఉన్నాయి: సంతకం ఫాంట్ ఈ భాషలో వాటిని చూపించలేదు.
 	No digital IDs yet.	ఇంకా డిజిటల్ ఐడీలు ఏవీ లేవు.
 	Configure New Digital ID	కొత్త డిజిటల్ ఐడీని కాన్ఫిగర్ చేయి
 	Remove "{name}" from this list? The file itself is not deleted.	ఈ జాబితా నుండి "{name}"ని తీసివేయాలా? ఫైల్ తొలగించబడదు.

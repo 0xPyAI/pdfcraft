@@ -855,6 +855,12 @@
 	Windows store  ·  	مخزن Windows  ·  
 	Issued by: 	صادرة عن: 
 	, Expires: 	، تنتهي: 
+	Digitally signed by	موقع رقميا من
+	DN: 	DN: 
+	Reason: 	السبب: 
+	Location: 	الموقع: 
+	Date: 	التاريخ: 
+	The labels are in English: the signature's font can't draw them in this language.	التسميات بالإنجليزية: لا يستطيع خط التوقيع رسمها بهذه اللغة.
 	No digital IDs yet.	لا توجد معرّفات رقمية بعد.
 	Configure New Digital ID	إعداد معرّف رقمي جديد
 	Remove "{name}" from this list? The file itself is not deleted.	إزالة "{name}" من هذه القائمة؟ لن يُحذف الملف نفسه.

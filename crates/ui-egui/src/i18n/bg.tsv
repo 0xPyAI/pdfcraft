@@ -530,6 +530,12 @@
 	Windows store  ·  	Хранилище на Windows  ·  
 	Issued by: 	Издаден от: 
 	, Expires: 	, валиден до: 
+	Digitally signed by	Цифрово подписано от
+	DN: 	DN: 
+	Reason: 	Причина: 
+	Location: 	Местоположение: 
+	Date: 	Дата: 
+	The labels are in English: the signature's font can't draw them in this language.	Етикетите са на английски: шрифтът на подписа не може да ги изобрази на този език.
 	No digital IDs yet.	Все още няма цифрови идентификатори.
 	Configure New Digital ID	Конфигурирай нов цифров идентификатор
 	Remove "{name}" from this list? The file itself is not deleted.	Да се премахне ли „{name}“ от този списък? Самият файл няма да бъде изтрит.

@@ -315,6 +315,60 @@ fn the_fill_and_sign_signature_or_an_image_shows_in_a_digital_signature() {
     assert_eq!(fresh.sign_graphic, SignGraphic::Name);
 }
 
+/// The decoded text of every visible signature appearance (Helvetica forms) in a signed file.
+fn stamped(path: &std::path::Path) -> String {
+    use pdfcraft_cos::{Document, ObjRef, Object};
+    let doc = Document::open(std::sync::Arc::new(std::fs::read(path).unwrap())).unwrap();
+    let mut text = String::new();
+    for num in doc.object_numbers() {
+        if let Object::Stream(s) = &*doc.get(ObjRef { num, generation: 0 })
+            && s.dict.name(b"Subtype") == Some(b"Form")
+        {
+            let content = String::from_utf8_lossy(&s.decoded().unwrap()).into_owned();
+            if content.contains("/Helv") {
+                text.push_str(&content);
+            }
+        }
+    }
+    text
+}
+
+/// A signature signed in German is stamped with German labels. In Simplified Chinese, whose
+/// labels the signature's font can't draw, it is stamped with English ones and the dialog says
+/// so under the preview: signing neither fails nor writes `?` for them.
+#[test]
+fn the_signature_labels_follow_the_interface_language() {
+    use pdfcraft_ui_egui::i18n::{Lang, tr};
+    let p12 = concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12");
+    let cert = pdfcraft_engine::sign::pkcs12::open(&std::fs::read(p12).unwrap(), "test").unwrap().certificate;
+    let note = "The labels are in English: the signature's font can't draw them in this language.";
+    for (code, labels, in_english) in [("de", ["(Digital", "(Grund:", "(Datum:"], false), ("zh-hans", ["(Digitally", "(Reason:", "(Date:"], true)] {
+        let dir = dir().join(code);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut h = harness(dir.clone());
+        let lang = Lang::from_code(code).unwrap();
+        h.state_mut().set_option("language", code).unwrap();
+        h.state_mut().start_signing(0, Some([20.0, 110.0, 280.0, 180.0]), None, None);
+        let entry = h.state_mut().add_digital_id(p12, &cert);
+        {
+            let d = h.state_mut().sign_draft.as_mut().unwrap();
+            (d.selected, d.step, d.password, d.reason) = (Some(entry), SignStep::SignAs, "test".into(), "OK".into());
+            d.appearance.reason = true;
+        }
+        h.run_steps(3);
+        assert_eq!(h.query_all_by_label(tr(lang, note)).count(), usize::from(in_english), "{code}: the note under the preview");
+        field(&h, tr(lang, "Sign")).click();
+        h.run_steps(6);
+        assert_eq!(h.state().sign_draft.as_ref().and_then(|d| d.error.clone()), None, "{code}");
+        let content = stamped(&dir.join("contract_signed.pdf"));
+        for label in labels {
+            assert!(content.contains(label), "{code}: {label}: {content}");
+        }
+        assert!(!content.contains('?'), "{code}: {content}");
+        assert_eq!(content.contains("Digitally") || content.contains("Reason"), in_english, "{code}: {content}");
+    }
+}
+
 #[test]
 fn os_store_identities_are_not_persisted() {
     let mut app = PdfCraftApp::new();
