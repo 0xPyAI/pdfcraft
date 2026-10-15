@@ -821,3 +821,110 @@ fn images_that_do_not_tile_a_picture_are_left_alone() {
     let (mut off, _) = printed_page(40, |_| false, |_, s| s);
     unmerged(&mut off, &Settings { merge_fragments: false, ..Settings::default() });
 }
+
+/// `levels` nested forms with their own resources, the innermost drawing `img` over the unit square.
+fn nested_forms(doc: &mut Document, img: ObjRef, levels: usize) -> ObjRef {
+    let mut inner = form(doc, Some(Object::Dict(resources(xobjects(&[("Im", img)])))), "/Im Do");
+    for _ in 1..levels {
+        inner = form(doc, Some(Object::Dict(resources(xobjects(&[("F", inner)])))), "/F Do");
+    }
+    inner
+}
+
+#[test]
+fn a_deeply_nested_form_is_measured_at_its_largest_use() {
+    // 1200 px drawn 1 in wide (1200 ppi) and then 8 in wide (150 ppi): 150 ppi, so it isn't resampled.
+    let small = "q 72 0 0 72 36 36 cm /F Do Q";
+    let large = "q 576 0 0 576 18 100 cm /F Do Q";
+    for levels in [1, 6, 12] {
+        for (pages, label) in [(vec![format!("{small} {large}")], "one page"), (vec![small.into(), large.into()], "two pages")] {
+            let mut doc = Document::new_empty();
+            let img = image(&mut doc, 1200, 1200, 3, false, None);
+            let outer = nested_forms(&mut doc, img, levels);
+            for c in &pages {
+                page(&mut doc, &[("F", outer)], c);
+            }
+            let refs = pdfcraft_annot::page_refs(&doc).unwrap();
+            assert_eq!(effective_resolutions(&doc, &refs)[&img].round(), 150.0, "{levels} levels, {label}");
+            optimize(&mut doc, &Settings::default()).unwrap();
+            assert_eq!(stream(&doc, img).dict.int(b"Width"), Some(1200), "{levels} levels, {label}");
+        }
+    }
+}
+
+#[test]
+fn a_form_drawing_itself_is_walked_once_per_use() {
+    let mut doc = Document::new_empty();
+    let img = image(&mut doc, 1200, 1200, 3, false, None);
+    let f = form(&mut doc, None, "/Im Do q 2 0 0 2 0 0 cm /F Do Q");
+    let mut x = xobjects(&[("Im", img)]);
+    x.set(b"F".to_vec(), Object::Ref(f));
+    let mut d = match &*doc.get(f) {
+        Object::Stream(s) => s.clone(),
+        _ => unreachable!(),
+    };
+    d.dict.set(b"Resources".to_vec(), Object::Dict(resources(x)));
+    doc.set(f, Object::Stream(d));
+    page(&mut doc, &[("F", f)], "q 72 0 0 72 36 36 cm /F Do Q");
+    let refs = pdfcraft_annot::page_refs(&doc).unwrap();
+    // Only the outer use: the cycle isn't followed, and doesn't count as a missed use.
+    assert_eq!(effective_resolutions(&doc, &refs)[&img].round(), 1200.0);
+}
+
+#[test]
+fn a_shared_form_without_resources_draws_each_callers_image() {
+    // G has no /Resources, so its /Im is whichever image the form drawing it names.
+    let mut doc = Document::new_empty();
+    let a = image(&mut doc, 1200, 1200, 3, false, None);
+    let b = image(&mut doc, 1200, 1200, 3, false, None);
+    let g = form(&mut doc, None, "/Im Do");
+    let mut outers = Vec::new();
+    for img in [a, b] {
+        let mut inner = form(&mut doc, Some(Object::Dict(resources(xobjects(&[("Im", img), ("G", g)])))), "/G Do");
+        for _ in 1..6 {
+            inner = form(&mut doc, Some(Object::Dict(resources(xobjects(&[("F", inner)])))), "/F Do");
+        }
+        outers.push(inner);
+    }
+    page(&mut doc, &[("A", outers[0]), ("B", outers[1])], "q 72 0 0 72 36 36 cm /A Do Q q 576 0 0 576 18 100 cm /B Do Q");
+    let refs = pdfcraft_annot::page_refs(&doc).unwrap();
+    let ppi = effective_resolutions(&doc, &refs);
+    assert_eq!(ppi[&a].round(), 1200.0);
+    assert_eq!(ppi.get(&b).map(|p| p.round()), Some(150.0));
+}
+
+#[test]
+fn images_are_not_resampled_when_some_uses_could_not_be_measured() {
+    // Too deep: the 13th form isn't followed, so its use of the image is unknown.
+    let mut doc = Document::new_empty();
+    let img = image(&mut doc, 1200, 1200, 3, false, None);
+    let other = image(&mut doc, 1200, 1200, 3, false, None);
+    let deep = nested_forms(&mut doc, img, 13);
+    page(
+        &mut doc,
+        &[("F", deep), ("Im", img), ("O", other)],
+        "q 72 0 0 72 36 36 cm /Im Do Q q 72 0 0 72 200 36 cm /O Do Q q 576 0 0 576 18 100 cm /F Do Q",
+    );
+    let refs = pdfcraft_annot::page_refs(&doc).unwrap();
+    let ppi = effective_resolutions(&doc, &refs);
+    assert_eq!((ppi[&img], ppi[&other]), (f64::INFINITY, f64::INFINITY));
+    optimize(&mut doc, &Settings::default()).unwrap();
+    assert_eq!(stream(&doc, img).dict.int(b"Width"), Some(1200));
+
+    // Too much work: forms without resources (so nothing can be skipped), each drawing the next
+    // three times, twelve deep, would be (3^12 - 1) / 2 walks.
+    let mut doc = Document::new_empty();
+    let img = image(&mut doc, 1200, 1200, 3, false, None);
+    let mut names = vec![("Im", img)];
+    let mut next = "Im";
+    let labels = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"];
+    for (i, label) in labels.iter().enumerate().rev() {
+        let s = 1.0 + i as f64 / 100.0;
+        let f = form(&mut doc, None, &format!("q {s} 0 0 {s} 0 0 cm /{next} Do Q /{next} Do q 1 0 0 1 1 0 cm /{next} Do Q"));
+        names.push((label, f));
+        next = label;
+    }
+    page(&mut doc, &names, "q 72 0 0 72 36 36 cm /F1 Do Q");
+    let refs = pdfcraft_annot::page_refs(&doc).unwrap();
+    assert_eq!(effective_resolutions(&doc, &refs)[&img], f64::INFINITY);
+}

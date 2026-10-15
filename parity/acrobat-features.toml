@@ -7264,6 +7264,8 @@ commands = ["optimize.advanced"]
 tools = ["doc_optimize"]
 evidence = ["crates/optimize/tests/optimize.rs::images_are_measured_where_drawn_and_downsampled", "crates/optimize/tests/optimize.rs::settings_choose_what_happens", "crates/automation/tests/automation.rs::optimizing_through_tools", "crates/optimize/tests/optimize.rs::a_page_picture_printed_as_one_pixel_strips_is_merged_into_one_image", "crates/optimize/tests/optimize.rs::images_that_do_not_tile_a_picture_are_left_alone"]
 notes = "colour and grayscale, bicubic, effective resolution measured where drawn; image fragments stacked edge to edge are merged first (side-by-side tiles not yet); monochrome not yet"
+evidence = ["crates/optimize/tests/optimize.rs::images_are_measured_where_drawn_and_downsampled", "crates/optimize/tests/optimize.rs::a_deeply_nested_form_is_measured_at_its_largest_use", "crates/optimize/tests/optimize.rs::images_are_not_resampled_when_some_uses_could_not_be_measured", "crates/optimize/tests/optimize.rs::settings_choose_what_happens", "crates/automation/tests/automation.rs::optimizing_through_tools"]
+notes = "colour and grayscale, bicubic, effective resolution measured where drawn (every use, through nested forms up to 12 deep; when a use can't be measured, nothing is resampled); monochrome not yet"
 
 [[feature]]
 id = "optimize.recompress-images"
