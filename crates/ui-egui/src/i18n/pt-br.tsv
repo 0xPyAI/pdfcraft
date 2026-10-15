@@ -2401,3 +2401,6 @@ animation effects	Off	Desativados
 	New file only	Somente o arquivo novo
 	Old file: {name}	Arquivo antigo: {name}
 	New file: {name}	Arquivo novo: {name}
+	Print as image	Imprimir como imagem
+	Resolution:	Resolução:
+	Use it when a printer skips text, shading or transparency. The print is no longer searchable text; with Print in grayscale, the pictures are grey.	Use quando uma impressora omite texto, sombreamento ou transparência. A impressão deixa de ser texto pesquisável; com Imprimir em tons de cinza, as imagens ficam cinza.

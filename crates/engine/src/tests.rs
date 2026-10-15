@@ -4975,3 +4975,44 @@ fn copy_image_finds_a_picture_inside_form_artwork_under_text() {
     assert_eq!(d.page_image_copy_file(0, 0).unwrap(), ("jpg", jpeg));
     assert!(d.page_image_copy_file(0, 1).is_err());
 }
+
+/// Print as image (Acrobat's Advanced Print Setup): the print-ready PDF carries each page as a
+/// picture, the size of the page, with no text left to search; in grayscale the pictures are
+/// grey. A page used on several sheets is rendered once.
+#[test]
+fn printing_as_image_sends_pictures_instead_of_pages() {
+    let (s, id) = session_with(3);
+    let page_size = (s.get(id).unwrap().info.pages[1].width as f64, s.get(id).unwrap().info.pages[1].height as f64);
+    let settings = print::Settings {
+        pages: vec![1, 2, 1],
+        layout: print::Layout::Size(print::SizeMode::Actual),
+        raster: Some(print::Raster { dpi: 100.0, grayscale: false }),
+        ..Default::default()
+    };
+    let bytes = s.print_pdf(id, &settings).unwrap();
+    let mut s2 = Session::new();
+    let id2 = s2.open("print.pdf", None, Arc::new(bytes.clone()), None).unwrap();
+    assert_eq!(s2.get(id2).unwrap().info.pages.len(), 3, "three sheets, one page each");
+    assert!(page_texts(&s2, id2).iter().all(|t| t.trim().is_empty()), "pictures carry no text");
+    let doc = pdfcraft_cos::Document::open(Arc::new(bytes)).unwrap();
+    let images: Vec<pdfcraft_cos::Dict> = doc
+        .scan_objects()
+        .filter_map(|(_, o)| match &*o {
+            pdfcraft_cos::Object::Stream(st) if st.dict.name(b"Subtype") == Some(b"Image") => Some(st.dict.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(images.len(), 2, "two distinct pages, each rendered once: {images:?}");
+    // 100 dpi: the picture's pixels match the page size.
+    let w = images.iter().map(|d| d.int(b"Width").unwrap_or(0)).max().unwrap();
+    assert!((w as f64 - page_size.0 * 100.0 / 72.0).abs() <= 1.0, "{w} px for {} pt", page_size.0);
+    assert!(images.iter().all(|d| d.name(b"ColorSpace") == Some(b"DeviceRGB")), "{images:?}");
+    // Grayscale renders the pictures grey (the printer is not merely asked for monochrome).
+    let grey = s.print_pdf(id, &print::Settings { raster: Some(print::Raster { dpi: 72.0, grayscale: true }), ..settings.clone() }).unwrap();
+    let mut s3 = Session::new();
+    let id3 = s3.open("grey.pdf", None, Arc::new(grey), None).unwrap();
+    let mut ex = crate::export::Exporter::new(s3.get(id3).unwrap());
+    let png = ex.png(0, 36.0).unwrap();
+    let img = image::load_from_memory(&png).unwrap().to_rgba8();
+    assert!(img.pixels().all(|p| p[0] == p[1] && p[1] == p[2]), "every pixel grey");
+}

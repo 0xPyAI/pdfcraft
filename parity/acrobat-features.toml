@@ -8105,11 +8105,11 @@ title = "Print in grayscale"
 area = "L"
 tier = "P1"
 milestone = "M10"
-status = "partial"
+status = "shipped"
 commands = ["print.dialog"]
 tools = ["doc_print"]
-evidence = ["crates/print/src/tests.rs::spooler_arguments_and_printer_list"]
-notes = "asks the printer for monochrome (lp -o, and the Windows page settings as the job's); the PDF itself stays in colour"
+evidence = ["crates/engine/src/tests.rs::printing_as_image_sends_pictures_instead_of_pages", "crates/ui-egui/tests/print.rs::print_as_image_is_an_advanced_choice_that_saves_pictures", "crates/automation/tests/automation.rs::doc_print_as_image"]
+notes = "asks the printer for monochrome (lp -o, and the Windows page settings as the job's); with Print as image the pictures themselves are rendered grey (Rec. 601 luma), so the print-ready PDF is grayscale too. Still missing against Acrobat: a grey conversion of the vector pages without rendering them."
 
 [[feature]]
 id = "print.print-as-image"
@@ -8117,11 +8117,11 @@ title = "Print as image"
 area = "L"
 tier = "P1"
 milestone = "M10"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "shipped"
+commands = ["print.dialog"]
+tools = ["doc_print"]
+evidence = ["crates/engine/src/tests.rs::printing_as_image_sends_pictures_instead_of_pages", "crates/ui-egui/tests/print.rs::print_as_image_is_an_advanced_choice_that_saves_pictures", "crates/automation/tests/automation.rs::doc_print_as_image"]
+notes = "The Print dialog's Advanced section (folded unless on): Print as image at 150, 300 or 600 dpi; doc_print as_image and dpi (72–600). The pages used are rendered once each the way the viewer shows them (comments left out when the print leaves them out), composed over white, made into an image-only document and imposed on the paper like the pages themselves. The print is no longer searchable text. Still missing against Acrobat: per-printer defaults for it."
 
 [[feature]]
 id = "print.page-setup"

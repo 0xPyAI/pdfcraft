@@ -28,6 +28,7 @@ pub mod js;
 pub mod links;
 pub mod ocr;
 pub mod optimizer;
+pub mod print_raster;
 pub mod printcheck;
 mod scan_colours;
 mod scan_fields;
@@ -4103,6 +4104,26 @@ impl Session {
         let doc = self.get(id).ok_or(EditError::NoDocument)?;
         if !doc.allows_printing() {
             return Err(EditError::NotPermitted("printing"));
+        }
+        // Print as image: the pages used become pictures first, then the picture document is
+        // imposed in their place (its page k is the k-th distinct source page used).
+        if let Some(raster) = &settings.raster {
+            let mut distinct: Vec<usize> = Vec::new();
+            for &p in &settings.pages {
+                if !distinct.contains(&p) {
+                    distinct.push(p);
+                }
+            }
+            let hide_comments = matches!(settings.content, print::Content::Document | print::Content::FormFieldsOnly);
+            let bytes = print_raster::rasterize(doc, &distinct, raster, hide_comments).map_err(EditError::Print)?;
+            let pictures = pdfcraft_cos::Document::open(Arc::new(bytes)).map_err(|e| EditError::Print(e.to_string()))?;
+            let remapped = print::Settings {
+                pages: settings.pages.iter().map(|p| distinct.iter().position(|d| d == p).unwrap_or(0)).collect(),
+                content: print::Content::Document,
+                raster: None,
+                ..settings.clone()
+            };
+            return pdfcraft_print::impose(&pictures, &remapped).map_err(|e| EditError::Print(e.to_string()));
         }
         let cos = match doc.editor.as_ref() {
             Some(e) => e.cos.clone(),

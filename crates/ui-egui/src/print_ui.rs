@@ -67,6 +67,9 @@ pub struct PrintDraft {
     pub cut_marks: bool,
     pub orientation: Orientation,
     pub content: Content,
+    /// Print as image (Acrobat's Advanced Print Setup) at `dpi`.
+    pub as_image: bool,
+    pub dpi: f64,
     pub paper: usize,
     /// The sheet shown in the preview (0-based).
     pub sheet: usize,
@@ -111,6 +114,8 @@ impl Default for PrintDraft {
             cut_marks: true,
             orientation: Orientation::Auto,
             content: Content::DocumentAndMarkups,
+            as_image: false,
+            dpi: 300.0,
             paper: 0,
             sheet: 0,
             current_page: 0,
@@ -156,7 +161,14 @@ impl PrintDraft {
             Handling::Booklet => Layout::Booklet { subset: self.booklet_subset, binding: self.binding },
             Handling::Poster => Layout::Poster { scale: self.poster_scale, overlap: self.overlap, cut_marks: self.cut_marks },
         };
-        Ok(print::Settings { pages, paper: PAPERS[self.paper.min(PAPERS.len() - 1)].1, orientation: self.orientation, layout, content: self.content })
+        Ok(print::Settings {
+            pages,
+            paper: PAPERS[self.paper.min(PAPERS.len() - 1)].1,
+            orientation: self.orientation,
+            layout,
+            content: self.content,
+            raster: self.as_image.then_some(print::Raster { dpi: self.dpi, grayscale: self.grayscale }),
+        })
     }
 
     pub fn job(&self, title: &str) -> spool::Job {
@@ -909,6 +921,29 @@ pub(crate) fn body(
                 ],
                 220.0,
             );
+            // Advanced (Acrobat's Advanced Print Setup): print as image. Folded unless it is on.
+            ui.add_space(6.0);
+            egui::CollapsingHeader::new(egui::RichText::new(tl!("Advanced").to_uppercase()).font(theme::semibold(10.5)).color(t.text_faint))
+                .id_salt("print-advanced")
+                .default_open(d.as_image)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add(widgets::checkbox(&mut d.as_image, tl!("Print as image")));
+                        ui.add_enabled_ui(d.as_image, |ui| {
+                            ui.label(tl!("Resolution:"));
+                            let mut dpi = d.dpi.round() as u32;
+                            combo(ui, "print-dpi", &mut dpi, &[(150, "150 dpi"), (300, "300 dpi"), (600, "600 dpi")], 100.0);
+                            d.dpi = f64::from(dpi);
+                        });
+                    });
+                    ui.label(
+                        egui::RichText::new(tl!(
+                            "Use it when a printer skips text, shading or transparency. The print is no longer searchable text; with Print in grayscale, the pictures are grey."
+                        ))
+                        .small()
+                        .color(t.text_muted),
+                    );
+                });
         });
         ui.add_space(12.0);
         // Preview.

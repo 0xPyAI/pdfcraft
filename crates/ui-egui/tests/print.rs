@@ -373,3 +373,31 @@ fn a_printer_without_two_sided_printing_points_to_its_properties() {
     h.run_steps(2);
     h.get_by_label_contains(note);
 }
+
+/// Print as image (Acrobat's Advanced Print Setup) is a choice in the Print dialog's Advanced
+/// section: the saved print-ready PDF carries the page as a picture, no text.
+#[test]
+fn print_as_image_is_an_advanced_choice_that_saves_pictures() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    h.get_by_label("Advanced".to_uppercase().as_str()).click();
+    h.run_steps(2);
+    h.get_by_label("Print as image").click();
+    h.run_steps(2);
+    assert!(h.state().print_draft.as_image);
+    let out = std::env::temp_dir().join(format!("pdfcraft-print-image-test-{}.pdf", std::process::id()));
+    h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    h.state_mut().print_draft.printer = None;
+    h.run_steps(1);
+    h.get_by_label("Save as PDF").click();
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, None);
+    let bytes = std::fs::read(&out).expect("saved");
+    let doc = pdfcraft_cos::Document::open(std::sync::Arc::new(bytes)).unwrap();
+    assert_eq!(pdfcraft_model::pages(&doc).len(), 1);
+    let pictures =
+        doc.scan_objects().filter(|(_, o)| matches!(&**o, pdfcraft_cos::Object::Stream(st) if st.dict.name(b"Subtype") == Some(b"Image"))).count();
+    assert_eq!(pictures, 1, "the page is one picture");
+    let _ = std::fs::remove_file(out);
+}

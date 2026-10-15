@@ -2392,3 +2392,6 @@ animation effects	Off	Izklopljeni
 	New file only	Samo nova datoteka
 	Old file: {name}	Stara datoteka: {name}
 	New file: {name}	Nova datoteka: {name}
+	Print as image	Natisni kot sliko
+	Resolution:	Ločljivost:
+	Use it when a printer skips text, shading or transparency. The print is no longer searchable text; with Print in grayscale, the pictures are grey.	Uporabite, ko tiskalnik izpusti besedilo, senčenje ali prosojnost. Natis ni več iskalno besedilo; s tiskanjem v sivinah so slike sive.

@@ -228,11 +228,37 @@ pub struct Settings {
     pub orientation: Orientation,
     pub layout: Layout,
     pub content: Content,
+    /// Print as image (Acrobat's Advanced Print Setup): every page rendered to a picture at this
+    /// resolution before it is placed on the paper. The engine does the rendering; `impose` is
+    /// then given the image-only document.
+    pub raster: Option<Raster>,
+}
+
+/// How pages are rendered when printing as image.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Raster {
+    /// Dots per inch, 72–600 (Acrobat offers 150, 300 and 600).
+    pub dpi: f64,
+    /// Render the pictures in grey, so the print-ready PDF itself is grayscale.
+    pub grayscale: bool,
+}
+
+impl Default for Raster {
+    fn default() -> Self {
+        Raster { dpi: 300.0, grayscale: false }
+    }
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { pages: Vec::new(), paper: PAPERS[0].1, orientation: Orientation::Auto, layout: Layout::default(), content: Content::default() }
+        Settings {
+            pages: Vec::new(),
+            paper: PAPERS[0].1,
+            orientation: Orientation::Auto,
+            layout: Layout::default(),
+            content: Content::default(),
+            raster: None,
+        }
     }
 }
 

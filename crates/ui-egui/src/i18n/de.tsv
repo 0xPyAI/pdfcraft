@@ -2388,3 +2388,6 @@ animation effects	Off	Aus
 	New file only	Nur neue Datei
 	Old file: {name}	Alte Datei: {name}
 	New file: {name}	Neue Datei: {name}
+	Print as image	Als Bild drucken
+	Resolution:	Auflösung:
+	Use it when a printer skips text, shading or transparency. The print is no longer searchable text; with Print in grayscale, the pictures are grey.	Verwenden, wenn ein Drucker Text, Schattierungen oder Transparenz auslässt. Der Ausdruck ist kein durchsuchbarer Text mehr; mit Graustufendruck sind die Bilder grau.
