@@ -2468,6 +2468,19 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         let page = page.min(rects.len() - 1);
         let r = rects[page];
         scroll = scroll.vertical_scroll_offset((r.top() - y_shift - GAP + frac * r.height()).max(0.0));
+        // Horizontally too, as Acrobat does (#2665): beside a much wider page the others sit off
+        // to one side. A page already shown whole, or one filling the window's width, keeps the
+        // scroll, so paging through a zoomed-in document stays on the same column. Otherwise a
+        // page that fits is centred, and a wider one scrolled just far enough to fill the window.
+        let (x, w) = (view.last_scroll.x, avail.width());
+        let target = if r.width() <= w {
+            if r.left() >= x && r.right() <= x + w { x } else { r.center().x - w / 2.0 }
+        } else {
+            x.clamp(r.left(), r.right() - w)
+        };
+        if (target - x).abs() > 0.5 {
+            scroll = scroll.horizontal_scroll_offset(target.clamp(0.0, (content_w - w).max(0.0)));
+        }
     }
     let ppp = ui.ctx().pixels_per_point();
     let scale = view.render_scale(ppp);

@@ -1738,3 +1738,27 @@ fn arrow_keys_follow_the_scroll_speed_preference() {
     let (slow, normal, fast) = (lines_to_page_2("slow"), lines_to_page_2("normal"), lines_to_page_2("fast"));
     assert!(fast * 3 < normal * 2 && normal * 3 < slow * 2, "presses to page 2: slow {slow}, normal {normal}, fast {fast}");
 }
+
+/// #2665: next to a very wide page the normal pages sit far to its right, outside the window.
+/// Going to one changed the page counter but kept the horizontal scroll, so it stayed out of
+/// sight; as in Acrobat, it is brought into view.
+#[test]
+fn go_to_page_brings_the_page_into_view_horizontally() {
+    use pdfcraft_ui_egui::canvas::Fit;
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("wide.pdf", None, sized_fixture(&[(595, 842), (595, 842), (595, 842), (6000, 2000)])).unwrap();
+        app.views[0].fit = Fit::None;
+        app.views[0].zoom = 1.0;
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state().views[0].page_screen_rect(0).is_none(), "page 1 starts off-screen, right of the window");
+    h.state_mut().views[0].go_to_page(2);
+    h.run_steps(4);
+    let v = &h.state().views[0];
+    assert_eq!(v.current, 2);
+    let (r, vp) = (v.page_screen_rect(2).expect("page 3 on screen"), v.viewport_rect());
+    assert!(r.left() >= vp.left() && r.right() <= vp.right(), "page 3 at {r:?}, viewport {vp:?}");
+}
