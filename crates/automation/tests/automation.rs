@@ -1565,6 +1565,54 @@ fn bookmark_list_pages_reach_bookmarks_past_the_hundred_thousandth() {
     assert!(matches!(a.call("bookmark_list", &json!({ "doc": doc, "offset": -1 })), Err(ToolError::InvalidArgs(_))));
 }
 
+/// Bookmarks and links say where on the page they go, in the same top-left points as rect, and a
+/// link through a named destination says which page that is.
+#[test]
+fn destinations_are_listed_with_their_position() {
+    let dir = workdir("destination-positions");
+    let objs: Vec<&str> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /Outlines 5 0 R /Names << /Dests << /Names [(sec-b) [4 0 R /XYZ 72 500 0]] >> >> >>",
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 612 792] >>",
+        "<< /Type /Page /Parent 2 0 R /Annots [8 0 R 9 0 R 10 0 R] >>",
+        "<< /Type /Page /Parent 2 0 R >>",
+        "<< /Type /Outlines /First 6 0 R /Last 7 0 R /Count 2 >>",
+        "<< /Title (Section B) /Parent 5 0 R /Next 7 0 R /Dest [4 0 R /XYZ 72 500 0] >>",
+        "<< /Title (Wide view) /Parent 5 0 R /Prev 6 0 R /Dest [4 0 R /FitH 400] >>",
+        "<< /Type /Annot /Subtype /Link /Rect [72 700 300 716] /Border [0 0 0] /Dest [4 0 R /XYZ 72 500 2] >>",
+        "<< /Type /Annot /Subtype /Link /Rect [72 670 300 686] /Border [0 0 0] /Dest (sec-b) >>",
+        "<< /Type /Annot /Subtype /Link /Rect [72 640 300 656] /Border [0 0 0] /A << /S /URI /URI (https://example.com) >> >>",
+    ];
+    let mut pdf = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        pdf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    std::fs::write(dir.join("dests.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "dests.pdf" }))["doc"].as_u64().unwrap();
+    let marks = ok(&mut a, "bookmark_list", json!({ "doc": doc }));
+    // 792 − 500 = 292 points from the top; a zoom of 0 keeps the reader's zoom.
+    assert_eq!(marks["bookmarks"][0]["destination"], json!({ "fit": "XYZ", "left": 72.0, "top": 292.0, "zoom": null }), "{marks}");
+    assert_eq!(marks["bookmarks"][1]["destination"], json!({ "fit": "FitH", "left": null, "top": 392.0 }), "{marks}");
+    let links = ok(&mut a, "link_list", json!({ "doc": doc }));
+    let explicit = &links["links"][0];
+    assert_eq!(
+        (explicit["to_page"].clone(), explicit["destination"].clone()),
+        (json!(2), json!({ "fit": "XYZ", "left": 72.0, "top": 292.0, "zoom": 2.0 }))
+    );
+    let named = &links["links"][1];
+    assert_eq!((named["to_page"].clone(), named["named"].clone(), named.get("other")), (json!(2), json!(true), None), "{links}");
+    assert_eq!(named["destination"]["top"], 292.0);
+    assert_eq!((links["links"][2]["url"].clone(), links["links"][2].get("destination")), (json!("https://example.com"), None));
+}
+
 #[test]
 fn bookmarks_from_structure_through_tools() {
     let dir = workdir("bookmarks-structure");

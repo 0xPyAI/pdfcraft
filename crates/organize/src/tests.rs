@@ -1132,6 +1132,35 @@ fn inserting_a_file_brings_its_bookmarks_under_one_named_after_it() {
     assert!(!catalog(&host).contains(b"Outlines"));
 }
 
+/// Bookmarks say where on their page they go, through every kind of destination: explicit,
+/// named (resolved), and a GoTo action's.
+#[test]
+fn bookmarks_report_the_view_their_destination_asks_for() {
+    let mut objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /Outlines 5 0 R /Names << /Dests << /Names [(sec) [4 0 R /FitH 300]] >> >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 200 400] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        "<< /Type /Outlines /First 6 0 R /Last 9 0 R /Count 4 >>".into(),
+    ];
+    objs.push("<< /Title (Explicit) /Parent 5 0 R /Next 7 0 R /Dest [4 0 R /XYZ 20 250 null] >>".into()); // 6
+    objs.push("<< /Title (Named) /Parent 5 0 R /Prev 6 0 R /Next 8 0 R /Dest (sec) >>".into()); // 7
+    objs.push("<< /Title (Action) /Parent 5 0 R /Prev 7 0 R /Next 9 0 R /A << /S /GoTo /D [3 0 R /FitR 10 20 110 (x) 999] >> >>".into()); // 8
+    objs.push("<< /Title (Nowhere) /Parent 5 0 R /Prev 8 0 R /Dest (missing) >>".into()); // 9
+    let doc = open(build(&objs, "/Root 1 0 R"));
+    type View = Option<(Vec<u8>, Vec<Option<f64>>)>;
+    let views: Vec<(String, Option<usize>, View)> = bookmarks(&doc).into_iter().map(|b| (b.title, b.page, b.view)).collect();
+    assert_eq!(
+        views,
+        [
+            ("Explicit".into(), Some(1), Some((b"XYZ".to_vec(), vec![Some(20.0), Some(250.0), None]))),
+            ("Named".into(), Some(1), Some((b"FitH".to_vec(), vec![Some(300.0)]))),
+            ("Action".into(), Some(0), Some((b"FitR".to_vec(), vec![Some(10.0), Some(20.0), Some(110.0), None]))),
+            ("Nowhere".into(), None, None),
+        ]
+    );
+}
+
 #[test]
 fn combine_and_insert_share_identical_resources() {
     let a = doc_a();

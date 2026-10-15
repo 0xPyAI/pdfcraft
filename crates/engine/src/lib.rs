@@ -924,6 +924,8 @@ pub struct BookmarkRow {
     pub open: bool,
     /// The 0-based page it goes to.
     pub page: Option<usize>,
+    /// Where on that page it goes ([`pdfcraft_render::DestView::Top`] when it doesn't say).
+    pub view: pdfcraft_render::DestView,
 }
 
 /// One page of the bookmark list, in outline order.
@@ -951,7 +953,7 @@ fn outline_rows(items: &[pdfcraft_render::OutlineItem]) -> Vec<BookmarkRow> {
             top.1 += 1;
         }
         let path: Vec<usize> = levels.iter().map(|(_, listed)| listed.saturating_sub(1)).collect();
-        rows.push(BookmarkRow { path, title: item.title.clone(), open: item.open, page: item.page });
+        rows.push(BookmarkRow { path, title: item.title.clone(), open: item.open, page: item.page, view: item.view });
         if !item.children.is_empty() {
             levels.push((&item.children, 0));
         }
@@ -4439,7 +4441,17 @@ impl Session {
         let doc = self.get(id)?;
         if let Some(editor) = doc.editor.as_ref() {
             let page = pdfcraft_organize::bookmark_page(&editor.cos, offset, limit);
-            let rows = page.bookmarks.into_iter().map(|b| BookmarkRow { path: b.path, title: b.title, open: b.open, page: b.page }).collect();
+            let rows = page
+                .bookmarks
+                .into_iter()
+                .map(|b| {
+                    let view = b.view.map_or_else(Default::default, |(kind, numbers)| {
+                        let numbers: Vec<Option<f32>> = numbers.iter().map(|n| n.map(|n| n as f32)).collect();
+                        pdfcraft_render::DestView::from_operands(Some(&kind), &numbers)
+                    });
+                    BookmarkRow { path: b.path, title: b.title, open: b.open, page: b.page, view }
+                })
+                .collect();
             return Some(BookmarkPage { rows, next: page.next, truncated: false });
         }
         let all = outline_rows(&doc.info.outline);

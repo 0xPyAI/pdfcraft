@@ -65,6 +65,7 @@ impl Automation {
 
     pub(crate) fn link_list(&self, a: &Args) -> Result<Value> {
         let doc = self.doc(a)?;
+        let targets: std::collections::HashMap<(usize, usize), &LinkTarget> = doc.info.links.iter().map(|t| ((t.page, t.index), &t.target)).collect();
         let items: Vec<Value> = doc
             .links
             .iter()
@@ -73,10 +74,25 @@ impl Automation {
                 let (v0, v1) = (p.user_to_view(l.rect[0] as f32, l.rect[1] as f32), p.user_to_view(l.rect[2] as f32, l.rect[3] as f32));
                 let rect = [v0[0].min(v1[0]), v0[1].min(v1[1]), v0[0].max(v1[0]), v0[1].max(v1[1])].map(|x| (x * 100.0).round() / 100.0);
                 let mut v = json!({ "page": l.page + 1, "index": l.index + 1, "rect": rect, "visible": l.style.visible });
-                match &l.action {
-                    LinkAction::Page(p) => v["to_page"] = json!(p + 1),
-                    LinkAction::Uri(u) => v["url"] = json!(u),
-                    LinkAction::Other(o) => v["other"] = json!(o),
+                // Where an in-document link goes, as the viewer resolves it: named destinations
+                // included, with the position on the page.
+                let target = targets.get(&(l.page, l.index)).and_then(|t| match t {
+                    LinkTarget::Page(page, view) => Some((*page, view)),
+                    _ => None,
+                });
+                match (&l.action, target) {
+                    (LinkAction::Uri(u), _) => v["url"] = json!(u),
+                    (action, Some((page, view))) => {
+                        v["to_page"] = json!(page + 1);
+                        if let Some(d) = doc.info.pages.get(page).and_then(|p| crate::destination(view, p)) {
+                            v["destination"] = d;
+                        }
+                        if matches!(action, LinkAction::Other(_)) {
+                            v["named"] = json!(true);
+                        }
+                    }
+                    (LinkAction::Page(p), None) => v["to_page"] = json!(p + 1),
+                    (LinkAction::Other(o), None) => v["other"] = json!(o),
                 }
                 v
             })

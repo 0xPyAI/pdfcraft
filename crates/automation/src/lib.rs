@@ -841,7 +841,8 @@ impl Automation {
             .session
             .bookmark_page(id, offset, limit)
             .ok_or_else(|| ToolError::Failed(format!("no open document with id {} (see doc_list)", id.0)))?;
-        Ok(json!({ "bookmarks": nest_rows(&page.rows), "next": page.next, "truncated": page.truncated }))
+        let pages = &self.doc(a)?.info.pages;
+        Ok(json!({ "bookmarks": nest_rows(&page.rows, pages), "next": page.next, "truncated": page.truncated }))
     }
 
     fn doc(&self, a: &Args) -> Result<&Document> {
@@ -2200,7 +2201,7 @@ impl Args<'_> {
 
 /// Bookmark rows in listing order as JSON: a row holds the rows that follow it on the page at the
 /// next level down in `children`, and paths and pages are 1-based.
-fn nest_rows(rows: &[pdfcraft_engine::BookmarkRow]) -> Vec<Value> {
+fn nest_rows(rows: &[pdfcraft_engine::BookmarkRow], pages: &[pdfcraft_render::PageInfo]) -> Vec<Value> {
     // The open rows, outermost first, with their depth and the children gathered so far.
     let mut open: Vec<(usize, Value, Vec<Value>)> = Vec::new();
     let mut roots = Vec::new();
@@ -2210,13 +2211,46 @@ fn nest_rows(rows: &[pdfcraft_engine::BookmarkRow]) -> Vec<Value> {
             close_row(&mut open, &mut roots);
         }
         let path: Vec<usize> = row.path.iter().map(|p| p.saturating_add(1)).collect();
-        let fields = json!({ "path": path, "title": row.title, "page": row.page.map(|p| p.saturating_add(1)), "open": row.open });
+        let mut fields = json!({ "path": path, "title": row.title, "page": row.page.map(|p| p.saturating_add(1)), "open": row.open });
+        if let Some(destination) = row.page.and_then(|p| pages.get(p)).and_then(|p| destination(&row.view, p)) {
+            fields["destination"] = destination;
+        }
         open.push((depth, fields, Vec::new()));
     }
     while !open.is_empty() {
         close_row(&mut open, &mut roots);
     }
     roots
+}
+
+/// Where on its page a bookmark or link goes, in points from the top-left of the displayed page
+/// like every `rect`: the destination type (`XYZ`, `Fit`, `FitH`, `FitV`, `FitR`) and its
+/// position, `null` where the destination leaves it unspecified (`/XYZ null null null` keeps the
+/// reader's position and zoom). `None` for a destination without a type.
+pub(crate) fn destination(view: &pdfcraft_render::DestView, page: &pdfcraft_render::PageInfo) -> Option<Value> {
+    use pdfcraft_render::DestView;
+    let points = |left: Option<f32>, top: Option<f32>| {
+        let [x, y] = page.dest_fraction(left, top, 0);
+        let round = |v: f32| f64::from((v * 100.0).round() / 100.0);
+        (x.map(|x| round(x * page.width)), y.map(|y| round(y * page.height)))
+    };
+    Some(match view {
+        DestView::Top => return None,
+        DestView::Xyz { left, top, zoom } => {
+            let (x, y) = points(*left, *top);
+            json!({ "fit": "XYZ", "left": x, "top": y, "zoom": zoom.map(f64::from) })
+        }
+        DestView::Fit => json!({ "fit": "Fit" }),
+        DestView::FitH { top } => {
+            let (x, y) = points(None, *top);
+            json!({ "fit": "FitH", "left": x, "top": y })
+        }
+        DestView::FitV { left } => {
+            let (x, y) = points(*left, None);
+            json!({ "fit": "FitV", "left": x, "top": y })
+        }
+        DestView::FitR { rect } => json!({ "fit": "FitR", "rect": comments::rect_to_view(page, *rect) }),
+    })
 }
 
 /// Closes the innermost open row: it joins the row above it as a child, or the top level.
