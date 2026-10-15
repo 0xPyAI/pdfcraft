@@ -55,7 +55,7 @@ pdfcraft-cli edit   <in.pdf> --out out.pdf [--rotate 1,3:90] [--delete 2,4] [--m
                       [--insert-blank 1] [--title T] [--author A] [--full]
                       (options run in order; page numbers refer to the document after the earlier options)
 pdfcraft-cli combine <a.pdf> <b.pdf> … --out combined.pdf
-pdfcraft-cli extract <in.pdf> --pages 1,3,5 --out out.pdf
+pdfcraft-cli extract <in.pdf> --pages 1,3,5-8 --out out.pdf    (pages and ranges, in the order given)
 pdfcraft-cli split   <in.pdf> (--every N | --before 3,7) [--out-dir DIR]
 pdfcraft-cli check  <files or dirs…> [--timeout 20] [--dpi 36] [--json out.json]
 pdfcraft-cli audit  <file.pdf> [--password PW]            find faux redactions (fails when found)
@@ -381,9 +381,30 @@ fn text(args: &[String]) -> Result<(), CliError> {
     }
 }
 
-/// 1-based page list ("1,3,5") → 0-based indices.
+/// The most pages one `A-B` range may name: a bound on what a typed range can allocate.
+const MAX_RANGE: usize = 1_000_000;
+
+/// 1-based pages ("1,3,5-8": single pages and inclusive ranges, in the order given) → 0-based
+/// indices (#1923).
 fn page_list(s: &str) -> Result<Vec<usize>, String> {
-    s.split(',').map(|p| p.trim().parse::<usize>().ok().filter(|n| *n > 0).map(|n| n - 1).ok_or(format!("bad page number {p:?}"))).collect()
+    let number = |t: &str, item: &str| t.trim().parse::<usize>().ok().filter(|n| *n > 0).ok_or_else(|| format!("bad page number {item:?}"));
+    let mut out = Vec::new();
+    for item in s.split(',').map(str::trim) {
+        match item.split_once('-') {
+            Some((from, to)) => {
+                let (from, to) = (number(from, item)?, number(to, item)?);
+                if to < from {
+                    return Err(format!("bad page range {item:?}: it ends before it starts"));
+                }
+                if to - from >= MAX_RANGE {
+                    return Err(format!("bad page range {item:?}: more than {MAX_RANGE} pages"));
+                }
+                out.extend(from - 1..to);
+            }
+            None => out.push(number(item, item)? - 1),
+        }
+    }
+    Ok(out)
 }
 
 /// The options `edit` understands, for its "unknown option" message.
