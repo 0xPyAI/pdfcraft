@@ -458,3 +458,4 @@ Newest first: the date, what moved, and the new overall estimate.
 | 2026-10-12 | minor | M8: image redaction removes alternate images and unsupported masks only on affected images. Estimates unchanged. |
 
 - **2026-10-12 (M8):** Redaction cleans indirect and form structure references, preserving surviving form tags.
+- **2026-10-13 (M7):** Edit a PDF ▸ Add content: Header and footer, Watermark and Background open an Add / Update / Remove menu (Update and Remove enabled only when the document has that mark), as Acrobat's Watermark control does. The catalogue gains `ToolItem::actions`, so any tool can list more commands (#1192).

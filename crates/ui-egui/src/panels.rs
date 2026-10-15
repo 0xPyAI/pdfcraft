@@ -230,8 +230,32 @@ fn tool_detail(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, g: &'static
                 row_label(ui, tl!(item.label), theme::regular(13.0), fg, body.left_center() + vec2(34.0, 0.0), r.left() - body.left() - 42.0);
                 ui.painter().rect_filled(r, CornerRadius::same(4), fill);
                 ui.painter().text(r.center(), Align2::CENTER_CENTER, chip_label, font, cfg);
-                if theme::hand(resp).on_hover_text(format!("{} — {}", tl!(item.label), item.command)).clicked() {
-                    run = Some(item.command);
+                let resp = theme::hand(resp).on_hover_text(format!("{} — {}", tl!(item.label), item.command));
+                if item.actions.is_empty() {
+                    if resp.clicked() {
+                        run = Some(item.command);
+                    }
+                } else {
+                    // A caret before the chip says the entry opens a menu (Add / Update / Remove).
+                    let c = r.left_center() - vec2(10.0, 0.0);
+                    ui.painter().add(egui::Shape::convex_polygon(
+                        vec![c + vec2(-3.5, -2.0), c + vec2(3.5, -2.0), c + vec2(0.0, 2.5)],
+                        fg,
+                        egui::Stroke::NONE,
+                    ));
+                    egui::Popup::menu(&resp).show(|ui| {
+                        ui.set_min_width(180.0);
+                        for (n, id) in item.actions.iter().enumerate() {
+                            let Some(spec) = pdfcraft_engine::commands::command(id) else { continue };
+                            // Add stays usable with no document open: it asks for a file first.
+                            let enabled = (n == 0 && app.active.is_none()) || app.command_enabled(spec);
+                            let label = crate::i18n::menu_label(spec.id, spec.label);
+                            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                                run = Some(spec.id);
+                                ui.close();
+                            }
+                        }
+                    });
                 }
             }
         }

@@ -24,6 +24,11 @@ pub struct ToolItem {
     pub icon: &'static str,
     pub command: &'static str,
     pub availability: Availability,
+    /// Further commands of the same tool, shown as a drop-down beside the entry: Acrobat's
+    /// Watermark control offers Add, Update and Remove. The first is `command` itself. A UI
+    /// enables each one by its own command's needs, so Update and Remove stay greyed out until
+    /// the document has that kind of mark. Empty for a plain entry.
+    pub actions: &'static [&'static str],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -45,7 +50,16 @@ pub struct ToolGroup {
 }
 
 const fn item(label: &'static str, icon: &'static str, command: &'static str, availability: Availability) -> ToolItem {
-    ToolItem { label, icon, command, availability }
+    ToolItem { label, icon, command, availability, actions: &[] }
+}
+
+/// An entry that opens a menu of `actions` (the first one is its `command`).
+const fn menu_item(label: &'static str, icon: &'static str, actions: &'static [&'static str]) -> ToolItem {
+    let command = match actions {
+        [first, ..] => *first,
+        [] => "",
+    };
+    ToolItem { label, icon, command, availability: Ready, actions }
 }
 
 use Availability::{Planned, Provider, Ready};
@@ -128,11 +142,11 @@ pub static TOOL_GROUPS: &[ToolGroup] = &[
                     item("Edit text & images", "text-cursor-input", "edit.edit_text", Ready),
                     item("Text", "type", "edit.text", Ready),
                     item("Image", "image-plus", "edit.image", Ready),
-                    item("Header and footer", "heading", "edit.header_footer", Ready),
-                    item("Watermark", "stamp", "edit.watermark", Ready),
+                    menu_item("Header and footer", "heading", &["edit.header_footer", "edit.header_footer.update", "edit.header_footer.remove"]),
+                    menu_item("Watermark", "stamp", &["edit.watermark", "edit.watermark.update", "edit.watermark.remove"]),
                     item("Link", "link-2", "edit.link", Ready),
                     item("Bates numbering", "hash", "edit.bates", Ready),
-                    item("Background", "palette", "edit.background", Ready),
+                    menu_item("Background", "palette", &["edit.background", "edit.background.update", "edit.background.remove"]),
                     item("Attach file", "paperclip", "edit.attach", Planned("M12")),
                 ],
             },
@@ -553,6 +567,40 @@ mod tests {
                     assert!(i.command.contains('.'), "{} lacks a namespace", i.command);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn menu_entries_list_registered_commands_starting_with_their_own() {
+        let mut menus = 0;
+        for g in TOOL_GROUPS {
+            for s in g.sections {
+                for i in s.items {
+                    if i.actions.is_empty() {
+                        continue;
+                    }
+                    menus += 1;
+                    assert_eq!(i.actions[0], i.command, "{}: the first action is the entry's command", i.label);
+                    for id in i.actions {
+                        assert!(crate::commands::command(id).is_some(), "{id} is not a registered command");
+                    }
+                }
+            }
+        }
+        // Watermark, Header and footer, Background: Add / Update / Remove each (Acrobat's menu).
+        assert!(menus >= 3);
+    }
+
+    #[test]
+    fn every_update_and_remove_command_is_reachable_from_a_tool_entry() {
+        let reachable: HashSet<&str> =
+            TOOL_GROUPS.iter().flat_map(|g| g.sections.iter().flat_map(|s| s.items.iter())).flat_map(|i| i.actions.iter().copied()).collect();
+        for id in crate::commands::COMMANDS
+            .iter()
+            .map(|c| c.id)
+            .filter(|id| id.starts_with("edit.") && (id.ends_with(".update") || id.ends_with(".remove")))
+        {
+            assert!(reachable.contains(id), "{id} is in no tool menu");
         }
     }
 }
