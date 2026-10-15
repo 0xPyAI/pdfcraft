@@ -1827,6 +1827,42 @@ fn printing_lays_out_sheets_that_render() {
     assert_eq!(s4.print_pdf(id4, &print::Settings { pages: vec![0], ..Default::default() }), Err(EditError::NotPermitted("printing")));
 }
 
+/// A one-page document whose red square is in a layer; `off` switches the layer off by default.
+fn red_layer_pdf(off: bool) -> Vec<u8> {
+    let content = "/OC /L1 BDC 1 0 0 rg 0 0 100 100 re f EMC";
+    let off = if off { "/OFF [5 0 R] " } else { "" };
+    format!(
+        "%PDF-1.7\n\
+         1 0 obj << /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R] /D << {off}/Order [5 0 R] >> >> >> endobj\n\
+         2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+         3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R /Resources << /Properties << /L1 5 0 R >> >> >> endobj\n\
+         4 0 obj << /Length {} >> stream\n{content}\nendstream endobj\n\
+         5 0 obj << /Type /OCG /Name (Red) >> endobj\n\
+         trailer << /Root 1 0 R >>\n%%EOF",
+        content.len()
+    )
+    .into_bytes()
+}
+
+/// Does the first page of `pdf` show any red when drawn?
+fn first_page_has_red(pdf: Vec<u8>) -> bool {
+    let mut renderer = pdfcraft_render::PageRenderer::new(Arc::new(pdf), pdfcraft_render::RenderConfig::default());
+    let page = renderer.render(pdfcraft_render::RenderRequest { page: 0, scale: 0.5, ..Default::default() });
+    page.rgba.as_chunks::<4>().0.iter().any(|p| p[0] > 200 && p[1] < 60 && p[2] < 60)
+}
+
+#[test]
+fn a_layer_that_is_off_does_not_print_and_one_that_is_on_does() {
+    for (off, prints) in [(true, false), (false, true)] {
+        let source = red_layer_pdf(off);
+        assert_eq!(first_page_has_red(source.clone()), prints, "on screen (off: {off})");
+        let mut s = Session::new();
+        let id = s.open("layers.pdf", None, Arc::new(source), None).unwrap();
+        let sheet = s.print_pdf(id, &print::Settings { pages: vec![0], ..Default::default() }).unwrap();
+        assert_eq!(first_page_has_red(sheet), prints, "printed (layer off by default: {off})");
+    }
+}
+
 #[test]
 fn crop_and_duplicate_pages_show_in_the_viewer() {
     let (mut s, id) = session_with(2);
