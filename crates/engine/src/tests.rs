@@ -2990,6 +2990,155 @@ fn detecting_fields_on_a_printed_form() {
     assert!(s.detect_fields(id, &[]).is_empty(), "nothing left to detect");
 }
 
+/// A printed form, 420 × 300 pt: a title, a label with a rule to write on, a box with a small
+/// label in its corner, an empty box with its label above, and two check boxes.
+fn paper_form() -> Vec<u8> {
+    let content = "BT /F1 14 Tf 30 270 Td (Gewerbe-Ummeldung) Tj ET \
+        BT /F1 10 Tf 30 230 Td (Name:) Tj ET 0.75 w 80 228 m 380 228 l S \
+        1 w 30 150 350 50 re S BT /F1 7 Tf 34 191 Td (Anschrift) Tj ET \
+        BT /F1 8 Tf 30 124 Td (Telefon) Tj ET 30 90 350 30 re S \
+        30 50 10 10 re S BT /F1 9 Tf 46 51 Td (Haupt) Tj ET 150 50 10 10 re S BT /F1 9 Tf 166 51 Td (Zweig) Tj ET";
+    let objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 420 300] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_vec(),
+        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()).into_bytes(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, obj) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend_from_slice(obj);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for offset in offsets {
+        out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+/// How the paper form was scanned.
+#[derive(Clone, Copy, Debug)]
+enum Scan {
+    Straight,
+    /// Stored sideways and turned upright by `/Rotate 90`.
+    Sideways,
+    /// Speckled paper, uneven light and lines that lose some pixels.
+    Noisy,
+    /// Laid on the scanner a degree askew.
+    Skewed,
+}
+
+/// The paper form as an image-only PDF at 150 dpi (the page keeps its 420 × 300 pt).
+fn scanned_form(scan: Scan) -> Arc<Vec<u8>> {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("paper.pdf", None, Arc::new(paper_form()), None).unwrap();
+    let png = export::Exporter::new(s.get(id).unwrap()).png(0, 150.0).unwrap();
+    let mut img = image::load_from_memory(&png).unwrap().to_rgba8();
+    match scan {
+        Scan::Straight => {}
+        Scan::Sideways => img = image::imageops::rotate270(&img),
+        Scan::Skewed => {
+            // Turned a degree about the centre (nearest pixel; the corners stay paper).
+            let (w, h) = (img.width() as f64, img.height() as f64);
+            let (sin, cos) = 1f64.to_radians().sin_cos();
+            let src = img.clone();
+            for (x, y, p) in img.enumerate_pixels_mut() {
+                let (dx, dy) = (x as f64 - w / 2.0, y as f64 - h / 2.0);
+                let (sx, sy) = (cos * dx + sin * dy + w / 2.0, -sin * dx + cos * dy + h / 2.0);
+                *p = if sx >= 0.0 && sy >= 0.0 && sx < w && sy < h { *src.get_pixel(sx as u32, sy as u32) } else { image::Rgba([255; 4]) };
+            }
+        }
+        Scan::Noisy => {
+            let (w, mut seed) = (img.width(), 7u32);
+            for (x, _, p) in img.enumerate_pixels_mut() {
+                seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
+                let noise = ((seed >> 16) % 48) as u8;
+                let shade = (x * 50 / w) as u8;
+                for c in &mut p.0[..3] {
+                    *c = if *c < 128 && noise < 4 { 230 } else { c.saturating_sub(shade).saturating_sub(noise) };
+                }
+            }
+        }
+    }
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+    let pdf = s.create_from_images_with_resolution(&[("scan.png".into(), bytes.into_inner())], ImageResolution::Dpi(150.0)).unwrap();
+    if !matches!(scan, Scan::Sideways) {
+        return pdf;
+    }
+    let id = s.open("scan.pdf", None, pdf, None).unwrap();
+    s.apply(id, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    s.save_bytes(id).unwrap()
+}
+
+/// Fields on a scanned paper form are found from its lines and boxes, wherever the page turns
+/// them, and named from the labels when text recognition is installed.
+#[test]
+fn detecting_fields_on_a_scanned_form() {
+    use pdfcraft_forms::detect::Kind::{CheckBox, Text};
+    for scan in [Scan::Straight, Scan::Sideways, Scan::Noisy, Scan::Skewed] {
+        let mut s = Session::new().with_clock(|| 1_700_000_000);
+        let id = s.open("scan.pdf", None, scanned_form(scan), None).unwrap();
+        assert_eq!(page_texts(&s, id), [""], "{scan:?}: a picture has no text");
+        let info = s.get(id).unwrap().info.pages[0].clone();
+        assert_eq!((info.width.round(), info.height.round()), (420.0, 300.0), "{scan:?}");
+        // Where a field shows on the page, in points from the bottom-left as displayed.
+        let shown = |r: [f64; 4]| {
+            let a = info.user_to_view(r[0] as f32, r[1] as f32);
+            let b = info.user_to_view(r[2] as f32, r[3] as f32);
+            [a[0].min(b[0]), 300.0 - a[1].max(b[1]), a[0].max(b[0]), 300.0 - a[1].min(b[1])].map(f64::from)
+        };
+        let found = s.detect_fields(id, &[]);
+        let got: Vec<(pdfcraft_forms::detect::Kind, [f64; 4])> = found.iter().map(|(_, c)| (c.kind.clone(), shown(c.rect))).collect();
+        // In reading order: the rule after "Name:", the box below "Anschrift", the "Telefon"
+        // box, two check boxes.
+        let want = [
+            (Text, [80.0, 229.0, 380.0, 245.0]),
+            (Text, [31.0, 151.0, 379.0, 189.0]),
+            (Text, [31.0, 91.0, 379.0, 119.0]),
+            (CheckBox, [30.0, 50.0, 40.0, 60.0]),
+            (CheckBox, [150.0, 50.0, 160.0, 60.0]),
+        ];
+        assert_eq!(got.len(), want.len(), "{scan:?}: {got:?}");
+        for ((kind, r), (want_kind, w)) in got.iter().zip(&want) {
+            assert_eq!(kind, want_kind, "{scan:?}: {got:?}");
+            // The labelled box's top is wherever the label ends; everything else is close. A
+            // degree askew, a 350 pt line climbs 6 pt, and the field stays inside the box.
+            let tol = if matches!(scan, Scan::Skewed) { [6.5; 4] } else { [2.5, 2.5, 2.5, if w[3] == 189.0 { 6.0 } else { 2.5 }] };
+            assert!(r.iter().zip(w).zip(tol).all(|((a, b), t)| (a - b).abs() <= t), "{scan:?}: {r:?}, want {w:?}");
+        }
+        let names: Vec<&str> = found.iter().map(|(_, c)| c.name.as_str()).collect();
+        if ocr::available() {
+            // (Askew, recognition may read "Haupt" and "Zweig" as one phrase.)
+            assert!(names.contains(&"Name") && names.contains(&"Telefon") && names.iter().any(|n| n.starts_with("Haupt")), "{scan:?}: {names:?}");
+        } else {
+            // Without text recognition the fields get the default names.
+            assert!(names.iter().all(|n| n.starts_with("Text") || n.starts_with("Check Box")), "{scan:?}: {names:?}");
+        }
+
+        // Added as one step, where they were found; on the turned page each field turns with
+        // it, so typing reads upright.
+        let added = s.auto_detect_fields(id, &[]).unwrap();
+        assert_eq!(added.len(), want.len());
+        let d = s.get(id).unwrap();
+        assert_eq!(d.can_undo(), Some("Detect form fields"));
+        let turn = if matches!(scan, Scan::Sideways) { 90 } else { 0 };
+        for (_, c) in &found {
+            let f = d.form.iter().find(|f| f.name == c.name).unwrap();
+            assert_eq!(f.widgets[0].rotation, turn, "{scan:?}: {}", f.name);
+            let r = f.widgets[0].rect;
+            assert!(r.iter().zip(c.rect).all(|(a, b)| (a - b).abs() < 0.01), "{scan:?}: {r:?} moved from {:?}", c.rect);
+        }
+        assert!(s.detect_fields(id, &[]).is_empty(), "{scan:?}: nothing left to detect");
+    }
+}
+
 #[test]
 fn comparing_two_versions_of_a_document() {
     let mut s = Session::new().with_clock(|| 1_700_000_000);
