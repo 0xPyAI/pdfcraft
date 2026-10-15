@@ -18,6 +18,14 @@ endstream endobj
 trailer << /Root 1 0 R >>
 %%EOF";
 
+const FORM_FIXTURE: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Annots [4 0 R] >> endobj
+4 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (Name) /Rect [20 40 120 60] /P 3 0 R >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
 fn status(h: &Harness<'static, PdfCraftApp>, rule: Rule) -> Status {
     h.state().a11y.report.as_ref().unwrap().1.result(rule).unwrap().status
 }
@@ -208,6 +216,28 @@ fn a_saved_page_range_past_the_document_still_checks_its_pages() {
     h.run_steps(2);
     assert_eq!(status(&h, Rule::TaggedContent), Status::Failed);
     assert_eq!(h.state().a11y.options.as_ref().and_then(|o| o.pages.clone()), Some(vec![0]));
+}
+
+#[test]
+fn tagging_form_fields_opens_the_tags_panel() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("form.pdf", None, FORM_FIXTURE.to_vec()).unwrap();
+        app
+    });
+    h.run_steps(3);
+    assert!(h.state_mut().execute("a11y.autotag_fields"));
+    h.run_steps(3);
+    assert_eq!(h.state().right, Some(RightPanel::Tags));
+    let id = h.state().views[0].id;
+    let report = h
+        .state()
+        .session
+        .get(id)
+        .unwrap()
+        .accessibility_check(&pdfcraft_engine::a11y::Options { rules: [Rule::TaggedFormFields].into(), pages: None });
+    assert_eq!(report.unwrap().result(Rule::TaggedFormFields).unwrap().status, Status::Passed);
 }
 
 /// Two tagged figures: an image without alternate text and a bar (role-mapped Photo) with.

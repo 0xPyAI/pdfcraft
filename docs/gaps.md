@@ -198,8 +198,10 @@ update the numbers.
 
 ### 11. Accessibility: only text-only automatic structure creation
 
-- **Missing:** auto-tag mixed text, images, tables, lists, links and fields; connect preview heading
-  proposals to Apply; visual Order and Content panels, Reading Order tool, table editor, Make Accessible action,
+- **Missing:** apply auto-tag proposals to marked content and a valid parent tree, tag fields
+  into structure trees with unusual layouts (only a direct Document root with a direct
+  ParentTree Nums array is extended),
+  visual Tags, Order and Content panels, Reading Order tool, table editor, Make Accessible action,
   Read Out Loud; full keyboard operation of PdfCraft itself and a screen-reader audit.
 - **Evidence:** all 32 checker rules, figure alt text, tag property and sibling order edits, and
   a bounded auto-tag preview exist. Apply writes valid structure and parent-tree links for

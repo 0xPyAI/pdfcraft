@@ -1471,6 +1471,8 @@ pub enum Edit {
         figure: u32,
         alt: Option<String>,
     },
+    /// Add `/Form` tags and object references for all widgets in an untagged AcroForm.
+    AutoTagFormFields,
     /// Change one property on a reachable indirect structure tag.
     SetTagProperty {
         object: pdfcraft_cos::ObjRef,
@@ -1961,6 +1963,7 @@ impl Edit {
             Edit::SetInitialView(_) => Label::of("Change initial view"),
             Edit::AutoTagText => Label::of("Automatically tag text"),
             Edit::SetAltText { .. } => Label::of("Set alternate text"),
+            Edit::AutoTagFormFields => Label::of("Tag form fields"),
             Edit::SetTagProperty { .. } => Label::of("Change tag properties"),
             Edit::MoveTag { .. } => Label::of("Move object"),
             Edit::MarkDecorative { .. } => Label::of("Mark figure as decorative"),
@@ -2156,6 +2159,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         | Edit::SetInitialView(_)
         | Edit::AutoTagText
         | Edit::SetAltText { .. }
+        | Edit::AutoTagFormFields
         | Edit::SetTagProperty { .. }
         | Edit::MoveTag { .. }
         | Edit::MarkDecorative { .. }
@@ -2443,6 +2447,9 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         Edit::SetAltText { figure, alt } => {
             let r = pdfcraft_cos::ObjRef::new(*figure, doc.generation(*figure));
             a11y::set_alt(doc, r, alt.as_deref()).map_err(|e| EditError::Accessibility(e.to_string()))?;
+        }
+        Edit::AutoTagFormFields => {
+            a11y::tag_form_fields(doc).map_err(EditError::Accessibility)?;
         }
         Edit::SetTagProperty { object, property, value } => {
             a11y::set_tag_property(doc, *object, *property, value.as_deref()).map_err(|e| EditError::Accessibility(e.to_string()))?;

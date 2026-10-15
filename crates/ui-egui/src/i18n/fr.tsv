@@ -2373,6 +2373,7 @@ animation effects	Off	Désactivés
 	This document is trying to open a local file:	Ce document tente d’ouvrir un fichier local :
 	Move tag earlier	Déplacer la balise plus tôt
 	Move tag later	Déplacer la balise plus tard
+	Tag form fields	Baliser les champs de formulaire
 	Mark as artifact	Marquer comme artefact
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Retirez cette balise feuille de l’ordre de lecture et marquez son contenu direct comme artefact
 	Mark content as artifact	Marquer le contenu comme artefact

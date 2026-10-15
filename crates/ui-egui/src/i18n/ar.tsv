@@ -2394,6 +2394,7 @@ animation effects	Off	معطّلة
 	This document is trying to open a local file:	يحاول هذا المستند فتح ملف محلي:
 	Move tag earlier	نقل العلامة للأعلى
 	Move tag later	نقل العلامة للأسفل
+	Tag form fields	وضع علامات على حقول النموذج
 	Mark as artifact	وضع علامة كعنصر زخرفي
 	Remove this leaf tag from reading order and mark its direct content as an artifact	أزل هذه العلامة من ترتيب القراءة وضع علامة على محتواها المباشر كعنصر زخرفي
 	Mark content as artifact	وضع علامة على المحتوى كعنصر زخرفي

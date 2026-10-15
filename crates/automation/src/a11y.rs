@@ -217,6 +217,19 @@ impl Automation {
         }))
     }
 
+    pub(crate) fn accessibility_autotag_form_fields(&mut self, a: &Args) -> Result<Value> {
+        let id = self.doc(a)?.id;
+        self.session.apply(id, pdfcraft_engine::Edit::AutoTagFormFields).map_err(failed)?;
+        let report = self
+            .doc(a)?
+            .accessibility_check(&Options { rules: [Rule::TaggedFormFields].into(), pages: None })
+            .ok_or_else(|| failed("the document can't be read"))?;
+        let result = report.result(Rule::TaggedFormFields).ok_or_else(|| failed("the form field check is unavailable"))?;
+        Ok(
+            json!({ "status": status_id(result.status), "remaining_findings": result.findings.len(), "note": "Only form widgets were tagged. Review text, figures, links, reading order, and other document content separately." }),
+        )
+    }
+
     pub(crate) fn accessibility_autotag_preview(&self, a: &Args) -> Result<Value> {
         let page = self.page(a)?;
         let preview = self.doc(a)?.autotag_preview(page).map_err(failed)?;

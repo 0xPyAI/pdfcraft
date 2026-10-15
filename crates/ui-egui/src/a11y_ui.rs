@@ -608,6 +608,12 @@ pub(crate) fn alt_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> 
 }
 
 impl PdfCraftApp {
+    /// Prepare for accessibility ▸ Tag form fields.
+    pub(crate) fn autotag_form_fields(&mut self) {
+        self.apply_edit(pdfcraft_engine::Edit::AutoTagFormFields);
+        self.choose_right_panel(Some(RightPanel::Tags));
+    }
+
     /// Prepare for accessibility ▸ Add alternate text.
     pub(crate) fn start_alt_text(&mut self) {
         let Some((_, id)) = self.active_ids() else { return };

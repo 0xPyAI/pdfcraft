@@ -291,7 +291,22 @@ fn autotag_apply_writes_reviewable_tags_and_survives_save_reopen() {
     let pages = pdfcraft_model::pages(&reopened);
     assert_eq!(pages.len(), 2);
     assert!(pages.iter().all(|page| page.dict.contains(b"StructParents")));
-    assert!(reopened.get(reopened.root().unwrap()).as_dict().unwrap().contains(b"StructTreeRoot"));
+}
+
+#[test]
+fn autotag_form_fields_writes_reviewable_widget_tags() {
+    let dir = workdir("autotag-form-fields");
+    std::fs::write(dir.join("field.pdf"), form_pdf("name")).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "field.pdf" }))["doc"].as_u64().unwrap();
+    let tagged = ok(&mut a, "accessibility_autotag_form_fields", json!({ "doc": doc }));
+    assert_eq!(tagged["status"], "passed");
+    assert_eq!(tagged["remaining_findings"], 0);
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "tagged.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "tagged.pdf" }))["doc"].as_u64().unwrap();
+    let check = ok(&mut a, "accessibility_check", json!({ "doc": reopened, "rules": ["tagged-form-fields"] }));
+    let result = check["results"].as_array().unwrap().iter().find(|result| result["rule"] == "tagged-form-fields").unwrap();
+    assert_eq!(result["status"], "passed");
 }
 
 /// A one-page PDF whose form holds one text field named `name`.

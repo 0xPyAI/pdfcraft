@@ -97,6 +97,78 @@ fn autotag_text_refuses_paint_and_does_not_modify_the_document() {
 }
 
 #[test]
+fn autotag_form_fields_writes_widget_structure_and_parent_tree() {
+    let mut doc = pdf(
+        &[
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [5 0 R 6 0 R] >>".into(),
+            "<< /Length 0 >>\nstream\n\nendstream".into(),
+            "<< /FT /Tx /T (name) /Kids [6 0 R] >>".into(),
+            "<< /Type /Annot /Subtype /Widget /Parent 5 0 R /Rect [20 60 120 80] >>".into(),
+        ],
+        "",
+    );
+    assert_eq!(tag_form_fields(&mut doc).unwrap(), 1);
+    let report = check(&doc, &Options { rules: [Rule::TaggedPdf, Rule::TaggedFormFields].into(), pages: None });
+    assert_eq!(status(&report, Rule::TaggedPdf), Status::Passed);
+    assert_eq!(status(&report, Rule::TaggedFormFields), Status::Passed);
+    let tree = doc.get(doc.root().unwrap()).as_dict().unwrap().reference(b"StructTreeRoot").unwrap();
+    assert!(doc.get(tree).as_dict().unwrap().contains(b"ParentTree"));
+    let widget = pdfcraft_model::pages(&doc)[0].dict.get(b"Annots").and_then(|a| doc.resolve(a).as_array().cloned()).unwrap()[1].as_ref().unwrap();
+    assert_eq!(doc.get(widget).as_dict().unwrap().get(b"StructParent").and_then(Object::as_int), Some(0));
+    let written = pdfcraft_cos::write_full(&doc, &pdfcraft_cos::SaveOptions::default()).unwrap();
+    let reopened = Document::open(Arc::new(written)).unwrap();
+    assert_eq!(status(&check(&reopened, &Options { rules: [Rule::TaggedFormFields].into(), pages: None }), Rule::TaggedFormFields), Status::Passed);
+}
+
+#[test]
+fn autotag_form_fields_tags_a_widget_listed_on_two_pages_once() {
+    let mut doc = pdf(
+        &[
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >>".into(),
+            "<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [5 0 R] >>".into(),
+            "<< /Length 0 >>\nstream\n\nendstream".into(),
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [20 60 120 80] >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [5 0 R] >>".into(),
+        ],
+        "",
+    );
+    assert_eq!(tag_form_fields(&mut doc).unwrap(), 1);
+    let tree = doc.get(doc.root().unwrap()).as_dict().unwrap().reference(b"StructTreeRoot").unwrap();
+    let parent_tree = doc.get(tree).as_dict().unwrap().reference(b"ParentTree").unwrap();
+    let nums = doc.get(parent_tree).as_dict().unwrap().get(b"Nums").and_then(|n| n.as_array().cloned()).unwrap();
+    assert_eq!(nums.len(), 2, "one key and one /Form element for the shared widget");
+}
+
+#[test]
+fn autotag_form_fields_extends_a_direct_existing_structure_tree() {
+    let mut doc = pdf(
+        &[
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> /MarkInfo << /Marked true >> /StructTreeRoot 6 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [5 0 R] /StructParents 0 >>".into(),
+            "<< /Length 0 >>\nstream\n\nendstream".into(),
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /Rect [20 60 120 80] >>".into(),
+            "<< /Type /StructTreeRoot /K 7 0 R /ParentTree 8 0 R >>".into(),
+            "<< /S /Document /P 6 0 R /K 9 0 R >>".into(),
+            "<< /Nums [0 [9 0 R]] >>".into(),
+            "<< /S /P /P 7 0 R /Pg 3 0 R /K 0 >>".into(),
+        ],
+        "",
+    );
+    assert_eq!(tag_form_fields(&mut doc).unwrap(), 1);
+    let widget = pdfcraft_model::pages(&doc)[0].dict.get(b"Annots").and_then(|a| doc.resolve(a).as_array().cloned()).unwrap()[0].as_ref().unwrap();
+    assert_eq!(doc.get(widget).as_dict().unwrap().get(b"StructParent").and_then(Object::as_int), Some(1));
+    let report = check(&doc, &Options { rules: [Rule::TaggedFormFields].into(), pages: None });
+    assert_eq!(status(&report, Rule::TaggedFormFields), Status::Passed);
+    let document_object = doc.get(pdfcraft_cos::ObjRef::new(7, 0));
+    let document = document_object.as_dict().unwrap();
+    assert_eq!(document.get(b"K").and_then(Object::as_array).unwrap().len(), 2, "the existing paragraph and new form remain siblings");
+}
+
+#[test]
 fn an_untagged_document_fails_the_document_rules() {
     let doc = pdf(
         &[

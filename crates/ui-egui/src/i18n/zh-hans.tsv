@@ -2337,6 +2337,7 @@ animation effects	Off	关
 	This document is trying to open a local file:	此文档正尝试打开本地文件：
 	Move tag earlier	将标签前移
 	Move tag later	将标签后移
+	Tag form fields	标记表单字段
 	Mark as artifact	标记为工件
 	Remove this leaf tag from reading order and mark its direct content as an artifact	从阅读顺序中移除此叶标签，并将其直接内容标记为工件
 	Mark content as artifact	将内容标记为工件

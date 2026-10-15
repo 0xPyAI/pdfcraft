@@ -2395,6 +2395,7 @@ animation effects	Off	Вимкнено
 	This document is trying to open a local file:	Цей документ намагається відкрити локальний файл:
 	Move tag earlier	Перемістити тег раніше
 	Move tag later	Перемістити тег пізніше
+	Tag form fields	Позначити поля форми
 	Mark as artifact	Позначити як артефакт
 	Remove this leaf tag from reading order and mark its direct content as an artifact	Вилучіть цей кінцевий тег із порядку читання та позначте його безпосередній вміст як артефакт
 	Mark content as artifact	Позначити вміст як артефакт

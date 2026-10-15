@@ -2373,6 +2373,7 @@ animation effects	Off	オフ
 	This document is trying to open a local file:	この文書はローカルファイルを開こうとしています：
 	Move tag earlier	タグを前へ移動
 	Move tag later	タグを後へ移動
+	Tag form fields	フォームフィールドにタグを付ける
 	Mark as artifact	アーティファクトとしてマーク
 	Remove this leaf tag from reading order and mark its direct content as an artifact	このリーフタグを読み上げ順序から削除し、その直接のコンテンツをアーティファクトとしてマークします
 	Mark content as artifact	コンテンツをアーティファクトとしてマーク
