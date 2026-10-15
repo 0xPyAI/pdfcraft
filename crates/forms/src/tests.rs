@@ -1997,3 +1997,16 @@ fn auto_text_size_fits_single_and_multiline_text() {
     }
     assert_eq!(auto_text_size(long, 50.0, 10.0, false, |_, _| f64::NAN), 10.0 / 1.15);
 }
+
+#[test]
+fn document_scripts_read_each_name_tree_node_once() {
+    // The root lists itself and the leaf twice each.
+    let doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /Names << /JavaScript 3 0 R >> >>".into(),
+        "<< /Type /Pages /Kids [] /Count 0 >>".into(),
+        "<< /Kids [3 0 R 4 0 R 3 0 R 4 0 R] >>".into(),
+        "<< /Names [(init) 5 0 R] >>".into(),
+        "<< /S /JavaScript /JS (var ready = true;) >>".into(),
+    ]);
+    assert_eq!(document_scripts_named(&doc), [("init".to_string(), "var ready = true;".to_string())]);
+}
