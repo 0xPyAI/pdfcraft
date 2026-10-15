@@ -17,6 +17,8 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+#[cfg(feature = "mcp")]
+mod automation_args;
 mod batch;
 
 use std::io::Write;
@@ -33,8 +35,14 @@ use pdfcraft_render::{PageRenderer, RenderConfig, RenderRequest, RequestKind, in
 macro_rules! mcp_usage {
     () => {
         "\
-pdfcraft-cli mcp    [--root DIR] [--compact]              MCP server on stdin/stdout (opt-in)
+pdfcraft-cli mcp    [--root DIR] [--compact] [--automation-read-root DIR] [--automation-write-root DIR]
+                                                           MCP server on stdin/stdout (opt-in)
                                                            --compact lists a core set of tools plus tool_search and tool_call
+                                                           --automation-read-root / --automation-write-root confine the files the
+                                                           agent's tools read (open, combine, import, fonts, certificates…) and
+                                                           write (save, export, extract, split, reports…) to DIR, links followed;
+                                                           a root left out grants none of its access. --root, when also given,
+                                                           applies as well
 "
     };
 }
@@ -901,11 +909,42 @@ fn run(args: &[String]) -> Result<(), CliError> {
     print_output(&auto, content, flag(args, "--out"))
 }
 
+/// Take `--automation-read-root` / `--automation-write-root` (each `--flag DIR` or `--flag=DIR`,
+/// once) out of `args`, and open the roots, which must be existing folders. Returns the arguments
+/// that are left. A malformed root flag is an error, never a root silently left out.
+#[cfg(feature = "mcp")]
+fn automation_roots(command: &str, args: &[String]) -> Result<(Option<Arc<pdfcraft_automation::file_access::AutomationRoots>>, Vec<String>), String> {
+    let mut found = automation_args::AutomationArgs::new(None, None);
+    let mut left = Vec::new();
+    let mut it = args.iter().cloned();
+    while let Some(arg) = it.next() {
+        if !found.consume(&arg, &mut it).map_err(|e| format!("{command}: {e}"))? {
+            left.push(arg);
+        }
+    }
+    let roots = pdfcraft_automation::file_access::AutomationRoots::new(found.read_root.as_deref(), found.write_root.as_deref())
+        .map_err(|e| format!("{command}: {e}"))?;
+    Ok((roots, left))
+}
+
 #[cfg(feature = "mcp")]
 fn mcp(args: &[String]) -> Result<(), CliError> {
+    let (roots, args) = automation_roots("mcp", args)?;
+    let args = args.as_slice();
     validate_options("mcp", args, MCP_OPTIONS)?;
     let compact = args.iter().any(|a| a == "--compact");
-    let mut server = pdfcraft_automation::mcp::McpServer::new(automation(args)?).with_compact(compact);
+    let mut auto = automation(args)?;
+    if let Some(roots) = roots {
+        let show = |root: Option<&Path>| root.map_or_else(|| "none".to_string(), |r| r.display().to_string());
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "pdfcraft-cli: files confined: read root {}, write root {}",
+            show(roots.read_root()),
+            show(roots.write_root())
+        );
+        auto = auto.with_automation_roots(Some(roots));
+    }
+    let mut server = pdfcraft_automation::mcp::McpServer::new(auto).with_compact(compact);
     let _ = writeln!(
         std::io::stderr().lock(),
         "pdfcraft-cli: MCP server on stdio (protocol {}{}); close stdin to stop",

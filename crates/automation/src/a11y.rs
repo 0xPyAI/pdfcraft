@@ -568,7 +568,7 @@ impl Automation {
         // other tools (the write check passes missing files, which stay per-file errors below).
         let paths = a.strs("paths")?;
         for p in &paths {
-            self.resolve(p, true)?;
+            self.resolve_for(p, crate::file_access::Access::Read, true)?;
         }
         std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
         let ocr = pdfcraft_engine::ocr::engine().map_err(failed)?;
