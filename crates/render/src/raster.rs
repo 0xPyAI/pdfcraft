@@ -1118,6 +1118,8 @@ fn worker(
                         if lock(&shared.busy).get_mut(id).is_none_or(|slot| slot.take().is_none()) {
                             return;
                         }
+                        // Release the active key, retrying if demand returned during parsing.
+                        shared.queue.retry(req);
                         continue;
                     }
                     let _ = parsed.set(init);
@@ -2153,6 +2155,62 @@ mod tests {
                 assert!(page.error.is_none(), "round {round}: {:?}", page.error);
             }
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn check_cancelled_parse_request_requeue(renew_before_abort: bool) {
+        use super::*;
+        use std::{sync::mpsc, time::Duration};
+
+        let pool = RenderPool::new(Arc::new(ONE_PAGE_TWICE.to_vec()), 1, RenderConfig::default());
+        let a = RenderRequest { page: 0, kind: RequestKind::Text, scale: 1.0, tag: 501, ..Default::default() };
+        let b = RenderRequest { page: 1, scale: 1.0, tag: 502, ..Default::default() };
+        let parse = parse_gate();
+        *lock(&pool.shared.parse_gate) = Some(parse.clone());
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        *lock(&pool.shared.busy_publish_gate) = Some(BusyPublishGate { request: b, entered: entered_tx, release: Arc::new(Mutex::new(release_rx)) });
+
+        pool.set_queue(vec![a]);
+        parse.entered.wait();
+        pool.set_queue(vec![b]);
+        if renew_before_abort {
+            // B stays first so the worker reaches its gate even when aborting A requeues it.
+            pool.set_queue(vec![b, a]);
+        }
+        parse.release.wait();
+        entered_rx.recv_timeout(Duration::from_secs(2)).expect("the worker finished aborting A and reached B");
+        // The parse hook's lock can span its barrier waits; clear it only after parsing returned.
+        *lock(&pool.shared.parse_gate) = None;
+        if !renew_before_abort {
+            pool.set_queue(vec![a]);
+        }
+        // B holds the sole worker, so this observes queue admission without racing a worker pop.
+        let pending = pool.shared.queue.pop();
+        if let Some(request) = pending {
+            pool.shared.queue.retry(request);
+        }
+        pool.set_queue(vec![a]);
+        // Release the worker before the regression assertion, including on the unfixed baseline.
+        release_tx.send(()).unwrap();
+        assert_eq!(pending, Some(a), "aborting a parse must release its active request identity");
+
+        let page = receive_before_deadline(&pool);
+        assert_eq!(page.request, a);
+        assert!(page.error.is_none(), "renewed text request failed: {:?}", page.error);
+        assert!(page.text.is_some(), "the exact cancelled text request completed");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn cancelled_parse_request_can_be_requested_again() {
+        check_cancelled_parse_request_requeue(false);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn cancelled_parse_request_renewed_before_abort_is_requeued() {
+        check_cancelled_parse_request_requeue(true);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
