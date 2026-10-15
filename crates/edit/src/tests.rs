@@ -2171,6 +2171,33 @@ fn hebrew_edits_are_drawn_right_to_left_and_keep_their_right_edge() {
     assert!((line.rect[0] - before[0]).abs() < 0.5, "left-aligned: {:?} vs {before:?}", line.rect);
 }
 
+/// A generated Type 3 font numbers its glyphs from 1, so code 32 is a character, not the space:
+/// justified rows are stretched after each space, never with word spacing.
+#[test]
+fn justified_text_in_the_type3_fallback_stretches_its_spaces() {
+    let src = "BT /F1 12 Tf 14 TL 100 700 Td (Some words to fill a row of text) Tj T* (and another one below it) Tj T* (end) Tj ET";
+    let mut doc = text_page(src);
+    let rect = text::text_blocks(&doc, 0).unwrap()[0].rect;
+    // More than 32 different characters, so one of them gets code 32.
+    let typed = "日本語の 文章を 書きます 東京 大阪 京都 名古屋 札幌 福岡 神戸 横浜 仙台 広島 千葉 新潟 静岡 熊本 岡山 金沢";
+    let style = text::BlockStyle { align: Some(added::Align::Justify), ..Default::default() };
+    let rewritten = text::rewrite_block(&mut doc, 0, 0, Some(typed), &style);
+    if pdfcraft_fonts::document_japanese_font().is_none() {
+        assert!(rewritten.is_err());
+        eprintln!("built without a craft-fonts Japanese face: the Type 3 path is checked with CRAFT_FONTS_DIR");
+        return;
+    }
+    rewritten.unwrap();
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert!(lines.len() > 2, "{lines:?}");
+    for l in &lines[..lines.len() - 1] {
+        assert!((l.rect[2] - rect[2]).abs() < 1.0, "{:?} spans {:?}, not {rect:?}", l.text, l.rect);
+    }
+    let ops = pdfcraft_content::parse(&page_content_bytes(&doc, 0)).ops;
+    assert!(ops.iter().any(|o| o.is("TJ")), "{ops:?}");
+    assert!(ops.iter().filter(|o| o.is("Tw")).all(|o| o.operands.first().and_then(|n| n.as_f64()) == Some(0.0)), "{ops:?}");
+}
+
 /// Letters the page's font lacks are drawn with the Hebrew face from craft-fonts; a build
 /// without it says so and changes nothing. Hebrew points are refused, not misdrawn.
 #[test]
@@ -2733,6 +2760,55 @@ fn group_moves_keep_split_stream_tokens_and_shared_form_resources() {
     assert_eq!(after[1].rect, images[1].rect);
     assert_eq!(*doc.get(artwork), *original_form);
     assert_eq!(page_content_bytes(&doc, 1), source_page);
+}
+
+#[test]
+fn justified_text_in_a_composite_font_fills_each_row_with_adjustments_after_its_spaces() {
+    // Two-byte codes, so word spacing (single-byte code 32 only) can't stretch the spaces.
+    let hex = |s: &str| s.bytes().map(|b| format!("00{b:02x}")).collect::<String>();
+    let src = format!(
+        "BT /F1 10 Tf 12 TL 100 700 Td <{}> Tj T* <{}> Tj T* <{}> Tj ET",
+        hex("One two three four five six seven"),
+        hex("eight nine ten eleven twelve"),
+        hex("and then the end of it")
+    );
+    let mut doc = text_page(&src);
+    let unicode = doc.add(Object::Stream(Stream::flate(
+        Dict::new(),
+        b"1 begincodespacerange <0000> <ffff> endcodespacerange 1 beginbfrange <0020> <007e> <0020> endbfrange",
+    )));
+    let font = Dict::from_iter([
+        (b"Type".to_vec(), Object::name("Font")),
+        (b"Subtype".to_vec(), Object::name("Type0")),
+        (b"BaseFont".to_vec(), Object::name("SyntheticCID")),
+        (b"Encoding".to_vec(), Object::name("Identity-H")),
+        (b"ToUnicode".to_vec(), Object::Ref(unicode)),
+        (
+            b"DescendantFonts".to_vec(),
+            Object::Array(vec![Object::Dict(Dict::from_iter([
+                (b"Subtype".to_vec(), Object::name("CIDFontType2")),
+                (b"DW".to_vec(), Object::Int(500)),
+            ]))]),
+        ),
+    ]);
+    let p = pdfcraft_model::pages(&doc)[0].obj;
+    let resources = Dict::from_iter([(b"Font".to_vec(), Object::Dict(Dict::from_iter([(b"F1".to_vec(), Object::Dict(font))])))]);
+    doc.update_dict(p, |d| d.set(b"Resources".to_vec(), Object::Dict(resources))).unwrap();
+    let before = text::text_blocks(&doc, 0).unwrap()[0].clone();
+    let right = before.rect[2];
+    text::rewrite_block(&mut doc, 0, 0, None, &text::BlockStyle { align: Some(added::Align::Justify), ..Default::default() }).unwrap();
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert!(lines.len() > 2, "{lines:?}");
+    for l in &lines[..lines.len() - 1] {
+        assert!((l.rect[2] - right).abs() < 1.0, "{:?} ends at {} not {right}", l.text, l.rect[2]);
+    }
+    // The source font shows the text, with its spaces, and the text reads as before, rewrapped.
+    let flat = |s: &str| s.replace('\n', " ");
+    assert_eq!(flat(&text::text_blocks(&doc, 0).unwrap()[0].editor_text), flat(&before.editor_text));
+    let ops = pdfcraft_content::parse(&page_content_bytes(&doc, 0)).ops;
+    assert!(ops.iter().all(|o| !o.is("Tf") || o.operands.first().and_then(|n| n.as_name()) == Some(b"F1".as_slice())), "{ops:?}");
+    assert!(ops.iter().any(|o| o.is("TJ")), "{ops:?}");
+    assert!(ops.iter().filter(|o| o.is("Tw")).all(|o| o.operands.first().and_then(|n| n.as_f64()) == Some(0.0)), "{ops:?}");
 }
 
 #[test]

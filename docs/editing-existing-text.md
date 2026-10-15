@@ -50,6 +50,12 @@ a second bidi reversal; adjacent visual glyph runs still recover their own readi
 Only right-to-left ActualText is kept apart this way: left-to-right spans, such as the Latin
 ligatures (`fi`, `fl`) Word and Chrome wrap in ActualText mid-word, join their line as before.
 
+A justified paragraph stretches each row but its last to the paragraph's width by widening its
+spaces. Word spacing (`Tw`) widens only single-byte code 32, so where the font shows a space with
+another code (a composite font, the generated Type 3 fallback) each space is followed by a `TJ`
+adjustment instead. Justifying a paragraph with several formats in it is not supported yet: it is
+left-aligned.
+
 For headless editing, use `text_font_files` → `text_font_import` → `text_fonts` and pass a
 resource to `text_edit.font_resource`. `text_edit.ranges` holds selected range formatting.
 `text_edit_layout` accepts resource/ranges too and measures a draft without applying it.

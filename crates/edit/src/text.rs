@@ -1946,9 +1946,15 @@ fn rewrite_block_from(
             _ => 0.0,
         }
     };
-    // Justify: word spacing (single-byte code 32 only) so each line but the last fills the width.
-    let single_byte = !reuse || metrics.as_ref().is_some_and(|m| !m.composite);
-    let justify = align == Some(crate::added::Align::Justify) && single_byte;
+    // Justify: each line but the last fills the width. Word spacing reaches only single-byte code 32
+    // (ISO 32000-1 §9.3.3), so where a space is shown with another code (a composite font, a
+    // generated Type 3 font, a subset without a space) the extra space follows each space as a
+    // TJ adjustment instead, and code 32, which may then be a letter, gets none.
+    let justify = align == Some(crate::added::Align::Justify);
+    let word_spacing_reaches_spaces = match metrics.as_ref().filter(|_| reuse) {
+        Some(m) => m.encode(" ").is_some_and(|b| m.codes(&b).iter().all(|(c, len)| m.is_space(*c, *len))),
+        None => type3.is_none(),
+    };
     let mut x = 0.0;
     let mut tw_set = 0.0;
     let mut underlines: Vec<(f64, f64, f64)> = Vec::new(); // (x0, x1, y) in text space
@@ -1962,24 +1968,34 @@ fn rewrite_block_from(
             block_ops.push(Op::new("Td", vec![n(dx - x), n(if i > 0 { -lead } else { 0.0 })]));
         }
         x = dx;
+        let stretch = if word_spacing_reaches_spaces { 0.0 } else { tw };
+        let tw = tw - stretch;
         if tw != tw_set {
             block_ops.push(Op::new("Tw", vec![n(tw)]));
             tw_set = tw;
         }
         // Each wrapped line in typing order; drawn left to right (right-to-left runs reversed).
         let visual = crate::bidi::to_visual(line);
-        if let Some(metrics) = metrics.as_ref().filter(|_| reuse) {
-            let indic_line = if metrics.visual_order { crate::indic::to_visual(&visual) } else { visual };
-            block_ops.extend(source_show(metrics, &indic_line, size, space, o_state.char_spacing, tw)?);
-        } else {
-            for (font, bytes) in encode(&visual).ok_or_else(|| EditError::Invalid(format!("\"{line}\" can't be shown")))? {
-                if font != shown_font {
-                    block_ops.push(Op::new("Tf", vec![Object::name(&font), n(size)]));
-                    shown_font = font;
+        // Stretched without word spacing: shown up to and including each space, then moved on.
+        let pieces = if stretch > 0.0 { visual.split_inclusive(' ').collect() } else { vec![visual.as_str()] };
+        for piece in pieces {
+            if let Some(metrics) = metrics.as_ref().filter(|_| reuse) {
+                let indic_piece = if metrics.visual_order { crate::indic::to_visual(piece) } else { piece.to_owned() };
+                block_ops.extend(source_show(metrics, &indic_piece, size, space, o_state.char_spacing, tw)?);
+            } else {
+                for (font, bytes) in encode(piece).ok_or_else(|| EditError::Invalid(format!("\"{line}\" can't be shown")))? {
+                    if font != shown_font {
+                        block_ops.push(Op::new("Tf", vec![Object::name(&font), n(size)]));
+                        shown_font = font;
+                    }
+                    block_ops.push(Op::new("Tj", vec![Object::String(PdfString::literal(bytes))]));
                 }
-                block_ops.push(Op::new("Tj", vec![Object::String(PdfString::literal(bytes))]));
+            }
+            if stretch > 0.0 && piece.ends_with(' ') {
+                block_ops.push(Op::new("TJ", vec![Object::Array(vec![n(-1000.0 * stretch / size)])]));
             }
         }
+        let tw = tw + stretch;
         let w = (advance(line) + tw * spaces as f64 * o_state.scale * k) / k;
         underlines.push((dx, dx + w, -(i as f64) * lead - size * 0.12));
     }
