@@ -855,7 +855,7 @@ pub(crate) fn body(
                             d.driver_error = spool::open_printer_preferences(&p).err().map(|e| e.to_string());
                         } else {
                             if d.driver_options.as_ref().is_none_or(|(read_for, _)| *read_for != p) {
-                                d.driver_options = Some((p.clone(), spool::printer_options(&p)));
+                                d.driver_options = Some((p.clone(), spool::printer_options_in(&p, crate::i18n::current().code())));
                                 d.driver_choices.clear();
                             }
                             d.show_driver_options = !d.show_driver_options;
