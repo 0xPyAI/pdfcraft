@@ -1194,6 +1194,18 @@ evidence = ["crates/ui-egui/tests/comments.rs::hovering_a_comment_shows_its_auth
 notes = "a popup with the author and the comment text, as Acrobat shows"
 
 [[feature]]
+id = "view.page-size-hover"
+title = "Page size on hover (bottom-left of the page view)"
+area = "B"
+tier = "P2"
+milestone = "M3"
+status = "shipped"
+commands = []
+tools = []
+evidence = ["crates/ui-egui/tests/control.rs::page_size_shows_while_the_pointer_is_in_the_bottom_left_quadrant", "crates/ui-egui/src/canvas.rs::page_size_hint_zone_is_the_bottom_left_quadrant"]
+notes = "While the pointer is in the bottom-left quadrant of the page view, a small label shows the current page's size (after /Rotate and /UserUnit) in the Preferences unit, formatted as in Document Properties (#1855). It never takes clicks and hides when the pointer leaves. Acrobat's trigger is the corner itself and may differ in exact area and wording (not compared with real Acrobat); the size of the current page only, not of the page under the pointer; no headless tool (page sizes are in document info)."
+
+[[feature]]
 id = "view.document-tabs"
 title = "Tabbed documents"
 area = "B"

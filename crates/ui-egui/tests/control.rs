@@ -1576,3 +1576,26 @@ fn click_and_drag_refuse_coordinates_that_overflow_like_move() {
     assert_eq!(ok(&mut h, &c, "ui.click", json!({ "x": x, "y": y }))["clicked"], json!([x, y]));
     ok(&mut h, &c, "ui.drag", json!({ "from": [x, y], "to": [x + 10.0, y], "steps": 2 }));
 }
+
+#[test]
+fn page_size_shows_while_the_pointer_is_in_the_bottom_left_quadrant() {
+    let (mut h, _c) = harness();
+    let area = h.state().views[0].viewport_rect();
+    let shown = |h: &Harness<'static, PdfCraftApp>| {
+        let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::new("page-size-hint"));
+        h.ctx.memory(|m| m.areas().visible_last_frame(&layer))
+    };
+    let away = area.center() + egui::vec2(300.0, -200.0);
+    h.event(egui::Event::PointerMoved(away));
+    h.run_steps(3);
+    assert!(!shown(&h), "top-right: hidden");
+    h.event(egui::Event::PointerMoved(area.left_bottom() + egui::vec2(80.0, -80.0)));
+    h.run_steps(3);
+    assert!(shown(&h), "bottom-left: shown");
+    if let Ok(dir) = std::env::var("PDFCRAFT_SHOT_DIR") {
+        h.render().unwrap().save(format!("{dir}/page-size-hint.png")).unwrap();
+    }
+    h.event(egui::Event::PointerMoved(away));
+    h.run_steps(3);
+    assert!(!shown(&h), "pointer left: hidden again");
+}

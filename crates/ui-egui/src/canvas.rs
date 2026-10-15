@@ -3361,6 +3361,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         });
     }
     find_bar(view, info.pages.len(), avail, ui, &t);
+    page_size_hint(view, info, units, avail, unobstructed, ui, &t);
     if tool == QuickTool::EnhanceCamera {
         crate::camera_ui::bar(ui.ctx(), view, avail, &t, can_modify);
     }
@@ -3707,6 +3708,37 @@ fn set_layers(app: &mut PdfCraftApp, index: usize, changes: &[(LayerOp, (u32, u1
     if app.session.set_layer_state(id, changes, preserve_rb) {
         app.views[index].invalidate_content();
     }
+}
+
+/// Whether `p` lies in the bottom-left quadrant of `area`, where the page size shows (#1855).
+fn in_size_hint_zone(area: Rect, p: Pos2) -> bool {
+    p.x >= area.min.x && p.x < area.center().x && p.y > area.center().y && p.y <= area.max.y
+}
+
+/// The current page's size, floating at the bottom-left of the document area while the pointer is
+/// in that quadrant, as Acrobat does. Same formatter and unit as Document Properties.
+fn page_size_hint(view: &DocView, info: &DocInfo, units: crate::units::Unit, area: Rect, unobstructed: bool, ui: &mut egui::Ui, t: &Tokens) {
+    let Some(page) = info.pages.get(view.current) else { return };
+    let inside = unobstructed && ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| in_size_hint_zone(area, p));
+    if !inside {
+        return;
+    }
+    let text = units.size(f64::from(page.width), f64::from(page.height));
+    egui::Area::new(egui::Id::new("page-size-hint"))
+        .order(egui::Order::Foreground)
+        .interactable(false)
+        .pivot(egui::Align2::LEFT_BOTTOM)
+        .fixed_pos(area.left_bottom() + vec2(14.0, -14.0))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::NONE
+                .fill(t.card)
+                .stroke(Stroke::new(1.0, t.border))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(egui::Margin::symmetric(8, 4))
+                .show(ui, |ui| {
+                    ui.add(egui::Label::new(egui::RichText::new(text).color(t.text)).selectable(false));
+                });
+        });
 }
 
 /// Acrobat-style floating find bar at the top-right of the document area.
@@ -4658,6 +4690,16 @@ pub(crate) fn texture_image(size: [usize; 2], pixels: pdfcraft_render::Pixels) -
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn page_size_hint_zone_is_the_bottom_left_quadrant() {
+        let area = Rect::from_min_max(pos2(100.0, 50.0), pos2(500.0, 450.0));
+        assert!(in_size_hint_zone(area, pos2(110.0, 440.0)));
+        assert!(!in_size_hint_zone(area, pos2(110.0, 100.0)), "top-left");
+        assert!(!in_size_hint_zone(area, pos2(400.0, 440.0)), "bottom-right");
+        assert!(!in_size_hint_zone(area, pos2(50.0, 440.0)), "outside");
+        assert!(!in_size_hint_zone(area, pos2(f32::NAN, 440.0)));
+    }
+
     use super::*;
 
     fn annotation(fill_sign: bool) -> pdfcraft_render::Annotation {
