@@ -132,3 +132,7 @@ display_name = "Jason Brashear"
 
 [people.alexanderalber]
 real_name = "Alexander Alber"
+
+[people.mtlcl410]
+display_name = "mtlcl410"
+sync_github_name = false
