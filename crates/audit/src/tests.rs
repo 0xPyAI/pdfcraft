@@ -232,8 +232,14 @@ fn self_drawing_form_fails_the_audit() {
 fn rectangle_drawn_as_a_path_covers_text_like_re() {
     // The same cover as `re`, built from `m`/`l` (closed with `h`, a repeated start point, or
     // only by the fill itself), or in a scaled user space: all are faux redactions (#1510).
-    let covers: [&[u8]; 5] = [
+    // So are `re` with a redundant `h`, and either path painted with `b`/`b*` (#1817).
+    let covers: [&[u8]; 10] = [
         b"0 g\n100 688 220 32 re f\n",
+        b"0 g\n100 688 220 32 re h f\n",
+        b"0 g\n100 688 220 32 re b\n",
+        b"0 g\n100 688 220 32 re h b*\n",
+        b"0 g\n100 688 m 320 688 l 320 720 l 100 720 l b\n",
+        b"0 g\n100 688 m 320 688 l 320 720 l 100 720 l h b*\n",
         b"0 g\n100 688 m 320 688 l 320 720 l 100 720 l h f\n",
         b"0 g\n100 688 m 320 688 l 320 720 l 100 720 l 100 688 l h f\n",
         b"0 g\n100 688 m 100 720 l 320 720 l 320 688 l f\n",
@@ -253,9 +259,12 @@ fn rectangle_drawn_as_a_path_covers_text_like_re() {
 #[test]
 fn non_rectangular_path_is_not_a_cover() {
     // Each path's bounding box covers the text, but the shape itself does not hide it all.
-    let covers: [&[u8]; 5] = [
+    let covers: [&[u8]; 7] = [
         // A triangle.
         b"0 g\n100 688 m 320 688 l 320 720 l h f\n",
+        // A triangle painted with `b`, and a trapezoid with `b*`.
+        b"0 g\n100 688 m 320 688 l 320 720 l b\n",
+        b"0 g\n100 688 m 320 688 l 320 720 l 140 720 l b*\n",
         // A triangle, then a line from its start point after `h`: not a fourth corner.
         b"0 g\n100 688 m 320 688 l 320 720 l h 100 720 l f\n",
         // A trapezoid: four corners, one slanted side.
