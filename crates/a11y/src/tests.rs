@@ -673,6 +673,105 @@ fn headings_are_found_with_their_levels_titles_and_pages() {
     );
 }
 
+/// Helvetica advances (standard 14 metrics, per 1000 em) of the characters the tests below draw.
+fn helvetica_width(c: char) -> f64 {
+    match c {
+        'C' | 'w' => 722.0,
+        'P' => 667.0,
+        'T' | 'F' => 611.0,
+        'v' => 500.0,
+        'r' => 333.0,
+        't' | ' ' => 278.0,
+        'i' => 222.0,
+        _ => 556.0, // a e h o p
+    }
+}
+
+/// `text` drawn one glyph at a time from (72, y), each glyph moved into place with its own `Td`,
+/// as Chromium writes text. With `spaces`, the space is drawn too; without, the next glyph is
+/// just moved past it.
+fn glyph_by_glyph(text: &str, size: f64, y: f64, spaces: bool) -> String {
+    let mut ops = format!("BT /F1 {size} Tf 72 {y} Td");
+    let mut step = 0.0;
+    for c in text.chars() {
+        if c == ' ' && !spaces {
+            step += helvetica_width(c) / 1000.0 * size;
+            continue;
+        }
+        ops.push_str(&format!(" {step:.3} 0 Td ({c}) Tj"));
+        step = helvetica_width(c) / 1000.0 * size;
+    }
+    ops + " ET"
+}
+
+/// `text` drawn one glyph at a time with `/F1 1 Tf` and a `Tm` per glyph scaled to `size`; the
+/// space is skipped over, not drawn.
+fn glyph_by_tm(text: &str, size: f64, y: f64) -> String {
+    let mut ops = "BT /F1 1 Tf".to_string();
+    let mut x = 72.0;
+    for c in text.chars() {
+        if c != ' ' {
+            ops.push_str(&format!(" {size} 0 0 {size} {x:.3} {y} Tm ({c}) Tj"));
+        }
+        x += helvetica_width(c) / 1000.0 * size;
+    }
+    ops + " ET"
+}
+
+/// One tagged page whose H1 headings show `contents` (one marked-content sequence each).
+fn heading_page(contents: &[String]) -> Document {
+    let marked: Vec<String> = contents.iter().enumerate().map(|(i, c)| format!("/H1 << /MCID {i} >> BDC {c} EMC")).collect();
+    let kids: Vec<String> = (0..contents.len()).map(|i| format!("{} 0 R", 7 + i)).collect();
+    let mut objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 5 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 6 0 R >> >> >>".into(),
+        stream(&marked.join("\n")),
+        format!("<< /Type /StructTreeRoot /K [{}] >>", kids.join(" ")),
+        FONT.into(),
+    ];
+    objs.extend((0..contents.len()).map(|i| format!("<< /S /H1 /Pg 3 0 R /K {i} >>")));
+    pdf(&objs, "")
+}
+
+/// Chromium (Skia) places each glyph with its own `Td`: a heading must read as its words, not as
+/// "C h a p t e r T w o", whether the space is drawn or only skipped over. A heading set with a
+/// negative font size or `Tz` keeps its words too.
+#[test]
+fn headings_drawn_glyph_by_glyph_keep_their_words() {
+    let doc = heading_page(&[
+        "BT /F1 20 Tf 72 700 Td (Chapter One) Tj ET".into(),
+        glyph_by_glyph("Chapter Two", 20.0, 650.0, true),
+        glyph_by_glyph("Chapter Three", 20.0, 600.0, false),
+        // Each glyph placed with its own Tm, at font size 1 scaled by the matrix.
+        glyph_by_tm("Part Five", 18.0, 550.0),
+        // Kerning inside a word, then a word space as a TJ adjustment, then a wrapped line.
+        "BT /F1 16 Tf 72 450 Td [(Ch) 40 (apter) -350 (Four)] TJ 0 -20 Td (continued) Tj ET".into(),
+        // A negative font size runs the glyphs backwards in text space: alone, in a mirrored
+        // text matrix (upright on the page), with a word space as a TJ adjustment, and the same
+        // with a negative horizontal scale instead (reset after, as Tz outlives the text object).
+        "BT /F1 -20 Tf 72 380 Td (Chapter Six) Tj ET".into(),
+        "BT /F1 -20 Tf -1 0 0 -1 300 330 Tm (Chapter Seven) Tj ET".into(),
+        "BT /F1 -20 Tf 72 280 Td [(Chapter) -300 (Eight)] TJ ET".into(),
+        "BT /F1 20 Tf -100 Tz 300 230 Td [(Chapter) -300 (Nine)] TJ ET 100 Tz".into(),
+    ]);
+    let titles: Vec<String> = headings(&doc).into_iter().map(|h| h.title).collect();
+    assert_eq!(
+        titles,
+        [
+            "Chapter One",
+            "Chapter Two",
+            "Chapter Three",
+            "Part Five",
+            "Chapter Four continued",
+            "Chapter Six",
+            "Chapter Seven",
+            "Chapter Eight",
+            "Chapter Nine"
+        ]
+    );
+}
+
 #[test]
 fn an_untagged_document_has_no_headings() {
     let mut objs = headings_doc();
@@ -768,4 +867,12 @@ fn a_nested_finding_says_itself() {
     assert_eq!(f.said(&in_english), f.message, "saying it in English is the message");
     // Both wordings are translated, each on its own, and the document's words are left alone.
     assert_eq!(f.said(&|w: &str| format!("«{w}»")), "«Table element on page 3: «rows have between 1 and 2 columns»»");
+}
+
+/// Horizontal stretching must not raise the vertical line-break threshold.
+#[test]
+fn horizontally_scaled_wrapped_heading_keeps_a_space_between_lines() {
+    let doc = heading_page(&["BT /F1 20 Tf 400 Tz 72 700 Td (I) Tj 0 -30 Td (Overview) Tj ET".into()]);
+    let titles: Vec<String> = headings(&doc).into_iter().map(|h| h.title).collect();
+    assert_eq!(titles, ["I Overview"]);
 }
