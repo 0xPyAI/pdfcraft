@@ -2865,7 +2865,12 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     || tool == QuickTool::AddText
             };
             // Added content owns its gesture; its source text must not queue a second edit.
-            let on_edit_text = !on_objects && !on_content && tool == QuickTool::EditText && can_modify && {
+            // Edit text & images boxes every paragraph and image whenever the tool is on. Only the
+            // input waits while selected objects or added content own the pointer, or while page
+            // input is blocked (another tab, a dialog, the window unfocused): the boxes stay drawn
+            // instead of vanishing until the pointer comes back.
+            let others_own_pointer = on_objects || on_content;
+            let on_edit_text = tool == QuickTool::EditText && can_modify && {
                 let generation = doc.edit_generation();
                 let lines = match view.edit_lines.get(&i) {
                     Some((g, l)) if *g == generation => l.clone(),
@@ -2885,10 +2890,19 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 };
                 // Editable text takes precedence over background/overlapping artwork. Both
                 // inventories are painted every frame, even when text owns the pointer.
-                let text_used = crate::edit_text_ui::page_input(ui, &resp, &xf, i, doc, &lines, view, !image_owns_pointer);
-                let image_used =
-                    crate::edit_text_ui::image_input(ui, &resp, &xf, i, info, &images, view, &mut image_action, image_owns_pointer || !text_used);
-                text_used || image_used
+                let text_used = crate::edit_text_ui::page_input(ui, &resp, &xf, i, doc, &lines, view, !others_own_pointer && !image_owns_pointer);
+                let image_used = crate::edit_text_ui::image_input(
+                    ui,
+                    &resp,
+                    &xf,
+                    i,
+                    info,
+                    &images,
+                    view,
+                    &mut image_action,
+                    !others_own_pointer && (image_owns_pointer || !text_used),
+                );
+                !others_own_pointer && (text_used || image_used)
             };
             let on_link = tool == QuickTool::Link && can_modify && crate::link_ui::page_input(ui, &resp, &xf, i, info, &doc_links, view);
             if tool == QuickTool::Select
@@ -5415,6 +5429,29 @@ trailer << /Root 1 0 R >>
         assert!(view.waiting_since.is_empty(), "waiting bookkeeping is cleared");
         assert!(view.last_queue.is_empty() && !view.render_pending(), "queued demand is retired");
         assert!(view.frame_queue.is_empty() && view.frame_visible.is_empty() && view.thumb_demand.is_empty());
+    }
+
+    /// Edit text & images keeps its boxes while page input is blocked (the window unfocused, a
+    /// dialog or the palette open): the page's paragraphs are still measured for the latest edit
+    /// and drawn, instead of vanishing until the pointer comes back.
+    #[test]
+    fn edit_text_boxes_stay_drawn_while_page_input_is_blocked() {
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1400.0, 900.0)).build_eframe(|_cc| {
+            let mut app = PdfCraftApp::new();
+            let bytes = app.session.create_blank(300.0, 400.0, 1).unwrap();
+            app.open_bytes("blank.pdf", None, bytes.as_ref().clone()).unwrap();
+            app.quick_tool = QuickTool::EditText;
+            app
+        });
+        h.run_steps(3);
+        // Block page input the way the window losing focus does.
+        h.state_mut().palette_open = true;
+        h.run_steps(2);
+        assert!(h.state_mut().apply_edit(Edit::RotatePages { pages: vec![0], degrees: 90 }));
+        h.run_steps(3);
+        let app = h.state();
+        let generation = app.session.get(app.views[0].id).unwrap().edit_generation();
+        assert_eq!(app.views[0].edit_lines.get(&0).map(|(g, _)| *g), Some(generation), "the boxes follow the edit while input is blocked");
     }
 
     #[test]
