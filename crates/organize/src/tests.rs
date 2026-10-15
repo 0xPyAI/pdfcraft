@@ -628,6 +628,43 @@ fn document_info_edits_update_the_xmp_packet() {
     assert_eq!((dict.name(b"Type"), dict.name(b"Subtype"), dict.get(b"Filter")), (Some(&b"Metadata"[..]), Some(&b"XML"[..]), None));
 }
 
+/// A file that states its title, author and so on only in XMP (PDF 2.0 deprecates `/Info`) shows
+/// them in Document Properties (#2373); `/Info` wins where it has a value.
+#[test]
+fn document_info_falls_back_to_the_xmp_packet() {
+    let xmp = LIBREOFFICE_XMP
+        .replace(
+            "<rdf:li xml:lang=\"x-default\">Untitled 1</rdf:li>",
+            "<rdf:li xml:lang=\"de\">Bericht</rdf:li><rdf:li xml:lang=\"x-default\">Report &amp; &#x201C;notes&#8221;</rdf:li>",
+        )
+        .replace("<rdf:li>Old Author</rdf:li>", "<rdf:li>Ada</rdf:li>\n<rdf:li>Grace</rdf:li>")
+        .replace("<pdf:Producer>Writer 1.0</pdf:Producer>", "<pdf:Producer>Writer 1.0</pdf:Producer><pdf:Keywords/>");
+    let mut doc = doc_with_xmp(xmp.as_bytes());
+    // Both: /Info's own values, XMP for what /Info lacks.
+    assert_eq!(info(&doc, "Title").as_deref(), Some("Untitled 1"));
+    assert_eq!(info(&doc, "Subject").as_deref(), Some("Old subject"));
+    // XMP only.
+    doc.trailer_mut().remove(b"Info");
+    let doc = full_roundtrip(&doc);
+    assert_eq!(info(&doc, "Title").as_deref(), Some("Report & \u{201C}notes\u{201D}"));
+    assert_eq!(info(&doc, "Author").as_deref(), Some("Ada; Grace"));
+    assert_eq!(info(&doc, "Subject").as_deref(), Some("Old subject"));
+    assert_eq!(info(&doc, "Producer").as_deref(), Some("Writer 1.0"));
+    assert_eq!(info(&doc, "Keywords"), None, "an empty property is no value");
+    assert_eq!(info(&doc, "Rating"), None, "no XMP counterpart");
+    // The attribute form, and a packet that isn't UTF-8 is not read.
+    let attrs = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\
+                 <rdf:Description rdf:about=\"\" xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\" pdf:Keywords='a, b &amp; c'/></rdf:RDF></x:xmpmeta>";
+    let mut doc = doc_with_xmp(attrs.as_bytes());
+    doc.trailer_mut().remove(b"Info");
+    assert_eq!(info(&doc, "Keywords").as_deref(), Some("a, b & c"));
+    let mut latin1 = LIBREOFFICE_XMP.as_bytes().to_vec();
+    latin1.extend_from_slice(b"<!-- \xE9 -->");
+    let mut doc = doc_with_xmp(&latin1);
+    doc.trailer_mut().remove(b"Info");
+    assert_eq!(info(&doc, "Subject"), None);
+}
+
 #[test]
 fn document_info_edits_leave_files_without_usable_xmp_alone() {
     // No packet: none is added.

@@ -3448,8 +3448,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["file.properties"]
 tools = ["doc_info"]
-evidence = ["crates/ui-egui/tests/it/editing.rs::document_properties_edit_is_one_undoable_step", "crates/ui-egui/tests/it/editing.rs::cancelling_properties_discards_the_draft"]
-notes = ""
+evidence = ["crates/ui-egui/tests/it/editing.rs::document_properties_edit_is_one_undoable_step", "crates/ui-egui/tests/it/editing.rs::cancelling_properties_discards_the_draft", "crates/organize/src/tests.rs::document_info_falls_back_to_the_xmp_packet", "crates/engine/src/tests.rs::document_information_stated_only_in_xmp_is_shown"]
+notes = "Title, Author, Subject and Keywords (and Creator, Producer in doc_info) come from /Info, else from the XMP packet (dc:title, dc:creator, dc:description, pdf:Keywords, xmp:CreatorTool, pdf:Producer) for files that state them only there; edits write both. Missing: a UTF-16 XMP packet isn't read, and /Info kept only in an older revision's trailer isn't looked up"
 
 [[feature]]
 id = "organize.edit-metadata"
