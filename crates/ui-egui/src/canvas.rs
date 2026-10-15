@@ -2950,7 +2950,22 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     } else if over_text && cursor_free {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
                     }
-                    let press_here = ui.input(|inp| inp.pointer.press_origin()).is_some_and(|o| r.contains(o));
+                    let press_here = ui
+                        .input(|inp| {
+                            inp.pointer.press_origin().or_else(|| {
+                                // A press and release can arrive in one pass; egui has already
+                                // cleared press_origin, but the press still starts multi-click selection.
+                                inp.events.iter().find_map(|event| match event {
+                                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, .. }
+                                        if pos.is_finite() =>
+                                    {
+                                        Some(*pos)
+                                    }
+                                    _ => None,
+                                })
+                            })
+                        })
+                        .is_some_and(|o| r.contains(o));
                     let pressed = ui.input(|inp| inp.pointer.primary_pressed());
                     if pressed && press_here && !over_link {
                         let now = ui.input(|inp| inp.time);

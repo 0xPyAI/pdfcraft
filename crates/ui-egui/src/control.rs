@@ -428,7 +428,8 @@ impl Control {
             let pos = egui::pos2(point("x", x)?, point("y", y)?);
             let which = pointer_button(p, "ui.click")?;
             let button = |pressed| egui::Event::PointerButton { pos, button: which, pressed, modifiers: egui::Modifiers::NONE };
-            let frames = self.inject(vec![vec![egui::Event::PointerMoved(pos)], vec![button(true)], vec![button(false)]]);
+            // Keep hover/layout warmup, then make an instantaneous click even on slow frames.
+            let frames = self.inject(vec![vec![egui::Event::PointerMoved(pos)], vec![button(true), button(false)]]);
             return Ok(Handled::AfterFrames(frames, json!({ "clicked": [x, y] })));
         }
         let s = self.shared.lock().map_err(|_| "control state poisoned")?;
@@ -1209,5 +1210,131 @@ mod transport_tests {
         assert_eq!(reply(&mut r)["error"]["code"], -32700, "a long line after auth is parsed, not refused");
         writeln!(w, "y").unwrap();
         assert_eq!(reply(&mut r)["error"]["code"], -32700, "and the connection is still open");
+    }
+}
+
+#[cfg(test)]
+mod pointer_tests {
+    use super::*;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+
+    #[test]
+    fn coordinate_clicks_activate_once_with_slow_frames() {
+        struct Probe {
+            control: Option<Control>,
+            client: Option<ControlClient>,
+            host: crate::PdfCraftApp,
+            primary: usize,
+            secondary: usize,
+            disabled: usize,
+            discard: bool,
+            discarded: bool,
+            events: Vec<(f64, egui::PointerButton, bool, egui::Pos2)>,
+        }
+        fn request(h: &mut Harness<'_, Probe>, c: &ControlClient, params: Value) -> Reply {
+            let rx = c.send("ui.click", params);
+            for _ in 0..8 {
+                let before = h.ctx.input(|i| i.time);
+                h.step();
+                assert!(h.ctx.input(|i| i.time) > before, "simulated input time advances");
+                if let Ok(reply) = rx.try_recv() {
+                    return reply;
+                }
+            }
+            panic!("coordinate click did not reply within eight steps");
+        }
+        let max_duration = egui::Context::default().options(|o| o.input_options.max_click_duration);
+        let slow_dt = (max_duration + 0.25) as f32;
+        assert!(f64::from(slow_dt) > max_duration);
+        for discard in [false, true] {
+            let state = Probe {
+                control: None,
+                client: None,
+                host: crate::PdfCraftApp::new(),
+                primary: 0,
+                secondary: 0,
+                disabled: 0,
+                discard,
+                discarded: false,
+                events: Vec::new(),
+            };
+            let mut h = Harness::builder().with_size(egui::vec2(320.0, 200.0)).with_step_dt(slow_dt).build_ui_state(
+                |ui, state: &mut Probe| {
+                    if state.control.is_none() {
+                        let (control, client) = attach(ui.ctx());
+                        state.control = Some(control);
+                        state.client = Some(client);
+                        ui.ctx().options_mut(|o| o.max_passes = if state.discard { 2 } else { 1 }.try_into().unwrap());
+                    }
+                    state.control.as_mut().unwrap().tick(ui.ctx(), &mut state.host);
+                    ui.input(|i| {
+                        for event in &i.events {
+                            if let egui::Event::PointerButton { pos, button, pressed, .. } = event {
+                                assert!(state.events.len() < 32, "bounded pointer trace");
+                                state.events.push((i.time, *button, *pressed, *pos));
+                            }
+                        }
+                    });
+                    let response = ui.button("Click probe");
+                    if response.clicked() {
+                        state.primary += 1;
+                        if state.discard && !state.discarded {
+                            state.discarded = true;
+                            ui.ctx().request_discard("control click must not replay across passes");
+                        }
+                    }
+                    if response.secondary_clicked() {
+                        state.secondary += 1;
+                    }
+                    let disabled = ui.add_enabled(false, egui::Button::new("Disabled probe"));
+                    if disabled.clicked() || disabled.secondary_clicked() {
+                        state.disabled += 1;
+                    }
+                },
+                state,
+            );
+            h.run_steps(3);
+            let c = h.state().client.as_ref().unwrap().clone();
+            assert_eq!(h.ctx.options(|o| o.input_options.max_click_duration), max_duration);
+            let pos = h.get_by_label("Click probe").rect().center();
+            assert_eq!((h.state().primary, h.state().secondary, h.state().disabled), (0, 0, 0));
+            let reply = request(&mut h, &c, json!({"x":pos.x,"y":pos.y})).unwrap();
+            assert_eq!(reply["clicked"], json!([pos.x, pos.y]));
+            println!("slow control click discard={discard} duration_limit={max_duration} step_dt={slow_dt} pointer_events={:?}", h.state().events);
+            let events = &h.state().events;
+            assert_eq!(
+                events.iter().map(|(_, button, pressed, point)| (*button, *pressed, *point)).collect::<Vec<_>>(),
+                [(egui::PointerButton::Primary, true, pos), (egui::PointerButton::Primary, false, pos)]
+            );
+            let elapsed = events[1].0 - events[0].0;
+            assert!(elapsed == 0.0 || elapsed >= f64::from(slow_dt) - 1e-6, "the pair is atomic or crosses a simulated slow frame");
+            assert_eq!(h.state().primary, 1, "a coordinate click activates the real button once on slow frames");
+            h.run_steps(3);
+            assert_eq!(h.state().primary, 1, "later passes must not replay the click");
+            assert_eq!(h.state().discarded, discard);
+            request(&mut h, &c, json!({"x":pos.x,"y":pos.y,"button":"secondary"})).unwrap();
+            assert_eq!((h.state().primary, h.state().secondary), (1, 1));
+            let disabled = h.get_by_label("Disabled probe").rect().center();
+            request(&mut h, &c, json!({"x":disabled.x,"y":disabled.y})).unwrap();
+            assert_eq!((h.state().primary, h.state().secondary, h.state().disabled), (1, 1, 0));
+            let disabled_id = h
+                .state()
+                .control
+                .as_ref()
+                .unwrap()
+                .shared
+                .lock()
+                .unwrap()
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("Disabled probe"))
+                .unwrap()
+                .0
+                .0;
+            assert!(request(&mut h, &c, json!({"id":disabled_id})).unwrap_err().contains("disabled"));
+            assert!(h.state().host.views.is_empty(), "pointer probes create no document edits");
+            assert_eq!(h.ctx.options(|o| o.input_options.max_click_duration), max_duration);
+        }
     }
 }
