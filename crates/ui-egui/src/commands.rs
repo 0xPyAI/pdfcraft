@@ -86,6 +86,11 @@ impl PdfCraftApp {
         }
         commands::is_enabled(spec, &self.session, self.active_ids().map(|(_, id)| id))
             && (spec.needs != commands::Needs::TwoPageView || self.active.and_then(|i| self.views.get(i)).is_some_and(crate::DocView::cover_applies))
+            && match spec.id {
+                "view.previous_view" => self.active.and_then(|i| self.views.get(i)).is_some_and(|v| !v.back.is_empty()),
+                "view.next_view" => self.active.and_then(|i| self.views.get(i)).is_some_and(|v| !v.forward.is_empty()),
+                _ => true,
+            }
     }
 
     /// Run a registered command by id. Returns `false` when the id is unknown or the command
@@ -267,6 +272,11 @@ impl PdfCraftApp {
                 }
             }
             "view.read_mode" => self.switch_mode(if self.mode == Mode::Read { Mode::AllTools } else { Mode::Read }, false),
+            "view.previous_view" | "view.next_view" => {
+                if let Some(v) = active.and_then(|i| self.views.get_mut(i)) {
+                    return v.view_history(id == "view.next_view");
+                }
+            }
             "view.next_tab" => self.step_tab(true),
             "view.previous_tab" => self.step_tab(false),
             "view.theme" => {
@@ -681,6 +691,10 @@ impl PdfCraftApp {
         specs.sort_by_key(|c| std::cmp::Reverse(c.shortcut.map(|s| s.modifier_count()).unwrap_or(0)));
         for spec in specs {
             let Some(s) = spec.shortcut else { continue };
+            // Keep the canvas's silent no-op when there is no previous/next view to visit.
+            if matches!(spec.id, "view.previous_view" | "view.next_view") && !self.command_enabled(spec) {
+                continue;
+            }
             if typing && !spec.in_text {
                 continue;
             }

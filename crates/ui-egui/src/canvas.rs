@@ -1005,6 +1005,8 @@ impl DocView {
         let Some(f) = self.find.as_mut() else { return };
         let Some(&(p, _)) = f.matches.get(i) else { return };
         f.current = Some(i);
+        self.go_to_page(p);
+        self.goto_point = None;
         self.flash_match(p);
     }
 
@@ -1019,6 +1021,9 @@ impl DocView {
         let next = if forward { (c + 1) % n } else { (c + n - 1) % n };
         f.current = Some(next);
         let p = f.matches[next].0;
+        // Only explicit search navigation joins history; background refresh uses flash_match alone.
+        self.go_to_page(p);
+        self.goto_point = None;
         self.flash_match(p);
     }
 
@@ -4885,6 +4890,71 @@ trailer << /Root 1 0 R >>
             ..Default::default()
         };
         DocView::new(DocId(1), &info, ViewDefaults { layout, continuous, ..Default::default() })
+    }
+
+    fn history_search_view() -> DocView {
+        let mut v = view(5, PageLayout::Single, true);
+        v.texts.insert(
+            3,
+            pdfcraft_render::PageText {
+                glyphs: vec![pdfcraft_render::TextGlyph {
+                    text: "match".into(),
+                    rect: [20.0, 260.0, 60.0, 280.0],
+                    quad: [[20.0, 260.0], [60.0, 260.0], [60.0, 280.0], [20.0, 280.0]],
+                    direction: [1.0, 0.0],
+                }],
+                line_of: vec![0],
+                space_before: vec![false],
+            }
+            .into(),
+        );
+        v.find = Some(Find { matches: vec![(3, 0..1), (3, 0..1), (1, 0..1)], current: Some(2), ..Default::default() });
+        v
+    }
+
+    #[test]
+    fn explicit_search_jumps_record_history_and_keep_match_destination() {
+        for step in [None, Some(true), Some(false)] {
+            let mut v = history_search_view();
+            v.goto_point = Some((3, Some(0.8), Some(0.9), Vec2::ZERO));
+            if let Some(forward) = step {
+                v.find_step(forward);
+            } else {
+                v.go_to_match(0);
+            }
+            assert_eq!(v.back, vec![0], "explicit search jump must remember its origin");
+            assert_eq!(v.goto, Some((3, 0.5)), "keep the match offset instead of the page top");
+            assert_eq!(v.page_input, "4");
+            assert!(v.goto_point.is_none(), "an earlier link destination cannot override the search offset");
+            v.go_to_match(1);
+            assert_eq!(v.back, vec![0], "same-page matches do not duplicate history");
+            assert!(v.view_history(false));
+            assert_eq!(v.current, 0);
+            assert!(v.view_history(true));
+            assert_eq!(v.current, 3);
+            assert!(v.view_history(false));
+            v.go_to_match(2);
+            assert!(v.forward.is_empty(), "a new explicit jump discards Forward");
+            assert_eq!(v.back, vec![0]);
+        }
+    }
+
+    #[test]
+    fn automatic_search_updates_do_not_record_history_or_discard_forward() {
+        let mut v = history_search_view();
+        v.forward = vec![4];
+        v.find = Some(Find { query: "match".into(), ..Default::default() });
+        v.rerun_find();
+        assert_eq!(v.current, 3);
+        assert_eq!(v.goto, Some((3, 0.5)));
+        assert!(v.back.is_empty());
+        assert_eq!(v.forward, vec![4]);
+        v.current = 0;
+        v.find.as_mut().unwrap().current = None;
+        v.refresh_find_page(3);
+        assert_eq!(v.current, 3);
+        assert!(v.back.is_empty());
+        assert_eq!(v.forward, vec![4]);
     }
 
     #[test]

@@ -188,3 +188,19 @@ unapplied with a warning.
 `doc_batch` runs conversion, OCR and compression over files and optionally recursive
 folders. The CLI also exposes it as `pdfcraft-cli batch`. See the
 [batch guide](../../docs/cli-batch.md) for examples, output protection, errors and limits.
+
+## Viewer navigation history
+
+A running PdfCraft instance launched with `--control FILE` exposes its per-tab history through
+`pdfcraft-cli ui --control FILE command id=view.previous_view` and
+`pdfcraft-cli ui --control FILE command id=view.next_view`. `commands` reports whether each action
+is enabled for the active document. These are the same actions as the rail buttons, View → Page
+navigation, and Ctrl+[ / Ctrl+] (⌘[ / ⌘] on macOS).
+
+Explicit page jumps, including search-result selection and Next/Previous match, enter history
+when the page changes. Automatic search refresh, continuous scrolling, and within-page scroll
+movement do not. Existing page-step commands and single-page wheel turns retain their history
+behavior. Back/Forward
+returns to page tops, does not restore zoom, does not switch documents, and is not saved across
+restarts. Standalone engine/MCP sessions have no viewport, so they do not have a separate
+navigation-history tool; use the opt-in UI control channel to navigate the displayed document.

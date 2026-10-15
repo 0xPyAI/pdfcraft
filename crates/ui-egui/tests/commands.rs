@@ -148,6 +148,13 @@ fn every_registered_command_is_implemented() {
         if spec.id == "view.layout.cover" {
             app.set_option("layout", "two-up").unwrap();
         }
+        // History commands need a real jump (and Back first to make Forward available).
+        if matches!(spec.id, "view.previous_view" | "view.next_view") {
+            app.views[0].go_to_page(1);
+            if spec.id == "view.next_view" {
+                assert!(app.views[0].view_history(false));
+            }
+        }
         let dir = std::env::temp_dir().join(format!("pdfcraft-cmd-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         app.save_override = Some(dir.join("out.pdf").to_string_lossy().into_owned());

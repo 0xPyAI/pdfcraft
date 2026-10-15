@@ -700,6 +700,16 @@ pub fn right_rail(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 if icons::button(ui, "chevron-up", 30.0, false, tl!("Previous page")).clicked() {
                     view.step_page(false);
                 }
+                // History is distinct from stepping to the adjacent page, and belongs to this tab.
+                for (forward, icon, label, shortcut, enabled) in [
+                    (true, "chevron-right", tl!("Next view"), crate::commands::NEXT_VIEW, !view.forward.is_empty()),
+                    (false, "chevron-left", tl!("Previous view"), crate::commands::PREV_VIEW, !view.back.is_empty()),
+                ] {
+                    let tip = format!("{label} ({})", crate::commands::shortcut_label(ui.ctx(), shortcut));
+                    if ui.add_enabled_ui(enabled, |ui| icons::button(ui, icon, 30.0, false, &tip)).inner.clicked() {
+                        view.view_history(forward);
+                    }
+                }
                 ui.label(egui::RichText::new(page_count.to_string()).font(theme::regular(11.0)).color(t.text_muted));
                 let page_input_id = view.page_input_id();
                 // Consume replacement selection once, including when the editor has lost focus.
