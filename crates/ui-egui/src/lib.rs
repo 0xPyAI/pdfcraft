@@ -2169,6 +2169,7 @@ impl PdfCraftApp {
     /// Switches workspace because the user chose to (mode bar, Read mode command). Entering Read
     /// mode closes the right panel, as Acrobat's Read mode hides its panes, and leaving it reopens
     /// that panel. The rail stays in Read mode, and its buttons open panels there too (#932).
+    /// Read mode hides the quick toolbar, so entering it also puts the current tool down.
     pub(crate) fn switch_mode(&mut self, mode: Mode, select_tools: bool) {
         let was_read = self.mode == Mode::Read;
         if select_tools {
@@ -2178,6 +2179,7 @@ impl PdfCraftApp {
         }
         if mode == Mode::Read && !was_read {
             self.right_before_read = self.right.take();
+            self.quick_tool = QuickTool::Select;
         } else if mode != Mode::Read && was_read {
             let before = self.right_before_read.take();
             if self.right.is_none() {
