@@ -4404,8 +4404,8 @@ milestone = "M2"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/render/src/raster.rs::widget_appearance_states"]
-notes = ""
+evidence = ["crates/render/src/raster.rs::widget_appearance_states", "crates/engine/src/tests.rs::validated_signatures_without_layers_keep_their_appearance", "crates/engine/src/tests.rs::real_layered_signatures_keep_their_original_appearance", "crates/engine/src/tests.rs::real_layered_signatures_round_trip_behind_a_user_password", "crates/engine/src/tests.rs::a_metadata_edit_keeps_the_original_signature_appearance", "crates/engine/src/tests.rs::saving_after_an_edit_keeps_the_baked_appearance", "crates/engine/src/tests.rs::chamfered_signature_borders_survive_trust_exports_printing_and_save", "crates/engine/src/tests.rs::mixed_signature_caption_details_survive_trust_exports_printing_and_save"]
+notes = "widgets retain their original artwork. Signature validation is a separate viewer page overlay; it is never written into document streams or included in image/text exports, vector printing or Print as Image. Saves retain signed appearance bytes. Generic in-place appearance rewriting is deferred: no supported producer template is positively identified, and caption text plus drawing uniqueness does not establish an icon role. Baked Not Verified captions remain unchanged; issue #79 is not fully resolved."
 
 [[feature]]
 id = "form.fill-text"
@@ -6224,8 +6224,8 @@ milestone = "M9"
 status = "shipped"
 commands = ["sign.panel"]
 tools = []
-evidence = ["crates/ui-egui/tests/signing.rs::drawing_a_signature_creating_an_id_signing_and_trusting", "crates/ui-egui/tests/signing.rs::certifying_without_a_visible_signature"]
-notes = "signed/valid, problems, invalid and certified bars"
+evidence = ["crates/ui-egui/tests/signing.rs::drawing_a_signature_creating_an_id_signing_and_trusting", "crates/ui-egui/tests/signing.rs::certifying_without_a_visible_signature", "crates/ui-egui/src/canvas.rs::signature_badges_keep_signed_visible_widgets_on_the_page"]
+notes = "signed/valid, problems, invalid and certified bars; visible signed widgets also carry a separate viewer validation overlay. Trust and explicit validation invalidate view caches without editing document artwork; baked appearance captions remain unchanged."
 
 [[feature]]
 id = "sign.signature-properties"
@@ -6333,7 +6333,7 @@ status = "shipped"
 commands = ["sign.panel"]
 tools = []
 evidence = ["crates/ui-egui/tests/signing.rs::drawing_a_signature_creating_an_id_signing_and_trusting"]
-notes = ""
+notes = "repeats reuse the tab, whose name keeps the (signed version) suffix instead of the document title; the tab carries a notice bar naming the revision, with a Close that asks about saving first. Still missing: the snapshot is a full editable document rather than a read-only view, and there is no side-by-side compare (sign.compare-signed-version)"
 
 [[feature]]
 id = "sign.compare-signed-version"
