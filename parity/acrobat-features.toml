@@ -1155,7 +1155,7 @@ status = "shipped"
 commands = []
 tools = []
 evidence = ["crates/ui-egui/tests/viewer.rs::layouts_fit_height_labels_and_system_theme"]
-notes = "the page box takes labels (iv, A-1) before numbers"
+notes = "the page box shows the current page's label and takes labels (iv, A-1) before numbers; where the label is not the page number the rail shows the physical position under it (3/180, dropped to the page count when it does not fit). Not yet: a preference to show physical numbers only, and labels in the organize bar's Page n of m"
 
 [[feature]]
 id = "view.view-history"

@@ -330,6 +330,9 @@ fn layouts_fit_height_labels_and_system_theme() {
     assert_eq!(labels[1], "ii");
     assert!(h.state_mut().views[0].go_to_typed("ii", &labels));
     assert_eq!(h.state().views[0].current, 1);
+    // Under the box, the physical position, since "ii" does not say which page it is (#2834).
+    h.run_steps(2);
+    h.get(By::new().label(&format!("2/{}", labels.len())));
     assert!(!h.state_mut().views[0].go_to_typed("xx", &labels));
     // Follow the system theme.
     h.state_mut().set_option("theme", "system").unwrap();

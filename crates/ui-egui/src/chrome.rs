@@ -753,7 +753,14 @@ pub fn right_rail(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         view.view_history(forward);
                     }
                 }
-                ui.label(egui::RichText::new(page_count.to_string()).font(theme::regular(11.0)).color(t.text_muted));
+                let font = theme::regular(11.0);
+                let mut position = page_position(view.current, page_count, labels.get(view.current).map_or("", String::as_str));
+                if widgets::text_width(ui, &position, &font) > ui.available_width() {
+                    position = page_count.to_string();
+                }
+                let of =
+                    crate::i18n::fmt(tl!("Page {p} of {n}"), &[("p", &view.current.saturating_add(1).to_string()), ("n", &page_count.to_string())]);
+                ui.label(egui::RichText::new(position).font(font).color(t.text_muted)).on_hover_text(of);
                 let page_input_id = view.page_input_id();
                 // Consume replacement selection once, including when the editor has lost focus.
                 let reselect = std::mem::take(&mut view.page_input_reselect);
@@ -793,6 +800,13 @@ pub fn right_rail(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 app.execute(id);
             }
         });
+}
+
+/// What the rail shows under the page box: the page count, or, when the current page's label is
+/// not its physical number (front matter numbered i, ii, …), its position as "3/180" (#2834).
+fn page_position(current: usize, count: usize, label: &str) -> String {
+    let number = current.saturating_add(1).to_string();
+    if label.is_empty() || label == number || current >= count { count.to_string() } else { format!("{number}/{count}") }
 }
 
 /// View ▸ Page display and the rail's Page display menu: the layouts and the cover page.
@@ -855,6 +869,21 @@ fn rail_view_menu(ui: &mut egui::Ui, view: &mut DocView) -> Option<&'static str>
         ui.close();
     }
     picked
+}
+
+#[cfg(test)]
+mod page_position_tests {
+    use super::page_position;
+
+    #[test]
+    fn position_shows_only_when_the_label_is_not_the_page_number() {
+        assert_eq!(page_position(0, 180, "i"), "1/180");
+        assert_eq!(page_position(2, 180, "1"), "3/180");
+        assert_eq!(page_position(2, 180, "3"), "180");
+        assert_eq!(page_position(2, 180, ""), "180");
+        assert_eq!(page_position(0, 0, "i"), "0");
+        assert_eq!(page_position(usize::MAX, 3, "x"), "3");
+    }
 }
 
 #[cfg(test)]
