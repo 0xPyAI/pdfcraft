@@ -371,38 +371,39 @@ pub static DATE_LANGUAGES: [DateLanguage; 26] = [
         days: ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"],
         days_short: ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"],
     },
-    // Vietnamese: the month name is `tháng Một` with a day number and `Tháng Một` standing
-    // alone, as in English.
+    // Vietnamese: numeric month forms (`tháng 1` with a day, `Tháng 1` standing alone).
+    // Fill & Sign still refuses any format whose final text fails the existing WinAnsi check
+    // (for example weekday names); `dd.mm.yyyy` remains writable.
     DateLanguage {
         code: "vi",
         name: "Tiếng Việt",
         months: [
-            "Tháng Một",
-            "Tháng Hai",
-            "Tháng Ba",
-            "Tháng Tư",
-            "Tháng Năm",
-            "Tháng Sáu",
-            "Tháng Bảy",
-            "Tháng Tám",
-            "Tháng Chín",
-            "Tháng Mười",
-            "Tháng Mười Một",
-            "Tháng Mười Hai",
+            "Tháng 1",
+            "Tháng 2",
+            "Tháng 3",
+            "Tháng 4",
+            "Tháng 5",
+            "Tháng 6",
+            "Tháng 7",
+            "Tháng 8",
+            "Tháng 9",
+            "Tháng 10",
+            "Tháng 11",
+            "Tháng 12",
         ],
         months_with_day: Some([
-            "tháng Một",
-            "tháng Hai",
-            "tháng Ba",
-            "tháng Tư",
-            "tháng Năm",
-            "tháng Sáu",
-            "tháng Bảy",
-            "tháng Tám",
-            "tháng Chín",
-            "tháng Mười",
-            "tháng Mười Một",
-            "tháng Mười Hai",
+            "tháng 1",
+            "tháng 2",
+            "tháng 3",
+            "tháng 4",
+            "tháng 5",
+            "tháng 6",
+            "tháng 7",
+            "tháng 8",
+            "tháng 9",
+            "tháng 10",
+            "tháng 11",
+            "tháng 12",
         ]),
         months_short: ["Thg 1", "Thg 2", "Thg 3", "Thg 4", "Thg 5", "Thg 6", "Thg 7", "Thg 8", "Thg 9", "Thg 10", "Thg 11", "Thg 12"],
         days: ["Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"],
@@ -699,6 +700,26 @@ mod tests {
         assert_eq!(s.date_format(), "dd.mm.yyyy", "a rejected pattern keeps the previous one");
     }
 
+    /// 21:30 on 14 Oct 2026 in São Paulo (UTC-3) is 00:30Z on the 15th. The date Fill & Sign
+    /// stamps is the wall-clock day (14th); the time the file records (`/M`, `/ModDate`) is UTC.
+    /// The test shortcut (`with_clock`) takes the injected time as local and says the 15th, which
+    /// is why it cannot serve a host that knows both the UTC time and the zone.
+    #[test]
+    fn a_wall_clock_gives_the_local_day_and_keeps_utc_for_the_file() {
+        let sao_paulo = Session::new().with_wall_clock(|| 1_792_024_200, || -3 * 3600);
+        assert_eq!(sao_paulo.today(), (2026, 10, 14));
+        assert_eq!(sao_paulo.today_text(None, None).as_deref(), Ok("10/14/2026"));
+        assert_eq!(sao_paulo.signing_date(), "D:20261014213000-03'00'");
+        assert_eq!(sao_paulo.stamp_by_line("Ada"), "By Ada at 9:30 pm, Oct 14, 2026");
+        assert_eq!(sao_paulo.now_secs(), 1_792_024_200, "the file's instant stays in UTC");
+
+        let utc = Session::new().with_wall_clock(|| 1_792_024_200, || 0);
+        assert_eq!(utc.today(), (2026, 10, 15));
+
+        let clock_only = Session::new().with_clock(|| 1_792_024_200);
+        assert_eq!(clock_only.today(), (2026, 10, 15), "on its own, an injected clock counts as local time");
+    }
+
     #[test]
     fn names_follow_the_date_language() {
         assert_eq!(in_lang("dddd, d \\de mmmm \\de yyyy", "es"), "sábado, 7 de marzo de 2026");
@@ -728,21 +749,15 @@ mod tests {
         assert_eq!(in_lang("dddd, mmmm", "cs"), "sobota, březen");
     }
 
-    /// Indonesian month names are the same with and after a day number; Vietnamese lowers `tháng`
-    /// after a day number and keeps it capitalised standing alone.
+    /// Indonesian month and weekday names are the same with and after a day number. (Vietnamese
+    /// has its own test upstream: its numeric month forms are writable, weekday names are not.)
     #[test]
-    fn indonesian_and_vietnamese_month_and_weekday_names() {
+    fn indonesian_month_and_weekday_names() {
         assert_eq!(in_lang("d mmmm yyyy", "id"), "7 Maret 2026");
         assert_eq!(in_lang("mmmm yyyy", "id"), "Maret 2026");
         assert_eq!(in_lang("dddd, d mmmm yyyy", "id"), "Sabtu, 7 Maret 2026");
-        assert_eq!(in_lang("d mmmm yyyy", "vi"), "7 tháng Ba 2026");
-        assert_eq!(in_lang("mmmm yyyy", "vi"), "Tháng Ba 2026");
-        assert_eq!(in_lang("ddd, d mmm", "vi"), "T7, 7 Thg 3");
-        // Indonesian month names are Latin, so they reach a PDF; Vietnamese ones are not Western
-        // European, and the date-text path refuses them with what to use instead.
+        // Indonesian month names are Latin, so they reach a PDF.
         let mut s = Session::new().with_clock(|| 1_700_000_000);
-        s.set_date_language(Some("vi")).unwrap();
-        assert!(s.today_text_for_pdf(Some("d mmmm yyyy"), None).unwrap_err().contains("dd.mm.yyyy"));
         s.set_date_language(Some("id")).unwrap();
         assert_eq!(s.today_text_for_pdf(Some("d mmmm yyyy"), None).as_deref(), Ok("14 November 2023"));
     }
@@ -784,6 +799,25 @@ mod tests {
         assert_eq!(s.today_text_for_pdf(None, None).as_deref(), Ok("martedì 14 novembre"), "Italian names and accents can be written into a PDF");
         s.set_date_language(None).unwrap();
         assert_eq!(s.date_language(), None);
+    }
+
+    #[test]
+    fn vietnamese_month_and_weekday_names() {
+        let mut s = Session::new().with_clock(|| 1_700_000_000);
+        s.set_date_language(Some("vi")).unwrap();
+        assert_eq!(s.date_language(), Some("vi"));
+        s.set_date_format("d mmmm yyyy").unwrap();
+        assert_eq!(s.today_text(None, None).as_deref(), Ok("14 tháng 11 2023"));
+        s.set_date_format("mmmm yyyy").unwrap();
+        assert_eq!(s.today_text(None, None).as_deref(), Ok("Tháng 11 2023"));
+        s.set_date_format("ddd, d mmm").unwrap();
+        assert_eq!(s.today_text(None, None).as_deref(), Ok("T3, 14 Thg 11"));
+        // Encoding follows the spelled text: `14 tháng 11 2023` is WinAnsi-representable;
+        // a weekday name such as `Thứ Ba` is not, so Fill & Sign refuses that format.
+        assert_eq!(s.today_text_for_pdf(Some("d mmmm yyyy"), Some("vi")).as_deref(), Ok("14 tháng 11 2023"));
+        let e = s.today_text_for_pdf(Some("dddd d mmmm yyyy"), Some("vi")).unwrap_err();
+        assert!(e.contains("can't be written into the PDF yet") && e.contains("dd.mm.yyyy"), "{e}");
+        assert!(s.today_text_for_pdf(Some("dd.mm.yyyy"), Some("vi")).is_ok());
     }
 
     #[test]

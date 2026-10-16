@@ -14,8 +14,10 @@ repository = "https://github.com/storytold/pdfcraft"
 [workspace.dependencies]
 # Shared frontend components; engines remain independent of egui.
 craft-ui = { git = "https://github.com/storytold/craft-libs", version = "0.1.0", rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675", features = ["serde"] }
+# Quit the macOS way (#1136): ⌘Q asks about unsaved changes, and closing quits through `terminate:`.
+craft-quit = { git = "https://github.com/storytold/craft-libs", version = "0.1.0", rev = "f58bc1a3df490992d633393d0898af0588ce882c" }
 # Shared system spooler; document composition remains in pdfcraft-print.
-craft-print = { git = "https://github.com/storytold/craft-libs", version = "0.1.0", rev = "f03ec27ab2c405969428512178f746183cd55ca0" }
+craft-print = { git = "https://github.com/storytold/craft-libs", version = "0.1.0", rev = "666c358065261a2816b376fa3bb10538dbf53040" }
 # internal
 pdfcraft-geom = { path = "crates/geom", version = "0.8.0" }
 pdfcraft-filters = { path = "crates/filters", version = "0.8.0" }
@@ -112,3 +114,4 @@ hayro-jbig2 = { path = "vendor/hayro-jbig2" }
 lopdf = { path = "vendor/lopdf" }
 winit = { path = "vendor/winit" }
 egui-wgpu = { path = "vendor/egui-wgpu" }
+vello_common = { path = "vendor/vello_common" }

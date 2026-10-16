@@ -278,3 +278,61 @@ fn signature_contents_stay_unencrypted() {
         assert_eq!(string(2, b"Contents"), b"Private note", "{alg:?}");
     }
 }
+
+#[test]
+fn a_nonpositive_crypt_filter_length_reads_as_the_default_key_length() {
+    // A V4 crypt filter's /Length counts bytes (≤ 32) or bits. A zero or negative value is
+    // meaningless and is read as if absent (128 bits), not multiplied into an overflow (#1816).
+    let original = protect(Algorithm::Aes128, "", "owner", -1);
+    for length in [i64::MIN, i64::MIN / 8 - 1, i64::MIN / 8, -1, 0, 16, 128] {
+        let mut doc = Document::open(Arc::new(original.clone())).unwrap();
+        let encrypt = doc.trailer().reference(b"Encrypt").unwrap();
+        doc.update_dict(encrypt, |e| {
+            let Some(Object::Dict(cf)) = e.get(b"CF") else { panic!("no /CF") };
+            let Some(Object::Dict(std_cf)) = cf.get(b"StdCF") else { panic!("no /StdCF") };
+            let (mut cf, mut std_cf) = (cf.clone(), std_cf.clone());
+            std_cf.set(b"Length".to_vec(), Object::Int(length));
+            cf.set(b"StdCF".to_vec(), Object::Dict(std_cf));
+            e.set(b"CF".to_vec(), Object::Dict(cf));
+        })
+        .unwrap();
+        let saved = write_incremental(&doc, &SaveOptions::default()).unwrap();
+        let again = Document::open(Arc::new(saved)).unwrap();
+        assert_eq!(content(&again), SECRET, "/Length {length}");
+    }
+}
+
+#[test]
+fn an_earlier_revision_opens_with_the_documents_own_credentials() {
+    // The bytes a signature covers are an earlier revision of the file: the document that is
+    // open can read them with its own key, so no password has to be kept or asked for again.
+    for alg in ALL {
+        let original = protect(alg, "user", "owner", -1);
+        let mut doc = Document::open_with_password(Arc::new(original.clone()), Some("user")).unwrap();
+        let info = doc.trailer().reference(b"Info").unwrap();
+        doc.update_dict(info, |d| d.set(b"Title".to_vec(), Object::String(PdfString::text("Revised")))).unwrap();
+        let saved = write_incremental(&doc, &SaveOptions::default()).unwrap();
+        let current = Document::open_with_password(Arc::new(saved), Some("user")).unwrap();
+        assert!(matches!(Document::open(Arc::new(original.clone())), Err(CosError::NeedsPassword)), "{alg:?}: not without a password");
+        let earlier = current.open_with_same_credentials(Arc::new(original.clone())).unwrap();
+        assert_eq!(content(&earlier), SECRET, "{alg:?}: the earlier revision is readable");
+        assert_eq!(title(&earlier).as_deref(), Some("Quarterly numbers"), "{alg:?}: and it is the earlier one");
+        // Another file, encrypted with other keys: the document's key is no use, and it says so.
+        let other = {
+            let mut doc = Document::open(Arc::new(fixture())).unwrap();
+            doc.set_encryption(&NewEncryption {
+                algorithm: alg,
+                user_password: "user",
+                owner_password: "owner",
+                permissions: -1,
+                encrypt_metadata: true,
+                seed: [3; 32],
+            })
+            .unwrap();
+            write_full(&doc, &SaveOptions::default()).unwrap()
+        };
+        assert!(matches!(current.open_with_same_credentials(Arc::new(other)), Err(CosError::NeedsPassword)), "{alg:?}");
+        // An unencrypted file opens as it always does.
+        assert_eq!(content(&current.open_with_same_credentials(Arc::new(fixture())).unwrap()), SECRET, "{alg:?}");
+    }
+}

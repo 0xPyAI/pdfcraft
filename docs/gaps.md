@@ -1,5 +1,8 @@
 # Where PdfCraft falls short of Acrobat Pro
 
+> **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (gap 12: reading order is scored, not just word F1) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-13 · **Change:** minor (gap 14: Vietnamese catalog shipped; Hindi/Indonesian/Korean and Arabic RTL remain) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (gap 6: #1910 Organize Pages opens on the current page; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (gap 6: #1398 stamps read upright on rotated pages; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (gap 6: #1317, #1327, #1302, #1315 and #1340; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (#1316: replacing a line keeps a neighbouring line whose glyph box overlaps; gap 3 remains) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
@@ -38,7 +41,7 @@ update the numbers.
 | 11 | Accessibility: checker only, no tagging tools | feature | 40–70 | [target-app-parity.md](target-app-parity.md) |
 | 12 | No measured fidelity harness against Acrobat | quality | (in 2) | [target-app-parity.md](target-app-parity.md) |
 | 13 | Performance budgets and lazy loading of very large files | performance | 25–45 | this file |
-| 14 | Arabic not mirrored; Korean has no craft-fonts face | localization | 25–45 | [localization-parity.md](localization-parity.md) |
+| 14 | Arabic not mirrored; no Hindi, Indonesian, Korean | localization | 25–45 | [localization-parity.md](localization-parity.md) |
 | 15 | Forms: JavaScript object model, actions, submit, XFA depth | feature | 40–75 | [pdf-spec-parity.md](pdf-spec-parity.md) |
 | 16 | UI precision gaps (multi-select move, rulers, accelerators, windows) | UI/UX | 30–60 | [ui-parity.md](ui-parity.md) |
 | 17 | Certificate security and other protect gaps | feature, spec | 15–30 | [pdf-spec-parity.md](pdf-spec-parity.md) |
@@ -128,14 +131,15 @@ update the numbers.
 - **Missing:** fixes for the ≈ 13 of ≈ 25 filed reports of features marked `shipped` that give wrong results still open,
   plus triage of ≈ 220 other open issues.
 - **Evidence:** 245 open issues on 2026-10-10. The first batch of `fix(...)` reports was fixed by
-  2026-10-10 (#799, #800, #807, #809, #810, #811, #815, #816, #817, #818, #819, #821). Stamps placed
-  on a rotated page read upright: rubber stamps, natural-size and explicit-rectangle images, and
-  PDF-page stamps (#1398). The rest of the backlog is untriaged.
   2026-10-10 (#799, #800, #807, #809, #810, #811, #815, #816, #817, #818, #819, #821). A later
   batch keeps a cloudy comment flatten cannot draw (#1317), leaves a refused text-box restyle or
   resize unchanged (#1327), keeps arrow defaults off plain lines (#1302), stops a custom text
   match on the separator instead of the next glyph (#1315), and states the vertical-text
-  redaction refusal without claiming an overlap (#1340). The rest of the backlog is untriaged.
+  redaction refusal without claiming an overlap (#1340). Organize Pages opens on the page being
+  read, selected and scrolled into view (#1910). Stamps placed on a rotated page read upright
+  (#1398). Another batch keeps a spaced XFA radio value in the datasets (#1319), replaces only the
+  selected pages when they are not adjacent (#1305), and leaves unrelated page streams in place
+  when a figure is marked decorative (#1324). The rest of the backlog is untriaged.
 - **Impact:** every one is a user who lost trust. Crash reports outrank feature work
   (`AGENTS.md` §4).
 - **Estimate:** 45–80 h (≈ 0.2–0.4 h per issue). **Doc:** this file.
@@ -195,8 +199,10 @@ update the numbers.
 
 ### 11. Accessibility: only text-only automatic structure creation
 
-- **Missing:** auto-tag mixed text, images, tables, lists, links and fields; connect preview heading
-  proposals to Apply; visual Order and Content panels, Reading Order tool, table editor, Make Accessible action,
+- **Missing:** apply auto-tag proposals to marked content and a valid parent tree, tag fields
+  into structure trees with unusual layouts (only a direct Document root with a direct
+  ParentTree Nums array is extended),
+  visual Tags, Order and Content panels, Reading Order tool, table editor, Make Accessible action,
   Read Out Loud; full keyboard operation of PdfCraft itself and a screen-reader audit.
 - **Evidence:** all 32 checker rules, figure alt text, tag property and sibling order edits, and
   a bounded auto-tag preview exist. Apply writes valid structure and parent-tree links for
@@ -242,6 +248,17 @@ update the numbers.
   every appearance we *do* draw: over the same 250 files, shown gives mean 2.16% / p90 5.35% / 25
   files within 0.1%, hidden gives 2.18% / 5.55% / 22, with `annotation-tx3.pdf` jumping to 45.64%.
   The biases nearly cancel; `--hide-annotations` tells the two apart for one file at a time.
+- **The text score was blind to reading order (2026-10-15).** Word F1 is a bag of words, so a page
+  emitted back to front scores a perfect 1.000 — and reading order is most of what text extraction
+  has left to get wrong (#2387, #2586). `cargo xtask text-oracle` now reports a second score: the
+  longest common subsequence of the two word sequences over the longer one, both cut to 3,000
+  words. The hole was not hypothetical. Measuring #2431, a change that moves text and alters
+  nothing else, **word F1 called 26 of the 29 files whose output changed identical**, where the
+  order score separated 18 improvements from 6 regressions and named their shape: forms, where a
+  checkbox's number was parted from its label (`prefilled_f1040.pdf` 0.672 → 0.481). Read it as a
+  disagreement, like the pixel score: the same split scored as a win on one file and a loss on
+  another purely because `pdftotext` makes it in one place and not the other. The corpus-wide
+  first reading has not been taken yet.
 - **Evidence:** text extraction (word-F1 0.98 against `pdftotext`) and now rendering (above); qpdf
   checks written output on every CI run since `PDFCRAFT_ORACLES_REQUIRED`. Acrobat captures must
   stay local in `plan/acrobat/` (clean-room, `AGENTS.md` §1.1).
@@ -272,15 +289,15 @@ update the numbers.
   to edit.
 - **Estimate:** 25–45 h. **Doc:** this file.
 
-### 14. Arabic not mirrored; Korean has no craft-fonts face
+### 14. Arabic not mirrored; no Hindi, Indonesian, Korean
 
 - **Missing:** a right-to-left layout (panels, menus, alignment), bidirectional text in the text
-  layout itself (wrapping, typed text); a Hangul face in craft-fonts (Korean now draws with one
-  installed system face, so the web build and machines without one show boxes). Acrobat ships
-  Korean; it ships Arabic in its Middle East edition; it ships neither Hindi nor Indonesian nor
-  Vietnamese. Indonesian, Vietnamese, Hindi and Korean catalogs ship as of 2026-10-13.
+  layout itself (wrapping, typed text); catalogs for Hindi, Indonesian and Korean (Acrobat ships
+  Korean; it ships Arabic in its Middle East edition; it ships none of Hindi or Indonesian).
+  Vietnamese ships as a catalog (`vi`, 100% of the current localizable union) but stays `partial`
+  like other non-English languages (no translated help; engine/OS details stay English).
 - **Evidence:** [localization.md](localization.md) §Arabic; `misc.rtl-ui` planned.
-- **Estimate:** 25–45 h (Arabic RTL 20–35, a Hangul face and native review 5–10). **Doc:**
+- **Estimate:** 25–45 h (Arabic RTL 20–35, three catalogs 8–12 plus review). **Doc:**
   [localization-parity.md](localization-parity.md).
 
 ### 15. Forms: JavaScript object model, actions, submit, XFA depth
@@ -353,14 +370,17 @@ update the numbers.
 
 - **Missing:** a menu and tool listing captured from Acrobat (names only, `plan/acrobat/`, never
   committed) diffed against the checklist, so that features the checklist never listed show up.
-  Also correct `misc.localization` and `misc.installers`, which are still `planned` though both
-  ship.
+  `misc.localization` and `misc.installers` are now `partial` (Chinese, Telugu and Arabic are not
+  fully usable yet; Linux packages are unsigned).
 - **Estimate:** 4–8 h. **Doc:** [target-app-parity.md](target-app-parity.md).
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-15 | minor | Gap 12: the text oracle scores reading order as well as word F1, which is a bag of words and cannot see order; the first measurement separated 18 improvements from 6 regressions in a change F1 called unchanged on 26 of 29 files. Estimates unchanged. |
+| 2026-10-15 | patch | Gap 24: record localization and installers as partial (unusable Chinese, Telugu and Arabic; unsigned Linux packages) |
+| 2026-10-13 | minor | Gap 6: Organize Pages selects and reveals the current page on open, including after an earlier grid selection elsewhere (#1910). Estimates unchanged. |
 | 2026-10-12 | minor | Gap 6: rubber stamps, explicit image rectangles and PDF-page stamps read upright on rotated pages (#1398). Estimates unchanged. |
 | 2026-10-12 | minor | #1316: replacing a line or paragraph keeps a neighbouring line whose glyph box overlaps. Gap 3 remains. Estimates unchanged. |
 | 2026-10-12 | minor | Exclusive image crops resize with their pixels across nested states, intervening operators and content streams; shared clips remain fixed. Synthetic engine/tool regressions and private image save/reopen checks; estimates unchanged. |

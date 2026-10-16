@@ -187,7 +187,7 @@ pub fn decode_pam_gray(bytes: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
     }
     let mut out = Vec::with_capacity(width.checked_mul(height)?);
     for px in data.get(..wanted)?.as_chunks::<4>().0 {
-        let [r, g, b, a] = *px;
+        let (&r, &g, &b, &a) = (px.first()?, px.get(1)?, px.get(2)?, px.get(3)?);
         // Composite premultiplied RGB over white, in integer arithmetic that cannot overflow:
         // each term is at most 255, and the sum is at most 255.
         let over_white = |c: u8| u32::from(c).saturating_add(255u32.saturating_sub(u32::from(a))).min(255);
