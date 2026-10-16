@@ -179,11 +179,14 @@ impl OpenTypeFontBlob {
         let f = FontRef::from_index(data.as_ref().as_ref(), index).ok()?;
         // Reject fonts with invalid post table version, fixes pdf.js issue 9462. Not sure if there
         // is a better fix, for some reason skrifa accepts the font which is completely invalid.
+        // PdfCraft patch: also accept 1.0, 2.0 and 3.0 with the two 16-bit halves swapped
+        // (`00 00 00 03` for 3.0), as ScanSoft PDF Create! writes it into every font it embeds
+        // (#2946). Rejecting those fonts drew their text with a substitute that has no such glyphs.
         let invalid = f.post().is_ok_and(|p| {
             !matches!(
                 p.version().to_major_minor(),
                 (1, 0) | (2, 0) | (2, 5) | (3, 0)
-            )
+            ) && !matches!(p.version().to_be_bytes(), [0, 0, 0, 1..=3])
         });
 
         if invalid {
