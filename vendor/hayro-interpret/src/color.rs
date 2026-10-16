@@ -2,6 +2,7 @@
 
 use crate::cache::{Cache, CacheKey};
 use crate::function::Function;
+use crate::util::hash128;
 use hayro_syntax::object;
 use hayro_syntax::object::Array;
 use hayro_syntax::object::Dict;
@@ -100,6 +101,34 @@ pub(crate) enum ColorSpaceType {
     DeviceN(DeviceN),
 }
 
+/// PdfCraft patch (40): what the colour space read from an `/ICCBased` profile stream is cached
+/// by. hayro keyed it by the stream dictionary's bytes alone, so two different profiles with the
+/// same `/N` and `/Length` shared whichever was read first, and colours in the second were
+/// drawn through the first.
+#[derive(Hash)]
+enum IccProfileKey<'a> {
+    /// The stream object a space names, looked up without reading the stream: an object holds
+    /// one profile for as long as the document, and so the cache, lives.
+    Object(object::ObjectIdentifier),
+    /// What the space is built from: the stream dictionary's key (its bytes, the old key:
+    /// `/N`, `/Alternate`, the filters) and the stream's own bytes, decrypted but not decoded,
+    /// which decode to the profile. Copies of a profile share it, and a lookup never decodes:
+    /// decoding waits for a miss.
+    Content { dict: u128, data: &'a [u8] },
+}
+
+/// PdfCraft patch (40): the object of the `/ICCBased` profile `stream` that `array` names, or
+/// `None` for a stream written directly in the array (its dictionary lies within the array's
+/// bytes). Such a stream has no object of its own: its dictionary reports the object that
+/// holds the array, which every other stream written there reports too.
+fn icc_stream_object(array: &Array<'_>, stream: &Stream<'_>) -> Option<object::ObjectIdentifier> {
+    let dict = stream.dict();
+    if array.data().as_ptr_range().contains(&dict.data().as_ptr()) {
+        return None;
+    }
+    dict.obj_id()
+}
+
 impl ColorSpaceType {
     fn new(object: Object<'_>, cache: &Cache) -> Option<Self> {
         Self::new_inner(object, cache)
@@ -118,34 +147,50 @@ impl ColorSpaceType {
                     let dict = icc_stream.dict();
                     let num_components = dict.get::<usize>(N)?;
 
-                    return cache.get_or_insert_with(icc_stream.cache_key(), || {
-                        if let Some(decoded) = icc_stream.decoded().ok().as_ref() {
-                            ICCProfile::new(decoded, num_components)
-                                .map(|icc| {
-                                    // TODO: For SVG and PNG we can assume that the output color space is
-                                    // sRGB. If we ever implement PDF-to-PDF, we probably want to
-                                    // let the user pass the native color type and don't make this optimization
-                                    // if it's not sRGB.
-                                    if icc.is_srgb() {
-                                        Self::DeviceRgb
-                                    } else {
-                                        Self::ICCBased(icc)
-                                    }
-                                })
-                                .or_else(|| {
-                                    dict.get::<Object<'_>>(ALTERNATE)
-                                        .and_then(|o| Self::new(o, cache))
-                                })
-                                .or_else(|| match dict.get::<u8>(N) {
-                                    Some(1) => Some(Self::DeviceGray),
-                                    Some(3) => Some(Self::DeviceRgb),
-                                    Some(4) => Some(Self::DeviceCmyk),
-                                    _ => None,
-                                })
-                        } else {
-                            None
+                    // PdfCraft patch (40): cached by what the profile is read from (see
+                    // `IccProfileKey`), not by the stream dictionary's bytes alone.
+                    let read = || {
+                        let data = icc_stream.raw_data();
+                        let content = IccProfileKey::Content {
+                            dict: icc_stream.cache_key(),
+                            data: &data,
+                        };
+                        cache.get_or_insert_with(hash128(&content), || {
+                            cache.count_icc_profile_read();
+                            if let Some(decoded) = icc_stream.decoded().ok().as_ref() {
+                                ICCProfile::new(decoded, num_components)
+                                    .map(|icc| {
+                                        // TODO: For SVG and PNG we can assume that the output color space is
+                                        // sRGB. If we ever implement PDF-to-PDF, we probably want to
+                                        // let the user pass the native color type and don't make this optimization
+                                        // if it's not sRGB.
+                                        if icc.is_srgb() {
+                                            Self::DeviceRgb
+                                        } else {
+                                            Self::ICCBased(icc)
+                                        }
+                                    })
+                                    .or_else(|| {
+                                        dict.get::<Object<'_>>(ALTERNATE)
+                                            .and_then(|o| Self::new(o, cache))
+                                    })
+                                    .or_else(|| match dict.get::<u8>(N) {
+                                        Some(1) => Some(Self::DeviceGray),
+                                        Some(3) => Some(Self::DeviceRgb),
+                                        Some(4) => Some(Self::DeviceCmyk),
+                                        _ => None,
+                                    })
+                            } else {
+                                None
+                            }
+                        })
+                    };
+                    return match icc_stream_object(&color_array, &icc_stream) {
+                        Some(object) => {
+                            cache.get_or_insert_with(hash128(&IccProfileKey::Object(object)), read)
                         }
-                    });
+                        None => read(),
+                    };
                 }
                 CALCMYK => return Some(Self::DeviceCmyk),
                 CALGRAY => {

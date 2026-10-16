@@ -6172,6 +6172,9 @@ endstream endobj
         assert_eq!(decodes("B"), 5, "a JPX soft mask decodes for the size it is drawn at");
     }
 
+    // ICC profiles whose stream dictionaries are the same (vendored hayro-interpret patch 40).
+    mod icc_profile_cache;
+
     /// Render `pdf`'s first page at 72 dpi with no time limit beyond the test's own.
     fn render_first_page(pdf: Vec<u8>) -> RenderedPage {
         let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
