@@ -2392,6 +2392,39 @@ trailer << /Root 1 0 R >>
         assert!(reads < 20 * (PAGES + PAGES * PER_PAGE), "{reads} object reads");
     }
 
+    /// #2365: the issue's fixture is two PDFs concatenated, the second cut off before its
+    /// cross-reference data, and the first's only trailer is a cross-reference stream. The
+    /// lazy reader refuses a file that needed repair, and lopdf's rebuild found no `trailer`
+    /// keyword and failed, so Document Properties showed every field empty. The rebuild now
+    /// takes the cross-reference stream's dictionary as the trailer.
+    #[test]
+    fn rebuilt_file_keeps_the_info_of_its_cross_reference_stream() {
+        let header = "%PDF-1.5\n";
+        let obj1 = "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n";
+        let obj2 = "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n";
+        let obj3 = "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 10 10]>>endobj\n";
+        let obj4 = "4 0 obj<</Title(Kept)/Creator(Me)>>endobj\n";
+        let o1 = header.len();
+        let o2 = o1 + obj1.len();
+        let o3 = o2 + obj2.len();
+        let o4 = o3 + obj3.len();
+        let o5 = o4 + obj4.len();
+        let rows: Vec<u8> =
+            [[0u8, 0, 0, 255], [1, 0, o1 as u8, 0], [1, 0, o2 as u8, 0], [1, 0, o3 as u8, 0], [1, 0, o4 as u8, 0], [1, (o5 >> 8) as u8, o5 as u8, 0]]
+                .concat();
+        let mut bytes = format!("{header}{obj1}{obj2}{obj3}{obj4}").into_bytes();
+        bytes.extend_from_slice(format!("5 0 obj<</Type/XRef/Root 1 0 R/Info 4 0 R/Size 6/W[1 2 1]/Length {}>>stream\n", rows.len()).as_bytes());
+        bytes.extend_from_slice(&rows);
+        // A wrong startxref, and a second file after %%EOF: every reader rebuilds the table.
+        bytes.extend_from_slice(b"\nendstream\nendobj\nstartxref\n999999\n%%EOF\n%PDF-1.3\n");
+        bytes.extend_from_slice(&[b'x'; 1024]);
+
+        let info = inspect(Arc::new(bytes), None).unwrap();
+        assert_eq!(info.pages.len(), 1);
+        assert_eq!(info.title.as_deref(), Some("Kept"));
+        assert_eq!(info.creator.as_deref(), Some("Me"));
+    }
+
     #[test]
     fn lazy_structure_matches_the_compatibility_inspector() {
         // Each fixture as lopdf writes it, and with its objects in object streams.
