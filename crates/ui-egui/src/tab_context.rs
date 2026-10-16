@@ -55,21 +55,8 @@ fn reveal(path: &std::path::Path) -> Result<(), String> {
         return Err("The file no longer exists".into());
     }
     let platform = std::env::consts::OS;
-    let run = |program: &str, args: &[std::ffi::OsString]| {
-        let mut command = std::process::Command::new(program);
-        // Windows: `reveal_command` already quotes what Explorer needs quoted, and Rust's own
-        // quoting of an argument with a space breaks `/select,` (#2579), so pass them as written.
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt as _;
-            for arg in args {
-                command.raw_arg(arg);
-            }
-        }
-        #[cfg(not(windows))]
-        command.args(args);
-        command.output().map(|o| o.status.success()).map_err(|e| e.to_string())
-    };
+    let run =
+        |program: &str, args: &[std::ffi::OsString]| reveal_process(program, args).output().map(|o| o.status.success()).map_err(|e| e.to_string());
     if matches!(platform, "linux" | "freebsd") {
         // `dbus-send --print-reply` waits up to 2 s for the file manager (then xdg-open may run),
         // so it runs off the UI thread; a failure there is only logged.
@@ -81,6 +68,24 @@ fn reveal(path: &std::path::Path) -> Result<(), String> {
         return spawned.map(|_| ()).map_err(|e| e.to_string());
     }
     reveal_via(platform, &path, run)
+}
+
+/// The process that runs `program` with `args`. Windows: `reveal_command` already quotes what
+/// Explorer needs quoted, and Rust's own quoting of an argument with a space breaks `/select,`
+/// (#2579), so the arguments go on the command line as written.
+#[cfg(not(target_arch = "wasm32"))]
+fn reveal_process(program: &str, args: &[std::ffi::OsString]) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        for arg in args {
+            command.raw_arg(arg);
+        }
+    }
+    #[cfg(not(windows))]
+    command.args(args);
+    command
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -238,6 +243,19 @@ mod tests {
         assert_eq!(calls[1], ("xdg-open".into(), vec![std::ffi::OsString::from("/tmp/年度 & reports")]));
         assert!(reveal_via("linux", path, |_, _| Ok(false)).is_err());
         assert!(reveal_via("linux", path, |_, _| Err("command missing".into())).is_err());
+    }
+
+    /// #2579 (review of #2625): the `/select,"…"` argument reaches the process exactly as written.
+    /// `cmd /c echo` prints its command line back; with Rust's own quoting (`args`) it would come
+    /// back wrapped in quotes with the inner ones escaped, which Explorer reads as no selection.
+    #[cfg(windows)]
+    #[test]
+    fn the_reveal_argument_reaches_the_process_as_written() {
+        let (_, args) = reveal_command("windows", std::path::Path::new(r"C:\Reports\annual report.pdf")).unwrap();
+        let mut echo: Vec<std::ffi::OsString> = ["/d", "/c", "echo"].map(std::ffi::OsString::from).to_vec();
+        echo.extend(args);
+        let out = reveal_process("cmd", &echo).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), r#"/select,"C:\Reports\annual report.pdf""#);
     }
 
     #[test]
