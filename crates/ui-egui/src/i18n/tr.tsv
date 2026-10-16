@@ -2259,6 +2259,7 @@ key	Space	Boşluk
 	Couldn't unlock {name}: {e}	{name} kilidi açılamadı: {e}
 	This document has no restrictions to lift	Bu belgede kaldırılacak kısıtlama yok
 	The document's security settings don't allow copying text and images	Belgenin güvenlik ayarları metin ve resimlerin kopyalanmasına izin vermiyor
+	The document's security settings don't allow printing	Belgenin güvenlik ayarları yazdırmaya izin vermiyor
 	Add the files to combine	Birleştirilecek dosyaları ekleyin
 	Leave out files that can't be read?	Okunamayan dosyalar dışarıda bırakılsın mı?
 	These files can't be read, so they won't be in the combined PDF:	Bu dosyalar okunamıyor, bu yüzden birleştirilmiş PDF'de yer almayacak:

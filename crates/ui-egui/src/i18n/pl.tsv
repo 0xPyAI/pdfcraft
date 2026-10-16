@@ -1758,6 +1758,7 @@
 	Couldn't unlock {name}: {e}	Nie udało się odblokować pliku {name}: {e}
 	This document has no restrictions to lift	Ten dokument nie ma ograniczeń do zniesienia
 	The document's security settings don't allow this change	Ustawienia zabezpieczeń dokumentu nie zezwalają na tę zmianę
+	The document's security settings don't allow printing	Ustawienia zabezpieczeń dokumentu nie zezwalają na drukowanie
 	Open a document first	Najpierw otwórz dokument
 	Security will be removed when you save	Zabezpieczenia zostaną usunięte przy zapisie
 	Click text or an image to edit it	Kliknij tekst lub obraz, aby go edytować

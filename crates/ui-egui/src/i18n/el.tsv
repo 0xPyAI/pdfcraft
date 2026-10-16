@@ -2263,6 +2263,7 @@ comment menu	Edit	Επεξεργασία
 	Couldn't unlock {name}: {e}	Δεν ήταν δυνατό το ξεκλείδωμα του {name}: {e}
 	This document has no restrictions to lift	Αυτό το έγγραφο δεν έχει περιορισμούς προς άρση
 	The document's security settings don't allow copying text and images	Οι ρυθμίσεις ασφαλείας του εγγράφου δεν επιτρέπουν την αντιγραφή κειμένου και εικόνων
+	The document's security settings don't allow printing	Οι ρυθμίσεις ασφαλείας του εγγράφου δεν επιτρέπουν την εκτύπωση
 	Add the files to combine	Προσθέστε τα αρχεία προς συνδυασμό
 	Leave out files that can't be read?	Να παραλειφθούν τα αρχεία που δεν διαβάζονται;
 	These files can't be read, so they won't be in the combined PDF:	Αυτά τα αρχεία δεν διαβάζονται, οπότε δεν θα συμπεριληφθούν στο συνδυασμένο PDF:

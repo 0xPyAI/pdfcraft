@@ -1684,6 +1684,7 @@ action wizard	Start	ప్రారంభించు
 	This document has no restrictions to lift	ఈ పత్రంలో తొలగించాల్సిన పరిమితులు లేవు
 	The document's security settings don't allow this change	పత్రం భద్రతా సెట్టింగ్‌లు ఈ మార్పును అనుమతించవు
 	The document's security settings don't allow copying text and images	పత్రం భద్రతా సెట్టింగ్‌లు టెక్స్ట్, చిత్రాలను కాపీ చేయడాన్ని అనుమతించవు
+	The document's security settings don't allow printing	పత్రం భద్రతా సెట్టింగ్‌లు ముద్రించడాన్ని అనుమతించవు
 	Open a document first	ముందుగా ఒక పత్రాన్ని తెరవండి
 	Security will be removed when you save	మీరు సేవ్ చేసినప్పుడు భద్రత తీసివేయబడుతుంది
 	Click text or an image to edit it	సవరించడానికి టెక్స్ట్ లేదా చిత్రంపై క్లిక్ చేయండి

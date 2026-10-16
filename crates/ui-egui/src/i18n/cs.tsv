@@ -1811,6 +1811,7 @@ key	Space	Mezerník
 	Only the document's owner can change its security (open it with the permissions password)	Zabezpečení může změnit jen vlastník dokumentu (otevřete ho heslem oprávnění)
 	The document's security settings don't allow this change	Nastavení zabezpečení dokumentu tuto změnu nedovoluje
 	The document's security settings don't allow copying text and images	Nastavení zabezpečení dokumentu nedovoluje kopírovat text a obrázky
+	The document's security settings don't allow printing	Nastavení zabezpečení dokumentu nedovoluje tisk
 	Open a document first	Nejdřív otevřete dokument
 	Security will be removed when you save	Zabezpečení se odebere při uložení
 	Click text or an image to edit it	Kliknutím na text nebo obrázek ho upravíte

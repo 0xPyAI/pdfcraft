@@ -1136,6 +1136,7 @@ theme	Appearance	Giao diện
 	The document now conforms to {level}; save it to keep the changes	Tài liệu hiện tuân thủ {level}; hãy lưu để giữ các thay đổi
 	The document opens without a password; this password is needed to change the restrictions. It's applied when you save.	Tài liệu mở không cần mật khẩu; mật khẩu này cần để thay đổi các hạn chế. Mật khẩu được áp dụng khi bạn lưu.
 	The document's security settings don't allow copying text and images	Cài đặt bảo mật của tài liệu không cho phép sao chép văn bản và hình ảnh
+	The document's security settings don't allow printing	Cài đặt bảo mật của tài liệu không cho phép in
 	The document's security settings don't allow this change	Cài đặt bảo mật của tài liệu không cho phép thay đổi này
 	The existing action will be preserved.	Hành động hiện có sẽ được giữ nguyên.
 	The fonts PdfCraft writes with can't draw “{c}” ({code}), so it shows as ? in every PDF viewer. The text is saved.	Phông chữ mà PdfCraft dùng để ghi không thể vẽ “{c}” ({code}), nên nó hiển thị là ? trong mọi trình xem PDF. Văn bản vẫn được lưu.

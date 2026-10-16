@@ -2253,6 +2253,7 @@ key	Space	Бос орын
 	Couldn't unlock {name}: {e}	{name} құлпын ашу мүмкін болмады: {e}
 	This document has no restrictions to lift	Бұл құжатта алып тасталатын шектеулер жоқ
 	The document's security settings don't allow copying text and images	Құжаттың қауіпсіздік параметрлері мәтін мен суреттерді көшіруге рұқсат бермейді
+	The document's security settings don't allow printing	Құжаттың қауіпсіздік параметрлері басып шығаруға рұқсат бермейді
 	Add the files to combine	Біріктірілетін файлдарды қосыңыз
 	Leave out files that can't be read?	Оқылмайтын файлдарды қалдырып кету керек пе?
 	These files can't be read, so they won't be in the combined PDF:	Бұл файлдар оқылмайды, сондықтан біріктірілген PDF-ке кірмейді:

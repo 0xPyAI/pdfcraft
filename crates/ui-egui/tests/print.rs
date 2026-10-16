@@ -426,3 +426,53 @@ fn an_empty_printer_list_says_none_were_found() {
     h.get_by_label_contains("No printers were found");
     assert!(!h.get_by_role_and_label(Role::Button, "Save as PDF").accesskit_node().is_disabled());
 }
+
+/// A document whose security forbids printing (#2669) says so before the dialog opens, and the
+/// top bar's Print button is disabled, instead of the dialog refusing on confirm.
+#[test]
+fn print_restricted_documents_say_so_before_the_dialog() {
+    let mut doc = pdfcraft_cos::Document::open(std::sync::Arc::new(include_bytes!("data/form.pdf").to_vec())).unwrap();
+    doc.set_encryption(&pdfcraft_cos::NewEncryption {
+        algorithm: pdfcraft_cos::Algorithm::Aes256,
+        user_password: "",
+        owner_password: "owner",
+        permissions: -1 ^ 0b100,
+        encrypt_metadata: true,
+        seed: [3; 32],
+    })
+    .unwrap();
+    let bytes = pdfcraft_cos::write_full(&doc, &Default::default()).unwrap();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("restricted.pdf", None, bytes).unwrap();
+        app
+    });
+    h.ctx.set_os(egui::os::OperatingSystem::Windows);
+    h.run_steps(4);
+    assert!(h.get_by_label("Print (Ctrl+P)").accesskit_node().is_disabled());
+    h.get_by_label("Print (Ctrl+P)").hover();
+    h.run_steps(30);
+    h.get_by_label_contains("don't allow printing");
+    assert!(!h.state_mut().execute("print.dialog"));
+    h.run_steps(2);
+    assert_eq!(h.state().dialog, None);
+    assert_eq!(h.state().toast.as_ref().map(|t| t.0.as_str()), Some("The document's security settings don't allow printing"));
+}
+
+/// With no document open the top bar's Print button is disabled too, but not for security
+/// reasons: its tooltip must not blame the document's settings (#2669).
+#[test]
+fn print_without_a_document_does_not_blame_security() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app
+    });
+    h.ctx.set_os(egui::os::OperatingSystem::Windows);
+    h.run_steps(4);
+    assert!(h.get_by_label("Print (Ctrl+P)").accesskit_node().is_disabled());
+    h.get_by_label("Print (Ctrl+P)").hover();
+    h.run_steps(30);
+    assert!(h.query_by_label_contains("don't allow printing").is_none());
+}

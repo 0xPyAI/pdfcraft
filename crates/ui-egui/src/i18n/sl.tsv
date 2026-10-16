@@ -2268,6 +2268,7 @@ key	Space	Preslednica
 	Couldn't unlock {name}: {e}	Dokumenta {name} ni bilo mogoče odkleniti: {e}
 	This document has no restrictions to lift	Ta dokument nima omejitev, ki bi jih bilo treba odpraviti
 	The document's security settings don't allow copying text and images	Varnostne nastavitve dokumenta ne dovolijo kopiranja besedila in slik
+	The document's security settings don't allow printing	Varnostne nastavitve dokumenta ne dovolijo tiskanja
 	Add the files to combine	Dodajte datoteke za združevanje
 	Leave out files that can't be read?	Izpustim datoteke, ki jih ni mogoče prebrati?
 	These files can't be read, so they won't be in the combined PDF:	Teh datotek ni mogoče prebrati, zato ne bodo v združenem PDF-ju:
