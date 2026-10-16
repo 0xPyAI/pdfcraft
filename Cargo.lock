@@ -4224,6 +4224,7 @@ dependencies = [
  "pdfcraft-model",
  "pdfcraft-render",
  "thiserror 2.0.21",
+ "zune-jpeg",
 ]
 
 [[package]]

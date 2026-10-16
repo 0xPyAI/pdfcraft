@@ -25,7 +25,10 @@ let report = optimize_with_progress(&mut doc, &settings, &mut |stage| keep_going
   threshold are resampled with a bicubic (Catmull-Rom) filter to a target resolution and
   stored as JPEG (Acrobat's quality steps) or ZIP; soft masks are resampled with their image.
   An image is replaced only if the result is smaller. Left alone: CMYK and other colour spaces,
-  image masks, decode arrays, more than 8 bits, JPEG 2000, JBIG2 and CCITT.
+  image masks, decode arrays, more than 8 bits, JPEG 2000, JBIG2 and CCITT. A JPEG is read with
+  its colour transform (an Adobe marker's, else `/ColorTransform`, ISO 32000-2 §7.4.8), so one
+  stored untransformed keeps its colours; one whose marker and `/ColorTransform` disagree is left
+  alone, since readers differ on which wins.
 - **Discard objects:** thumbnails, alternate images, document tags, print settings.
 - **Clean up:** Flate for streams with no filter; for streams with an outer ASCII85 or ASCIIHex
   layer, that layer is removed when the result is smaller (the inner filters keep their encoded
@@ -34,5 +37,5 @@ let report = optimize_with_progress(&mut doc, &settings, &mut |stage| keep_going
 The engine runs Remove Hidden Information (`pdfcraft-redact`) for the user-data categories,
 then this, then merges identical objects and writes a full, compressed save
 (`pdfcraft_engine::optimizer::OptimizeJob`, which the UI runs on a worker thread with a
-progress bar). JPEG decoding and
-encoding and resampling come from the `image` crate.
+progress bar). JPEG decoding comes from `zune-jpeg` (the decoder behind `image` and the
+renderer), JPEG encoding and resampling from the `image` crate.

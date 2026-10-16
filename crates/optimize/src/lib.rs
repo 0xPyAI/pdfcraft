@@ -9,7 +9,8 @@
 //!   threshold are resampled (bicubic) to a target resolution and recompressed as JPEG or Flate.
 //!   A new image replaces the old one only if it is smaller. Images PdfCraft can't decode
 //!   faithfully (CMYK and other colour spaces, masks, decode arrays other than the default,
-//!   JPEG 2000, JBIG2, CCITT, other than 8 bits) are left alone.
+//!   JPEG 2000, JBIG2, CCITT, other than 8 bits, JPEGs whose Adobe marker and `/ColorTransform`
+//!   disagree) are left alone.
 //! - **Discard objects:** page thumbnails, alternate images, document tags (structure tree),
 //!   print settings.
 //! - **Clean up:** drop images and forms that pages list but never draw (such as a deleted

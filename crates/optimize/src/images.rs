@@ -228,18 +228,132 @@ fn is_dct(s: &Stream) -> Option<bool> {
     }
 }
 
-/// 8-bit samples of an image (`n` components), decoded.
-pub(crate) fn pixels(s: &Stream, n: usize) -> Option<Vec<u8>> {
+/// 8-bit samples of an image (`n` components), decoded. `None` for a JPEG whose colour transform
+/// readers may disagree about ([`ycc_encoded`]).
+pub(crate) fn pixels(doc: &Document, s: &Stream, n: usize) -> Option<Vec<u8>> {
     let (w, h) = (s.dict.int(b"Width")? as usize, s.dict.int(b"Height")? as usize);
     if is_dct(s)? {
-        let img = image::load_from_memory_with_format(&s.raw, image::ImageFormat::Jpeg).ok()?;
-        // Adobe CMYK/YCCK JPEGs aren't handled (the colour space check excludes them).
-        let v = if n == 1 { img.into_luma8().into_raw() } else { img.into_rgb8().into_raw() };
-        (v.len() == w * h * n).then_some(v)
+        // The colour transform matters to three components only (§7.4.8). CMYK and YCCK JPEGs
+        // never get here: the colour space check excludes them.
+        let ycc = n == 3 && ycc_encoded(doc, s)?;
+        jpeg_samples(&s.raw, w, h, n, ycc)
     } else {
         let v = s.decoded().ok()?;
         (v.len() >= w * h * n).then(|| v[..w * h * n].to_vec())
     }
+}
+
+/// Whether the samples of a three-component JPEG are YCbCr, to be converted to RGB (ISO 32000-2
+/// §7.4.8). An Adobe APP14 marker's transform flag says so, overriding the filter's
+/// /ColorTransform; without a marker /ColorTransform does, 1 (YCbCr) by default.
+///
+/// `None`, so the image is left as it is, when readers may disagree: the marker and
+/// /ColorTransform contradict each other (PdfCraft's renderer lets /ColorTransform 0 win where
+/// the standard lets the marker win), either holds a value other than 0 or 1, or the parameters
+/// or the JPEG's segments can't be read.
+fn ycc_encoded(doc: &Document, s: &Stream) -> Option<bool> {
+    let entry = color_transform(doc, s)?;
+    match adobe_transform(&s.raw)? {
+        Some(t @ (0 | 1)) => entry.is_none_or(|c| c == i64::from(t)).then_some(t == 1),
+        Some(_) => None,
+        None => match entry {
+            None | Some(1) => Some(true),
+            Some(0) => Some(false),
+            Some(_) => None,
+        },
+    }
+}
+
+/// The /ColorTransform of a JPEG stream's filter parameters: `Some(None)` without one. `None`
+/// if it isn't an integer, or the parameters aren't a dictionary paired with the filter as
+/// §7.4 pairs them (a dictionary for a filter name, a one-element array for a one-filter array).
+fn color_transform(doc: &Document, s: &Stream) -> Option<Option<i64>> {
+    let Some(parms) = s.dict.get(b"DecodeParms") else { return Some(None) };
+    let parms = doc.resolve(parms);
+    let parms = match (s.dict.get(b"Filter"), &*parms) {
+        (Some(Object::Array(_)), Object::Array(a)) if a.len() == 1 => doc.resolve(a.first()?),
+        (Some(Object::Name(_)), _) | (_, Object::Null) => parms.clone(),
+        _ => return None,
+    };
+    match &*parms {
+        Object::Null => Some(None),
+        Object::Dict(d) => match d.get(b"ColorTransform").map(|c| doc.resolve(c)).as_deref() {
+            None => Some(None),
+            Some(Object::Int(c)) => Some(Some(*c)),
+            Some(_) => None,
+        },
+        _ => None,
+    }
+}
+
+/// The transform flag of a JPEG's Adobe APP14 segment (0: samples stored as they are,
+/// 1: YCbCr, 2: YCCK), the last one if there are several, as decoders read them; `Some(None)`
+/// without one. `None` if the segments before the first scan can't be read.
+fn adobe_transform(data: &[u8]) -> Option<Option<u8>> {
+    if data.get(..2)? != [0xFF, 0xD8] {
+        return None;
+    }
+    let mut flag = None;
+    let mut i = 2usize;
+    // Every step moves on by at least one byte, and reading past the end returns.
+    loop {
+        if *data.get(i)? != 0xFF {
+            // Stray bytes between segments, which decoders skip.
+            i = i.checked_add(1)?;
+            continue;
+        }
+        let marker = *data.get(i.checked_add(1)?)?;
+        match marker {
+            // A fill byte before the marker.
+            0xFF => i = i.checked_add(1)?,
+            // The first scan (or the end): no header segments after it.
+            0xDA | 0xD9 => return Some(flag),
+            // Markers without a segment: TEM, RSTn, SOI.
+            0x01 | 0xD0..=0xD8 => i = i.checked_add(2)?,
+            _ => {
+                let len = usize::from(u16::from_be_bytes([*data.get(i.checked_add(2)?)?, *data.get(i.checked_add(3)?)?]));
+                // The length counts its own two bytes: anything shorter is malformed.
+                let end = i.checked_add(2)?.checked_add(len)?;
+                let segment = data.get(i.checked_add(4)?..end)?;
+                if marker == 0xEE
+                    && let Some(rest) = segment.strip_prefix(b"Adobe")
+                {
+                    // Version, flags0 and flags1 (two bytes each), then the transform flag.
+                    flag = Some(*rest.get(6)?);
+                }
+                i = end;
+            }
+        }
+    }
+}
+
+/// 8-bit samples of a JPEG `w` × `h` with `n` components (grey or RGB): YCbCr converted to RGB
+/// if `ycc`, otherwise the samples as stored. `None` if the JPEG doesn't match (size or number
+/// of components), is too large, or its decoder reads the samples otherwise (for example
+/// components named R, G and B, which decoders take as stored, while `ycc` says YCbCr).
+fn jpeg_samples(data: &[u8], w: usize, h: usize, n: usize, ycc: bool) -> Option<Vec<u8>> {
+    use zune_jpeg::zune_core::{bytestream::ZCursor, colorspace::ColorSpace, options::DecoderOptions};
+    if (w.checked_mul(h)? as u64) > MAX_PIXELS {
+        return None;
+    }
+    let options = DecoderOptions::default().set_strict_mode(false).set_max_width(usize::from(u16::MAX)).set_max_height(usize::from(u16::MAX));
+    let mut dec = zune_jpeg::JpegDecoder::new_with_options(ZCursor::new(data), options);
+    dec.decode_headers().ok()?;
+    if dec.dimensions()? != (w, h) || usize::from(dec.info()?.components) != n {
+        return None;
+    }
+    let out = match (n, ycc, dec.input_colorspace()?) {
+        (1, _, ColorSpace::Luma) => ColorSpace::Luma,
+        (3, true, ColorSpace::YCbCr) => ColorSpace::RGB,
+        // As stored: no conversion either way. The decoder reports an Adobe marker's 0 as CMYK
+        // until it decodes, and then reads three such components as RGB.
+        (3, false, ColorSpace::YCbCr) => ColorSpace::YCbCr,
+        (3, false, ColorSpace::RGB | ColorSpace::CMYK) => ColorSpace::RGB,
+        _ => return None,
+    };
+    dec.set_options(options.jpeg_set_out_colorspace(out));
+    let px = dec.decode().ok()?;
+    (px.len() == w.checked_mul(h)?.checked_mul(n)?).then_some(px)
 }
 
 pub(crate) fn resample(px: &[u8], n: usize, w: u32, h: u32, nw: u32, nh: u32) -> Option<Vec<u8>> {
@@ -258,11 +372,17 @@ fn jpeg(px: &[u8], n: usize, w: u32, h: u32, quality: u8) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Whether [`pixels`] reads `s` as it is drawn: a codec it decodes and no decode array that
-/// changes anything. `None` when the colour space isn't grey or RGB.
+/// Whether [`pixels`] reads `s` as it is drawn: a codec it decodes, no decode array that
+/// changes anything, and for an RGB JPEG a colour transform readers agree on. `None` when the
+/// colour space isn't grey or RGB.
 pub(crate) fn decodable(doc: &Document, s: &Stream) -> Option<bool> {
     let n = components(doc, s.dict.get(b"ColorSpace")?)?;
-    Some(is_dct(s).is_some() && s.dict.get(b"Decode").is_none_or(|d| is_identity_decode(doc, d, n)))
+    let dct = is_dct(s);
+    Some(
+        dct.is_some()
+            && s.dict.get(b"Decode").is_none_or(|d| is_identity_decode(doc, d, n))
+            && (n != 3 || dct == Some(false) || ycc_encoded(doc, s).is_some()),
+    )
 }
 
 /// Whether `decode` is the default decode array for `n` components ([0 1] each), which changes
@@ -274,7 +394,9 @@ fn is_identity_decode(doc: &Document, decode: &Object, n: usize) -> bool {
 }
 
 /// A new image stream from 8-bit samples: the original dictionary with the new size and filter.
-/// A decode array is dropped: only images without one, or with the default one, get here.
+/// A decode array is dropped: only images without one, or with the default one, get here. So are
+/// the filter parameters: the samples are decoded, and a JPEG written here is plain YCbCr with no
+/// Adobe marker, which is what a missing /ColorTransform means.
 fn image_stream(old: &Dict, px: &[u8], n: usize, w: u32, h: u32, compression: Compression, was_dct: bool) -> Option<Stream> {
     let mut d = old.clone();
     for k in [&b"Filter"[..], b"DecodeParms", b"Decode", b"Length", b"DL"] {
@@ -335,7 +457,7 @@ fn process(doc: &Document, s: &Stream, ppi: f64, settings: &ImageSettings, n: us
     } else {
         (w, h)
     };
-    let px = pixels(s, n)?;
+    let px = pixels(doc, s, n)?;
     let px = if (nw, nh) != (w, h) { resample(&px, n, w, h, nw, nh)? } else { px };
     let new = image_stream(d, &px, n, nw, nh, settings.compression, was_dct)?;
     // A soft mask must keep the image's dimensions: resample it with the image (lossless).
@@ -348,7 +470,7 @@ fn process(doc: &Document, s: &Stream, ppi: f64, settings: &ImageSettings, n: us
                 return None;
             }
             let (mw, mh) = (m.dict.int(b"Width")? as u32, m.dict.int(b"Height")? as u32);
-            let mpx = pixels(m, 1)?;
+            let mpx = pixels(doc, m, 1)?;
             let mpx = resample(&mpx, 1, mw, mh, nw, nh)?;
             smask = Some((mr, image_stream(&m.dict, &mpx, 1, nw, nh, Compression::Flate, false)?));
         }

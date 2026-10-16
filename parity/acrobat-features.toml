@@ -7284,8 +7284,8 @@ milestone = "M11"
 status = "partial"
 commands = ["optimize.advanced"]
 tools = ["doc_optimize"]
-evidence = ["crates/optimize/tests/optimize.rs::images_are_measured_where_drawn_and_downsampled", "crates/optimize/tests/optimize.rs::settings_choose_what_happens"]
-notes = "JPEG (quality steps) and ZIP; no JPEG 2000"
+evidence = ["crates/optimize/tests/optimize.rs::images_are_measured_where_drawn_and_downsampled", "crates/optimize/tests/optimize.rs::settings_choose_what_happens", "crates/optimize/tests/jpeg_color_transform.rs::optimize_keeps_the_colours_of_an_rgb_jpeg_whatever_its_colour_transform"]
+notes = "JPEG (quality steps) and ZIP; a JPEG is decoded with its colour transform (Adobe marker, else /ColorTransform), and one whose marker and /ColorTransform disagree is left as it is; no JPEG 2000"
 
 [[feature]]
 id = "optimize.mono-compression"
