@@ -13,8 +13,9 @@
 //! Acrobat keeps a value its field font can't show: the value itself is stored as typed,
 //! [`field_appearance_drawn`] returns the first such character, and the caller marks the widget
 //! (`pdfcraft_fonts::UNDRAWN_MARK`) and asks other viewers to redraw the field
-//! (`/NeedAppearances`). Widths use the approximate metrics of `pdfcraft-fonts` (Helvetica, or one
-//! em per full-width character in composite fonts).
+//! (`/NeedAppearances`). Widths are the field font's own (its `/Widths`, or the standard-14
+//! metrics), Helvetica's when Helvetica stands in, and one em per full-width character in
+//! composite fonts.
 //!
 //! `/MK /R` (0, 90, 180, 270, counterclockwise) lays the content out in the upright box and sets
 //! the appearance `/Matrix` so that box lands on the widget rectangle. Any other value is 0, and
@@ -191,7 +192,12 @@ impl FontText {
 
     fn width(&self, s: &str, size: f64) -> f64 {
         match self {
-            Self::WinAnsi | Self::Simple(_) => helvetica_width(s, size),
+            Self::WinAnsi => helvetica_width(s, size),
+            // The font's `/Widths`, or its standard-14 metrics (Courier, Times) when it has none.
+            Self::Simple(metrics) => match metrics.encode(&s.replace(['\t', '\r', '\n'], " ")) {
+                Some(bytes) => metrics.codes(&bytes).iter().map(|&(code, _)| metrics.width(code)).sum::<f64>() * size,
+                None => helvetica_width(s, size),
+            },
             Self::Unicode(_) => cjk_width(s, size),
         }
     }
