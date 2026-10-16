@@ -223,6 +223,10 @@ fn annots(doc: &Document, page: &Dict) -> Result<Vec<AnnotationCover>, AuditErro
         match dict.name(b"Subtype") {
             Some(b"Redact") => out.push(AnnotationCover::Redact(rect)),
             Some(b"Square") => {
+                let flags = dict.get(b"F").and_then(|f| doc.resolve(f).as_int()).unwrap_or(0);
+                if flags & 2 != 0 || flags & 32 != 0 {
+                    continue;
+                }
                 let alpha = dict.get(b"CA").map(|o| doc.resolve(o)).and_then(|o| o.as_f64()).unwrap_or(1.0);
                 if alpha >= 1.0
                     && let Some(rgb) = annotation_color(doc, &dict, b"IC")
