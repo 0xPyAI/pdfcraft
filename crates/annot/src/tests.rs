@@ -803,7 +803,7 @@ fn replace_text_groups_a_strikeout_and_a_caret() {
     let quads = [[100.0, 720.0, 200.0, 720.0, 100.0, 706.0, 200.0, 706.0]];
     let red = Style { color: [0.89, 0.13, 0.13], opacity: 1.0, width: 1.0, fill: None };
     let blue = Style { color: [0.0, 0.47, 0.84], opacity: 1.0, width: 1.0, fill: None };
-    let i = add_text_replacement(&mut doc, 0, &quads, "new words", "Ada", &red, &blue, &meta("r")).unwrap();
+    let i = add_text_replacement(&mut doc, 0, &quads, "new words", "Ada", &red, &blue, &meta("r"), &meta("r-caret")).unwrap();
     let doc = reopen(&doc);
     let a = list(&doc, 0);
     let strike = &a[i];
@@ -811,13 +811,21 @@ fn replace_text_groups_a_strikeout_and_a_caret() {
     let caret = a.iter().find(|d| d.name(b"Subtype") == Some(b"Caret")).unwrap();
     assert_eq!((text(caret, b"Contents").as_str(), caret.name(b"RT")), ("new words", Some(&b"Group"[..])));
     assert!(caret.reference(b"IRT").is_some());
+    // #2666: the pair needs its own `/NM` each. XFDF names a reply by the `/NM` of what it
+    // replies to, so sharing one id writes `inreplyto` equal to the caret's own `name` and the
+    // pair does not survive an export and import.
+    assert_eq!(text(caret, b"NM").as_str(), "r-caret");
+    assert_eq!(text(strike, b"NM").as_str(), "r");
+    assert_ne!(text(caret, b"NM"), text(strike, b"NM"), "the caret must not carry the strikeout's name");
+    let irt = caret.reference(b"IRT").unwrap();
+    assert_eq!(text(doc.get(irt).as_dict().unwrap(), b"NM").as_str(), "r", "the caret replies to the strikeout");
     let r = rect(caret);
     assert!(r[0] < 200.0 && r[2] > 200.0 && r[1] < 706.0, "at the end of the line, below its baseline: {r:?}");
     // Deleting the strikeout takes the caret with it (the group).
     let mut doc = doc;
     delete_annotation(&mut doc, 0, i).unwrap();
     assert!(!list(&doc, 0).iter().any(|d| d.name(b"Subtype") == Some(b"Caret")));
-    assert!(add_text_replacement(&mut doc, 0, &[], "x", "Ada", &red, &blue, &meta("r")).is_err());
+    assert!(add_text_replacement(&mut doc, 0, &[], "x", "Ada", &red, &blue, &meta("r"), &meta("r-caret")).is_err());
 }
 
 #[test]
