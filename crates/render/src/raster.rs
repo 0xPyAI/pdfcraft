@@ -3034,6 +3034,91 @@ trailer << /Root 1 0 R >>
         }
     }
 
+    /// #2583, #1869: a sticky note carries the NoRotate flag (`/F` bit 5), so on a page with
+    /// `/Rotate` its icon stays upright as displayed, turned about the upper-left corner of its
+    /// `/Rect`, which stays where it is on the page (ISO 32000-2 §12.5.3). It was drawn turned with
+    /// the page, in `/Rect` as displayed (vendored hayro-interpret patch 37). A note without the
+    /// flag still turns with the page. `Annotation::shown_rect` is where the UI hit-tests the
+    /// note, and must be where it is drawn.
+    #[test]
+    fn no_rotate_notes_stay_upright_at_their_corner_on_rotated_pages() {
+        // A 30 × 20 appearance: red in its top-left quarter, blue elsewhere.
+        let content = "0 0 1 rg 0 0 30 20 re f 1 0 0 rg 0 10 15 10 re f";
+        for rotation in [0u16, 90, 180, 270] {
+            let objects = [
+                "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+                format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 140] /Rotate {rotation} /Annots [4 0 R 5 0 R] >>"),
+                // NoRotate (and Print), as PdfCraft and Acrobat save notes.
+                "<< /Type /Annot /Subtype /Text /F 20 /Rect [40 50 70 70] /AP << /N 6 0 R >> >>".to_string(),
+                // The same appearance without the flag.
+                "<< /Type /Annot /Subtype /Text /F 4 /Rect [120 50 150 70] /AP << /N 6 0 R >> >>".to_string(),
+                format!("<< /Type /XObject /Subtype /Form /BBox [0 0 30 20] /Length {} >>\nstream\n{content}\nendstream", content.len()),
+            ];
+            let mut pdf = b"%PDF-1.7\n".to_vec();
+            let mut offsets = Vec::new();
+            for (i, object) in objects.iter().enumerate() {
+                offsets.push(pdf.len());
+                pdf.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", i + 1).as_bytes());
+            }
+            let xref = pdf.len();
+            pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+            for offset in offsets {
+                pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+            }
+            pdf.extend_from_slice(format!("trailer << /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+            let pdf = Arc::new(pdf);
+            let info = crate::inspect(pdf.clone(), None).expect("opens");
+            let page = &info.pages[0];
+            assert_eq!(page.rotation, rotation);
+            let mut r = PageRenderer::new(pdf, RenderConfig::default());
+            let p = r.render(RenderRequest { page: 0, scale: 1.0, ..Default::default() });
+            assert!(p.error.is_none(), "{:?}", p.error);
+            // Displayed-page points are device pixels at scale 1.
+            let px = |x: f32, y: f32| -> [u8; 4] {
+                let (x, y) = (x.clamp(0.0, p.width as f32 - 1.0) as u32, y.clamp(0.0, p.height as f32 - 1.0) as u32);
+                p.rgba[((y * p.width + x) * 4) as usize..][..4].try_into().unwrap()
+            };
+            let red: fn([u8; 4]) -> bool = |c| c[0] > 200 && c[1] < 60 && c[2] < 60;
+            let blue: fn([u8; 4]) -> bool = |c| c[2] > 200 && c[0] < 60 && c[1] < 60;
+            let paper: fn([u8; 4]) -> bool = |c| c.iter().all(|v| *v > 240);
+
+            // The NoRotate note: its upper-left corner (40, 70) is the top-left of an upright
+            // 30 × 20 icon as displayed, red quarter top-left.
+            let [cx, cy] = page.user_to_view(40.0, 70.0);
+            for ((dx, dy), want, what) in [
+                ((7.5, 5.0), red, "red top-left quarter"),
+                ((22.5, 5.0), blue, "blue top-right"),
+                ((7.5, 15.0), blue, "blue bottom-left"),
+                ((22.5, 15.0), blue, "blue bottom-right"),
+                ((-3.0, 10.0), paper, "paper left of the icon"),
+                ((10.0, -3.0), paper, "paper above the icon"),
+                ((33.0, 10.0), paper, "paper right of its 30 pt width"),
+                ((10.0, 23.0), paper, "paper below its 20 pt height"),
+            ] {
+                let c = px(cx + dx, cy + dy);
+                assert!(want(c), "rotation {rotation}: NoRotate note at corner + ({dx}, {dy}) is {c:?}, want {what}");
+            }
+            let note = info.annotations.iter().find(|a| a.no_rotate).expect("the NoRotate note is listed");
+            let shown = note.shown_rect(rotation);
+            let (a, b) = (page.user_to_view(shown[0], shown[1]), page.user_to_view(shown[2], shown[3]));
+            let box_ = [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])];
+            let want = [cx, cy, cx + 30.0, cy + 20.0];
+            assert!(box_.iter().zip(want).all(|(v, w)| (v - w).abs() < 0.01), "rotation {rotation}: shown {box_:?}, drawn {want:?}");
+
+            // The note without the flag turns with the page: its red quarter stays at the
+            // user-space top-left of /Rect, at the displayed top-left only when unturned.
+            let plain = info.annotations.iter().find(|a| !a.no_rotate).expect("the plain note is listed");
+            assert_eq!(plain.shown_rect(rotation), plain.rect);
+            let [rx, ry] = page.user_to_view(127.5, 65.0);
+            let [bx, by] = page.user_to_view(142.5, 55.0);
+            assert!(red(px(rx, ry)) && blue(px(bx, by)), "rotation {rotation}: the plain note's appearance turns with the page");
+            let (a, b) = (page.user_to_view(120.0, 50.0), page.user_to_view(150.0, 70.0));
+            let corner = px(a[0].min(b[0]) + 4.0, a[1].min(b[1]) + 4.0);
+            assert_eq!(red(corner), rotation == 0, "rotation {rotation}: displayed top-left of the plain note is {corner:?}");
+        }
+    }
+
     /// #1968: the highlight appearance other editors write, a transparency group whose content is
     /// filled with `/BM /Multiply`, drew as an opaque block over the text. Every `/Group` form
     /// got a layer of its own, so the Multiply blended with that layer's transparent backdrop

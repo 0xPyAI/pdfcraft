@@ -255,7 +255,8 @@ pub(crate) fn show(
             continue;
         }
         let thread = replies_of(a);
-        if let Some(e) = card(ui, t, a, &thread, view, prefs, allowed, nav) {
+        let rotation = info.pages.get(a.page).map_or(0, |p| p.rotation);
+        if let Some(e) = card(ui, t, a, rotation, &thread, view, prefs, allowed, nav) {
             edit = Some(e);
         }
     }
@@ -267,6 +268,8 @@ fn card(
     ui: &mut egui::Ui,
     t: &Tokens,
     a: &Annotation,
+    // The clockwise `/Rotate` of the comment's page.
+    rotation: u16,
     thread: &[&Annotation],
     view: &mut DocView,
     prefs: &CommentPrefs,
@@ -430,7 +433,7 @@ fn card(
     if click.clicked() {
         view.comments.selected = Some(key);
         view.comments.reply.clear();
-        *nav = Some(Nav::Flash(a.page, a.rect));
+        *nav = Some(Nav::Flash(a.page, a.shown_rect(rotation)));
     }
     if click.double_clicked() && allowed {
         view.comments.editing = Some((a.page, a.index, a.contents.clone().unwrap_or_default()));

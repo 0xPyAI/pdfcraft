@@ -3572,8 +3572,8 @@ milestone = "M5"
 status = "shipped"
 commands = ["comment.note"]
 tools = ["comment_add"]
-evidence = ["crates/ui-egui/tests/comments.rs::sticky_note_composer_posts_and_returns_to_select", "crates/ui-egui/tests/comments.rs::the_comment_composer_shortcut_only_posts_the_focused_editor", "crates/annot/src/tests.rs::every_tool_creates_a_drawable_comment"]
-notes = "our own Comment/Note icon drawings, with a pop-up; Ctrl+Enter (also Command+Enter) posts from the focused editor, Shift+Enter adds a newline"
+evidence = ["crates/ui-egui/tests/comments.rs::sticky_note_composer_posts_and_returns_to_select", "crates/ui-egui/tests/comments.rs::the_comment_composer_shortcut_only_posts_the_focused_editor", "crates/annot/src/tests.rs::every_tool_creates_a_drawable_comment", "crates/engine/src/tests.rs::sticky_notes_stay_upright_where_they_are_placed_on_rotated_pages", "crates/render/src/raster.rs::no_rotate_notes_stay_upright_at_their_corner_on_rotated_pages", "crates/ui-egui/tests/comments.rs::a_sticky_note_on_a_turned_page_is_picked_where_it_is_drawn"]
+notes = "our own Comment/Note icon drawings, with a pop-up; Ctrl+Enter (also Command+Enter) posts from the focused editor, Shift+Enter adds a newline. Notes are saved with the NoRotate flag, and it is honoured: on a page with /Rotate the icon stays upright with its top-left where it was placed, and is selected and hovered there (#2583). Missing: NoZoom (the icon scales with the zoom); printing and flattening still place the icon in its /Rect, turned with the page"
 
 [[feature]]
 id = "comment.highlight"

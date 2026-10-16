@@ -21,7 +21,7 @@ use hayro_syntax::object::dict::keys::{
     ACTUAL_TEXT, ANNOTS, AP, AS, C, CA, F, MCID, N, OC, QUADPOINTS, RECT, SUBTYPE,
 };
 use hayro_syntax::object::{Array, Dict, Object, Rect, Stream, dict_or_stream};
-use hayro_syntax::page::{ContentReader, Page, Resources};
+use hayro_syntax::page::{ContentReader, Page, Resources, Rotation};
 use hayro_syntax::MAX_DECODED_STREAM;
 use kurbo::{Affine, BezPath, Point, Shape};
 use smallvec::smallvec;
@@ -249,6 +249,13 @@ pub fn interpret_page<'a>(
                     annot_rect.x0 - sx * transformed_rect.x0,
                     annot_rect.y0 - sy * transformed_rect.y0,
                 ]);
+                // PdfCraft patch (37): NoRotate (bit 5) keeps the appearance upright as the page is
+                // displayed (ISO 32000-2 §12.5.3).
+                let affine = if flags & 16 != 0 && no_rotate_applies(&annot) {
+                    no_rotate_turn(page.rotation(), &annot_rect) * affine
+                } else {
+                    affine
+                };
 
                 // PdfCraft patch: a /BBox or /Matrix that collapses the appearance box to a line
                 // or a point leaves nothing to map onto /Rect: the scales above divide by zero,
@@ -280,6 +287,31 @@ pub fn interpret_page<'a>(
         }
         device.end_annotations();
     }
+}
+
+/// PdfCraft patch (37): whether the NoRotate flag turns this annotation's appearance. Form fields
+/// and links are left in `/Rect`: PdfCraft takes their click targets from it.
+fn no_rotate_applies(annot: &Dict<'_>) -> bool {
+    !matches!(
+        annot.get::<hayro_syntax::object::Name<'_>>(SUBTYPE).as_deref(),
+        Some(b"Widget" | b"Link")
+    )
+}
+
+/// PdfCraft patch (37): the user-space turn that keeps a NoRotate annotation upright on a page
+/// with `/Rotate`. The page is shown turned clockwise, so the appearance (already fitted to
+/// `/Rect`) is turned as far counterclockwise about the rectangle's upper-left corner, which stays
+/// where it is on the page (ISO 32000-2 §12.5.3). Its width then runs across the displayed page
+/// and its height down from that corner.
+fn no_rotate_turn(rotation: Rotation, rect: &kurbo::Rect) -> Affine {
+    let (cos, sin) = match rotation {
+        Rotation::None => return Affine::IDENTITY,
+        Rotation::Horizontal => (0.0, 1.0),
+        Rotation::Flipped => (-1.0, 0.0),
+        Rotation::FlippedHorizontal => (0.0, -1.0),
+    };
+    let (x, y) = (rect.x0.min(rect.x1), rect.y0.max(rect.y1));
+    Affine::new([cos, sin, -sin, cos, x - (cos * x - sin * y), y - (sin * x + cos * y)])
 }
 
 /// PdfCraft patch: the normal appearance of a Highlight annotation that has none (ISO 32000-2

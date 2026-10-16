@@ -3354,7 +3354,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 let freehand = matches!(tool, QuickTool::Comment(comments::CommentTool::Ink | comments::CommentTool::Eraser));
                 let gesturing = view.comments.gesture.is_some() || freehand;
                 for a in info.annotations.iter().filter(|a| a.page == i && !gesturing) {
-                    let sr = xf.user_rect(info, i, a.rect);
+                    let sr = xf.user_rect(info, i, a.shown_rect(info.pages.get(i).map_or(0, |p| p.rotation)));
                     let hidden = prefs.hide_empty_highlight_hover && a.subtype == "Highlight" && a.contents.as_deref().is_none_or(str::is_empty);
                     if sr.contains(p)
                         && hover_text.is_none()
@@ -5141,6 +5141,7 @@ mod tests {
             locked: false,
             intent: None,
             fill_sign,
+            no_rotate: false,
         }
     }
 

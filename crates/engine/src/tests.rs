@@ -196,6 +196,47 @@ fn rubber_stamps_point_left_as_displayed_on_rotated_pages() {
     }
 }
 
+/// #2583, #1869: a sticky note placed on a turned page is drawn upright, with its top-left as
+/// displayed where it was placed (the corner its `/Rect` keeps, as the NoRotate flag it is saved
+/// with asks), exactly as on an unturned page, including after save. The comment list's
+/// `shown_rect`, which the UI hit-tests, is that square.
+#[test]
+fn sticky_notes_stay_upright_where_they_are_placed_on_rotated_pages() {
+    // The displayed 20 × 20 pt square whose top-left is (100, 40), in device pixels at scale 2.
+    let crop = |rendered: &pdfcraft_render::RenderedPage| -> Vec<[u8; 4]> {
+        (80..120).flat_map(|y| (200..240).map(move |x| (x, y))).map(|(x, y)| stamp_pixel(rendered, x, y)).collect()
+    };
+    let mut upright = None;
+    for degrees in [0, 90, 180, 270] {
+        let (mut session, id) = rotated_blank(degrees);
+        let info = session.get(id).unwrap().info.pages[0].clone();
+        let [x, y] = info.view_to_user(100.0, 40.0);
+        let shape = Shape::Note { at: [f64::from(x), f64::from(y)], icon: NoteIcon::Comment };
+        let style = Style::default_for(&shape);
+        session.apply(id, Edit::AddAnnotation(NewAnnotation { page: 0, style, shape, contents: "Turned".into(), author: "Test".into() })).unwrap();
+        let mut check = |session: &Session, id: DocId| {
+            let doc = session.get(id).unwrap();
+            let info = &doc.info.pages[0];
+            let note = &doc.info.annotations[0];
+            assert!(note.no_rotate, "rotation {degrees}: notes are saved NoRotate");
+            let shown = note.shown_rect(info.rotation);
+            let (a, b) = (info.user_to_view(shown[0], shown[1]), info.user_to_view(shown[2], shown[3]));
+            let shown = [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])];
+            assert!(shown.iter().zip([100.0, 40.0, 120.0, 60.0]).all(|(v, w)| (v - w).abs() < 0.01), "rotation {degrees}: shown at {shown:?}");
+            let icon = crop(&render_page(session, id));
+            let reference = upright.get_or_insert_with(|| icon.clone());
+            assert!(reference.iter().filter(|c| c.iter().any(|v| *v < 200)).count() > 100, "the note's icon is drawn");
+            let off = icon.iter().zip(reference.iter()).filter(|(a, b)| a.iter().zip(b.iter()).any(|(a, b)| a.abs_diff(*b) > 48)).count();
+            assert!(off <= 8, "rotation {degrees}: {off} of the icon's {} pixels differ from the unturned page's", icon.len());
+        };
+        check(&session, id);
+        let saved = session.save_bytes(id).unwrap();
+        let mut reopened = Session::new().with_clock(|| 1_700_000_000);
+        let again = reopened.open("drawing.pdf", None, saved, None).unwrap();
+        check(&reopened, again);
+    }
+}
+
 /// Fill & Sign text and text boxes read across as displayed on turned pages (scanned forms are
 /// often stored sideways with `/Rotate`), including after save.
 #[test]

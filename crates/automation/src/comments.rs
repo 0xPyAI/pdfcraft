@@ -3,9 +3,7 @@
 //! Geometry follows the automation convention: points from the top-left of the displayed page,
 //! y down. It is converted to PDF user space (crop box, `/Rotate`) here.
 
-use pdfcraft_engine::{
-    Edit, LineEnding, Markup, NOTE_SIZE, NewAnnotation, NoteIcon, ReviewState, Rgb, Shape, StampGroup, StampKind, Style, SummarySort,
-};
+use pdfcraft_engine::{Edit, LineEnding, Markup, NewAnnotation, NoteIcon, ReviewState, Rgb, Shape, StampGroup, StampKind, Style, SummarySort};
 use pdfcraft_render::{Annotation, PageInfo};
 use serde_json::{Value, json};
 
@@ -79,13 +77,11 @@ fn rect_to_user(p: &PageInfo, r: [f64; 4]) -> [f64; 4] {
 }
 
 /// The engine's `at` for a note or attachment icon whose top-left corner *as displayed* is the
-/// view point (x, y): the top-left (`[x0, y1]`) of the icon's square in user space. Converting
-/// the point alone is only right on unrotated pages — under `/Rotate` that corner of the
-/// displayed square is another corner of the user-space one, and the icon lands one icon-width
-/// away from where it was asked for.
+/// view point (x, y): the upper-left corner (`[x0, y1]`) of its `/Rect`. Notes and attachments
+/// are NoRotate, so on a turned page the icon is drawn upright with its top-left at that corner
+/// (ISO 32000-2 §12.5.3), and `comment_list` reports that square (`Annotation::shown_rect`).
 fn icon_anchor(p: &PageInfo, x: f64, y: f64) -> [f64; 2] {
-    let r = rect_to_user(p, [x, y, x + NOTE_SIZE, y + NOTE_SIZE]);
-    [r[0], r[3]]
+    to_user(p, x, y)
 }
 
 /// A user-space rectangle as the displayed-page rectangle every tool reports and accepts:
@@ -182,7 +178,7 @@ impl Automation {
                 "author": c.author,
                 "contents": c.contents,
                 "modified": c.modified,
-                "rect": rect_to_view(p, c.rect),
+                "rect": rect_to_view(p, c.shown_rect(p.rotation)),
                 "color": c.color.map(hex),
             })
         };
@@ -626,7 +622,12 @@ impl Automation {
             edits.push(Edit::FontSizeAnnotation { page, index, size });
         }
         if let Some(r) = a.nums::<4>("rect")? {
-            edits.push(Edit::ResizeAnnotation { page, index, rect: rect_to_user(&info, r) });
+            // The rectangle as comment_list reports it: where the comment is drawn.
+            let doc = self.doc(a)?;
+            let rect = rect_to_user(&info, r);
+            let rect =
+                doc.info.annotations.iter().find(|c| c.page == page && c.index == index).map_or(rect, |c| c.rect_for_shown(rect, info.rotation));
+            edits.push(Edit::ResizeAnnotation { page, index, rect });
         }
         if let Some([dx, dy]) = a.nums::<2>("move")? {
             let (o, d) = (to_user(&info, 0.0, 0.0), to_user(&info, dx, dy));

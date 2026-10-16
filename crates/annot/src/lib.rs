@@ -751,6 +751,17 @@ fn annotation_flags(doc: &Document, d: &Dict) -> i64 {
     d.get(b"F").and_then(|f| doc.resolve(f).as_int()).unwrap_or(0)
 }
 
+/// Whether the renderer keeps the annotation upright on a turned page: the NoRotate flag, with
+/// `/F` read as the renderer reads it (a real truncated, a value that isn't a `u32` no flags).
+fn drawn_upright(doc: &Document, d: &Dict) -> bool {
+    let f = match d.get(b"F").map(|f| doc.resolve(f)).as_deref() {
+        Some(Object::Int(i)) => *i,
+        Some(Object::Real(r)) => *r as i64,
+        _ => 0,
+    };
+    u32::try_from(f).is_ok_and(|f| i64::from(f) & FLAG_NO_ROTATE != 0)
+}
+
 /// Whether any page has a Fill & Sign annotation that flatten would bake in (not hidden).
 pub fn has_visible_fill_sign(doc: &Document) -> bool {
     let Ok(pages) = page_refs(doc) else { return false };
@@ -2082,6 +2093,8 @@ pub struct Summary {
     pub intent: Option<String>,
     /// A Fill & Sign mark ([`is_fill_sign`]).
     pub fill_sign: bool,
+    /// The NoRotate flag (`/F` bit 5), as `pdfcraft_render::Annotation::no_rotate`.
+    pub no_rotate: bool,
 }
 
 fn text_value(doc: &Document, d: &Dict, key: &[u8]) -> Option<String> {
@@ -2155,6 +2168,7 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
                 locked: annotation_flags(doc, d) & FLAG_LOCKED != 0,
                 intent: d.get(b"IT").and_then(|o| doc.resolve(o).as_name().map(|n| String::from_utf8_lossy(n).into_owned())),
                 fill_sign: is_fill_sign(doc, d),
+                no_rotate: drawn_upright(doc, d),
             });
         }
     }

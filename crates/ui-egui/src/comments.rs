@@ -553,8 +553,14 @@ impl PageCx<'_> {
         self.xf.norm_to_screen(v[0] / self.xf.pw, v[1] / self.xf.ph)
     }
 
+    /// The page's clockwise `/Rotate`.
+    fn rotation(&self) -> u16 {
+        self.info.pages.get(self.page).map_or(0, |p| p.rotation)
+    }
+
+    /// Where a comment is drawn on screen (a sticky note stays upright on a turned page).
     fn screen_rect(&self, a: &Annotation) -> Rect {
-        self.xf.user_rect(self.info, self.page, a.rect)
+        self.xf.user_rect(self.info, self.page, a.shown_rect(self.rotation()))
     }
 
     /// Top-level comments on this page, in paint order.
@@ -625,16 +631,13 @@ impl PageCx<'_> {
         if let Some(Edit::ResizeAnnotation { page, index, rect }) = pending
             && (*page, *index) == (self.page, a.index)
         {
-            return self.xf.user_rect(self.info, self.page, rect.map(|v| v as f32));
+            return self.xf.user_rect(self.info, self.page, a.shown(*rect, self.rotation()).map(|v| v as f32));
         }
         if let Some(Edit::MoveAnnotation { page, index, dx, dy }) = pending
             && (*page, *index) == (self.page, a.index)
         {
-            return self.xf.user_rect(
-                self.info,
-                self.page,
-                [a.rect[0] + *dx as f32, a.rect[1] + *dy as f32, a.rect[2] + *dx as f32, a.rect[3] + *dy as f32],
-            );
+            let r = a.shown_rect(self.rotation());
+            return self.xf.user_rect(self.info, self.page, [r[0] + *dx as f32, r[1] + *dy as f32, r[2] + *dx as f32, r[3] + *dy as f32]);
         }
         match (gesture, pointer) {
             (Some(Gesture::Move { page, index, from }), Some(p)) if (*page, *index) == (self.page, a.index) => r.translate(p - *from),
@@ -1091,7 +1094,7 @@ fn select_input(
                     let from_rect = cx.screen_rect(a);
                     let shift = ui.input(|i| i.modifiers.shift);
                     let r = resized(from_rect, handle, p - from, corner_ratio(from_rect, aspect_ratio, shift));
-                    let rect = cx.rect_to_user(r);
+                    let rect = a.rect_for_shown(cx.rect_to_user(r), cx.rotation());
                     if r.width() >= 4.0 && r.height() >= 4.0 {
                         view.pending_edit = Some(Edit::ResizeAnnotation { page, index, rect });
                     }
@@ -1131,7 +1134,7 @@ fn select_input(
         cv.selected = Some((cx.page, a.index));
         cv.composer = Some(Composer {
             page: cx.page,
-            at: [a.rect[2] as f64, a.rect[3] as f64],
+            at: edit_anchor(cx.info, a),
             kind: ComposerKind::Edit(a.index),
             text: a.contents.clone().unwrap_or_default(),
             focus: true,
@@ -1330,6 +1333,15 @@ fn erase(cx: &PageCx<'_>, path: &[[f64; 2]]) -> Option<Edit> {
     hits.sort_unstable_by(|a, b| b.cmp(a));
     let edits = hits.into_iter().map(|index| Edit::EraseInk { page: cx.page, index, path: path.to_vec(), radius }).collect();
     Some(Edit::Batch { label: "Erase".into(), edits })
+}
+
+/// Where the composer for editing `a` opens: the top-right corner of the comment as drawn on the
+/// displayed page.
+fn edit_anchor(info: &DocInfo, a: &Annotation) -> [f64; 2] {
+    let Some(p) = info.pages.get(a.page) else { return [f64::from(a.rect[2]), f64::from(a.rect[3])] };
+    let r = a.shown_rect(p.rotation);
+    let (u, v) = (p.user_to_view(r[0], r[1]), p.user_to_view(r[2], r[3]));
+    p.view_to_user(u[0].max(v[0]), u[1].min(v[1])).map(f64::from)
 }
 
 fn new_comment(cx: &PageCx<'_>, tool: CommentTool, shape: Shape, contents: String) -> Edit {
@@ -1588,7 +1600,7 @@ pub(crate) fn context_menu(ui: &mut egui::Ui, view: &mut DocView, info: &DocInfo
             if ui.add_enabled(allowed, egui::Button::new(tl!("Edit text…"))).clicked() {
                 view.comments.composer = Some(Composer {
                     page,
-                    at: [a.rect[2] as f64, a.rect[3] as f64],
+                    at: edit_anchor(info, a),
                     kind: ComposerKind::Edit(index),
                     text: a.contents.clone().unwrap_or_default(),
                     focus: true,
