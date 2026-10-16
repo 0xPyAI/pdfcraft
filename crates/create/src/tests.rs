@@ -124,6 +124,18 @@ fn text_is_wrapped_and_paginated() {
     assert!(content(p.last().unwrap()).contains("(After a form feed) Tj"), "a form feed starts a page");
 }
 
+#[test]
+fn text_keeps_leading_spaces_and_tabs() {
+    let doc = reopen(&from_text("t", "    indented\n\ttabbed\nplain", LETTER, 11.0).unwrap());
+    let p = pages(&doc);
+    let c = doc.resolve(p[0].get(b"Contents").unwrap());
+    let Object::Stream(s) = &*c else { panic!() };
+    let content = String::from_utf8_lossy(&s.decoded().unwrap()).into_owned();
+    assert!(content.contains("(    indented) Tj"), "{content}");
+    assert!(content.contains("(    tabbed) Tj"), "{content}");
+    assert!(content.contains("(plain) Tj"), "{content}");
+}
+
 /// Text Helvetica can't draw is refused with its line and character, never set as `?`; text
 /// PdfCraft generates writes such characters as [U+XXXX] and says so.
 #[test]
