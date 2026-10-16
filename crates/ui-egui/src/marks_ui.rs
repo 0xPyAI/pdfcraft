@@ -223,6 +223,7 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, kind: M
                 ui.label(tl!("Start page number"));
                 ui.add(egui::DragValue::new(&mut d.hf.start_number).range(1..=999_999));
             });
+            ui.add(widgets::checkbox(&mut d.hf.shrink, tl!("Shrink the page content to make room for the header and footer")));
         }
         MarkKind::Watermark => {
             ui.horizontal(|ui| {
@@ -306,11 +307,20 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, kind: M
     ui.add_space(8.0);
     // Preview of the current page.
     let hf = d.hf.clone();
+    let size_h = page.1.max(1.0);
     let (wm, bg, fit) = (d.wm.clone(), d.bg.clone(), d.fit);
     let file_name = d.use_file.then(|| d.file.as_ref().map(|f| f.0.clone())).flatten();
     ui.horizontal(|ui| {
         preview(ui, t, page, |p, r, s| match kind {
             MarkKind::HeaderFooter => {
+                if hf.shrink {
+                    // The band the page content shrinks into, centred across.
+                    let (top, bottom) = hf.bands();
+                    let k = ((size_h - top - bottom) / size_h).clamp(0.0, 1.0) as f32;
+                    let band = Rect::from_min_max(pos2(r.left(), r.top() + top as f32 * s), pos2(r.right(), r.bottom() - bottom as f32 * s));
+                    let content = Rect::from_center_size(band.center(), vec2(r.width() * k, band.height().max(0.0)));
+                    p.rect_filled(content, CornerRadius::ZERO, Color32::from_gray(232));
+                }
                 for (k, text) in hf.text.iter().enumerate() {
                     if text.trim().is_empty() {
                         continue;

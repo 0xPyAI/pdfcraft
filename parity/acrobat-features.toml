@@ -2433,11 +2433,11 @@ title = "Shrink document to avoid overwriting content"
 area = "C"
 tier = "P2"
 milestone = "M7"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "shipped"
+commands = ["edit.header_footer"]
+tools = ["doc_header_footer"]
+evidence = ["crates/edit/src/tests.rs::shrink_scales_the_original_content_into_the_band_between_header_and_footer", "crates/edit/src/tests.rs::shrink_follows_the_display_space_of_a_rotated_page", "crates/edit/src/tests.rs::shrink_is_undone_by_remove_and_not_doubled_by_update", "crates/automation/tests/automation.rs::a_shrinking_header_and_footer_moves_the_page_content_out_of_their_way_through_tools", "crates/ui-egui/tests/ui_group/marks.rs::header_and_footer_dialog_can_shrink_the_page_content"]
+notes = "#2140: the page's original content is scaled evenly into the band the header and footer leave free (margin, tallest box, half the font size of clearance), centred across, in display space; Remove and Update undo it. Not moved yet: annotations (links, comments, form fields) and PdfCraft's own added text and images; not compared side by side with Acrobat's exact scale"
 
 [[feature]]
 id = "edit.watermark-add-text"
