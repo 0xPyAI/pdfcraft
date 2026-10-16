@@ -2599,3 +2599,83 @@ key	Space	Space
 @plural	{n} file|{n} files	{n} ไฟล์
 @plural	{n} comment|{n} comments	{n} ความคิดเห็น
 @plural	{n} result|{n} results	{n} ผลลัพธ์
+	Hide hover previews for highlights without comment text	ซ่อนตัวอย่างเมื่อชี้เมาส์ที่การเน้นข้อความซึ่งไม่มีข้อความความคิดเห็น
+	Set page transitions	ตั้งค่าการเปลี่ยนหน้า
+	What takes up the space in this file, by kind of content.	พื้นที่ในไฟล์นี้ถูกใช้ไปกับอะไรบ้าง แยกตามชนิดเนื้อหา
+	Digitally signed by	ลงนามแบบดิจิทัลโดย
+	DN: 	DN: 
+	Reason: 	เหตุผล: 
+	Location: 	สถานที่: 
+	Date: 	วันที่: 
+	The labels are in English: the signature's font can't draw them in this language.	ป้ายกำกับเป็นภาษาอังกฤษ เพราะฟอนต์ของลายเซ็นแสดงภาษานี้ไม่ได้
+	Font size	ขนาดแบบอักษร
+	Make Properties Default	ตั้งคุณสมบัติเป็นค่าเริ่มต้น
+	Save over the changed file?	บันทึกทับไฟล์ที่ถูกเปลี่ยนแปลงหรือไม่
+	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	“{name}” ถูกเปลี่ยนแปลงบนดิสก์หลังจากเปิดหรือบันทึกครั้งล่าสุด ถ้าบันทึกตอนนี้ รุ่นที่ใหม่กว่านั้นจะถูกแทนที่ด้วยรุ่นนี้
+	Save anyway	บันทึกทับเลย
+	Sending sheet {s} of {n} to {printer}…	กำลังส่งแผ่นที่ {s} จาก {n} ไปยัง {printer}…
+	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	ไม่พบเครื่องพิมพ์ ตรวจสอบว่าติดตั้งเครื่องพิมพ์แล้วและบริการ Print Spooler กำลังทำงาน แล้วเปิดหน้าต่างพิมพ์อีกครั้ง
+	Collapse all pages	ยุบทุกหน้า
+	Expand all pages	ขยายทุกหน้า
+	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	ไฟล์นี้ถูกเปลี่ยนแปลงบนดิสก์ "โหลดใหม่" จะแสดงรุ่นใหม่และทิ้งการเปลี่ยนแปลงที่ยังไม่ได้บันทึก ส่วน "บันทึก" จะแทนที่ไฟล์ด้วยรุ่นนี้
+	Scroll speed (mouse wheel and arrow keys)	ความเร็วการเลื่อน (ล้อเมาส์และปุ่มลูกศร)
+	Cut Image	ตัดรูปภาพ
+	Redact Image	ปิดทับรูปภาพ
+	Create Link…	สร้างลิงก์…
+	Recognize Text…	รู้จำข้อความ…
+	Open in Full Screen mode?	เปิดในโหมดเต็มหน้าจอหรือไม่
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	เอกสารนี้ขอเปิดในโหมดเต็มหน้าจอ หน้าเอกสารจะเต็มหน้าจอและไม่แสดงสิ่งอื่น กด Esc เพื่อออกได้ทุกเมื่อ
+	Full Screen	เต็มหน้าจอ
+	Not now	ไม่ใช่ตอนนี้
+	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	คุณกำลังดูฉบับที่เซ็นแล้วของ “{from}” (ฉบับแก้ไข {rev}) ซึ่งเป็นสำเนา ณ ขณะนั้น การเปลี่ยนแปลงที่นี่จะไม่มีผลกับต้นฉบับ
+	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.	คุณกำลังดูฉบับแก้ไข {rev} ของ “{from}” ซึ่งเป็นสำเนา ณ ขณะนั้น การเปลี่ยนแปลงที่นี่จะไม่มีผลกับต้นฉบับ
+	Turn upside down (180°)	กลับหัว (180°)
+	4 x 6 in label (101.6 x 152.4 mm)	ฉลากขนาด 4 x 6 นิ้ว (101.6 x 152.4 มม.)
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	ตัดแต่ละหน้าให้เหลือเฉพาะส่วนที่พิมพ์ หมุนให้ตั้งตรง และปรับให้พอดีกับแผ่นโดยไม่ยืด หนึ่งฉลากต่อหนึ่งแผ่น
+	Find untagged content	ค้นหาเนื้อหาที่ไม่มีแท็ก
+	No untagged content was found.	ไม่พบเนื้อหาที่ไม่มีแท็ก
+	Found {n} untagged content problems.	พบปัญหาเนื้อหาที่ไม่มีแท็ก {n} รายการ
+	Tag form fields	ติดแท็กฟิลด์ฟอร์ม
+	Mark as artifact	ระบุเป็นส่วนตกแต่ง
+	Remove this leaf tag from reading order and mark its direct content as an artifact	นำแท็กปลายสุดนี้ออกจากลำดับการอ่าน และระบุเนื้อหาโดยตรงของแท็กเป็นส่วนตกแต่ง
+	Mark content as artifact	ระบุเนื้อหาเป็นส่วนตกแต่ง
+	Word count	จำนวนคำ
+	Current page only	เฉพาะหน้าปัจจุบัน
+	Exclude tagged tables	ไม่นับตารางที่ติดแท็ก
+	Exclude tagged code blocks	ไม่นับบล็อกโค้ดที่ติดแท็ก
+	Exclude image/OCR text	ไม่นับข้อความในรูปภาพ/OCR
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	การยกเว้นใช้แท็กของ PDF ตารางและโค้ดที่ไม่มีแท็กยังคงถูกนับ การไม่นับรูปภาพจะไม่นับข้อความที่มองไม่เห็นด้วย
+	Words	คำ
+	Characters	ตัวอักษร
+	Characters without spaces	ตัวอักษรไม่รวมช่องว่าง
+	Pages counted	จำนวนหน้าที่นับ
+	Some pages contain no countable text. Scanned images need OCR first.	บางหน้าไม่มีข้อความที่นับได้ ภาพสแกนต้องทำ OCR ก่อน
+	Some content could not be classified safely and was kept in the count.	เนื้อหาบางส่วนจำแนกได้ไม่แน่ชัด จึงยังนับรวมไว้
+	Counting words… {n} pages read	กำลังนับคำ… อ่านแล้ว {n} หน้า
+	Word counting stopped unexpectedly.	การนับคำหยุดทำงานโดยไม่คาดคิด
+	Word count…	นับจำนวนคำ…
+@id	file.word_count	นับจำนวนคำ…
+	Standard	มาตรฐาน
+	Mobile	อุปกรณ์พกพา
+	Merge image fragments	รวมชิ้นส่วนรูปภาพ
+	Optimizing… merging image fragments	กำลังปรับให้เหมาะสม… รวมชิ้นส่วนรูปภาพ
+	Side by side	เคียงข้างกัน
+	New file only	เฉพาะไฟล์ใหม่
+	Old file: {name}	ไฟล์เก่า: {name}
+	New file: {name}	ไฟล์ใหม่: {name}
+	Print as image	พิมพ์เป็นรูปภาพ
+	Resolution:	ความละเอียด:
+	Use it when a printer skips text, shading or transparency. The print is no longer searchable text; with Print in grayscale, the pictures are grey.	ใช้เมื่อเครื่องพิมพ์พิมพ์ข้อความ การไล่เฉดสี หรือความโปร่งใสไม่ออก งานพิมพ์จะไม่เป็นข้อความที่ค้นหาได้ และถ้าเลือก "พิมพ์เป็นระดับสีเทา" รูปภาพจะเป็นสีเทา
+	Crop Image	ครอบตัดรูปภาพ
+	Remove Crop	เอาการครอบตัดออก
+	Trim the picture with its handles; Enter or Done applies	ตัดขอบรูปด้วยจุดจับ กด Enter หรือ "เสร็จสิ้น" เพื่อใช้
+	Redaction mark appearance	ลักษณะของเครื่องหมายปิดทับ
+	Outline colour:	สีเส้นขอบ:
+	Fill colour:	สีเติม:
+	Shown while the pointer is over a mark.	แสดงขณะชี้เมาส์อยู่บนเครื่องหมาย
+	Opacity:	ความทึบ:
+	Make properties default	ตั้งคุณสมบัติเป็นค่าเริ่มต้น
+	Pages selected	หน้าที่เลือก
+	Page properties	คุณสมบัติหน้า
+	The password must have at least 8 characters.	รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร
+theme	Appearance	ลักษณะที่ปรากฏ
