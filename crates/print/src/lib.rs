@@ -149,6 +149,19 @@ pub enum BookletSubset {
     BackOnly,
 }
 
+/// How a booklet goes through the printer (#2707): it decides two-sided printing itself, as
+/// Acrobat does (its Print dialog hides Two-sided while Booklet is chosen; Using Acrobat X Pro,
+/// Print dialog box options: "Acrobat automatically enables duplex printing, if available, for
+/// booklet printing"). Both sides flip on the short edge, the fold of a 2-up sheet turned
+/// sideways; front side only or back side only is one pass of a manual duplex and prints
+/// single-sided.
+pub fn booklet_duplex(subset: BookletSubset) -> spool::Duplex {
+    match subset {
+        BookletSubset::BothSides => spool::Duplex::ShortEdge,
+        BookletSubset::FrontOnly | BookletSubset::BackOnly => spool::Duplex::Off,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Binding {
     #[default]

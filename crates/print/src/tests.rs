@@ -961,3 +961,11 @@ fn odd_and_even_pages_are_page_numbers_not_places_in_the_range() {
     // A range with no page of the kind prints nothing.
     assert_eq!(select_pages(12, Some("3, 5"), &[], Subset::Even, false), Err(PrintError::NoPages));
 }
+
+/// #2707: a booklet's two-sided setting follows its subset.
+#[test]
+fn a_booklet_prints_both_sides_on_the_short_edge() {
+    assert_eq!(booklet_duplex(BookletSubset::BothSides), spool::Duplex::ShortEdge);
+    assert_eq!(booklet_duplex(BookletSubset::FrontOnly), spool::Duplex::Off);
+    assert_eq!(booklet_duplex(BookletSubset::BackOnly), spool::Duplex::Off);
+}
