@@ -603,6 +603,24 @@ fn grab_at(boxes: &[Rect], p: Pos2, upright: bool) -> Option<(usize, Grip)> {
     })
 }
 
+/// A paragraph's box on screen: its text rect (user space), with a little room around it.
+fn paragraph_box(xf: &PageXform, info: &DocInfo, page: usize, rect: [f64; 4]) -> Rect {
+    xf.user_rect(info, page, rect.map(|v| v as f32)).expand(2.0)
+}
+
+/// The width handles need the page upright (or upside down): on a quarter-turned page the
+/// screen's horizontal is the paragraph's vertical.
+fn has_edges(info: &DocInfo, page: usize) -> bool {
+    info.pages.get(page).is_some_and(|p| p.rotation % 180 == 0)
+}
+
+/// Whether a press at `p` takes hold of the width handle of one of the paragraphs `rects` (user
+/// space). The handle is drawn half outside the box and grabs from a little further out still,
+/// where a press is not on the box itself, so area selection must leave it to [`page_input`].
+pub(crate) fn grabs_edge(xf: &PageXform, info: &DocInfo, page: usize, mut rects: impl Iterator<Item = [f64; 4]>, p: Pos2) -> bool {
+    has_edges(info, page) && rects.any(|r| edge_at(paragraph_box(xf, info, page, r), p).is_some())
+}
+
 /// What a right-click on a selected image asks for.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum ImageAction {
@@ -988,7 +1006,7 @@ pub(crate) fn page_input(
         view.block_drag = None;
         return true;
     }
-    let boxes: Vec<Rect> = lines.iter().map(|l| xf.user_rect(info, page, l.rect.map(|v| v as f32)).expand(2.0)).collect();
+    let boxes: Vec<Rect> = lines.iter().map(|l| paragraph_box(xf, info, page, l.rect)).collect();
     let painter = ui.painter();
     let active = view.line_editor.as_ref().filter(|e| e.page == page).map(|e| e.block);
     for (i, b) in boxes.iter().enumerate() {
@@ -1008,9 +1026,7 @@ pub(crate) fn page_input(
     if !allow_interaction {
         return false;
     }
-    // The width handle needs the page upright (or upside down): on a quarter-turned page the
-    // screen's horizontal is the paragraph's vertical.
-    let upright = info.pages.get(page).is_some_and(|p| p.rotation % 180 == 0);
+    let upright = has_edges(info, page);
     let draw_handles = |b: Rect| {
         for h in width_handles(b) {
             painter.rect(h, CornerRadius::same(2), Color32::WHITE, Stroke::new(1.0, ACCENT), egui::StrokeKind::Middle);
