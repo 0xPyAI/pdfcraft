@@ -1408,9 +1408,29 @@ fn a_picked_picture_that_is_deleted_in_edit_mode_loses_its_highlight() {
     h.drop_at(at);
     h.run_steps(2);
     h.key_press(egui::Key::Delete);
-    h.run_steps(4);
+    // One frame, no more input: the highlight goes at once, it does not wait for a click.
+    h.run_steps(1);
     assert!(h.state().session.get(id).unwrap().page_images(0).is_empty(), "the picture is gone");
     assert_eq!(h.state().views[i].picked_image, None, "and so is its highlight");
+}
+
+/// The highlight goes in the very edit that removes the picture, not on a later frame: the window
+/// only redraws on the next input, so waiting for one leaves the highlight on screen until a click.
+#[test]
+fn an_edit_clears_the_picked_picture_at_once() {
+    let (_, mut h) = picture_harness();
+    let i = h.state().active.unwrap();
+    let at = h.state().views[i].page_screen_rect(0).expect("on screen").center();
+    h.hover_at(at);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+    h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+    h.run_steps(2);
+    assert!(h.state().views[i].picked_image.is_some(), "picked with the Select tool");
+    let delete = pdfcraft_engine::Edit::EditPageImage { page: 0, index: 0, change: pdfcraft_engine::ImageEdit::Delete };
+    assert!(h.state_mut().apply_edit(delete));
+    // No frame has run since the edit.
+    assert_eq!(h.state().views[i].picked_image, None);
 }
 
 #[test]
