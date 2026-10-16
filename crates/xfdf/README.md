@@ -26,7 +26,7 @@ including CDATA and character references. Nested-element and XFA interpretation 
 
 CSV export and spreadsheet merging quote tabs, and import distinguishes quoted tabs from TSV
 delimiters without changing field identities. Automatic detection of externally authored, ambiguous
-tables remains heuristic. Formula-cell policy and tab-delimited export are unchanged.
+tables remains heuristic.
 
 Import replaces comments with the same `/NM` (and drops the replaced comment's pop-up), draws
 appearances PdfCraft can draw, and sets values through the form's own checks (formats,
