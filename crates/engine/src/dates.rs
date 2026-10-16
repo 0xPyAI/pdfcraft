@@ -13,7 +13,7 @@ use crate::Session;
 pub const DEFAULT_DATE_FORMAT: &str = "m/d/yyyy";
 
 /// Ready-made formats for Preferences ▸ Date format. Any other valid pattern works too.
-pub const DATE_FORMATS: [&str; 12] = [
+pub const DATE_FORMATS: [&str; 14] = [
     "m/d/yyyy",
     "mm/dd/yyyy",
     "d/m/yyyy",
@@ -21,6 +21,9 @@ pub const DATE_FORMATS: [&str; 12] = [
     "dd.mm.yyyy",
     "yyyy-mm-dd",
     "yyyy.mm.dd.",
+    // Year first with slashes, as Taiwan, Japan and China write it (Windows' zh-TW short date).
+    "yyyy/mm/dd",
+    "yyyy/m/d",
     "d mmm yyyy",
     "d mmmm yyyy",
     "mmm d, yyyy",
@@ -604,6 +607,8 @@ mod tests {
                 "07.03.2026",
                 "2026-03-07",
                 "2026.03.07.",
+                "2026/03/07",
+                "2026/3/7",
                 "7 Mar 2026",
                 "7 March 2026",
                 "Mar 7, 2026",

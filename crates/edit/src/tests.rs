@@ -60,6 +60,7 @@ fn tokens_expand() {
     assert_eq!(expand("Page <<1>> of <<n>>", 3, 10, 0, &c), "Page 3 of 10");
     assert_eq!(expand("<<1 of n>> · <<Page 1>> · <<1/n>>", 2, 5, 0, &c), "2 of 5 · Page 2 · 2/5");
     assert_eq!(expand("<<m/d/yyyy>> <<yyyy-mm-dd>> <<mmmm d, yyyy>>", 1, 1, 0, &c), "10/1/2026 2026-10-01 October 1, 2026");
+    assert_eq!(expand("<<yyyy/mm/dd>> <<yyyy/m/d>>", 1, 1, 0, &c), "2026/10/01 2026/10/1");
     assert_eq!(expand("<<Bates Number#6#100#ABC#-X>>", 1, 1, 104, &c), "ABC000104-X");
     assert_eq!(expand("keep <<unknown>> and <<unclosed", 1, 1, 0, &c), "keep <<unknown>> and <<unclosed");
     assert_eq!(bates_start("x <<Bates Number#6#100#A#B>>"), Some(100));
