@@ -2388,8 +2388,8 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.header_footer"]
 tools = ["doc_header_footer"]
-evidence = ["crates/ui-egui/tests/ui_group/marks.rs::header_and_footer_dialog_inserts_tokens_and_applies_to_a_subset", "crates/edit/src/tests.rs::header_and_footer_are_drawn_in_display_space_and_wrap_the_original_content", "crates/engine/src/tests.rs::headers_footers_watermarks_and_backgrounds_show_update_and_remove"]
-notes = "Helvetica only (no font choice yet); drawn in display space on rotated pages; artifact-tagged"
+evidence = ["crates/ui-egui/tests/ui_group/marks.rs::header_and_footer_dialog_inserts_tokens_and_applies_to_a_subset", "crates/edit/src/tests.rs::header_and_footer_are_drawn_in_display_space_and_wrap_the_original_content", "crates/engine/src/tests.rs::headers_footers_watermarks_and_backgrounds_show_update_and_remove", "crates/ui-egui/tests/ui_group/marks.rs::the_preview_shows_the_page_the_range_selects_under_the_marks"]
+notes = "Helvetica only (no font choice yet); drawn in display space on rotated pages; artifact-tagged; the dialog previews the text over the page's own thumbnail (the current page, or the first one the range selects), in the interface font and with tokens unexpanded"
 
 [[feature]]
 id = "edit.header-footer-update-remove"
@@ -2448,8 +2448,8 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.watermark"]
 tools = ["doc_watermark"]
-evidence = ["crates/edit/src/tests.rs::watermarks_rotate_fade_and_can_go_behind", "crates/ui-egui/tests/ui_group/marks.rs::watermark_and_background_dialogs", "crates/automation/tests/automation.rs::headers_watermarks_and_backgrounds_through_tools"]
-notes = "Helvetica; fit-to-page or a size"
+evidence = ["crates/edit/src/tests.rs::watermarks_rotate_fade_and_can_go_behind", "crates/ui-egui/tests/ui_group/marks.rs::watermark_and_background_dialogs", "crates/automation/tests/automation.rs::headers_watermarks_and_backgrounds_through_tools", "crates/ui-egui/tests/ui_group/marks.rs::the_preview_shows_the_page_the_range_selects_under_the_marks"]
+notes = "Helvetica; fit-to-page or a size; the dialog previews it over the page's own thumbnail, always on top (a watermark behind the page is not drawn under its content there)"
 
 [[feature]]
 id = "edit.watermark-add-file"
@@ -2461,7 +2461,7 @@ status = "shipped"
 commands = ["edit.watermark"]
 tools = ["doc_watermark"]
 evidence = ["crates/engine/src/tests.rs::backgrounds_and_watermarks_from_files"]
-notes = "an image or a page of a PDF, scaled relative to the page, rotated, with opacity, behind or on top"
+notes = "an image or a page of a PDF, scaled relative to the page, rotated, with opacity, behind or on top; the dialog's preview shows its frame and file name over the page, not the picture itself"
 
 [[feature]]
 id = "edit.watermark-update-remove"
@@ -2496,8 +2496,8 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.background"]
 tools = ["doc_background"]
-evidence = ["crates/ui-egui/tests/ui_group/marks.rs::watermark_and_background_dialogs", "crates/engine/src/tests.rs::headers_footers_watermarks_and_backgrounds_show_update_and_remove", "crates/engine/src/tests.rs::backgrounds_and_watermarks_from_files", "crates/ui-egui/tests/ui_group/marks.rs::backgrounds_and_watermarks_from_a_file", "crates/organize/src/tests.rs::a_page_becomes_a_form_xobject_upright"]
-notes = "colour, or a picture from a file (an image or a page of a PDF) scaled relative to the page"
+evidence = ["crates/ui-egui/tests/ui_group/marks.rs::watermark_and_background_dialogs", "crates/engine/src/tests.rs::headers_footers_watermarks_and_backgrounds_show_update_and_remove", "crates/engine/src/tests.rs::backgrounds_and_watermarks_from_files", "crates/ui-egui/tests/ui_group/marks.rs::backgrounds_and_watermarks_from_a_file", "crates/organize/src/tests.rs::a_page_becomes_a_form_xobject_upright", "crates/ui-egui/tests/ui_group/marks.rs::the_preview_shows_the_page_the_range_selects_under_the_marks"]
+notes = "colour, or a picture from a file (an image or a page of a PDF) scaled relative to the page; the dialog previews a colour as a tint of the page's own thumbnail (opaque pictures on the page are tinted there too, not in the result), a file as its frame and name"
 
 [[feature]]
 id = "edit.background-update-remove"
