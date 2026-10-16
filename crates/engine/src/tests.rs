@@ -3489,6 +3489,28 @@ fn detecting_fields_on_a_printed_form() {
     assert!(s.detect_fields(id, &[]).is_empty(), "nothing left to detect");
 }
 
+/// #294, #2831: a detected field sits on a line or box the page already draws, so it gets no border
+/// and no fill that would cover the printed form. A field drawn by hand keeps the defaults.
+#[test]
+fn detected_fields_have_no_border_or_fill() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("paper.pdf", None, Arc::new(paper_form()), None).unwrap();
+    let added = s.auto_detect_fields(id, &[]).unwrap();
+    let d = s.get(id).unwrap();
+    let kinds: Vec<pdfcraft_forms::FieldKind> = d.form.iter().map(|f| f.kind).collect();
+    assert!(kinds.contains(&pdfcraft_forms::FieldKind::Text) && kinds.contains(&pdfcraft_forms::FieldKind::CheckBox), "{kinds:?}");
+    for name in &added {
+        let look = d.field_look(name).unwrap();
+        assert_eq!((look.border, look.fill), (None, None), "{name}");
+    }
+    assert_eq!(d.can_undo(), Some("Detect form fields"), "still one step");
+
+    s.apply(id, Edit::AddField { page: 0, rect: [200.0, 10.0, 300.0, 30.0], kind: NewField::Text { multiline: false }, name: Some("drawn".into()) })
+        .unwrap();
+    let look = s.get(id).unwrap().field_look("drawn").unwrap();
+    assert!(look.border.is_some() && look.fill.is_some(), "{look:?}");
+}
+
 /// A printed form, 420 × 300 pt: a title, a label with a rule to write on, a box with a small
 /// label in its corner, an empty box with its label above, and two check boxes.
 fn paper_form() -> Vec<u8> {

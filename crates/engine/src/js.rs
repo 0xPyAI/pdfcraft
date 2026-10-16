@@ -343,8 +343,17 @@ impl Session {
         let names = found.iter().map(|(_, c, _)| c.name.clone()).collect();
         let mut edits = Vec::with_capacity(found.len());
         for (page, c, turn) in found {
-            // A turned field keeps its place: the rectangle is already the one on the page.
-            let props = (turn != 0).then(|| pdfcraft_forms::FieldProps { rotation: Some((0, turn)), rect: Some((0, c.rect)), ..Default::default() });
+            // The page already draws the line or box the field sits on, so the field gets no
+            // border or fill of its own: an opaque fill would hide the printed form (#294, #2831).
+            let mut props = pdfcraft_forms::FieldProps {
+                appearance: Some(pdfcraft_forms::LookPatch { border: Some(None), fill: Some(None), ..Default::default() }),
+                ..Default::default()
+            };
+            if turn != 0 {
+                // A turned field keeps its place: the rectangle is already the one on the page.
+                props.rotation = Some((0, turn));
+                props.rect = Some((0, c.rect));
+            }
             let tall = if turn % 180 == 0 { c.rect[3] - c.rect[1] } else { c.rect[2] - c.rect[0] };
             edits.push(Edit::AddField {
                 page,
@@ -355,9 +364,7 @@ impl Session {
                 },
                 name: Some(c.name.clone()),
             });
-            if let Some(props) = props {
-                edits.push(Edit::SetFieldProps { name: c.name, props: Box::new(props) });
-            }
+            edits.push(Edit::SetFieldProps { name: c.name, props: Box::new(props) });
         }
         self.apply(id, Edit::Batch { label: "Detect form fields".into(), edits })?;
         Ok(names)
