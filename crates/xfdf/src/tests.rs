@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pdfcraft_annot::{Markup, Meta, NewAnnotation, Shape, Style, add_annotation, add_reply, summaries};
+use pdfcraft_annot::{Markup, Meta, NewAnnotation, Shape, Style, add_annotation, add_reply, add_text_replacement, summaries};
 use pdfcraft_cos::{SaveOptions, write_full, write_incremental};
 use pdfcraft_forms::{NewField, add_field, fields, set_value};
 
@@ -140,6 +140,32 @@ fn comment_view(doc: &Document) -> Vec<String> {
 
 fn values(doc: &Document) -> Vec<(String, Vec<String>)> {
     fields(doc).into_iter().map(|f| (f.name, f.value)).collect()
+}
+
+/// #2666: Replace Text writes a StrikeOut and a Caret that replies to it. XFDF names a reply by
+/// the `/NM` of what it replies to, so when both carried one id the caret's `inreplyto` was its
+/// own `name`: importing it found a comment replying to itself and the pair was lost.
+#[test]
+fn a_replace_text_pair_survives_an_xfdf_round_trip() {
+    let mut src = blank();
+    let quads = [[100.0, 720.0, 200.0, 720.0, 100.0, 706.0, 200.0, 706.0]];
+    let style = Style { color: [0.89, 0.13, 0.13], opacity: 1.0, width: 1.0, fill: None };
+    let meta = |id: &str| Meta { date: Some("D:20261001120000Z".into()), id: id.into() };
+    add_text_replacement(&mut src, 0, &quads, "new words", "Ada", &style, &style, &meta("strike"), &meta("caret")).unwrap();
+    assert_eq!(summaries(&src).len(), 2, "a strikeout and a caret");
+
+    let xfdf = export_xfdf(&src, true, false, "a.pdf");
+    assert!(xfdf.contains("name=\"strike\"") && xfdf.contains("name=\"caret\""), "each gets its own name: {xfdf}");
+    assert!(xfdf.contains("inreplyto=\"strike\""), "the caret replies to the strikeout: {xfdf}");
+    assert!(!xfdf.contains("name=\"caret\" ... inreplyto=\"caret\""), "never a reply to itself");
+
+    let mut dst = blank();
+    let r = import(&mut dst, xfdf.as_bytes()).unwrap();
+    assert_eq!(r.comments, 2, "both comments import: {r:?}");
+    let found = summaries(&dst);
+    let kinds: Vec<&str> = found.iter().map(|s| s.subtype.as_str()).collect();
+    assert!(kinds.contains(&"StrikeOut") && kinds.contains(&"Caret"), "{kinds:?}");
+    assert_eq!(comment_view(&dst), comment_view(&src), "the pair and its thread survive");
 }
 
 #[test]
