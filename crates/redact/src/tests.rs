@@ -732,6 +732,39 @@ fn flattened_widgets_and_far_pop_ups_leave_the_structure_tree() {
     assert!(!field_left, "the flattened field didn't survive the save through the structure tree");
 }
 
+/// #2532 review: a structure tree larger than the walk's limit can't be searched in full, so a
+/// reference the walk never reached could keep a removed annotation. Then the whole tree goes
+/// (with `/MarkInfo`), rather than reporting success with references left behind; under the
+/// limit only the reference goes.
+#[test]
+fn a_structure_tree_too_large_to_walk_is_removed_whole() {
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 5 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] >>".to_vec(),
+        // 4: the removed link
+        b"<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /URI /URI (https://secret.example) >> >>".to_vec(),
+        // 5 root, 6 document, 7 section, 8 link element with the OBJR
+        b"<< /Type /StructTreeRoot /K 6 0 R >>".to_vec(),
+        b"<< /Type /StructElem /S /Document /P 5 0 R /K [7 0 R] >>".to_vec(),
+        b"<< /Type /StructElem /S /Sect /P 6 0 R /K [8 0 R] >>".to_vec(),
+        b"<< /Type /StructElem /S /Link /P 7 0 R /K [<< /Type /OBJR /Obj 4 0 R >>] >>".to_vec(),
+    ];
+    let gone: std::collections::HashSet<ObjRef> = [ObjRef::new(4, 0)].into();
+    let catalog = |doc: &Document| doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+
+    let mut doc = pdf(objs.clone());
+    assert_eq!(crate::tags::drop_object_refs_within(&mut doc, &gone, 100).unwrap(), 1);
+    assert!(catalog(&doc).contains(b"StructTreeRoot") && catalog(&doc).contains(b"MarkInfo"), "under the limit the tree stays");
+
+    let mut doc = pdf(objs);
+    crate::tags::drop_object_refs_within(&mut doc, &gone, 2).unwrap();
+    assert!(!catalog(&doc).contains(b"StructTreeRoot"), "a tree the walk couldn't finish goes whole");
+    assert!(!catalog(&doc).contains(b"MarkInfo"));
+    let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
+    assert!(!bytes.windows(14).any(|w| w == b"secret.example"), "the removed link can't be reached any more");
+}
+
 /// Issue #1325: removing comments keeps the annotations that are not comments: the multimedia
 /// and print-production ones (Watermark, PrinterMark, TrapNet, Screen, Movie, RichMedia, 3D).
 #[test]
