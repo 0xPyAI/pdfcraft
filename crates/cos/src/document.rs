@@ -1957,9 +1957,6 @@ fn generated_id(seed: &[u8; 32]) -> Vec<u8> {
     out
 }
 
-/// Object numbers must fit the representation used by references and the xref map.
-/// Validate the whole subsection before adding entries, so neither arithmetic overflow nor
-/// truncation can turn a damaged range into entries for unrelated objects.
 /// The object number a classic xref subsection really starts at. A common producer bug heads the
 /// table `1 n` and then writes object 0's free entry (`0000000000 65535 f`) as its first row, so
 /// every row would be read one number too high and object 1 as free. Such a subsection is read
@@ -1988,6 +1985,9 @@ fn subsection_start(data: &[u8], rows: usize, start: i64, count: i64) -> i64 {
     }
 }
 
+/// Object numbers must fit the representation used by references and the xref map.
+/// Validate the whole subsection before adding entries, so neither arithmetic overflow nor
+/// truncation can turn a damaged range into entries for unrelated objects.
 fn valid_xref_range(start: i64, count: i64) -> bool {
     u32::try_from(start).is_ok() && count >= 0 && start.checked_add(count).is_some_and(|end| end <= i64::from(u32::MAX) + 1)
 }
