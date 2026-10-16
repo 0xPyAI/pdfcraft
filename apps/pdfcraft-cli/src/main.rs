@@ -458,17 +458,31 @@ fn edit(args: &[String]) -> Result<(), CliError> {
             "--password" => password = Some(value),
             "--rotate" => {
                 let (pages, deg) = value.split_once(':').ok_or("--rotate PAGES:DEGREES")?;
-                edits.push(Edit::RotatePages { pages: page_list(pages)?, degrees: deg.parse().map_err(|_| "bad degrees")? });
+                let degrees: i64 = deg.parse().map_err(|_| format!("bad --rotate degrees: expected a whole number of degrees, got {deg:?}"))?;
+                // The same rule `rotate_pages` enforces, checked here so a bad angle is named
+                // with its option before any file is opened.
+                if degrees % 90 != 0 {
+                    return Err(format!("bad --rotate degrees: expected a multiple of 90 (such as 90, -90 or 180), got {degrees}").into());
+                }
+                edits.push(Edit::RotatePages { pages: page_list(pages)?, degrees });
             }
             "--delete" => edits.push(Edit::DeletePages { pages: page_list(value)? }),
             "--move" => {
                 let (pages, to) = value.split_once(':').ok_or("--move PAGES:TO")?;
-                let to: usize = to.parse().map_err(|_| "bad target")?;
-                edits.push(Edit::MovePages { pages: page_list(pages)?, to: to.checked_sub(1).ok_or("--move target must be at least 1")? });
+                let target: usize = to
+                    .parse()
+                    .ok()
+                    .filter(|target| *target > 0)
+                    .ok_or_else(|| format!("bad --move target: expected a page number of at least 1, got {to:?}"))?;
+                edits.push(Edit::MovePages { pages: page_list(pages)?, to: target - 1 });
             }
             "--insert-blank" => {
-                let at: usize = value.parse().map_err(|_| "bad position")?;
-                edits.push(Edit::InsertBlankPage { at: at.checked_sub(1).ok_or("--insert-blank must be at least 1")?, width: 612.0, height: 792.0 });
+                let position: usize = value
+                    .parse()
+                    .ok()
+                    .filter(|position| *position > 0)
+                    .ok_or_else(|| format!("bad --insert-blank position: expected a page position of at least 1, got {value:?}"))?;
+                edits.push(Edit::InsertBlankPage { at: position - 1, width: 612.0, height: 792.0 });
             }
             "--title" => edits.push(Edit::SetInfo { key: "Title".into(), value: value.into() }),
             "--author" => edits.push(Edit::SetInfo { key: "Author".into(), value: value.into() }),
@@ -550,7 +564,16 @@ fn split(args: &[String]) -> Result<(), CliError> {
     use pdfcraft_engine::SplitBy;
     let path = *positional(args).first().ok_or("split: missing file")?;
     let by = match (flag(args, "--every"), flag(args, "--before")) {
-        (Some(n), None) => SplitBy::PageCount(n.parse().map_err(|_| "bad --every")?),
+        (Some(n), None) => {
+            // A count the splitter cannot hold is refused here, before the file is opened,
+            // rather than silently clamped to 1 further down.
+            let count = n
+                .parse::<usize>()
+                .ok()
+                .filter(|count| *count > 0)
+                .ok_or_else(|| format!("bad --every: expected a positive whole number of pages, got {n:?}"))?;
+            SplitBy::PageCount(count)
+        }
         (None, Some(list)) => SplitBy::Before(page_list(list)?),
         _ => return Err("split: give either --every N or --before PAGES".into()),
     };
@@ -570,12 +593,25 @@ fn split(args: &[String]) -> Result<(), CliError> {
     Ok(())
 }
 
+/// A `--dpi` the renderer can be asked for: a positive, finite number. `0`, a negative value
+/// or `NaN` parse as an `f32` but reach the renderer as a scale it refuses with its own
+/// internal message (and in `check`, passed on as text, they would turn every file into a
+/// child that printed nothing), so the CLI names the option and the value instead.
+fn parse_dpi(value: &str) -> Result<f32, String> {
+    value
+        .parse::<f32>()
+        .ok()
+        .filter(|dpi| dpi.is_finite() && *dpi > 0.0)
+        .ok_or_else(|| format!("bad --dpi: expected a positive number of dots per inch, got {value:?}"))
+}
+
 fn render(args: &[String]) -> Result<(), CliError> {
     validate_options("render", args, RENDER_OPTIONS)?;
     let path = *positional(args).first().ok_or("render: missing file")?;
-    let page: usize = flag(args, "--page").unwrap_or("1").parse().map_err(|_| "bad --page")?;
-    let page_index = page.checked_sub(1).ok_or("--page must be at least 1")?;
-    let dpi: f32 = flag(args, "--dpi").unwrap_or("96").parse().map_err(|_| "bad --dpi")?;
+    let page: usize =
+        flag(args, "--page").unwrap_or("1").parse().ok().filter(|page| *page > 0).ok_or("bad --page: expected a positive page number")?;
+    let page_index = page - 1;
+    let dpi = parse_dpi(flag(args, "--dpi").unwrap_or("96"))?;
     let out = flag(args, "--out").ok_or("render: missing --out (.png, .jpg, .tif or .pam)")?;
     // The file is what its name says (#248): a `.png` used to get a netpbm PAM stream.
     let format = match Path::new(out).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
@@ -621,7 +657,7 @@ fn render(args: &[String]) -> Result<(), CliError> {
 fn check_one(args: &[String]) -> Result<(), CliError> {
     validate_options("check-one", args, CHECK_ONE_OPTIONS)?;
     let path = *positional(args).first().ok_or("check-one: missing file")?;
-    let dpi: f32 = flag(args, "--dpi").unwrap_or("36").parse().map_err(|_| "bad --dpi")?;
+    let dpi = parse_dpi(flag(args, "--dpi").unwrap_or("36"))?;
     let start = Instant::now();
     let bytes = read(path)?;
     let (status, pages, failed, detail, warnings) = match inspect(bytes.clone(), None) {
@@ -713,12 +749,23 @@ fn collect(paths: &[&str]) -> Vec<PathBuf> {
 
 fn check(args: &[String]) -> Result<(), CliError> {
     validate_options("check", args, CHECK_OPTIONS)?;
+    // Every option is checked before the inputs are scanned, so a bad value is one message,
+    // not one problem per file: a zero timeout used to make every file time out, and a bad
+    // dpi used to reach each child, which printed nothing and was reported as a crash.
+    let timeout_value = flag(args, "--timeout").unwrap_or("20");
+    let timeout = Duration::from_secs(
+        timeout_value
+            .parse::<u64>()
+            .ok()
+            .filter(|secs| *secs > 0)
+            .ok_or_else(|| format!("bad --timeout: expected a positive whole number of seconds, got {timeout_value:?}"))?,
+    );
+    let dpi = flag(args, "--dpi").unwrap_or("36").to_string();
+    parse_dpi(&dpi)?;
     let files = collect(&positional(args));
     if files.is_empty() {
         return Err("check: no PDF files found".into());
     }
-    let timeout = Duration::from_secs(flag(args, "--timeout").unwrap_or("20").parse().map_err(|_| "bad --timeout")?);
-    let dpi = flag(args, "--dpi").unwrap_or("36").to_string();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut results = Vec::new();
     let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
