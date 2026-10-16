@@ -1,7 +1,7 @@
 # Localization parity
 
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (Vietnamese 100% of current key union; native-speaker community review; twelve-language mean ≈68%) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (Italian count after completing its catalog) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-20 · **Change:** minor (Spanish 100% of the current key union) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 
 Per-language status of PdfCraft's interface against Acrobat Pro's. How translations work and how to
 add a language: [localization.md](localization.md). Summary in [ROADMAP.md](../ROADMAP.md).
@@ -10,10 +10,10 @@ add a language: [localization.md](localization.md). Summary in [ROADMAP.md](../R
 
 - **Strings translated** is measured: the catalogs in `crates/ui-egui/src/i18n/<code>.tsv`, counted
   as distinct `(context, English)` keys with a non-empty translation. The **current** denominator is
-  the union of keys across all catalogs (**2,590** plain keys as of 2026-10-13, plus language-specific
-  context rows such as Vietnamese `theme`/`Appearance`). The twelve-language percentage table below
+  the union of keys across all catalogs (**2,674** keys as of 2026-10-20, counting language-specific
+  context rows such as `theme`/`Appearance`). The twelve-language percentage table below
   still quotes the **historical 2,143-key snapshot** from 2026-10-10 for every language except
-  Vietnamese (re-measured against the current union). English is built in.
+  Vietnamese and Spanish (re-measured against the current union). English is built in.
 - **Not counted:** error details from the engine and the operating system, which are shown in
   English inside a translated frame; there is no translated user documentation or help yet (Acrobat
   ships localized help).
@@ -31,7 +31,7 @@ add a language: [localization.md](localization.md). Summary in [ROADMAP.md](../R
 |---|---|---|---|---|---|---|---|---|
 | English | `en` | built in (100%) | all; README and docs | Latin | yes | **full** | yes | 0 |
 | Simplified Chinese | `zh-hans` | 2,088 (97.4%) | dialogs and tooltips through `tl!`; no help | CJK text and IME work, but **release builds have no Hans face**: many characters show as boxes (#826, #688, #728, #758; Flatpak #689) | no | partial | yes | 6–12 |
-| Spanish | `es` | 2,046 (95.5%) | dialogs and tooltips; no help | Latin | no | partial | yes | 2–4 |
+| Spanish | `es` | 2,674 (100% of current key union) | dialogs and tooltips; no help | Latin | no | partial | yes | 2–4 |
 | Hindi | `hi` | 0 | none | Devanagari not tested (egui shapes Telugu conjuncts, so shaping is likely workable); no Devanagari face in craft-fonts | no | none | no | 10–18 |
 | Arabic | `ar` | 2,143 (100%) | dialogs and tooltips; no help | Letters joined and lines reordered at load, but **layout not mirrored**, wrapped lines break at the wrong end, typed text runs left to right (`localization.md` §Arabic) | no | partial | yes (Middle East edition) | 25–45 |
 | French | `fr` | 2,128 (99.3%) | dialogs and tooltips; no help | Latin | no | partial | yes | 1–2 |
@@ -40,7 +40,7 @@ add a language: [localization.md](localization.md). Summary in [ROADMAP.md](../R
 | Japanese | `ja` | 2,123 (99.1%) | dialogs and tooltips; no help | BIZ UDPGothic from craft-fonts; IME patched on macOS, Windows, X11, Wayland; vertical text renders but can't be edited | no | partial | yes | 4–8 |
 | German | `de` | 2,128 (99.3%) | dialogs and tooltips; no help | Latin | community, in progress (#828: terminology, clipping) | partial | yes | 2–4 |
 | Korean | `ko` | 0 | none | Hangul IME patched (Microsoft and Apple Korean, `vendor/README.md` winit 3, 6, 9, 10); no Hangul UI face in craft-fonts | no | none | yes | 6–10 |
-| Vietnamese | `vi` | 2,591 (100% of current union + theme Appearance) | dialogs and tooltips; no help | Latin with stacked diacritics; bundled Inter covers them (fonts test) | community | partial | no | 2–4 |
+| Vietnamese | `vi` | 2,674 (100% of current key union) | dialogs and tooltips; no help | Latin with stacked diacritics; bundled Inter covers them (fonts test) | community | partial | no | 2–4 |
 
 **Localization dimension ≈ 68%**: the mean over the twelve, counting a catalog's percentage but only
 60% for Chinese and Arabic until their script problems are fixed, and 0 for Hindi, Indonesian and
@@ -49,8 +49,8 @@ to bring all twelve to `full`, of which ≈ 35–60 h is engineering (Hans face,
 and the rest catalogs and fixes; native-speaker review needs humans.
 
 No language is `full` except English: every catalog leaves engine error details in English, and
-none has translated help. Vietnamese's **To `full`** hours are therefore residual help/docs polish
-(catalog and script work are already done), not missing UI strings.
+none has translated help. The **To `full`** hours of Vietnamese and Spanish are therefore residual
+help/docs polish (catalog and script work are already done), not missing UI strings.
 
 ## Other shipped languages
 
@@ -82,6 +82,7 @@ Acrobat languages PdfCraft lacks: Danish, Dutch, Finnish, Norwegian, Swedish, He
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | Spanish: the 143 keys the other catalogs had and `es.tsv` was missing; `es` now covers the whole 2,674-key union, like `lt` and `vi` |
 | 2026-10-13 | minor | Vietnamese (`vi`) catalog: 2,591 entries (100% of current key union + `theme`/`Appearance`); twelve-language mean ≈ 68%; native-speaker community review; registered with `plural_none` |
 | 2026-10-14 | minor | Italian: 2,528 entries after adding the 201 keys the other catalogs had and the code looks up |
 | 2026-10-12 | minor | Added current counts for Kazakh, Polish, Slovenian, Greek, Turkish and Lithuanian; retained existing language assessments and the original percentage snapshot |

@@ -132,14 +132,14 @@ What's strong and missing in each: [target-app-parity.md](docs/target-app-parity
 
 ## Languages
 
-Twelve key languages (historical % snapshot vs 2,143 keys, except Vietnamese vs the current
-union). Detail and script notes: [localization-parity.md](docs/localization-parity.md).
+Twelve key languages (historical % snapshot vs 2,143 keys, except Vietnamese and Spanish vs the
+current union). Detail and script notes: [localization-parity.md](docs/localization-parity.md).
 
 | Language | Code | Strings | Status |
 |---|---|---|---|
 | English | `en` | 100% | full |
 | Simplified Chinese | `zh-hans` | 97.4% | partial (no Hans UI face in releases, #826) |
-| Spanish | `es` | 95.5% | partial |
+| Spanish | `es` | 100% of current union | partial (dialogs / tooltips; no help) |
 | Hindi | `hi` | 0% | none |
 | Arabic | `ar` | 100% | partial (layout not mirrored) |
 | French | `fr` | 99.3% | partial |
@@ -201,6 +201,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 - **2026-10-16 (M10, #1201 partial):** Lossless image export applies each component's Decode pair. Indexed values round and clip before palette lookup. Color-key masks keep raw samples. The existing 16-bit precision limit remains. JPEG and mask Decode, ICC transforms, and calibrated colors remain outside this fix. Estimates unchanged.
 - **2026-10-16 (M3, #2739):** Wrapped revision buttons stay above Binding in Document Properties. A synthetic regression checks control bounds and opens a saved revision at two viewport widths. Estimates unchanged.
 - **2026-10-19 (M7, tracked text):** Editable paragraphs and object labels distinguish repeated glyph tracking from word gaps in TJ arrays and separately positioned glyphs. Synthetic regressions cover character spacing, horizontal scaling, rotated baselines, larger word gaps, and rows of one-glyph words or cells (inferred tracking is capped at half an em, so `a b c` and digit or Y/N columns keep their spaces). Estimates unchanged.
+- **2026-10-20 (M14, Spanish catalog gaps):** `es.tsv` gains the 143 `(context, English)` keys the other catalogs carried and it was missing, so Spanish covers the whole bundled key union like Lithuanian and Vietnamese: calendar months and weekdays, the `certificate` context, X.509 key usages, signature-revision and digital-ID lines, password validation, eight plural messages, the combine-from-folder strings, the rendering and stale-file notices and the shortcut-spelled tooltips. Counts in `localization-parity.md` re-measured against the current union (`vi` restated against it for the same reason). Status stays `partial`: no translated help, and OS details stay outside the catalog. Estimates unchanged.
 - **2026-10-15 (M2, gap 12):** `cargo xtask text-oracle` scores reading order as well as word F1: the longest common subsequence of the two word sequences over the longer one. F1 is a bag of words and cannot see order at all -- measuring #2431, a change that moves text and nothing else, it called 26 of the 29 files whose output changed identical, where the order score separated 18 improvements from 6 regressions. Reports, does not gate; a disagreement with Poppler, not a verdict. Estimates unchanged.
 - **2026-10-15 (M2, #2305 follow-up):** WinAnsiEncoding 0xA0 and 0xAD and MacRomanEncoding 0xCA extract as the ordinary space and hyphen Annex D.2 names them, in the vendored hayro tables (patch 30) as well as `crates/fonts`, so search, copy and redaction see characters that were hidden behind U+00A0 and U+00AD. Across the pdf.js corpus the soft hyphens we extract fall 117 to 13 and the non-breaking spaces 30 to 26; the rest come from `/ToUnicode`. An explicit `/Differences` name keeps its glyph list value, as pdftotext does. Estimates unchanged.
 - **2026-10-15 (M12, XFA, #2574):** A `pageArea` with no `<occur>` repeats without limit instead of taking a subform's default of one use, so a later page area with `occur max="1"` is no longer drawn (with a copy of its fields) over every body page. A page area's `occur min` is honoured too: one the body never reached gets the pages it still needs after the body (the once-only closing page of a form, with its button, comes last). Acrobat Pro also puts that page last, and when printing keeps it but leaves it blank (`relevant="-print"` on the page area), which PdfCraft does not do yet; both re-observed on a synthetic fixture, see the 2026-10-19 line. Synthetic regression tests. Estimates unchanged.
