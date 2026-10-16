@@ -6439,6 +6439,7 @@ fn architectural_and_iso_papers_through_tools() {
         ("Letter", 612.0, 792.0),
         ("US Legal", 612.0, 1008.0),
         ("Tabloid", 792.0, 1224.0),
+        ("US #10 Envelope", 4.125 * 72.0, 9.5 * 72.0),
     ] {
         for orientation in ["portrait", "landscape"] {
             let out = ok(
