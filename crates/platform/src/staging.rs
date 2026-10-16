@@ -76,7 +76,7 @@ pub fn write_atomically(path: &Path, bytes: &[u8], form: StagingName) -> std::io
 
 /// [`write_atomically`] with the staging-name suffixes and the flush given, so tests can plant
 /// names and refuse flushes. A failure at any step removes the staging file and leaves the
-/// target as it was.
+/// target as it was. A read-only target is refused before anything is written.
 pub fn write_atomically_with(
     path: &Path,
     bytes: &[u8],
@@ -85,6 +85,12 @@ pub fn write_atomically_with(
     sync_all: impl FnOnce(&std::fs::File) -> std::io::Result<()>,
 ) -> std::io::Result<()> {
     use std::io::Write as _;
+    // A read-only file is not replaced. Windows refuses the rename anyway, but on Unix a rename
+    // ignores the target's permissions: the file would be overwritten without a word, and come
+    // out writable (#2658).
+    if std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().readonly()) {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "the file is read-only; save a copy with Save As"));
+    }
     let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("save");
     let (tmp, file) = create_staging(dir, name, form, suffixes)?;
@@ -159,6 +165,33 @@ mod tests {
         // One-byte characters: exactly 128 of them are kept.
         let (tmp, _) = create_staging(&dir, &"x".repeat(200), StagingName::SuffixThenTag, [2]).unwrap();
         assert_eq!(file_name(&tmp), format!(".{}.0000000000000002.pdfcraft-tmp", "x".repeat(128)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #2658: a read-only file is refused before anything is staged, on Unix (where a rename would
+    /// replace it) as on Windows (where the rename fails).
+    #[test]
+    fn a_read_only_target_is_refused_and_kept() {
+        let dir = test_dir("readonly");
+        let target = dir.join("out.pdf");
+        std::fs::write(&target, "OLD").unwrap();
+        let mut perms = std::fs::metadata(&target).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&target, perms.clone()).unwrap();
+        let staged = std::cell::Cell::new(false);
+        let e = write_atomically_with(&target, b"NEW", StagingName::TagThenSuffix, [7], |_: &std::fs::File| {
+            staged.set(true);
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}");
+        assert!(!staged.get(), "nothing was staged");
+        assert_eq!(std::fs::read(&target).unwrap(), b"OLD");
+        assert!(std::fs::metadata(&target).unwrap().permissions().readonly(), "still read-only");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no staging file is left");
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        std::fs::set_permissions(&target, perms).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 
