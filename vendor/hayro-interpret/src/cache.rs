@@ -73,7 +73,10 @@ pub(crate) struct DecodedImageCache {
 ///   `/BitsPerComponent`, filters, …) and its object (`obj`: the decryption key depends on it);
 /// - whether it is decoded as a mask, a stencil mask, raster or mask output, interpolation,
 ///   the decode target size (only for an image a JPX stream decodes, which is the only
-///   decode that reads it: PdfCraft patch 32), and preview or final quality.
+///   decode that reads it: PdfCraft patch 32), and preview or final quality;
+/// - the default colour space drawn in place of the image's device space, if any (the cache
+///   key of its object, PdfCraft patch 38): the same image can be drawn by resources with a
+///   `/DefaultRGB` and by resources without one.
 ///
 /// A transfer function (graphics state `/TR`) also changes the pixels and has no cheap key, so
 /// an image drawn under one is not cached; neither is an inline image, whose dictionary lives in
@@ -88,6 +91,7 @@ pub(crate) struct DecodedImageKey {
     pub(crate) is_mask: bool,
     pub(crate) is_stencil_mask: bool,
     pub(crate) interpolate: bool,
+    pub(crate) default_space: Option<u128>,
     pub(crate) target: Option<(u32, u32)>,
     pub(crate) preview: bool,
 }
