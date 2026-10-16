@@ -264,6 +264,21 @@ fn read_mode_hides_the_quick_toolbar() {
     h.get_by_label("Select (V)");
 }
 
+/// Opening a document with Read as the default mode puts down the tool in use, as entering Read
+/// mode from the mode bar does: the hidden toolbar would leave no way to see or change it.
+#[test]
+fn opening_into_read_mode_puts_the_tool_down() {
+    use pdfcraft_ui_egui::{Mode, QuickTool};
+    let mut h = harness(|app| app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens"));
+    assert_eq!(h.state().mode, Mode::AllTools);
+    h.state_mut().set_option("quick", "hand").unwrap();
+    h.state_mut().set_option("default-mode", "read").unwrap();
+    h.state_mut().open_bytes("again.pdf", None, FIXTURE.to_vec()).unwrap();
+    h.run_steps(3);
+    assert_eq!(h.state().mode, Mode::Read, "the new document opens in the default mode");
+    assert_eq!(h.state().quick_tool, QuickTool::Select, "no tool stays active behind the hidden toolbar");
+}
+
 /// A pane closed in Read mode stays closed on the way out: leaving Read mode doesn't bring back the
 /// pane saved on the way in, and closing Comments keeps its close preference.
 #[test]

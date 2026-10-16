@@ -2152,6 +2152,11 @@ impl PdfCraftApp {
         } else if matches!(self.quick_tool, QuickTool::EditText | QuickTool::AddText) {
             self.put_down_edit_text();
         }
+        // Read mode hides the quick toolbar, so no other tool may stay active there. Opening a
+        // document with Read as the default mode comes here without `switch_mode`.
+        if mode == Mode::Read {
+            self.quick_tool = QuickTool::Select;
+        }
     }
 
     /// Back to the Select tool from an editing tool. A paragraph still open in the editor is
