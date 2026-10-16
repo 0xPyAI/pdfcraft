@@ -36,6 +36,10 @@ fn click_field(h: &mut Harness<'static, PdfCraftApp>, name: &str, widget: usize)
         let f = doc.form.iter().find(|f| f.name == name).unwrap();
         pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, widget).expect("on screen").center()
     };
+    click_at(h, p);
+}
+
+fn click_at(h: &mut Harness<'static, PdfCraftApp>, p: egui::Pos2) {
     h.hover_at(p);
     h.run_steps(1);
     h.drag_at(p);
@@ -1007,4 +1011,67 @@ fn auto_size_fields_shrink_and_wrap_typed_text_to_fit_their_box() {
 
     // An explicit size is kept, as in Acrobat: the text may then run past the box.
     assert_eq!(on_screen_fit(&h, "fixed", long).0, 10.0);
+}
+
+/// Where a mode bar tab is, by its label.
+fn mode_tab(h: &Harness<'static, PdfCraftApp>, label: &str) -> egui::Rect {
+    use egui_kittest::kittest::Queryable;
+    h.get_all_by_role_and_label(egui::accesskit::Role::Button, label).map(|n| n.rect()).find(|r| r.bottom() < 120.0).expect("a mode tab")
+}
+
+/// Scroll the page until `what` (on screen) lies across the mode bar, then the cursor over each
+/// tab it lies under: with the All tools panel closed, Read, Edit, Convert and E-Sign.
+fn mode_tab_cursors(
+    h: &mut Harness<'static, PdfCraftApp>,
+    what: impl Fn(&Harness<'static, PdfCraftApp>) -> egui::Rect,
+) -> [(&'static str, egui::CursorIcon); 4] {
+    let page = |h: &Harness<'static, PdfCraftApp>| h.state().views[0].page_screen_rect(0).expect("on screen");
+    let y = what(h).center().y - page(h).top();
+    let tabs = mode_tab(h, "Convert").center().y;
+    h.state_mut().views[0].goto = Some((0, 0.0));
+    h.run_steps(4);
+    let top = page(h).top();
+    h.state_mut().views[0].goto = Some((0, (top - (tabs - y)) / page(h).height()));
+    h.run_steps(4);
+    let under = what(h);
+    ["Read", "Edit", "Convert", "E-Sign"].map(|label| {
+        let at = mode_tab(h, label).center();
+        assert!(under.contains(at), "{under:?} lies under {label} at {at:?}");
+        h.hover_at(at);
+        h.run_steps(2);
+        (label, h.output().platform_output.cursor_icon)
+    })
+}
+
+const HAND_ON_EVERY_TAB: [(&str, egui::CursorIcon); 4] = [
+    ("Read", egui::CursorIcon::PointingHand),
+    ("Edit", egui::CursorIcon::PointingHand),
+    ("Convert", egui::CursorIcon::PointingHand),
+    ("E-Sign", egui::CursorIcon::PointingHand),
+];
+
+/// A text field scrolled up under the mode bar leaves its tabs the hand (#2755). The field gave
+/// them its I-beam, and its open editor floated over them and took their clicks.
+#[test]
+fn mode_tabs_keep_the_hand_over_a_text_field_scrolled_under_them() {
+    let mut h = harness();
+    // The page across the window, so the name field reaches under the tabs.
+    h.state_mut().views[0].fit = pdfcraft_ui_egui::canvas::Fit::Width;
+    h.run_steps(4);
+    let name = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f = doc.form.iter().find(|f| f.name == "name").unwrap();
+        pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen")
+    };
+    assert_eq!(mode_tab_cursors(&mut h, name), HAND_ON_EVERY_TAB, "the field under the tabs");
+    // Open it, where it shows.
+    h.state_mut().views[0].goto = Some((0, 0.0));
+    h.run_steps(4);
+    click_field(&mut h, "name", 0);
+    assert!(h.state().views[0].forms.focus.is_some(), "the editor opened");
+    assert_eq!(mode_tab_cursors(&mut h, name), HAND_ON_EVERY_TAB, "the open field under the tabs");
+    let convert = mode_tab(&h, "Convert").center();
+    click_at(&mut h, convert);
+    assert_eq!(h.state().mode, pdfcraft_ui_egui::Mode::Convert, "the tab takes the click, not the field's editor");
 }

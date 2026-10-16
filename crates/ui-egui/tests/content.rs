@@ -585,3 +585,75 @@ fn released_text_does_not_jump_back_before_the_page_is_redrawn() {
     let (old, new) = ink_at(&mut h, from, to);
     assert!(new > 20 && old == 0, "the redrawn page has the text in its new place ({old} old, {new} new)");
 }
+
+/// Where a mode bar tab is, by its label.
+fn mode_tab(h: &Harness<'static, PdfCraftApp>, label: &str) -> egui::Rect {
+    h.get_all_by_role_and_label(egui::accesskit::Role::Button, label).map(|n| n.rect()).find(|r| r.bottom() < 120.0).expect("a mode tab")
+}
+
+/// Scroll the page until `what` (on screen) lies across the mode bar, then the cursor over each
+/// tab it lies under: with the All tools panel closed, Read, Edit, Convert and E-Sign.
+fn mode_tab_cursors(
+    h: &mut Harness<'static, PdfCraftApp>,
+    what: impl Fn(&Harness<'static, PdfCraftApp>) -> egui::Rect,
+) -> [(&'static str, egui::CursorIcon); 4] {
+    let page = |h: &Harness<'static, PdfCraftApp>| h.state().views[0].page_screen_rect(0).expect("on screen");
+    let y = what(h).center().y - page(h).top();
+    let tabs = mode_tab(h, "Convert").center().y;
+    h.state_mut().views[0].goto = Some((0, 0.0));
+    h.run_steps(4);
+    let top = page(h).top();
+    h.state_mut().views[0].goto = Some((0, (top - (tabs - y)) / page(h).height()));
+    h.run_steps(4);
+    let under = what(h);
+    ["Read", "Edit", "Convert", "E-Sign"].map(|label| {
+        let at = mode_tab(h, label).center();
+        assert!(under.contains(at), "{under:?} lies under {label} at {at:?}");
+        h.hover_at(at);
+        h.run_steps(2);
+        (label, h.output().platform_output.cursor_icon)
+    })
+}
+
+const HAND_ON_EVERY_TAB: [(&str, egui::CursorIcon); 4] = [
+    ("Read", egui::CursorIcon::PointingHand),
+    ("Edit", egui::CursorIcon::PointingHand),
+    ("Convert", egui::CursorIcon::PointingHand),
+    ("E-Sign", egui::CursorIcon::PointingHand),
+];
+
+/// Add text, with the page scrolled up under the mode bar, leaves its tabs the hand (#2755): the
+/// tool gave them its I-beam, added text its four-way arrow, and the open editor floated over
+/// them and took their clicks.
+#[test]
+fn mode_tabs_keep_the_hand_over_added_text_scrolled_under_them() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("edit.text"));
+    h.state_mut().set_option("left", "closed").unwrap();
+    // The page across the window, so text placed at its left edge reaches under the tabs.
+    h.state_mut().views[0].fit = pdfcraft_ui_egui::canvas::Fit::Width;
+    h.run_steps(4);
+    assert_eq!(h.state().quick_tool, QuickTool::AddText);
+    // The empty page, ready for text.
+    assert_eq!(mode_tab_cursors(&mut h, |h| item_on_screen(h, [10.0, 290.0, 210.0, 305.0])), HAND_ON_EVERY_TAB, "the page under the tabs");
+    // Text kept by a click lower down, which starts a second box (#74).
+    h.state_mut().views[0].goto = Some((0, 0.0));
+    h.run_steps(4);
+    let p = at(&h, 10.0, 40.0);
+    click(&mut h, p);
+    h.event(egui::Event::Text("Reviewed".into()));
+    h.run_steps(2);
+    let p = at(&h, 10.0, 120.0);
+    click(&mut h, p);
+    h.event(egui::Event::Text("Approved".into()));
+    h.run_steps(2);
+    assert_eq!(texts(&h), ["Reviewed"]);
+    let kept = added(&h)[0].content.rect();
+    assert_eq!(mode_tab_cursors(&mut h, |h| item_on_screen(h, kept)), HAND_ON_EVERY_TAB, "added text under the tabs");
+    // The second box, still being typed.
+    let draft = |h: &Harness<'static, PdfCraftApp>| item_on_screen(h, h.state().views[0].content.draft.as_ref().expect("the open box").rect);
+    assert_eq!(mode_tab_cursors(&mut h, draft), HAND_ON_EVERY_TAB, "the open box under the tabs");
+    let convert = mode_tab(&h, "Convert").center();
+    click(&mut h, convert);
+    assert_eq!(h.state().mode, pdfcraft_ui_egui::Mode::Convert, "the tab takes the click, not the box");
+}
