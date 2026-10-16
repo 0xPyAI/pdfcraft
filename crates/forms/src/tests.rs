@@ -833,6 +833,80 @@ fn properties_rename_and_delete() {
     assert_eq!(annots.as_array().unwrap().len(), 13 - 3, "the deleted widgets left the page");
 }
 
+/// A parent `MASTER` with kids `a` and `b` (each a field merged with its widget) and `e` (a field
+/// with two widget kids), and the top-level fields `c` and `d`.
+fn dotted_form() -> Document {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),                 // 1
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(), // 2
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R 8 0 R 9 0 R 11 0 R 12 0 R] >>".into(), // 3
+        "<< /Fields [5 0 R 8 0 R 9 0 R] /DA (/Helv 0 Tf 0 g) >>".into(),            // 4
+        "<< /T (MASTER) /Kids [6 0 R 7 0 R 10 0 R] >>".into(),                      // 5
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (a) /Parent 5 0 R /V (one) /Rect [50 700 250 720] /P 3 0 R >>".into(), // 6
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (b) /Parent 5 0 R /V (two) /Rect [50 650 250 670] /P 3 0 R >>".into(), // 7
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (c) /V (three) /Rect [50 600 250 620] /P 3 0 R >>".into(), // 8
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (d) /Rect [50 550 250 570] /P 3 0 R >>".into(), // 9
+        "<< /FT /Tx /T (e) /Parent 5 0 R /V (four) /Kids [11 0 R 12 0 R] >>".into(), // 10
+        "<< /Type /Annot /Subtype /Widget /Parent 10 0 R /Rect [50 500 250 520] /P 3 0 R >>".into(), // 11
+        "<< /Type /Annot /Subtype /Widget /Parent 10 0 R /Rect [300 500 500 520] /P 3 0 R >>".into(), // 12
+    ];
+    document(&objs)
+}
+
+fn rename(doc: &mut Document, name: &str, to: &str) -> Result<String, FormError> {
+    set_props(doc, name, &FieldProps { name: Some(to.into()), ..FieldProps::default() })
+}
+
+/// The partial name (`/T`) of object `num`.
+fn own_name(doc: &Document, num: u32) -> Option<String> {
+    doc.get(ObjRef::new(num, 0)).as_dict().unwrap().get(b"T").and_then(|t| text_of(&doc.resolve(t)))
+}
+
+#[test]
+fn renaming_a_kid_is_checked_against_the_full_name_it_takes() {
+    let mut doc = dotted_form();
+    // MASTER.b is taken, though no field's full name is the bare "b". Two fields of one fully
+    // qualified name are one field and share its value (ISO 32000-2 §12.7.4.2).
+    let err = rename(&mut doc, "MASTER.a", "b").unwrap_err();
+    assert_eq!(err, FormError::Invalid("a field named \"MASTER.b\" already exists".into()));
+    assert_eq!(own_name(&doc, 6).as_deref(), Some("a"), "a refused rename changes nothing");
+    // The same between a field merged with its widget and a field with widget kids.
+    assert!(rename(&mut doc, "MASTER.e", "a").is_err());
+    assert!(rename(&mut doc, "MASTER.a", "e").is_err());
+    // A kid keeping its own name is no clash with itself.
+    assert_eq!(rename(&mut doc, "MASTER.b", "b").unwrap(), "MASTER.b");
+    // The top-level "c" does not take MASTER.c.
+    assert_eq!(rename(&mut doc, "MASTER.a", "c").unwrap(), "MASTER.c");
+    assert_eq!(rename(&mut doc, "MASTER.e", "f").unwrap(), "MASTER.f");
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    let names: Vec<&str> = all.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["MASTER.c", "MASTER.b", "MASTER.f", "c", "d"]);
+    for (name, value) in [("MASTER.c", "one"), ("MASTER.b", "two"), ("MASTER.f", "four"), ("c", "three")] {
+        assert_eq!(field(&all, name).value, [value], "{name} keeps its own value");
+    }
+    // Only the field's own /T changes: the kids stay under MASTER, a merged kid stays its own
+    // widget, and the widget kids get no /T (which would make them fields).
+    let widgets = |name: &str| field(&all, name).widgets.iter().map(|w| w.obj.num).collect::<Vec<_>>();
+    assert_eq!((field(&all, "MASTER.c").obj, widgets("MASTER.c")), (ObjRef::new(6, 0), vec![6]));
+    assert_eq!((field(&all, "MASTER.f").obj, widgets("MASTER.f")), (ObjRef::new(10, 0), vec![11, 12]));
+    let partial: Vec<Option<String>> = [5, 6, 10, 11, 12].into_iter().map(|n| own_name(&doc, n)).collect();
+    assert_eq!(partial.iter().map(Option::as_deref).collect::<Vec<_>>(), [Some("MASTER"), Some("c"), Some("f"), None, None]);
+}
+
+#[test]
+fn renaming_a_top_level_field_is_still_checked_against_top_level_names() {
+    let mut doc = dotted_form();
+    let err = rename(&mut doc, "c", "d").unwrap_err();
+    assert_eq!(err, FormError::Invalid("a field named \"d\" already exists".into()));
+    assert_eq!(own_name(&doc, 8).as_deref(), Some("c"), "a refused rename changes nothing");
+    // A kid's partial name is no top-level name: MASTER.a leaves "a" free.
+    assert_eq!(rename(&mut doc, "c", "a").unwrap(), "a");
+    let doc = reopen(&doc);
+    let names: Vec<String> = fields(&doc).into_iter().map(|f| f.name).collect();
+    assert_eq!(names, ["MASTER.a", "MASTER.b", "MASTER.e", "a", "d"]);
+}
+
 #[test]
 fn deleting_works_with_a_form_dictionary_inside_the_catalog() {
     let mut doc = fixture();
