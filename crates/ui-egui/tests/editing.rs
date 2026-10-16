@@ -2629,6 +2629,40 @@ fn editing_existing_text_in_place() {
     assert_eq!(texts_of(s, 0), ["Chapter One"], "the page shows it");
 }
 
+/// The Read mode command (View ▸ Read mode, its shortcut, the palette) leaves Edit as the Edit tab
+/// does when another tab is chosen (#2241): Edit text & images is put down, and a paragraph still
+/// open in the editor is applied instead of staying open, editable, over the page in Read mode.
+#[test]
+fn the_read_mode_command_applies_an_open_paragraph_and_puts_edit_text_down() {
+    use pdfcraft_ui_egui::{Mode, QuickTool};
+    let mut h = harness(1, |_| {});
+    h.get_by_label("Edit").click();
+    h.run_steps(3);
+    assert_eq!((h.state().mode, h.state().quick_tool), (Mode::Edit, QuickTool::EditText));
+    // Open the line "Page 1" (at (20, 150) on a 200 × 300 page, 24 pt) and retype it.
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - 158.0) / 300.0 * r.height());
+    h.hover_at(at);
+    h.run_steps(1);
+    h.drag_at(at);
+    h.run_steps(1);
+    h.drop_at(at);
+    h.run_steps(3);
+    assert_eq!(h.state().views[0].line_editor.as_ref().expect("the line opens for editing").text, "Page 1");
+    h.state_mut().views[0].line_editor.as_mut().unwrap().text = "Chapter One".into();
+    h.run_steps(1);
+    assert!(h.state_mut().execute("view.read_mode"));
+    h.run_steps(3);
+    let s = h.state();
+    assert_eq!(s.mode, Mode::Read);
+    assert_eq!(s.quick_tool, QuickTool::Select, "Edit text & images is put down");
+    assert!(s.views[0].line_editor.is_none(), "no paragraph editor is left open in Read mode");
+    let doc = s.session.get(s.views[0].id).unwrap();
+    assert_eq!(doc.can_undo(), Some("Edit text"), "the open paragraph's edit is applied");
+    assert_eq!(doc.text_lines(0)[0].text, "Chapter One");
+    assert_eq!(texts_of(s, 0), ["Chapter One"], "the page shows it");
+}
+
 #[test]
 fn text_tool_clicking_source_text_edits_instead_of_adding_a_copy() {
     let mut h = harness(1, |_| {});
