@@ -978,13 +978,15 @@ fn is_form_edit(edit: &Edit) -> bool {
 /// classic Outlook (`Temporary Internet Files\Content.Outlook\` on older Windows), and the
 /// `Microsoft.OutlookForWindows` package folder for the new Outlook. Saving there either fails,
 /// because Outlook can still hold the file, or appears to work while the edits stay out of the
-/// email and are deleted with the cache. Matched on either separator and in any case, so it can
-/// be tested on every platform.
+/// email and are deleted with the cache. Apple Mail opens one from `Mail Downloads/<UUID>/` in
+/// its sandbox container, where other apps can't write, so saving there fails (#2751). Matched on
+/// either separator and in any case, so it can be tested on every platform.
 pub(crate) fn is_mail_temp_copy(path: &str) -> bool {
     let p = path.replace('\\', "/").to_ascii_lowercase();
     p.contains("/inetcache/content.outlook/")
         || p.contains("/temporary internet files/content.outlook/")
         || p.contains("/microsoft.outlookforwindows")
+        || p.contains("/library/containers/com.apple.mail/data/library/mail downloads/")
 }
 
 /// Write via a temporary file in the same directory and rename over the target, so a crash or
@@ -1303,12 +1305,24 @@ mod tests {
     }
 
     #[test]
+    fn apple_mail_attachment_copies_are_recognised() {
+        for p in [
+            "/Users/me/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/6F1C2A9E-3B4D-4E5F-8A7B-9C0D1E2F3A4B/booking.pdf",
+            "/Users/me/library/containers/COM.APPLE.MAIL/data/library/mail downloads/6F1C2A9E/Booking (2).pdf",
+        ] {
+            assert!(is_mail_temp_copy(p), "{p}");
+        }
+    }
+
+    #[test]
     fn ordinary_paths_are_not_mail_copies() {
         for p in [
             r"C:\Users\me\Documents\Quote.pdf",
             r"C:\Users\me\OneDrive - Contoso\Content.Outlook notes\Quote.pdf",
             r"C:\Users\me\AppData\Local\Microsoft\Windows\INetCache\IE\Quote.pdf",
             "/home/me/Documents/Quote.pdf",
+            "/Users/me/Downloads/Mail Downloads/booking.pdf",
+            "/Users/me/Library/Containers/com.apple.Notes/Data/Library/Mail Downloads/booking.pdf",
             "Quote.pdf",
         ] {
             assert!(!is_mail_temp_copy(p), "{p}");

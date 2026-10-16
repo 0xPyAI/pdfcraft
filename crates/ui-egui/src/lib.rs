@@ -142,6 +142,8 @@ pub mod updates;
 mod wheel_pager;
 mod widgets;
 pub mod window_controls;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod window_state;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod open_worker_tests;
@@ -744,6 +746,9 @@ pub struct PdfCraftApp {
     dialog_epoch: u64,
     /// The egui context, for commands that change window or theme state.
     ctx: Option<egui::Context>,
+    /// The window's size and place kept across a minimized close (desktop).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub window_state: window_state::WindowState,
     styled: bool,
     fonts_ready: bool,
     /// The CJK fallback order the installed fonts follow (see `theme::installed_font_definitions`).
@@ -1033,6 +1038,8 @@ impl PdfCraftApp {
             dialog_seen: None,
             dialog_epoch: 0,
             ctx: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            window_state: Default::default(),
             styled: false,
             fonts_ready: false,
             fonts_cjk: theme::CjkPreference::Default,
@@ -2917,11 +2924,19 @@ impl eframe::App for PdfCraftApp {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        // eframe has just stored the window as it is now: not while it is minimized.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let minimized = self.ctx.as_ref().is_some_and(|c| c.input(|i| i.viewport().minimized == Some(true)));
+            self.window_state.keep(storage, minimized);
+        }
         storage.set_string("pdfcraft", self.persist());
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.ctx = Some(ctx.clone());
+        #[cfg(not(target_arch = "wasm32"))]
+        self.window_state.repair(ctx);
         self.dialog_epoch();
         // Notices raised outside `ui` (opened files, OS events, the control channel) translate too.
         let lang = i18n::Lang::from_pref(&self.language);
