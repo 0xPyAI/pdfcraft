@@ -589,6 +589,25 @@ fn links_are_added_edited_listed_and_removed() {
 }
 
 #[test]
+fn link_uri_is_percent_encoded_to_7_bit_ascii() {
+    use crate::links::{self, LinkAction, LinkStyle};
+    let mut doc = fixture();
+    for url in ["https://example.com/ação", "https://example.com/a%20b"] {
+        links::add(&mut doc, 0, [10.0, 10.0, 110.0, 30.0], &LinkAction::Uri(url.into()), &LinkStyle::default()).unwrap();
+    }
+    let doc = reopen(&doc);
+    let urls: Vec<String> = links::list(&doc)
+        .into_iter()
+        .filter_map(|link| match link.action {
+            LinkAction::Uri(url) => Some(url),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(urls, ["https://example.com/a%C3%A7%C3%A3o", "https://example.com/a%20b"]);
+    assert!(urls.iter().all(|url| url.is_ascii()));
+}
+
+#[test]
 fn link_edit_rejects_non_finite_and_overflowed_rectangles_without_mutating_the_pdf() {
     use crate::links::{self, LinkAction, LinkStyle};
     let mut doc = fixture();
