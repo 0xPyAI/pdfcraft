@@ -596,6 +596,90 @@ fn the_save_prompt_answers_to_the_keyboard() {
     let _ = std::fs::remove_file(out);
 }
 
+/// An organize harness with a dirty document and the "Save changes?" prompt open.
+fn dirty_prompt() -> Harness<'static, PdfCraftApp> {
+    let mut h = organize(2);
+    h.get_by_label("Rotate clockwise").click();
+    h.run_steps(3);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::W);
+    h.run_steps(3);
+    h.get_by_label_contains("Save changes to “doc.pdf”");
+    h
+}
+
+/// The prompt has Save chosen on arrival; `keys` then move the choice and Enter or Space presses it.
+fn press_after(keys: &[(Modifiers, Key)], activate: Key) -> Harness<'static, PdfCraftApp> {
+    let mut h = dirty_prompt();
+    for (m, k) in keys {
+        h.key_press_modifiers(*m, *k);
+        h.run_steps(2);
+    }
+    h.key_press(activate);
+    h.run_steps(3);
+    h
+}
+
+#[test]
+fn the_save_prompt_moves_between_buttons_with_the_keyboard() {
+    let none = Modifiers::NONE;
+    // Left from Save is Cancel: Enter or Space presses it, so nothing closes and nothing saves.
+    for activate in [Key::Enter, Key::Space] {
+        let h = press_after(&[(none, Key::ArrowLeft)], activate);
+        assert_eq!(h.state().views.len(), 1, "{activate:?} on Cancel keeps the document");
+        assert!(h.state().close_request.is_none());
+        assert!(dirty(&h), "{activate:?} on Cancel doesn't save");
+    }
+    // Two left is Don't save, which closes without saving; Shift+Tab walks the same way.
+    for keys in [
+        vec![(none, Key::ArrowLeft), (none, Key::ArrowLeft)],
+        vec![(Modifiers::SHIFT, Key::Tab), (Modifiers::SHIFT, Key::Tab)],
+        vec![(none, Key::ArrowLeft), (none, Key::ArrowLeft), (none, Key::ArrowLeft)],
+        vec![(none, Key::Tab)],
+    ] {
+        let h = press_after(&keys, Key::Enter);
+        assert!(h.state().views.is_empty(), "{keys:?} reaches Don't save, which closes the tab");
+    }
+    // Tab from Save wraps to Don't save; arrows stop at the right end, so Save stays chosen.
+    let out = temp_path("arrows-stop.pdf");
+    let mut h = dirty_prompt();
+    h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    h.key_press(Key::ArrowRight);
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert!(h.state().views.is_empty(), "Right from Save stays on Save, which saves");
+    assert!(out.exists());
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
+fn the_save_prompt_escape_still_cancels_whatever_is_chosen() {
+    let h = press_after(&[(Modifiers::NONE, Key::ArrowLeft), (Modifiers::NONE, Key::ArrowLeft)], Key::Escape);
+    assert_eq!(h.state().views.len(), 1, "Escape cancels even with Don't save chosen");
+    assert!(dirty(&h));
+}
+
+#[test]
+fn the_save_prompt_starts_on_save_every_time_it_opens() {
+    // Move to Don't save, cancel with Escape, and ask again: the choice is back on Save.
+    let out = temp_path("reopened.pdf");
+    let mut h = dirty_prompt();
+    h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    h.key_press(Key::ArrowLeft);
+    h.key_press(Key::ArrowLeft);
+    h.run_steps(2);
+    h.key_press(Key::Escape);
+    h.run_steps(3);
+    assert_eq!(h.state().views.len(), 1);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::W);
+    h.run_steps(3);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert!(h.state().views.is_empty(), "Enter saved and closed");
+    assert!(out.exists(), "the second prompt opened on Save");
+    let _ = std::fs::remove_file(out);
+}
+
 #[test]
 fn keys_leave_the_document_under_a_dialog_alone() {
     // Issue #870: ⌘W with Preferences open closed the file underneath it, and in the page grid

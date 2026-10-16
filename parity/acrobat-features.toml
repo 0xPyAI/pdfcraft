@@ -586,8 +586,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["file.close"]
 tools = ["doc_close"]
-evidence = ["crates/ui-egui/tests/editing.rs::closing_a_dirty_tab_asks_and_cancel_keeps_it", "crates/ui-egui/tests/editing.rs::closing_a_dirty_tab_can_save_first", "crates/ui-egui/tests/editing.rs::quitting_with_unsaved_changes_asks_for_each_document", "crates/ui-egui/tests/editing.rs::save_prompt_stays_inside_the_screen_for_a_long_filename"]
-notes = ""
+evidence = ["crates/ui-egui/tests/editing.rs::closing_a_dirty_tab_asks_and_cancel_keeps_it", "crates/ui-egui/tests/editing.rs::closing_a_dirty_tab_can_save_first", "crates/ui-egui/tests/editing.rs::quitting_with_unsaved_changes_asks_for_each_document", "crates/ui-egui/tests/editing.rs::save_prompt_stays_inside_the_screen_for_a_long_filename", "crates/ui-egui/tests/editing.rs::the_save_prompt_moves_between_buttons_with_the_keyboard", "crates/ui-egui/tests/editing.rs::the_save_prompt_escape_still_cancels_whatever_is_chosen", "crates/ui-egui/tests/editing.rs::the_save_prompt_starts_on_save_every_time_it_opens"]
+notes = "Save is chosen when the prompt opens, so Enter saves. Left/Right (and Up/Down) and Tab/Shift+Tab move the choice between Don't save, Cancel and Save, shown with a focus ring; Enter or Space press the chosen button; Escape cancels. Alt+D, Alt+N and Ctrl/Cmd+D still answer Don't save. Not yet: the same keys on the other confirmations (Revert, reload, overwrite)."
 
 [[feature]]
 id = "core.dirty-indicator"
