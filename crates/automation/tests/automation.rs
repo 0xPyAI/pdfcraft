@@ -2242,6 +2242,43 @@ fn headers_watermarks_and_backgrounds_through_tools() {
 }
 
 #[test]
+fn a_shrinking_header_and_footer_moves_the_page_content_out_of_their_way_through_tools() {
+    let dir = workdir("hf-shrink");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    // The box of "Page 1" (left, top, width, height in points), read back from a saved copy.
+    let mut saved = 0;
+    let mut text_box = |a: &mut Automation| -> [f64; 4] {
+        saved += 1;
+        let path = format!("shrunk{saved}.pdf");
+        ok(a, "doc_save", json!({ "doc": doc, "path": path }));
+        let copy = ok(a, "doc_open", json!({ "path": path }))["doc"].as_u64().unwrap();
+        let found = ok(a, "text_find", json!({ "doc": copy, "query": "Page 1" }));
+        let r = found["matches"][0]["rects"][0].as_array().unwrap_or_else(|| panic!("Page 1 is on the page: {found}"));
+        let v: Vec<f64> = r.iter().map(|x| x.as_f64().unwrap()).collect();
+        [v[0], v[1], v[2] - v[0], v[3] - v[1]]
+    };
+    let before = text_box(&mut a);
+    ok(
+        &mut a,
+        "doc_header_footer",
+        json!({ "doc": doc, "pages": [1], "header_center": "ACME", "footer_right": "<<Bates Number#6#1##>>", "shrink": true }),
+    );
+    let after = text_box(&mut a);
+    // 200 × 300 page, 8 pt text and 36 pt margins: the header takes 48 pt, the footer 46.4 pt.
+    let k = (300.0 - 48.0 - 46.4) / 300.0;
+    assert!((after[2] / before[2] - k).abs() < 0.02 && (after[3] / before[3] - k).abs() < 0.02, "scaled by {k}: {before:?} → {after:?}");
+    assert!((after[0] - (20.0 * k + (200.0 - 200.0 * k) / 2.0)).abs() < 1.0, "centred across: {before:?} → {after:?}");
+    assert!(page_text(&mut a, doc)[0].contains("000001"), "the Bates number is drawn");
+    // Margins that leave no room are refused; Remove brings the content back to full size.
+    let full = json!({ "doc": doc, "header_center": "X", "margins": [295, 36, 72, 72], "shrink": true, "replace": true });
+    assert!(matches!(a.call("doc_header_footer", &full), Err(ToolError::Failed(_))), "no room");
+    ok(&mut a, "doc_remove_marks", json!({ "doc": doc, "kind": "header_footer" }));
+    let restored = text_box(&mut a);
+    assert!(restored.iter().zip(before).all(|(r, b)| (r - b).abs() < 0.01), "{before:?} → {restored:?}");
+}
+
+#[test]
 fn watermarks_move_from_the_page_centre_through_tools() {
     let dir = workdir("wm-offset");
     let mut a = auto(&dir);
