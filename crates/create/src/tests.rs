@@ -1046,32 +1046,31 @@ fn lossless_decode_interpolation_avoids_endpoint_difference_overflow() {
 }
 
 #[test]
-fn lossless_decode_rejects_malformed_explicit_values() {
-    for decode in [
-        Object::name("bad"),
-        decode_array(&[]),
-        decode_array(&[0.]),
-        decode_array(&[0., 1., 0., 1.]),
-        Object::Array(vec![Object::Int(0), Object::name("bad")]),
-        Object::Array(vec![Object::Int(0), Object::Null]),
+fn lossless_decode_falls_back_to_the_default_mapping_when_malformed() {
+    for (space, samples, decode, expected) in [
+        ("DeviceRGB", vec![0, 64, 255], decode_array(&[1., 0.]), [0, 64, 255]),
+        ("DeviceGray", vec![64], Object::name("bad"), [64, 64, 64]),
+        ("DeviceGray", vec![64], decode_array(&[]), [64, 64, 64]),
+        ("DeviceGray", vec![64], decode_array(&[0.]), [64, 64, 64]),
+        ("DeviceGray", vec![64], decode_array(&[1., 0., 0., 1.]), [64, 64, 64]),
+        ("DeviceGray", vec![64], Object::Array(vec![Object::Int(1), Object::name("bad")]), [64, 64, 64]),
+        ("DeviceGray", vec![64], Object::Array(vec![Object::Int(1), Object::Null]), [64, 64, 64]),
     ] {
-        let mut dict = image_dict(1, 1, "DeviceGray", 8);
+        let mut dict = image_dict(1, 1, space, 8);
         dict.set(b"Decode".to_vec(), decode);
-        let (doc, image) = decode_fixture(dict, vec![0]);
-        assert!(image_file(&doc, image).unwrap_err().contains("Decode"));
-        let out = extract_images(&doc, &[0], 0);
-        assert!(out.images.is_empty());
-        assert_eq!(out.skipped.len(), 1);
-        assert!(out.skipped[0].2.contains("Decode"));
+        assert_decode_pixels(dict, samples, &expected);
     }
     // Non-finite reals cannot be serialized as PDF numbers. Exercise the in-memory input.
     for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let mut dict = image_dict(1, 1, "DeviceGray", 8);
-        dict.set(b"Decode".to_vec(), decode_array(&[0., value]));
-        let (mut doc, image) = decode_fixture(image_dict(1, 1, "DeviceGray", 8), vec![0]);
-        doc.set(image, Object::Stream(Stream::from_raw(dict, vec![0])));
-        assert!(image_file(&doc, image).unwrap_err().contains("Decode"));
-        assert_eq!(extract_images(&doc, &[0], 0).skipped.len(), 1);
+        dict.set(b"Decode".to_vec(), decode_array(&[1., value]));
+        let (mut doc, image) = decode_fixture(image_dict(1, 1, "DeviceGray", 8), vec![64]);
+        doc.set(image, Object::Stream(Stream::from_raw(dict, vec![64])));
+        let out = extract_images(&doc, &[0], 0);
+        assert!(out.skipped.is_empty(), "{:?}", out.skipped);
+        assert_eq!(exported_png_pixels(&out.images[0].data), [64, 64, 64]);
+        let (_, bytes) = image_file(&doc, image).unwrap();
+        assert_eq!(exported_png_pixels(&bytes), [64, 64, 64]);
     }
 }
 

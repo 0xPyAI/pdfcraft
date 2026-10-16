@@ -161,7 +161,7 @@ fn image(doc: &Document, s: &Stream) -> Result<(&'static str, Vec<u8>), String> 
         (unpack(&data, w, h, space.components(), bpc).ok_or("the image data is shorter than its size says")?, bpc)
     };
     let n = space.components();
-    let decode = if jpeg || mask { None } else { decode(doc, s, n)? };
+    let decode = if jpeg || mask { None } else { decode(doc, s, n) };
     if alpha.is_none() {
         alpha = key.and_then(|k| keyed_alpha(&samples, n, bpc, &k));
     }
@@ -215,24 +215,21 @@ fn image(doc: &Document, s: &Stream) -> Result<(&'static str, Vec<u8>), String> 
 }
 
 /// The explicit Decode intervals for a lossless colour image (8.9.5.2, Table 90).
-fn decode(doc: &Document, s: &Stream, n: usize) -> Result<Option<Vec<[f64; 2]>>, String> {
-    let Some(value) = s.dict.get(b"Decode") else { return Ok(None) };
-    let value = doc.resolve(value);
-    if matches!(&*value, Object::Null) {
-        return Ok(None);
+///
+/// A malformed array (not an array, the wrong length, a non-number or non-finite entry) gives
+/// the default mapping, so the image still exports.
+fn decode(doc: &Document, s: &Stream, n: usize) -> Option<Vec<[f64; 2]>> {
+    let value = doc.resolve(s.dict.get(b"Decode")?);
+    let values = value.as_array()?;
+    if Some(values.len()) != n.checked_mul(2) {
+        return None;
     }
-    let values = value.as_array().ok_or("the image Decode must be an array")?;
-    if values.len() != n * 2 {
-        return Err(format!("the image Decode must contain {} numbers", n * 2));
-    }
-    let endpoint = |value: &Object| {
-        doc.resolve(value).as_f64().filter(|v| v.is_finite()).ok_or_else(|| "the image Decode must contain finite numbers".to_string())
-    };
+    let endpoint = |value: &Object| doc.resolve(value).as_f64().filter(|v| v.is_finite());
     let mut pairs = Vec::with_capacity(n);
     for [lo, hi] in values.as_chunks::<2>().0 {
         pairs.push([endpoint(lo)?, endpoint(hi)?]);
     }
-    Ok(Some(pairs))
+    Some(pairs)
 }
 
 /// Width and height as sizes, when both are positive and the image is at most `MAX_PIXELS`.
