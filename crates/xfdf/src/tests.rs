@@ -157,7 +157,7 @@ fn a_replace_text_pair_survives_an_xfdf_round_trip() {
     let xfdf = export_xfdf(&src, true, false, "a.pdf");
     assert!(xfdf.contains("name=\"strike\"") && xfdf.contains("name=\"caret\""), "each gets its own name: {xfdf}");
     assert!(xfdf.contains("inreplyto=\"strike\""), "the caret replies to the strikeout: {xfdf}");
-    assert!(!xfdf.contains("name=\"caret\" ... inreplyto=\"caret\""), "never a reply to itself");
+    assert!(!xfdf.contains("inreplyto=\"caret\""), "never a reply to itself");
 
     let mut dst = blank();
     let r = import(&mut dst, xfdf.as_bytes()).unwrap();
