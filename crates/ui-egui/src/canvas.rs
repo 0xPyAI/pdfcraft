@@ -3218,6 +3218,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                         }
                     }
                     if resp.drag_started() && press_here && !over_link {
+                        // A drag replaces the selection without passing through none, so a
+                        // re-drag over text whose bar Copy closed would keep the bar hidden.
+                        view.actions_dismissed = None;
                         view.selection_drag = true;
                         let origin = ui.input(|inp| inp.pointer.press_origin()).unwrap_or(p);
                         let (ox, oy) = xf.screen_to_view(origin);
