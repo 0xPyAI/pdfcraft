@@ -274,11 +274,18 @@ pub(crate) fn drop_object_refs(doc: &mut Document, gone: &HashSet<ObjRef>) -> Re
         n += before - keep.len();
         doc.update_dict(r, |e| {
             if array {
-                e.set(b"K".to_vec(), Object::Array(keep));
-            } else if let Some(k) = keep.into_iter().next() {
+                e.set(b"K".to_vec(), Object::Array(keep.clone()));
+            } else if let Some(k) = keep.first().cloned() {
                 e.set(b"K".to_vec(), k);
             } else {
                 e.remove(b"K");
+            }
+            // An element left with nothing to tag keeps no text describing what it tagged:
+            // a link's alternate text often repeats the URL, an annotation's its comment.
+            if keep.is_empty() {
+                for key in [&b"Alt"[..], b"ActualText", b"T", b"E"] {
+                    e.remove(key);
+                }
             }
         })?;
     }
