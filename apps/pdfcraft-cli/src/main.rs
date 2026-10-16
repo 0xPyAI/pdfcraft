@@ -175,7 +175,12 @@ fn audit(args: &[String]) -> Result<(), CliError> {
     let findings = pdfcraft_audit::audit_redactions(&doc).map_err(|e| format!("{path}: {e}"))?;
     // Rectangles in points from the top-left of the displayed page, as `doc_audit_redactions`
     // reports them; the page geometry is read only when there is something to place.
-    let info = if findings.is_empty() { None } else { Some(inspect(bytes, password).map_err(|e| format!("{path}: {e}"))?) };
+    let info = if findings.is_empty() {
+        None
+    } else {
+        let render_password = pdfcraft_engine::render_password_for(bytes.clone(), password);
+        Some(inspect(bytes, render_password.as_deref()).map_err(|e| format!("{path}: {e}"))?)
+    };
     let items: Vec<serde_json::Value> = findings
         .into_iter()
         .map(|f| {
@@ -298,7 +303,9 @@ fn info(args: &[String]) -> Result<(), CliError> {
     let path = *positional(args).first().ok_or("info: missing file")?;
     let bytes = read(path)?;
     let password = flag(args, "--password");
-    let info = inspect(bytes.clone(), password).map_err(|e| e.to_string())?;
+    // The renderer takes only the user password of R2–R4 files; `Session::open` takes either.
+    let render_password = pdfcraft_engine::render_password_for(bytes.clone(), password);
+    let info = inspect(bytes.clone(), render_password.as_deref()).map_err(|e| e.to_string())?;
     // Dynamic XFA forms: say what laying the template out gives (what the app shows).
     let xfa_layout = (info.xfa == Some(pdfcraft_render::Xfa::Dynamic))
         .then(|| {
@@ -349,12 +356,14 @@ fn text(args: &[String]) -> Result<(), CliError> {
     }
     let password = flag(args, "--password");
     let bytes = read(path)?;
-    let mut r = PageRenderer::new(bytes.clone(), RenderConfig { password: password.map(Arc::from), ..Default::default() });
+    // The renderer takes only the user password of R2–R4 files; `Session::open` takes either.
+    let render_password = pdfcraft_engine::render_password_for(bytes.clone(), password);
+    let mut r = PageRenderer::new(bytes.clone(), RenderConfig { password: render_password.as_deref().map(Arc::from), ..Default::default() });
     // A document the renderer could not open (wrong or missing password, unparseable file) has
     // no pages, and "extract every page" of nothing would print nothing and exit 0 (#132). Ask
     // `inspect` why instead, so a protected file fails the same way `info` does.
     if r.page_count() == 0 {
-        let info = inspect(bytes.clone(), password).map_err(|e| format!("text: {e}"))?;
+        let info = inspect(bytes.clone(), render_password.as_deref()).map_err(|e| format!("text: {e}"))?;
         if !info.pages.is_empty() {
             return Err("text: the document could not be parsed".into());
         }
@@ -588,9 +597,12 @@ fn render(args: &[String]) -> Result<(), CliError> {
     // The app renders a display copy that draws comments missing their /AP streams; the CLI
     // must agree with it (and with independent viewers), while keeping the file it reads intact.
     let bytes = read(path)?;
+    let password = flag(args, "--password");
+    // The renderer takes only the user password of R2–R4 files; the display copy takes either.
+    let render_password = pdfcraft_engine::render_password_for(bytes.clone(), password);
     let mut r = PageRenderer::new(
-        pdfcraft_engine::display_bytes_for(bytes.clone(), flag(args, "--password")),
-        RenderConfig { password: flag(args, "--password").map(Arc::from), reject_oversize: true, ..Default::default() },
+        pdfcraft_engine::display_bytes_for(bytes.clone(), password),
+        RenderConfig { password: render_password.as_deref().map(Arc::from), reject_oversize: true, ..Default::default() },
     );
     let p = r.render(RenderRequest { page: page_index, kind: RequestKind::Pixels, tile: None, scale: dpi / 72.0, tag: 0, preview: false });
     if let Some(e) = p.error {

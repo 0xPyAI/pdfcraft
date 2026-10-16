@@ -4022,6 +4022,7 @@ dependencies = [
  "pdfcraft-engine",
  "pdfcraft-platform",
  "pdfcraft-render",
+ "png 0.18.1",
  "rustix 1.1.5",
  "serde_json",
  "winresource",

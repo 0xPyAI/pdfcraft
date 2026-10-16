@@ -912,6 +912,24 @@ pub fn display_bytes_for(bytes: Arc<Vec<u8>>, password: Option<&str>) -> Arc<Vec
     .unwrap_or(bytes)
 }
 
+/// The password to give the renderer (`inspect`, `PageRenderer`) for `bytes` opened with
+/// `password`. The renderer authenticates only the user password of R2–R4 files, so for their
+/// owner password this is the user password that owner authentication recovers; otherwise it is
+/// `password` itself. Render paths outside a [`Session`], such as the CLI, use this so the owner
+/// password works there as it does in `doc_open`. A file that doesn't open with `password` keeps
+/// it, so the renderer reports the same error it always did.
+pub fn render_password_for(bytes: Arc<Vec<u8>>, password: Option<&str>) -> Option<String> {
+    let password = password?;
+    let recovered =
+        guard(|| pdfcraft_cos::Document::open_with_password(bytes, Some(password)).ok().and_then(|d| recovered_render_password(&d))).ok().flatten();
+    Some(recovered.unwrap_or_else(|| password.to_owned()))
+}
+
+/// The user password owner authentication recovered from an R2–R4 `cos`, as the renderer takes it.
+fn recovered_render_password(cos: &pdfcraft_cos::Document) -> Option<String> {
+    cos.security().and_then(|s| s.recovered_user_password()).map(|user| renderer_password(&user))
+}
+
 /// Fails when the renderer still draws text under an applied redaction mark.
 ///
 /// Redaction decides what lies under a mark from the positions its own interpreter computes, and
@@ -3343,10 +3361,10 @@ impl Session {
             Ok(info) => (info, password.map(str::to_owned)),
             Err(OpenError::WrongPassword) => {
                 let user = match &cos {
-                    Ok(Ok(d)) => d.security().and_then(|s| s.recovered_user_password()),
+                    Ok(Ok(d)) => recovered_render_password(d),
                     _ => None,
                 };
-                let user = renderer_password(&user.ok_or(OpenError::WrongPassword)?);
+                let user = user.ok_or(OpenError::WrongPassword)?;
                 (inspect(bytes.clone(), Some(&user))?, Some(user))
             }
             Err(e) => return Err(e),
