@@ -3960,6 +3960,76 @@ fn default_width_subset_paragraph_keeps_its_rows_when_a_word_is_added() {
     }
 }
 
+/// #2578: a single turned row grows along its baseline only up to the page's 36 pt margin and wraps
+/// onto further rows from there, instead of running off the page.
+#[test]
+fn turned_single_row_wraps_at_the_page_margin() {
+    let draft = "A single turned row that keeps growing with many more words added until it is far longer than the page is tall, so it has to stop or wrap somewhere";
+    // Reading upwards (90° CCW) from y = 600 on the 600 × 800 test page: top margin is at y = 764.
+    let before = text_page("BT /F1 12 Tf 0 1 -1 0 300 600 Tm (A single turned row) Tj ET");
+    let layout = text::text_edit_layout(&before, 0, 0, draft, &text::BlockStyle::default()).unwrap();
+    let mut doc = before;
+    text::rewrite_block(&mut doc, 0, 0, Some(draft), &text::BlockStyle::default()).unwrap();
+    let reopened = reopen(&doc);
+    let lines = text::text_lines(&reopened, 0).unwrap();
+    assert!(lines.len() > 1, "expected the turned row to wrap at the top margin: {lines:?}");
+    for line in &lines {
+        assert!((line.rect[1] - 600.0).abs() < 0.5, "row starts at y = 600: {:?}", line.rect);
+        assert!(line.rect[3] <= 800.0 - 36.0 + 0.5, "row stays within the top margin: {:?}", line.rect);
+    }
+    let blocks = text::text_blocks(&reopened, 0).unwrap();
+    assert_eq!(blocks.len(), 1, "wrapped turned rows stay one paragraph: {blocks:?}");
+    assert_eq!(blocks[0].text, draft);
+    assert_eq!(layout.draft_rect, Some(blocks[0].rect));
+
+    // Reading downwards (90° CW) from y = 200: bottom margin is at y = 36.
+    let mut doc = text_page("BT /F1 12 Tf 0 -1 1 0 300 200 Tm (A single turned row) Tj ET");
+    text::rewrite_block(&mut doc, 0, 0, Some(draft), &text::BlockStyle::default()).unwrap();
+    let lines = text::text_lines(&reopen(&doc), 0).unwrap();
+    assert!(lines.len() > 1, "expected 90° CW row to wrap at the bottom margin: {lines:?}");
+    for line in &lines {
+        assert!((line.rect[3] - 200.0).abs() < 0.5, "row starts at y = 200: {:?}", line.rect);
+        assert!(line.rect[1] >= 36.0 - 0.5, "row stays within the bottom margin: {:?}", line.rect);
+    }
+
+    // Reading upside down (180°) from x = 200: left margin is at x = 36.
+    let mut doc = text_page("BT /F1 12 Tf -1 0 0 -1 200 600 Tm (A single turned row) Tj ET");
+    text::rewrite_block(&mut doc, 0, 0, Some(draft), &text::BlockStyle::default()).unwrap();
+    let lines = text::text_lines(&reopen(&doc), 0).unwrap();
+    assert!(lines.len() > 1, "expected 180° row to wrap at the left margin: {lines:?}");
+    for line in &lines {
+        assert!((line.rect[2] - 200.0).abs() < 0.5, "row starts at x = 200: {:?}", line.rect);
+        assert!(line.rect[0] >= 36.0 - 0.5, "row stays within the left margin: {:?}", line.rect);
+    }
+
+    // Slanted (45°) from (400, 600): baseline stops where it first reaches a 36 pt margin.
+    let (sin, cos) = 45.0_f64.to_radians().sin_cos();
+    let mut doc = text_page(&format!("BT /F1 12 Tf {cos:.6} {sin:.6} {:.6} {cos:.6} 400 600 Tm (A single turned row) Tj ET", -sin));
+    text::rewrite_block(&mut doc, 0, 0, Some(draft), &text::BlockStyle::default()).unwrap();
+    let lines = text::text_lines(&reopen(&doc), 0).unwrap();
+    assert!(lines.len() > 1, "expected 45° slanted row to wrap at the margin: {lines:?}");
+    for line in &lines {
+        assert!(line.rect[2] <= 600.0 && line.rect[3] <= 800.0, "slanted row stays on the page: {:?}", line.rect);
+    }
+
+    // Moving a turned single row with `offset` reduces the room left before the margin.
+    let mut doc = text_page("BT /F1 12 Tf 0 1 -1 0 300 500 Tm (A single turned row) Tj ET");
+    let moved = text::BlockStyle { offset: Some([0.0, 150.0]), ..Default::default() };
+    text::rewrite_block(&mut doc, 0, 0, Some(draft), &moved).unwrap();
+    let lines = text::text_lines(&reopen(&doc), 0).unwrap();
+    assert!(lines.len() > 1, "{lines:?}");
+    for line in &lines {
+        assert!((line.rect[1] - 650.0).abs() < 0.5, "moved row starts at y = 650: {:?}", line.rect);
+        assert!(line.rect[3] <= 800.0 - 36.0 + 0.5, "moved row stops at the top margin: {:?}", line.rect);
+    }
+
+    // A turned row that already starts inside the 36 pt margin keeps its own width instead of collapsing.
+    let mut doc = text_page("BT /F1 12 Tf 0 1 -1 0 300 770 Tm (Edge label) Tj ET");
+    text::rewrite_block(&mut doc, 0, 0, Some("Edge label updated"), &text::BlockStyle::default()).unwrap();
+    let lines = text::text_lines(&reopen(&doc), 0).unwrap();
+    assert!(lines.len() >= 2, "{lines:?}");
+}
+
 /// An added item is written out as a specific standard-14 face (`/Times-Italic`, `/Helvetica-Bold`
 /// …), so it has to be *measured* with that same face. Measuring the upright face while writing
 /// the italic one mis-sizes every box: Times-Italic `A` is 611 against Times-Roman's 722.

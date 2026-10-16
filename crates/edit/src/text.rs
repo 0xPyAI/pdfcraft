@@ -2149,9 +2149,27 @@ fn rewrite_block_from(
         };
         t * o_state.scale * k
     };
-    // A turned single line grows to fit, as far as the largest page PDF allows.
+    // A turned single line grows to fit, up to where its baseline reaches the page's margin.
     let width = if !upright && style.width.is_none() && members.len() == 1 {
-        text.split('\n').map(&advance).fold(width, f64::max).min(14_400.0)
+        let crop = p.crop(doc);
+        let (x0, y0) = (first.origin.x + dx, first.origin.baseline + dy);
+        let (ux, uy) = first.direction();
+        let tx = if ux > 1e-6 {
+            (crop[2] - 36.0 - x0) / ux
+        } else if ux < -1e-6 {
+            (crop[0] + 36.0 - x0) / ux
+        } else {
+            f64::INFINITY
+        };
+        let ty = if uy > 1e-6 {
+            (crop[3] - 36.0 - y0) / uy
+        } else if uy < -1e-6 {
+            (crop[1] + 36.0 - y0) / uy
+        } else {
+            f64::INFINITY
+        };
+        let cap = width.max(tx.min(ty)).min(14_400.0);
+        text.split('\n').map(&advance).fold(width, f64::max).min(cap)
     } else {
         width
     };
