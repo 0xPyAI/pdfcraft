@@ -2047,6 +2047,43 @@ fn paragraphs_take_new_formatting() {
 }
 
 #[test]
+fn a_one_row_title_keeps_its_centre_when_it_grows_and_when_it_wraps() {
+    // A centred one-row title (its centre is at x ≈ 306 on the 600 pt page) above a body
+    // left-aligned at x = 72. Growing it must not drag it to the right.
+    let src = "BT /F1 18 Tf 1 0 0 1 252.477 700 Tm (Centered title) Tj ET\n\
+               BT /F1 12 Tf 1 0 0 1 72 640 Tm (Body text below the heading starts here and runs) Tj ET\n\
+               BT /F1 12 Tf 1 0 0 1 72 625.6 Tm (on for a second row of ordinary words.) Tj ET";
+    let mut doc = text_page(src);
+    let before = text::text_blocks(&doc, 0).unwrap()[0].clone();
+    let centre = (before.rect[0] + before.rect[2]) / 2.0;
+    text::rewrite_block(&mut doc, 0, 0, Some("Centered title with a few more words"), &text::BlockStyle::default()).unwrap();
+    let doc = reopen(&doc);
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(blocks[0].text, "Centered title with a few more words");
+    let r = lines[blocks[0].lines[0]].rect;
+    assert!(((r[0] + r[2]) / 2.0 - centre).abs() < 1.0, "the grown title stays centred on {centre}, its centre is {}", (r[0] + r[2]) / 2.0);
+    // Long enough to have to wrap: every row stays centred on the same centre too.
+    let mut doc = text_page(src);
+    text::rewrite_block(
+        &mut doc,
+        0,
+        0,
+        Some("Centered title with many more words added so that the single row has to become much longer"),
+        &text::BlockStyle::default(),
+    )
+    .unwrap();
+    let doc = reopen(&doc);
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert!(blocks[0].lines.len() > 1, "the long title wraps into rows: {:?}", blocks[0].text);
+    for i in &blocks[0].lines {
+        let r = lines[*i].rect;
+        assert!(((r[0] + r[2]) / 2.0 - centre).abs() < 2.0, "row {:?} stays centred on {centre}", lines[*i].text);
+    }
+}
+
+#[test]
 fn a_new_paragraph_colour_does_not_spill_into_the_text_after_it() {
     let mut doc = text_page("BT /F1 10 Tf 72 700 Td (First paragraph) Tj 0 -40 Td (Second paragraph) Tj ET");
     let style = text::BlockStyle { color: Some([1.0, 0.0, 0.0]), ..Default::default() };
