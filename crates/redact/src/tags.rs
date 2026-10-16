@@ -202,3 +202,85 @@ pub(crate) fn clean(
     }
     Ok(n)
 }
+
+/// Whether `o` is an object reference (`/Type /OBJR`, direct or indirect) to one of `gone`.
+fn refers_to(doc: &Document, o: &Object, gone: &HashSet<ObjRef>) -> bool {
+    doc.resolve(o)
+        .as_dict()
+        .is_some_and(|d| d.name(b"Type") == Some(b"OBJR") && d.get(b"Obj").and_then(Object::as_ref).is_some_and(|r| gone.contains(&r)))
+}
+
+/// Drop the structure tree's object references (OBJR) to `gone`, annotations removed from their
+/// pages (#2447). A tagged PDF's tree points at each link and comment it tags; left there, the
+/// reference keeps the annotation, its URL or text included, in a full rewrite after the page
+/// no longer lists it. Returns how many references were dropped.
+pub(crate) fn drop_object_refs(doc: &mut Document, gone: &HashSet<ObjRef>) -> Result<usize, pdfcraft_cos::CosError> {
+    if gone.is_empty() {
+        return Ok(0);
+    }
+    let Some(root) = doc
+        .root()
+        .and_then(|r| doc.get(r).as_dict().cloned())
+        .and_then(|c| c.get(b"StructTreeRoot").map(|s| doc.resolve(s)).and_then(|s| s.as_dict().cloned()))
+    else {
+        return Ok(0);
+    };
+    let mut todo: Vec<Object> = root.get(b"K").cloned().into_iter().collect();
+    let mut seen = HashSet::new();
+    let mut hits: Vec<ObjRef> = Vec::new();
+    while let Some(k) = todo.pop() {
+        match k {
+            Object::Array(a) => todo.extend(a),
+            Object::Ref(r) => {
+                if !seen.insert(r) || seen.len() > 2_000_000 {
+                    continue;
+                }
+                let object = doc.get(r);
+                if let Object::Array(a) = &*object {
+                    todo.extend(a.iter().cloned());
+                    continue;
+                }
+                let Some(d) = object.as_dict() else { continue };
+                if !d.contains(b"S") {
+                    continue;
+                }
+                let kids: Vec<Object> = match d.get(b"K").map(|k| doc.resolve(k)) {
+                    Some(o) => match &*o {
+                        Object::Array(a) => a.clone(),
+                        _ => d.get(b"K").cloned().into_iter().collect(),
+                    },
+                    None => Vec::new(),
+                };
+                if kids.iter().any(|x| refers_to(doc, x, gone)) {
+                    hits.push(r);
+                }
+                todo.extend(kids);
+            }
+            _ => {}
+        }
+    }
+    let mut n = 0;
+    for r in hits {
+        let Some(d) = doc.get(r).as_dict().cloned() else { continue };
+        let kids = d.get(b"K").map(|k| doc.resolve(k));
+        let array = kids.as_ref().is_some_and(|k| matches!(&**k, Object::Array(_)));
+        let list: Vec<Object> = match kids.as_deref() {
+            Some(Object::Array(a)) => a.clone(),
+            Some(_) => d.get(b"K").cloned().into_iter().collect(),
+            None => Vec::new(),
+        };
+        let before = list.len();
+        let keep: Vec<Object> = list.into_iter().filter(|x| !refers_to(doc, x, gone)).collect();
+        n += before - keep.len();
+        doc.update_dict(r, |e| {
+            if array {
+                e.set(b"K".to_vec(), Object::Array(keep));
+            } else if let Some(k) = keep.into_iter().next() {
+                e.set(b"K".to_vec(), k);
+            } else {
+                e.remove(b"K");
+            }
+        })?;
+    }
+    Ok(n)
+}
