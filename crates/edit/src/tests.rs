@@ -3972,6 +3972,31 @@ fn turned_paragraph_keeps_its_line_breaks_when_a_word_is_added() {
     assert!(text::rewrite_block(&mut doc, 0, 0, Some("Only line"), &style).is_err());
 }
 
+/// A paragraph drawn at a slant rewraps at the width its rows have along their baseline, as the
+/// same paragraph upright does. Its upright bounding box turned into the baseline's frame is wider
+/// by the rows' height times |sin 2θ|, which let a word that doesn't fit stay on its row.
+#[test]
+fn a_paragraph_at_a_slant_rewraps_at_the_width_it_has_upright() {
+    let rows = ["Rotated paragraph, first row of text", "that continues on a second row and", "ends on the third row here."];
+    let draft = "Rotated paragraph, first row of text that continues on a second row and now carries a few extra words \
+        before it ends on the third row here.";
+    let rewrapped = |degrees: f64| {
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        let shown = rows.iter().map(|r| format!("({r}) Tj")).collect::<Vec<_>>().join(" T* ");
+        let mut doc = text_page(&format!("BT /F1 12 Tf 14.4 TL {cos:.6} {sin:.6} {:.6} {cos:.6} 300 400 Tm {shown} ET", -sin));
+        let block = text::text_blocks(&doc, 0).unwrap().remove(0);
+        assert_eq!(block.editor_text, rows.join("\n"), "{degrees}°");
+        text::rewrite_block(&mut doc, 0, 0, Some(draft), &text::BlockStyle::default()).unwrap();
+        text::text_lines(&reopen(&doc), 0).unwrap().into_iter().map(|l| l.text).collect::<Vec<_>>()
+    };
+    let upright = rewrapped(0.0);
+    // The widest source row is 189.44 pt; "now carries a few extra words before" is 196.07 pt.
+    assert_eq!(upright[2], "now carries a few extra words", "{upright:?}");
+    for degrees in [30.0, 45.0, 60.0, 90.0, 135.0, 210.0, 330.0] {
+        assert_eq!(rewrapped(degrees), upright, "{degrees}°");
+    }
+}
+
 /// A paragraph in a Chrome-style subset font: `/W` leaves out the glyphs of the `/DW` width.
 /// Adding a word keeps every row as it was and shows the word in the page's own font (#1443).
 #[test]

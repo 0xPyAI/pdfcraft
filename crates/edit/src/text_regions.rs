@@ -17,10 +17,6 @@ fn same_plane(a: &TextLine, b: &TextLine) -> bool {
         })
 }
 
-fn union(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
-    [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]
-}
-
 fn row_rect(row: &[usize], lines: &[TextLine]) -> Option<[f64; 4]> {
     row.iter().filter_map(|i| lines.get(*i)).map(|l| l.rect).reduce(union)
 }
