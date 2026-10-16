@@ -4704,8 +4704,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.export_data", "form.import_data"]
 tools = ["doc_export_data", "doc_import_data"]
-evidence = ["crates/xfdf/src/tests.rs::form_data_as_xml_csv_and_text", "crates/automation/tests/automation.rs::comments_and_form_data_travel_as_xfdf_fdf_and_text", "crates/xfdf/src/tests.rs::xml_exports_preserve_whitespace_in_field_names", "crates/xfdf/src/tests.rs::xml_form_import_preserves_text_around_comments_and_instructions"]
-notes = "Acrobat's XML (xfdf:original), CSV, tab-delimited; XML/XFDF exports retain tabs and line breaks in field identities through character references; plain AcroForm XML imports retain all direct text around comments and processing instructions, including CDATA and character references. Nested-element and XFA interpretation remain outside this flat exchange format."
+evidence = ["crates/xfdf/src/tests.rs::form_data_as_xml_csv_and_text", "crates/automation/tests/automation.rs::comments_and_form_data_travel_as_xfdf_fdf_and_text", "crates/xfdf/src/tests.rs::xml_exports_preserve_whitespace_in_field_names", "crates/xfdf/src/tests.rs::xml_form_import_preserves_text_around_comments_and_instructions", "crates/xfdf/src/tests.rs::csv_headers_with_tabs_survive_export_import_and_save", "crates/xfdf/src/tests.rs::tabular_import_keeps_tsv_quotes_literal_and_csv_value_tabs"]
+notes = "Acrobat's XML (xfdf:original), CSV, tab-delimited; XML/XFDF exports retain tabs and line breaks in field identities through character references; plain AcroForm XML imports retain all direct text around comments and processing instructions, including CDATA and character references. Nested-element and XFA interpretation remain outside this flat exchange format. CSV export and spreadsheet merging quote tabs, and import distinguishes quoted tabs from TSV delimiters without changing field identities. Ambiguous externally authored tables remain heuristic; TSV export and formula-cell policy are unchanged."
 
 [[feature]]
 id = "form.merge-to-spreadsheet"
@@ -4716,8 +4716,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.merge_data"]
 tools = ["form_merge_data"]
-evidence = ["crates/xfdf/src/tests.rs::data_files_merge_into_a_spreadsheet", "crates/automation/tests/automation.rs::merging_form_data_into_a_spreadsheet", "crates/ui-egui/tests/javascript.rs::merge_data_files_into_a_spreadsheet"]
-notes = "FDF, XFDF or filled-in PDF forms \u2192 CSV, a column per field and a row per file."
+evidence = ["crates/xfdf/src/tests.rs::data_files_merge_into_a_spreadsheet", "crates/automation/tests/automation.rs::merging_form_data_into_a_spreadsheet", "crates/ui-egui/tests/javascript.rs::merge_data_files_into_a_spreadsheet", "crates/xfdf/src/tests.rs::csv_headers_with_tabs_survive_export_import_and_save"]
+notes = "FDF, XFDF or filled-in PDF forms \u2192 CSV, a column per field and a row per file. CSV header tabs, quotes and line breaks retain field identities through import and save/reopen; ambiguous external table detection remains heuristic."
 
 [[feature]]
 id = "form.flatten-fields"

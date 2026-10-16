@@ -24,6 +24,10 @@ character references, so XML attribute normalization cannot change their identit
 Plain AcroForm XML imports retain all direct text around comments and processing instructions,
 including CDATA and character references. Nested-element and XFA interpretation are unchanged.
 
+CSV export and spreadsheet merging quote tabs, and import distinguishes quoted tabs from TSV
+delimiters without changing field identities. Automatic detection of externally authored, ambiguous
+tables remains heuristic. Formula-cell policy and tab-delimited export are unchanged.
+
 Import replaces comments with the same `/NM` (and drops the replaced comment's pop-up), draws
 appearances PdfCraft can draw, and sets values through the form's own checks (formats,
 validation, recalculation); read-only fields take imported values, as in Acrobat. XML is read

@@ -157,6 +157,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 | 8 | 1.0 polish: performance, right-to-left, missing languages, keyboard-only (M14) | 55–95 |
 
 ## Progress log
+- **2026-10-15 (M6, CSV tab-containing headers):** CSV export and spreadsheet merging quote tabs, and import distinguishes quoted tabs from TSV delimiters without changing field identities. Synthetic export/import and incremental/full save regressions cover header tabs, quotes and line breaks, plus ordinary TSV controls. Formula-cell policy is unchanged. Estimates unchanged.
 - **2026-10-15 (M6, AcroForm XML text):** Plain AcroForm XML imports retain all direct text around comments and processing instructions, including CDATA and character references. Synthetic regressions verify exact values and unknown catalog data after incremental and full save/reopen. Nested-element and XFA interpretation are unchanged. Estimates unchanged.
 - **2026-10-13 (M6, data exchange fidelity):** XML and XFDF exports preserve tabs and line breaks in field names and comment metadata using character references. Saved-PDF regressions cover distinct names that XML would normalize to the same attribute value, restored field values and replacement of the original comment identities. Estimates unchanged.
 - **2026-10-15 (M2, gap 12):** `cargo xtask text-oracle` scores reading order as well as word F1: the longest common subsequence of the two word sequences over the longer one. F1 is a bag of words and cannot see order at all -- measuring #2431, a change that moves text and nothing else, it called 26 of the 29 files whose output changed identical, where the order score separated 18 improvements from 6 regressions. Reports, does not gate; a disagreement with Poppler, not a verdict. Estimates unchanged.
@@ -497,6 +498,7 @@ Newest first: the date, what moved, and the new overall estimate.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-15 | minor | M6: CSV export and spreadsheet merging quote tabs, and import distinguishes quoted tabs from TSV delimiters without changing field identities. Estimates unchanged. |
 | 2026-10-15 | minor | M6: Plain AcroForm XML imports retain all direct text around comments and processing instructions, including CDATA and character references. Estimates unchanged. |
 | 2026-10-13 | minor | M6: XML/XFDF attribute whitespace survives form and comment export/import; estimates unchanged |
 | 2026-10-13 | minor | M9: separate page validation overlays preserve signature artwork, and snapshot tabs reuse instead of multiplying; baked captions remain unchanged (#79 open); estimates unchanged |

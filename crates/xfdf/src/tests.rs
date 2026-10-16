@@ -1144,3 +1144,49 @@ fn xml_form_import_preserves_text_around_comments_and_instructions() {
         assert_eq!(fields(&original).into_iter().find(|f| f.name == "Name").unwrap().value, vec!["replace me"]);
     }
 }
+
+#[test]
+fn csv_headers_with_tabs_survive_export_import_and_save() {
+    for name in ["First\tName", "\tName", "Name\t", "Name\t\"quoted\"", "Name\nwith\ta tab"] {
+        let mut source = one_field();
+        add_field(&mut source, 0, [50.0, 650.0, 250.0, 670.0], &NewField::Text { multiline: false }, Some("Other")).unwrap();
+        set_value(&mut source, "Other", &FieldValue::Text("other field".into())).unwrap();
+        let field = fields(&source).into_iter().find(|f| f.name == "Name").unwrap().obj;
+        source.update_dict(field, |dict| dict.set(b"T".to_vec(), PdfString::text(name))).unwrap();
+        set_value(&mut source, name, &FieldValue::Text("original, \"value\"".into())).unwrap();
+        let bytes = write_full(&source, &SaveOptions::default()).unwrap();
+        let source = Document::open(Arc::new(bytes.clone())).unwrap();
+        let row = data_values(&bytes).unwrap();
+        for csv in [export_data(&source, Format::Csv), merge_csv(&[row])] {
+            let mut doc = Document::open(Arc::new(bytes.clone())).unwrap();
+            set_value(&mut doc, name, &FieldValue::Text("replacement".into())).unwrap();
+            set_value(&mut doc, "Other", &FieldValue::Text("other replacement".into())).unwrap();
+            let report = import(&mut doc, csv.as_bytes()).unwrap();
+            assert_eq!(report.fields, 2);
+            assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+            for saved in [write_full(&doc, &SaveOptions::default()).unwrap(), write_incremental(&doc, &SaveOptions::default()).unwrap()] {
+                let reopened = Document::open(Arc::new(saved)).unwrap();
+                assert_eq!(fields(&reopened).into_iter().find(|f| f.name == name).unwrap().value, vec!["original, \"value\""], "{csv:?}");
+                assert_eq!(values(&reopened), values(&source), "{csv:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn tabular_import_keeps_tsv_quotes_literal_and_csv_value_tabs() {
+    for name in ["Name", "Na\"me", "\"Name\"", "\"Name"] {
+        let mut doc = one_field();
+        add_field(&mut doc, 0, [50.0, 650.0, 250.0, 670.0], &NewField::Text { multiline: false }, Some("Other")).unwrap();
+        let field = fields(&doc).into_iter().find(|f| f.name == "Name").unwrap().obj;
+        doc.update_dict(field, |dict| dict.set(b"T".to_vec(), PdfString::text(name))).unwrap();
+        let text = format!("{name}\tOther\r\nAda\tother field\r\n");
+        let report = import(&mut doc, text.as_bytes()).unwrap();
+        assert_eq!(report.fields, 2, "{text:?}");
+        assert_eq!(fields(&doc).into_iter().find(|f| f.name == name).unwrap().value, vec!["Ada"]);
+    }
+    let mut doc = one_field();
+    add_field(&mut doc, 0, [50.0, 650.0, 250.0, 670.0], &NewField::Text { multiline: false }, Some("Other")).unwrap();
+    import(&mut doc, b"Name,Other\r\n\"Ada\tLovelace\",other field\r\n").unwrap();
+    assert_eq!(fields(&doc).into_iter().find(|f| f.name == "Name").unwrap().value, vec!["Ada\tLovelace"]);
+}
