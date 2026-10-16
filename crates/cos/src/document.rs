@@ -82,6 +82,8 @@ struct XrefSection {
     row_count: usize,
     max_num: u32,
     has_entries: bool,
+    /// A table subsection was read one number lower than it says ([`subsection_start`]).
+    renumbered: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1370,6 +1372,9 @@ impl Document {
                 Err(e) => return Err(e),
             };
             revisions.push(Revision { xref_offset: off, is_stream, header_relative });
+            if primary.renumbered {
+                log.push(format!("xref subsection at {off} is numbered from 1 but begins with object 0's entry; read from 0"));
+            }
             let Some(rows) = retained_rows.checked_add(primary.row_count).filter(|rows| *rows <= MAX_COMPACT_XREF_ROWS) else { return Ok(None) };
             let Some(bytes) = retained_bytes.checked_add(primary.retained_bytes()).filter(|bytes| *bytes <= MAX_COMPACT_XREF_BYTES) else {
                 return Ok(None);
@@ -1444,6 +1449,7 @@ impl Document {
             let mut has_entries = false;
             let mut previous_end = None;
             let mut row_count = 0usize;
+            let mut renumbered = false;
             loop {
                 lx.skip_ws();
                 if lx.eat_keyword(b"trailer") {
@@ -1452,7 +1458,7 @@ impl Document {
                     if !layout_ok {
                         return Ok(None);
                     }
-                    return Ok(Some((XrefSection { data: XrefSectionData::Table, ranges, row_count, max_num, has_entries }, d, false)));
+                    return Ok(Some((XrefSection { data: XrefSectionData::Table, ranges, row_count, max_num, has_entries, renumbered }, d, false)));
                 }
                 let (Ok(Object::Int(start)), Ok(Object::Int(count))) = (lx.object(), lx.object()) else {
                     return Err(CosError::Syntax { offset: lx.pos, detail: "bad xref subsection header".into() });
@@ -1460,6 +1466,9 @@ impl Document {
                 if !valid_xref_range(start, count) || count > 10_000_000 {
                     return Err(CosError::Syntax { offset: lx.pos, detail: "invalid xref object range".into() });
                 }
+                let shifted = subsection_start(data, lx.pos, start, count);
+                renumbered |= shifted != start;
+                let start = shifted;
                 let Some(next_rows) = usize::try_from(count).ok().and_then(|count| row_count.checked_add(count)) else { return Ok(None) };
                 if next_rows > MAX_COMPACT_XREF_ROWS {
                     return Ok(None);
@@ -1612,7 +1621,14 @@ impl Document {
         }
         let max_num = ranges.iter().filter_map(|range| range.start.checked_add(range.count.saturating_sub(1))).max().unwrap_or(0);
         let row_count = row_start;
-        let section = XrefSection { data: XrefSectionData::Stream { bytes: Arc::new(raw), widths }, ranges, row_count, max_num, has_entries: false };
+        let section = XrefSection {
+            data: XrefSectionData::Stream { bytes: Arc::new(raw), widths },
+            ranges,
+            row_count,
+            max_num,
+            has_entries: false,
+            renumbered: false,
+        };
         let has_entries = section.has_any_entry();
         let section = XrefSection { has_entries, ..section };
         Ok(Some((section, stream.dict.clone(), true)))
@@ -1646,13 +1662,13 @@ impl Document {
             let mut sect = BTreeMap::new();
             // Object numbers whose entry in this section was set aside ([`Self::xref_oddities`]).
             let mut odd = Vec::new();
-            let ((sect_trailer, is_stream), header_relative) = match self.read_section(off as usize, &mut sect, &mut odd) {
+            let ((sect_trailer, is_stream), header_relative) = match self.read_section(off as usize, &mut sect, &mut odd, log) {
                 Ok(v) => (v, false),
                 Err(e) if self.header_offset > 0 => {
                     log.push(format!("xref at {off} unreadable ({e}); retrying relative to the header"));
                     sect.clear();
                     odd.clear();
-                    (self.read_section(off as usize + self.header_offset, &mut sect, &mut odd)?, true)
+                    (self.read_section(off as usize + self.header_offset, &mut sect, &mut odd, log)?, true)
                 }
                 Err(e) => {
                     // An unreadable older section loses every object only it locates (the page
@@ -1668,7 +1684,7 @@ impl Document {
             // free entries it gives objects only a cross-reference stream can locate.
             if let Some(x) = sect_trailer.int(b"XRefStm").filter(|x| *x >= 0) {
                 let mut stm = BTreeMap::new();
-                match self.read_section(x as usize, &mut stm, &mut odd) {
+                match self.read_section(x as usize, &mut stm, &mut odd, log) {
                     Ok(_) => {
                         for (num, e) in stm {
                             match sect.get(&num) {
@@ -1703,7 +1719,13 @@ impl Document {
 
     /// Read one section at `off`, adding entries not already known (newer sections win). `odd`
     /// collects the object numbers whose entry here is set aside ([`Self::xref_oddities`]).
-    fn read_section(&self, off: usize, entries: &mut BTreeMap<u32, XrefEntry>, odd: &mut Vec<u32>) -> Result<(Dict, bool), CosError> {
+    fn read_section(
+        &self,
+        off: usize,
+        entries: &mut BTreeMap<u32, XrefEntry>,
+        odd: &mut Vec<u32>,
+        log: &mut Vec<String>,
+    ) -> Result<(Dict, bool), CosError> {
         let data = &self.data;
         let mut lx = Lexer::new(data, off);
         if lx.eat_keyword(b"xref") {
@@ -1720,6 +1742,11 @@ impl Document {
                 if !valid_xref_range(start, count) || count > 10_000_000 {
                     return Err(CosError::Syntax { offset: lx.pos, detail: "invalid xref object range".into() });
                 }
+                let shifted = subsection_start(data, lx.pos, start, count);
+                if shifted != start {
+                    log.push(format!("xref subsection at {off} is numbered from 1 but begins with object 0's entry; read from 0"));
+                }
+                let start = shifted;
                 for i in 0..count {
                     lx.skip_ws();
                     let o = lx.token();
@@ -1933,6 +1960,34 @@ fn generated_id(seed: &[u8; 32]) -> Vec<u8> {
 /// Object numbers must fit the representation used by references and the xref map.
 /// Validate the whole subsection before adding entries, so neither arithmetic overflow nor
 /// truncation can turn a damaged range into entries for unrelated objects.
+/// The object number a classic xref subsection really starts at. A common producer bug heads the
+/// table `1 n` and then writes object 0's free entry (`0000000000 65535 f`) as its first row, so
+/// every row would be read one number too high and object 1 as free. Such a subsection is read
+/// from 0 when its second row, read that way, locates an object that is indeed numbered 1. `rows`
+/// is the position just after the subsection header.
+fn subsection_start(data: &[u8], rows: usize, start: i64, count: i64) -> i64 {
+    if start != 1 || count < 2 {
+        return start;
+    }
+    let mut lx = Lexer::new(data, rows);
+    let mut row = || {
+        lx.skip_ws();
+        let offset = std::str::from_utf8(lx.token()).ok().and_then(|s| s.parse::<u64>().ok());
+        lx.skip_ws();
+        let generation = std::str::from_utf8(lx.token()).ok().and_then(|s| s.parse::<u32>().ok());
+        lx.skip_ws();
+        (offset, generation, lx.token() == b"f")
+    };
+    let (Some(0), Some(65535), true) = row() else { return start };
+    let (Some(second), _, false) = row() else { return start };
+    let Some(at) = usize::try_from(second).ok().filter(|at| *at < data.len()) else { return start };
+    let mut obj = Lexer::new(data, at);
+    match (obj.object(), obj.object()) {
+        (Ok(Object::Int(1)), Ok(Object::Int(_))) if obj.eat_keyword(b"obj") => 0,
+        _ => start,
+    }
+}
+
 fn valid_xref_range(start: i64, count: i64) -> bool {
     u32::try_from(start).is_ok() && count >= 0 && start.checked_add(count).is_some_and(|end| end <= i64::from(u32::MAX) + 1)
 }
@@ -2093,6 +2148,119 @@ mod tests {
         assert_eq!(doc.get(ObjRef { num: 3, generation: 0 }).as_string().map(|s| s.bytes.clone()), Some(b"three".to_vec()));
         assert!(!doc.xref_entry_is_exact(3));
         assert!(doc.xref_entry_is_exact(1) && doc.xref_entry_is_exact(2));
+    }
+
+    /// A classic table with `/Size` rows and object 0's free entry first, its subsection numbered
+    /// `1 n` instead of `0 n` (#2676): every row is one number off.
+    fn misnumbered_table(start: u32) -> Vec<u8> {
+        let bodies = ["<< /Marker (first object) >>", "<< /Type /Pages /Kids [] /Count 0 >>", "<< /Type /Catalog /Pages 2 0 R >>"];
+        let mut out = b"%PDF-1.7
+"
+        .to_vec();
+        let mut offsets = Vec::new();
+        for (i, body) in bodies.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(
+                format!(
+                    "{} 0 obj
+{body}
+endobj
+",
+                    i + 1
+                )
+                .as_bytes(),
+            );
+        }
+        let xref = out.len();
+        out.extend_from_slice(
+            format!(
+                "xref
+{start} 4
+0000000000 65535 f 
+"
+            )
+            .as_bytes(),
+        );
+        for o in offsets {
+            out.extend_from_slice(
+                format!(
+                    "{o:010} 00000 n 
+"
+                )
+                .as_bytes(),
+            );
+        }
+        out.extend_from_slice(
+            format!(
+                "trailer
+<< /Size 4 /Root 3 0 R >>
+startxref
+{xref}
+%%EOF
+"
+            )
+            .as_bytes(),
+        );
+        out
+    }
+
+    #[test]
+    fn a_table_numbered_from_1_that_begins_with_object_0_is_read_from_0() {
+        let doc = Document::open(Arc::new(misnumbered_table(1))).unwrap();
+        let first = doc.get(ObjRef::new(1, 0)).as_dict().cloned().expect("object 1 is not free");
+        assert!(first.contains(b"Marker"));
+        assert_eq!(doc.root(), Some(ObjRef::new(3, 0)));
+        assert!(doc.repair_log().iter().any(|l| l.contains("numbered from 1")), "{:?}", doc.repair_log());
+        // A correct table reads the same and logs nothing.
+        let fine = Document::open(Arc::new(misnumbered_table(0))).unwrap();
+        assert!(fine.get(ObjRef::new(1, 0)).as_dict().is_some_and(|d| d.contains(b"Marker")));
+        assert!(!fine.repair_log().iter().any(|l| l.contains("numbered from 1")));
+    }
+
+    #[test]
+    fn a_table_that_really_starts_at_1_keeps_its_numbers() {
+        // Object 1 deleted for good (generation 65535) in a subsection that does start at 1: its
+        // second row locates object 2, so nothing is shifted.
+        let mut bytes = b"%PDF-1.7
+"
+        .to_vec();
+        let pages = bytes.len();
+        bytes.extend_from_slice(
+            b"2 0 obj
+<< /Type /Pages /Kids [] /Count 0 >>
+endobj
+",
+        );
+        let catalog = bytes.len();
+        bytes.extend_from_slice(
+            b"3 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+",
+        );
+        let xref = bytes.len();
+        bytes.extend_from_slice(
+            format!(
+                "xref
+0 1
+0000000000 65535 f 
+1 3
+0000000000 65535 f 
+{pages:010} 00000 n 
+{catalog:010} 00000 n 
+trailer
+<< /Size 4 /Root 3 0 R >>
+startxref
+{xref}
+%%EOF
+"
+            )
+            .as_bytes(),
+        );
+        let doc = Document::open(Arc::new(bytes)).unwrap();
+        assert!(doc.get(ObjRef::new(2, 0)).as_dict().is_some_and(|d| d.name(b"Type") == Some(b"Pages")));
+        assert!(doc.get(ObjRef::new(1, 0)).as_dict().is_none(), "object 1 stays free");
+        assert!(!doc.repair_log().iter().any(|l| l.contains("numbered from 1")));
     }
 
     #[test]
