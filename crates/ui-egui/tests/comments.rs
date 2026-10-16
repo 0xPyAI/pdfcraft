@@ -24,10 +24,14 @@ trailer << /Root 1 0 R >>
 %%EOF";
 
 fn harness(setup: impl FnOnce(&mut PdfCraftApp) + 'static) -> Harness<'static, PdfCraftApp> {
+    harness_with_bytes(TEXT_FIXTURE.to_vec(), setup)
+}
+
+fn harness_with_bytes(bytes: Vec<u8>, setup: impl FnOnce(&mut PdfCraftApp) + 'static) -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
         app.set_option("language", "en").unwrap();
-        app.open_bytes("text.pdf", None, TEXT_FIXTURE.to_vec()).expect("opens");
+        app.open_bytes("text.pdf", None, bytes).expect("opens");
         app.set_option("left", "closed").unwrap();
         app.set_option("author", "Tester").unwrap();
         setup(&mut app);
@@ -733,6 +737,131 @@ fn the_panel_filters_and_sorts() {
     h.run_steps(2);
     // Grouped by type: a group header names each type.
     assert_eq!(h.query_all_by_label("Oval").count(), ovals + 1, "a group header was added");
+}
+
+// Contributor-original PDF. Two roots deliberately share /NM. Their replies are on
+// another page, with dates opposite to source order. An unnamed root has no thread.
+const REVIEW_FIXTURE: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [5 0 R 6 0 R 7 0 R] >> endobj
+4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [8 0 R 9 0 R 10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R] >> endobj
+5 0 obj << /Type /Annot /Subtype /Text /Rect [20 140 40 160] /NM (shared) /T (Alpha) /Contents (First root) >> endobj
+6 0 obj << /Type /Annot /Subtype /Text /Rect [60 140 80 160] /NM (shared) /T (Beta) /Contents (Duplicate root) >> endobj
+7 0 obj << /Type /Annot /Subtype /Text /Rect [100 140 120 160] /T (Gamma) /Contents (Unnamed root) >> endobj
+8 0 obj << /Type /Annot /Subtype /Text /Rect [20 140 40 160] /NM (late) /T (Delta) /Contents (Late root) >> endobj
+9 0 obj << /Type /Annot /Subtype /Text /Rect [20 100 40 120] /NM (first-reply) /IRT 5 0 R /T (Reader) /Contents (Needle first reply) /M (D:20260102000000) >> endobj
+10 0 obj << /Type /Annot /Subtype /Text /Rect [20 100 40 120] /IRT 5 0 R /StateModel /Review /State /Rejected /Contents (Old review) /M (D:20260102000000) >> endobj
+11 0 obj << /Type /Annot /Subtype /Text /Rect [20 100 40 120] /IRT 5 0 R /StateModel /Marked /State /Marked /M (D:20260102000000) >> endobj
+12 0 obj << /Type /Annot /Subtype /Text /Rect [20 100 40 120] /NM (second-reply) /IRT 5 0 R /T (Reader) /Contents (Second reply) /M (D:20260101000000) >> endobj
+13 0 obj << /Type /Annot /Subtype /Text /Rect [20 100 40 120] /IRT 5 0 R /StateModel /Review /State /Accepted /Contents (Status-only token) /M (D:20260101000000) >> endobj
+14 0 obj << /Type /Annot /Subtype /Text /Rect [20 100 40 120] /IRT 5 0 R /StateModel /Marked /State /Unmarked /M (D:20260101000000) >> endobj
+15 0 obj << /Type /Annot /Subtype /Text /Rect [20 100 40 120] /NM (late-reply) /IRT 8 0 R /T (Reader) /Contents (Late thread reply) >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
+#[test]
+fn the_panel_preserves_global_threads_source_order_and_unfiltered_page_counts() {
+    let mut h = harness_with_bytes(REVIEW_FIXTURE.to_vec(), |app| {
+        app.set_option("panel", "comments").unwrap();
+        app.views[0].comments.search = Some("needle".into());
+        app.views[0].comments.hidden_authors.push("Beta".into());
+        app.views[0].comments.selected = Some((0, 0));
+    });
+    h.get_by_label("First root");
+    h.get_by_label("Page 1");
+    h.get_by_label("3"); // All three page roots count, including the two filtered out.
+    assert_eq!(h.query_all_by_label("Duplicate root").count(), 0);
+    assert_eq!(h.query_all_by_label("Unnamed root").count(), 0);
+    assert!(
+        h.get_by_label("Needle first reply").rect().top() < h.get_by_label("Second reply").rect().top(),
+        "replies follow source order, not dates"
+    );
+    h.get_by_label("Accepted");
+    h.get_by_label("Mark with checkmark"); // The later Unmarked reply wins independently.
+    assert_eq!(h.query_all_by_label("Status-only token").count(), 0, "status text is searchable but is not a displayed reply");
+
+    h.state_mut().views[0].comments.hidden_authors.clear();
+    h.run_steps(2);
+    h.get_by_label("Duplicate root");
+    assert_eq!(h.query_all_by_label("Needle first reply").count(), 2, "duplicate names share the same global thread");
+    h.state_mut().views[0].comments.search = Some("status-only token".into());
+    h.state_mut().views[0].comments.hidden_statuses.push("Rejected".into());
+    h.state_mut().views[0].comments.hidden_checks.push("Checked".into());
+    h.run_steps(2);
+    h.get_by_label("First root");
+    h.get_by_label("Duplicate root");
+
+    h.state_mut().views[0].comments.hidden_statuses.push("Accepted".into());
+    h.run_steps(2);
+    h.get_by_label("No comments match.");
+    h.state_mut().views[0].comments.hidden_statuses.clear();
+    h.state_mut().views[0].comments.hidden_checks.push("Unchecked".into());
+    h.run_steps(2);
+    h.get_by_label("No comments match.");
+
+    h.state_mut().views[0].comments.search = Some("unnamed root".into());
+    h.state_mut().views[0].comments.hidden_checks.clear();
+    h.run_steps(2);
+    h.get_by_label("Unnamed root");
+    assert_eq!(h.query_all_by_label("Needle first reply").count(), 0, "an unnamed root has no replies");
+}
+
+#[test]
+fn the_panel_reveals_edits_and_reopens_a_late_thread_without_changing_its_replies() {
+    let mut h = harness_with_bytes(REVIEW_FIXTURE.to_vec(), |app| {
+        app.set_option("panel", "comments").unwrap();
+        app.views[0].comments.collapsed_pages = vec![0, 1];
+    });
+    assert_eq!(h.query_all_by_label("Late root").count(), 0);
+    h.state_mut().views[0].comments.selected = Some((1, 0));
+    h.state_mut().views[0].comments.reveal = true;
+    h.run_steps(4);
+    h.get_by_label("Late root");
+    h.get_by_label("Late thread reply");
+    assert_eq!(h.state().views[0].comments.collapsed_pages, vec![0]);
+    h.get_by_label("More").click();
+    h.run_steps(2);
+    h.query_all_by_label("Edit").last().expect("comment menu edit, after the toolbar tab").click();
+    h.run_steps(2);
+    let editor = h
+        .query_all_by(|n| n.role() == egui::accesskit::Role::MultilineTextInput && n.placeholder() != Some("Add a reply"))
+        .next()
+        .expect("note editor");
+    editor.click();
+    h.run_steps(1);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.event(egui::Event::Text("Late root edited exactly".into()));
+    h.run_steps(2);
+    h.get_by_label("Save").click();
+    h.run_steps(3);
+    assert_eq!(h.state().views[0].comments.selected, Some((1, 0)));
+    let before = comments(&h);
+    let late = before.iter().find(|a| a.name.as_deref() == Some("late")).unwrap();
+    assert_eq!(late.contents.as_deref(), Some("Late root edited exactly"));
+    let id = h.state().views[0].id;
+    let saved = h.state().session.save_bytes(id).unwrap().as_ref().clone();
+    let mut reopened = harness_with_bytes(saved, |app| {
+        app.set_option("panel", "comments").unwrap();
+        app.views[0].comments.search = Some("late thread reply".into());
+    });
+    h.get_by_label("Late root edited exactly");
+    reopened.get_by_label("Late root edited exactly");
+    reopened.get_by_label("Late thread reply");
+    assert_eq!(reopened.query_all_by_label("First root").count(), 0);
+    let after = comments(&reopened);
+    assert_eq!(after.len(), before.len());
+    for (original, saved) in before.iter().zip(&after) {
+        assert_eq!(
+            (&saved.name, &saved.contents, &saved.in_reply_to, &saved.state),
+            (&original.name, &original.contents, &original.in_reply_to, &original.state)
+        );
+    }
+    assert_eq!(after.iter().find(|a| a.name.as_deref() == Some("late-reply")).unwrap().in_reply_to.as_deref(), Some("late"));
+    reopened.state_mut().views[0].comments.sort = pdfcraft_ui_egui::comments::SortBy::Author;
+    reopened.run_steps(2);
+    assert_eq!(reopened.query_all_by_label("Delta").count(), 2, "the author group and its card remain visible after sorting");
+    reopened.get_by_label("Late root edited exactly");
 }
 
 /// #1554: a page group's chevron folds that page's cards away and back, and the choice holds.

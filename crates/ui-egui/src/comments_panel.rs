@@ -4,6 +4,8 @@
 //! current page; cards grouped by page. Selecting a card selects the comment on the page and
 //! opens its reply box and "…" menu (Edit, Set status, Delete). Status replies show as a badge.
 
+use std::collections::HashMap;
+
 use egui::{Align, Color32, CornerRadius, Layout, Sense, Stroke, vec2};
 use pdfcraft_engine::{Edit, NoteIcon, ReviewState, Shape};
 use pdfcraft_render::{Annotation, DocInfo};
@@ -154,12 +156,18 @@ pub(crate) fn show(
         return edit;
     }
     let query = view.comments.search.clone().filter(|q| !q.trim().is_empty());
-    let replies_of = |a: &Annotation| -> Vec<&Annotation> {
-        match &a.name {
-            Some(nm) => info.annotations.iter().filter(|r| r.in_reply_to.as_deref() == Some(nm.as_str())).collect(),
-            None => Vec::new(),
+    let mut replies: HashMap<&str, Vec<&Annotation>> = HashMap::new();
+    let mut page_counts: HashMap<usize, usize> = HashMap::new();
+    // Keep global name matching and source reply order. Page badges count roots before filtering.
+    for a in &info.annotations {
+        if let Some(parent) = a.in_reply_to.as_deref() {
+            replies.entry(parent).or_default().push(a);
+        } else {
+            let count = page_counts.entry(a.page).or_default();
+            *count = count.saturating_add(1);
         }
-    };
+    }
+    let replies_of = |a: &Annotation| -> &[&Annotation] { a.name.as_deref().and_then(|name| replies.get(name)).map(Vec::as_slice).unwrap_or(&[]) };
     let cv = &view.comments;
     let status_of =
         |a: &Annotation| replies_of(a).iter().rev().filter(|r| !r.is_mark()).find_map(|r| r.state.clone()).unwrap_or_else(|| "None".into());
@@ -172,7 +180,7 @@ pub(crate) fn show(
         .filter(|a| !cv.hidden_authors.contains(&a.author.clone().unwrap_or_default()))
         .filter(|a| !cv.hidden_statuses.contains(&status_of(a)))
         .filter(|a| !cv.hidden_colors.contains(&color_key(a)))
-        .filter(|a| !cv.hidden_checks.contains(&check_label(is_marked(&replies_of(a))).to_string()))
+        .filter(|a| !cv.hidden_checks.contains(&check_label(is_marked(replies_of(a))).to_string()))
         .collect();
     let sort = cv.sort;
     match sort {
@@ -221,7 +229,7 @@ pub(crate) fn show(
             }
         } else if a.page != page {
             page = a.page;
-            let n = info.annotations.iter().filter(|x| x.page == page && x.in_reply_to.is_none()).count();
+            let n = page_counts.get(&page).copied().unwrap_or_default();
             let open = !view.comments.collapsed_pages.contains(&page);
             ui.add_space(6.0);
             let clicked = ui
@@ -255,7 +263,7 @@ pub(crate) fn show(
             continue;
         }
         let thread = replies_of(a);
-        if let Some(e) = card(ui, t, a, &thread, view, prefs, allowed, nav) {
+        if let Some(e) = card(ui, t, a, thread, view, prefs, allowed, nav) {
             edit = Some(e);
         }
     }
