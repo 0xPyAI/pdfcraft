@@ -661,7 +661,7 @@ fn removed_links_and_comments_leave_the_structure_tree_and_the_saved_file() {
     let mut doc = pdf(objs);
     let done = remove_hidden(&mut doc, &[Hidden::LinksActionsScripts, Hidden::Comments]).unwrap();
     assert!(done.contains(&(Hidden::LinksActionsScripts, 1)) && done.contains(&(Hidden::Comments, 1)), "{done:?}");
-    let bytes = write_full(&doc, &SaveOptions::default()).unwrap();
+    let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
     let has = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
     assert!(!has(b"secret.example"), "the removed link's URL survived the save");
     assert!(!has(b"COMMENTSECRETNOTE"), "the removed comment's text survived the save");
