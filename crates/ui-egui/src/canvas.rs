@@ -3893,7 +3893,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if copy_selected {
         app.execute("edit.copy");
     }
-    quick_bar(app, avail, ui);
+    // Read mode hides the tools (#2646).
+    if app.mode != crate::Mode::Read {
+        quick_bar(app, avail, ui);
+    }
     if let Some((source, file, destination)) = remote_open {
         app.open_remote_link(source, file, destination);
     }
