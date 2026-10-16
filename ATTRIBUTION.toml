@@ -99,6 +99,17 @@ usage = "German UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
 sha256 = "be689af8bb22537879269ad9ab9bdcc4b730665cf0b27c6bf4bad560cacf3b69"
 
 [[asset]]
+path = "crates/ui-egui/src/i18n/lo.tsv"
+title = "Lao interface translation catalog"
+author = "@bounkirdni-2025"
+source = "Contributor-original: clean-room translations of PdfCraft English UI labels, no proprietary localisation resources"
+licence = "MIT OR Apache-2.0"
+licence_file = "LICENSE-MIT"
+kind = "translation"
+usage = "Lao UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
+sha256 = "2dd835aeee0199f3ce9c9c396500f4466fec61bc0c19b9a09e33698a6cd6b8eb"
+
+[[asset]]
 path = "crates/ui-egui/src/i18n/te.tsv"
 title = "Telugu interface translation catalog"
 author = "PdfCraft contributors"

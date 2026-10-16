@@ -147,7 +147,7 @@ fn plural_sl(n: u64) -> usize {
 }
 
 /// The registry. English first: it is the fallback and the source language.
-pub static LANGUAGES: [LangInfo; 23] = [
+pub static LANGUAGES: [LangInfo; 24] = [
     LangInfo { code: "en", name: "English", source: "", plural: plural_one_other, rtl: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Simplified Chinese; `zh`, `zh-CN`, `zh-SG` and `zh-Hans-*` locales resolve here (see `candidates`).
@@ -210,6 +210,8 @@ pub static LANGUAGES: [LangInfo; 23] = [
     // Vietnamese; every `vi-*` locale (`vi-VN`, `vi_VN.UTF-8`) resolves here. CLDR `vi` counts have
     // one form ("other"), so `@plural` entries list a single form.
     LangInfo { code: "vi", name: "Tiếng Việt", source: include_str!("vi.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
+    // Lao; every `lo-*` locale (`lo-LA`, `lo_LA.UTF-8` ...) resolves here.
+    LangInfo { code: "lo", name: "ພາສາລາວ", source: include_str!("lo.tsv"), plural: plural_none, rtl: false,  catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
@@ -598,6 +600,9 @@ mod tests {
         assert_eq!(lang_from_tag("zh"), Lang::from_code("zh-hans"));
         assert_eq!(lang_from_tag("zh_HK.UTF-8"), Lang::from_code("zh-hant"));
         assert_eq!(lang_from_tag("zh-Hant-MO"), Lang::from_code("zh-hant"));
+        assert_eq!(lang_from_tag("lo_LA.UTF-8"), Lang::from_code("lo"));
+        assert_eq!(lang_from_tag("lo-LA"), Lang::from_code("lo"));
+        assert_eq!(lang_from_tag("lo"), Lang::from_code("lo"));
         assert_eq!(lang_from_tag(""), None);
         assert_eq!(lang_from_tag("_"), None);
     }
@@ -610,6 +615,7 @@ mod tests {
         assert_eq!(candidates("zh_TW"), ["zh-tw", "zh-hant", "zh"]);
         assert_eq!(candidates("zh-CN"), ["zh-cn", "zh-hans", "zh"]);
         assert_eq!(candidates("zh-Hant-HK"), ["zh-hant-hk", "zh-hant", "zh"]);
+        assert_eq!(candidates("lo_LA.UTF-8"), ["lo-la", "lo"]);
     }
 
     #[test]
@@ -629,6 +635,7 @@ mod tests {
         }
         assert_eq!(first_supported("en-US\r\n"), Some(Lang::EN));
         assert_eq!(first_supported("fr-FR\r\n"), Lang::from_code("fr"));
+        assert_eq!(first_supported("lo-LA\r\n"), Lang::from_code("lo"));
         assert_eq!(first_supported("\r\n"), None);
     }
 
