@@ -2576,6 +2576,18 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         // scroll bars float.)
         let max_y = (content_h - avail.height()).max(0.0);
         scroll = scroll.vertical_scroll_offset((r.top() - y_shift - GAP + frac * r.height()).max(0.0).min(max_y));
+        // Horizontally too, as Acrobat does (#2665): beside a much wider page the others sit off
+        // to one side. A page already shown whole, or one filling the window's width, keeps the
+        // scroll, so paging through a zoomed-in document stays on the same column. Otherwise a
+        // page that fits is centred, and a wider one scrolled just far enough to fill the window.
+        // The page counts with its side gutters, which keep its edge clear of the floating
+        // quick-action bar as the layout does.
+        let (x, w) = (view.last_scroll.x, avail.width());
+        let (left, right) = (r.left() - SIDE, r.right() + SIDE);
+        let target = if right - left <= w { if left >= x && right <= x + w { x } else { r.center().x - w / 2.0 } } else { x.clamp(left, right - w) };
+        if (target - x).abs() > 0.5 {
+            scroll = scroll.horizontal_scroll_offset(target.clamp(0.0, (content_w - w).max(0.0)));
+        }
     }
     let ppp = ui.ctx().pixels_per_point();
     let scale = view.render_scale(ppp);
