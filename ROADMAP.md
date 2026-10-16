@@ -171,6 +171,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 - **2026-10-14 (M1, Flate fallback):** Raw deflate whose first bytes resemble a zlib header no longer loses a decoding-limit error during fallback. Strict and tolerant filter regressions and a COS stream regression cover refusal at the caller limit and successful decoding within it. No parity status or estimate changes.
 
+- **2026-10-13 (M4, indirect page rotation):** Rotation queries and edits resolve indirect integer values on pages and their page-tree ancestors. Turning a page already at 270° by 90° now saves it at 0°, including when its rotation is inherited. Synthetic full/incremental save-and-reopen tests cover nested inheritance, sibling preservation, negative/large angles and invalid-value fallback. Estimates unchanged.
 - **2026-10-12 (M6, XML field names):** AcroForm XML data export constrains generated element names to XML 1.0 NCNames, so Latin-1 names such as `Area²` and `Aµ` produce readable data files. Original PDF field names travel through the existing `xfdf:original` attribute; previously valid tags, including Greek and CJK, keep their spelling. Saved-PDF regressions cover invalid prefixes, combining letters and normalized-name collisions. Estimates unchanged.
 - **2026-10-12 (M6, CSV carriage returns):** Form-data CSV export quotes carriage returns in field names and values, so a trailing carriage return cannot turn into a record separator and disappear on reimport. Saved-PDF round-trip regressions cover CR, LF, CRLF, commas and quotes; estimates unchanged.
 - **2026-10-13 (community, M14, #1553 review):** Relative Fontconfig includes resolve beside each including config, including nested configuration selected through `FONTCONFIG_PATH`. Directory includes accept only digit-prefixed `*.conf` in lexical order. Isolated regressions reproduce both review findings; configuration size/count/depth limits, cycles, symlinked config and valid reset ordering are covered. Estimates unchanged.
@@ -500,6 +501,7 @@ Newest first: the date, what moved, and the new overall estimate.
 |---|---|---|
 | 2026-10-13 | minor | M9: separate page validation overlays preserve signature artwork, and snapshot tabs reuse instead of multiplying; baked captions remain unchanged (#79 open); estimates unchanged |
 | 2026-10-14 | minor | M1: raw-deflate fallback preserves decoding-limit errors in strict and tolerant decoding; synthetic filter and COS stream regressions. Estimates unchanged. |
+| 2026-10-13 | minor | M4: rotation queries and edits resolve indirect page-tree values; inherited, negative and large rotations verified through both saves. Estimates unchanged. |
 | 2026-10-12 | minor | M6: valid AcroForm XML element names with original PDF field names preserved; saved-PDF collision and Unicode regressions. Estimates unchanged. |
 | 2026-10-12 | minor | M6: preserve carriage returns in exported CSV field names and values; saved-PDF round-trip coverage. Estimates unchanged. |
 | 2026-10-13 | minor | M4: Insert-from-file preserves source bookmarks; integration tests retained with current main. Estimates unchanged. |
