@@ -32,9 +32,9 @@ pub fn create_staging(
 }
 
 /// [`create_staging`], giving the new file the permissions `keep` on Unix. It is created readable
-/// and writable by its owner only and then given `keep`, so it is never open to more people than
-/// the file it will replace, not even while it is still empty (a handle opened then would keep
-/// reading what is written later).
+/// and writable by its owner only and then given `keep`, so its mode is never more open than that
+/// of the file it will replace, not even while it is still empty (a handle opened then would keep
+/// reading what is written later). Only the mode is copied: the owner and group are the saver's.
 fn create_staging_as(
     dir: &Path,
     name: &str,
