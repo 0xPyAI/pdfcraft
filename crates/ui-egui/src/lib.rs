@@ -2191,7 +2191,12 @@ impl PdfCraftApp {
         }
         if mode == Mode::Read && !was_read {
             self.right_before_read = self.right.take();
-            self.quick_tool = QuickTool::Select;
+            // An editing tool is put down so its open paragraph is applied, as `select_mode` does.
+            if matches!(self.quick_tool, QuickTool::EditText | QuickTool::AddText) {
+                self.put_down_edit_text();
+            } else {
+                self.quick_tool = QuickTool::Select;
+            }
         } else if mode != Mode::Read && was_read {
             let before = self.right_before_read.take();
             if self.right.is_none() {
