@@ -1333,6 +1333,8 @@
 	This document has no layers.	この文書にレイヤーはありません。
 	This document has no attachments.	この文書に添付ファイルはありません。
 	Hide layer	レイヤーを非表示
+	Layer options	レイヤーのオプション
+	Reset to Initial Visibility	初期表示状態にリセット
 	Show layer	レイヤーを表示
 	Set layer visibility	レイヤーの表示を設定
 	on page {label}	ページ {label}

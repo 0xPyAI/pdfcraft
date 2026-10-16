@@ -507,6 +507,7 @@ pub fn right_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let mut nav: Option<Nav> = None;
     let mut close = false;
     let mut toggle_layer: Option<(usize, bool)> = None;
+    let mut reset_layers = false;
     let mut attachment_action: Option<(usize, bool)> = None; // (index, open instead of save)
     let mut bm_action: Option<BmAction> = None;
     let mut bm_expand: Option<usize> = None;
@@ -596,6 +597,16 @@ pub fn right_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                                             ui.close();
                                         }
                                     }
+                                }
+                            });
+                        }
+                        if panel == RightPanel::Layers && !info.layers.is_empty() {
+                            let more = icons::button(ui, "ellipsis", 26.0, false, tl!("Layer options"));
+                            egui::Popup::menu(&more).show(|ui| {
+                                ui.set_min_width(200.0);
+                                if ui.button(tl!("Reset to Initial Visibility")).clicked() {
+                                    reset_layers = true;
+                                    ui.close();
                                 }
                             });
                         }
@@ -816,6 +827,9 @@ pub fn right_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     if let Some((layer, visible)) = toggle_layer
         && app.session.set_layer_visible(id, layer, visible)
     {
+        app.views[index].invalidate_content();
+    }
+    if reset_layers && app.session.reset_layers(id) {
         app.views[index].invalidate_content();
     }
     match nav {

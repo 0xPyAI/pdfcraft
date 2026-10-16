@@ -2466,7 +2466,7 @@ fn info(d: &Document) -> Value {
                 pdfcraft_render::LinkTarget::Other(o) => json!({ "other": o }),
             },
         })).collect::<Vec<_>>(),
-        "layers": i.layers.iter().map(|l| json!({ "name": l.name, "visible": l.visible })).collect::<Vec<_>>(),
+        "layers": i.layers.iter().map(|l| json!({ "name": l.name, "visible": l.visible, "initial": l.initial })).collect::<Vec<_>>(),
         // Full-screen presentation settings a page carries (ISO 32000-2 §12.4.4): only pages with
         // a `/Trans` or `/Dur` appear; `style` is null for a display time alone.
         "transitions": i.transitions.iter().map(|t| json!({

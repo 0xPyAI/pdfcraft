@@ -425,6 +425,8 @@ pub struct Layer {
     pub id: (u32, u16),
     pub name: String,
     pub visible: bool,
+    /// Shown as the file opens: the default configuration (`/OCProperties /D`).
+    pub initial: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1428,7 +1430,7 @@ impl<'a> Inspector<'a> {
                 _ => !base_off,
             };
             let Some(id) = id else { continue };
-            out.push(Layer { id, name: self.text(d, b"Name").unwrap_or_else(|| "Layer".into()), visible });
+            out.push(Layer { id, name: self.text(d, b"Name").unwrap_or_else(|| "Layer".into()), visible, initial: visible });
         }
     }
 
@@ -2356,6 +2358,24 @@ trailer << /Root 1 0 R /Info 4 0 R >>
         assert_eq!(layers, [((5, 0), "Red", true), ((6, 0), "Green", false), ((7, 0), "Blue", true)]);
         // A group of one constrains nothing; an indirect group is read.
         assert_eq!(info.layer_groups, [vec![(5, 0), (6, 0)], vec![(6, 0), (7, 0)]]);
+    }
+
+    #[test]
+    fn initial_layer_visibility_is_the_default_configuration() {
+        // BaseState OFF: Red is listed ON; Green is listed both ON and OFF, and OFF wins; Blue
+        // isn't listed, so it takes the base state.
+        let pdf = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R 6 0 R 7 0 R] /D << /BaseState /OFF /ON [5 0 R 6 0 R] /OFF [6 0 R] >> >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj
+5 0 obj << /Type /OCG /Name (Red) >> endobj
+6 0 obj << /Type /OCG /Name (Green) >> endobj
+7 0 obj << /Type /OCG /Name (Blue) >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+        let info = inspect(Arc::new(pdf.to_vec()), None).expect("opens");
+        let layers: Vec<_> = info.layers.iter().map(|l| (l.name.as_str(), l.initial)).collect();
+        assert_eq!(layers, [("Red", true), ("Green", false), ("Blue", false)]);
     }
 
     const ORPHAN_FIELDS: &[u8] = b"%PDF-1.7

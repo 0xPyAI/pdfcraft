@@ -685,7 +685,7 @@ fn layer_choices_survive_edits() {
 #[test]
 fn set_layer_actions_toggle_in_order_and_keep_radio_groups() {
     use pdfcraft_render::LayerOp::{Off, On, Toggle};
-    let layer = |n: u32, visible: bool| Layer { id: (n, 0), name: format!("L{n}"), visible };
+    let layer = |n: u32, visible: bool| Layer { id: (n, 0), name: format!("L{n}"), visible, initial: visible };
     let run = |changes: &[(LayerOp, u32)], preserve_rb: bool| {
         // L1 and L2 are a radio-button group; L3 is on its own.
         let mut layers = vec![layer(1, true), layer(2, false), layer(3, true)];
@@ -759,6 +759,59 @@ fn set_layer_actions_change_what_renders() {
     assert!(s.set_layer_state(id, &[(LayerOp::Off, (6, 0))], true));
     assert_eq!(halves(&s), (white.clone(), white));
     assert!(!s.set_layer_state(DocId(999), &[(LayerOp::On, (5, 0))], true));
+}
+
+#[test]
+fn reset_layers_returns_to_the_files_visibility() {
+    // Red (left half, on) and Green (right half, off) are a radio-button group.
+    let content = "/OC /R BDC 1 0 0 rg 0 0 50 100 re f EMC /OC /G BDC 0 1 0 rg 50 0 50 100 re f EMC";
+    let pdf = pdfcraft_testkit::Pdf::new()
+        .obj("<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R 6 0 R] /D << /OFF [6 0 R] /RBGroups [[5 0 R 6 0 R]] >> >> >>")
+        .obj("<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+        .obj("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R /Resources << /Properties << /R 5 0 R /G 6 0 R >> >> >>")
+        .stream("", content)
+        .obj("<< /Type /OCG /Name (Red) >>")
+        .obj("<< /Type /OCG /Name (Green) >>")
+        .build();
+    // A page drawing on layer Blue, which that file has off.
+    let other = pdfcraft_testkit::Pdf::new()
+        .obj("<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R] /D << /OFF [5 0 R] >> >> >>")
+        .obj("<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+        .obj("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R /Resources << /Properties << /B 5 0 R >> >> >>")
+        .stream("", "/OC /B BDC 0 0 1 rg 0 0 10 10 re f EMC")
+        .obj("<< /Type /OCG /Name (Blue) >>")
+        .build();
+    let mut s = Session::new();
+    let id = s.open("layers.pdf", None, Arc::new(pdf), None).unwrap();
+    let shown = |s: &Session| s.get(id).unwrap().info.layers.iter().map(|l| (l.name.clone(), l.visible)).collect::<Vec<_>>();
+    let left = |s: &Session| {
+        let doc = s.get(id).unwrap();
+        let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), doc.config.clone());
+        let p = r.render(pdfcraft_render::RenderRequest { page: 0, kind: pdfcraft_render::RequestKind::Pixels, scale: 1.0, ..Default::default() });
+        let i = (50 * p.width as usize + 25) * 4;
+        p.rgba[i..i + 3].to_vec()
+    };
+    assert!(s.set_layer_state(id, &[(LayerOp::On, (6, 0))], true));
+    let edit = Edit::InsertPagesFrom {
+        name: "b.pdf".into(),
+        bytes: Arc::new(other),
+        pages: None,
+        at: 1,
+        field_conflicts: pdfcraft_organize::FieldConflicts::Rename,
+    };
+    s.apply(id, edit).unwrap();
+    let blue = s.get(id).unwrap().info.layers.iter().position(|l| l.name == "Blue").unwrap();
+    assert!(s.set_layer_visible(id, blue, true));
+    assert_eq!(shown(&s), [("Red".into(), false), ("Green".into(), true), ("Blue".into(), true)]);
+    assert_eq!(left(&s), [255, 255, 255]);
+    // Every layer, the inserted one too, goes back to the file's default configuration.
+    assert!(s.reset_layers(id));
+    assert_eq!(shown(&s), [("Red".into(), true), ("Green".into(), false), ("Blue".into(), false)]);
+    assert_eq!(left(&s), [255, 0, 0]);
+    assert!(!s.reset_layers(id), "already as the file opens");
+    // What the eye sees is not an edit: Undo still undoes the insert.
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Insert pages from b.pdf"));
+    assert!(!s.reset_layers(DocId(999)));
 }
 
 #[test]

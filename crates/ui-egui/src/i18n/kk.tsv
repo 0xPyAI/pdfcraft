@@ -1275,6 +1275,8 @@
 	This document has no layers.	Бұл құжатта қабаттар жоқ.
 	This document has no attachments.	Бұл құжатта тіркемелер жоқ.
 	Hide layer	Қабатты жасыру
+	Layer options	Қабат параметрлері
+	Reset to Initial Visibility	Бастапқы көрінуді қалпына келтіру
 	Show layer	Қабатты көрсету
 	Set layer visibility	Қабаттың көрінісін орнату
 	on page {label}	{label} бетінде

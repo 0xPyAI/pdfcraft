@@ -1303,6 +1303,8 @@ signature pad	Type	టైప్ చేయి
 	This document has no layers.	ఈ పత్రంలో లేయర్‌లు లేవు.
 	This document has no attachments.	ఈ పత్రంలో జోడింపులు లేవు.
 	Hide layer	లేయర్‌ను దాచు
+	Layer options	లేయర్ ఎంపికలు
+	Reset to Initial Visibility	ప్రారంభ దృశ్యతకు రీసెట్ చేయి
 	Show layer	లేయర్‌ను చూపించు
 	on page {label}	పేజీ {label}లో
 	Save attachment…	జోడింపును సేవ్ చేయి…
