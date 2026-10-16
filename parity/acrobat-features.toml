@@ -178,8 +178,8 @@ milestone = "M1"
 status = "shipped"
 commands = ["file.open"]
 tools = ["doc_open"]
-evidence = ["crates/ui-egui/tests/editing.rs::password_prompt_opens_and_security_tab_reports_the_details", "crates/crypt/src/tests.rs::empty_user_password_opens_without_asking", "crates/ui-egui/src/open_worker_tests.rs::a_chosen_tool_survives_wrong_password_retry_and_runs_after_unlock", "crates/ui-egui/src/open_worker_tests.rs::startup_intake_waits_for_local_authentication_and_keeps_its_own_background_password_prompt"]
-notes = ""
+evidence = ["crates/ui-egui/tests/editing.rs::password_prompt_opens_and_security_tab_reports_the_details", "crates/crypt/src/tests.rs::empty_user_password_opens_without_asking", "crates/ui-egui/src/open_worker_tests.rs::a_chosen_tool_survives_wrong_password_retry_and_runs_after_unlock", "crates/ui-egui/src/open_worker_tests.rs::startup_intake_waits_for_local_authentication_and_keeps_its_own_background_password_prompt", "crates/ui-egui/tests/pickers.rs::the_open_password_can_be_typed_through_an_input_method_however_the_file_is_opened"]
+notes = "the field takes typing through the platform input method, which typed keys go through on Linux, however the file was opened (#2818); checked with synthetic input-method events, not on a Linux desktop"
 
 [[feature]]
 id = "core.unicode-passwords"
@@ -202,7 +202,7 @@ milestone = "M1"
 status = "shipped"
 commands = ["protect.unlock"]
 tools = ["doc_open"]
-evidence = ["crates/engine/src/tests.rs::restricted_documents_refuse_changes_unless_opened_by_the_owner", "crates/engine/src/tests.rs::owner_password_of_older_revisions_opens_the_viewer_too", "crates/crypt/src/tests.rs::owner_authentication_recovers_the_user_password", "crates/engine/src/tests.rs::the_permissions_password_unlocks_an_open_document", "crates/ui-egui/tests/editing.rs::the_security_notice_unlocks_with_the_permissions_password", "crates/ui-egui/tests/editing.rs::remove_security_asks_for_the_permissions_password_first"]
+evidence = ["crates/engine/src/tests.rs::restricted_documents_refuse_changes_unless_opened_by_the_owner", "crates/engine/src/tests.rs::owner_password_of_older_revisions_opens_the_viewer_too", "crates/crypt/src/tests.rs::owner_authentication_recovers_the_user_password", "crates/engine/src/tests.rs::the_permissions_password_unlocks_an_open_document", "crates/ui-egui/tests/editing.rs::the_security_notice_unlocks_with_the_permissions_password", "crates/ui-egui/tests/editing.rs::remove_security_asks_for_the_permissions_password_first", "crates/ui-egui/tests/pickers.rs::the_permissions_password_can_be_typed_through_an_input_method"]
 notes = "at open (the password prompt takes either password), or after opening a restricted file that needed no password (#995, #1077): Unlock… on the security notice and in Properties ▸ Security, and changing security asks for it first. Not yet: an automation tool to unlock an open document (reopen with doc_open and the password instead)"
 
 [[feature]]
