@@ -1384,6 +1384,35 @@ fn a_clicked_picture_is_selected_and_copied_in_its_original_format() {
     assert_eq!(h.state().views[i].picked_image, None);
 }
 
+/// A picture picked with the Select tool, then deleted in Edit text & images, leaves no highlight
+/// behind on the empty spot where it was.
+#[test]
+fn a_picked_picture_that_is_deleted_in_edit_mode_loses_its_highlight() {
+    let (_, mut h) = picture_harness();
+    let i = h.state().active.unwrap();
+    let id = h.state().views[i].id;
+    let at = h.state().views[i].page_screen_rect(0).expect("on screen").center();
+    h.hover_at(at);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+    h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+    h.run_steps(2);
+    assert!(h.state().views[i].picked_image.is_some(), "picked with the Select tool");
+    // Edit text & images: click the picture, delete it with the Delete key.
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    h.hover_at(at);
+    h.run_steps(1);
+    h.drag_at(at);
+    h.run_steps(1);
+    h.drop_at(at);
+    h.run_steps(2);
+    h.key_press(egui::Key::Delete);
+    h.run_steps(4);
+    assert!(h.state().session.get(id).unwrap().page_images(0).is_empty(), "the picture is gone");
+    assert_eq!(h.state().views[i].picked_image, None, "and so is its highlight");
+}
+
 #[test]
 fn right_click_on_a_picture_copies_it_at_full_size() {
     let (px, mut h) = picture_harness();
