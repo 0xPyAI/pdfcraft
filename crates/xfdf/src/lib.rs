@@ -197,6 +197,9 @@ fn esc(s: &str) -> String {
             '<' => o.push_str("&lt;"),
             '>' => o.push_str("&gt;"),
             '"' => o.push_str("&quot;"),
+            // XML 1.0 §3.3.3 normalizes literal attribute whitespace, but not references.
+            '\t' => o.push_str("&#9;"),
+            '\n' => o.push_str("&#10;"),
             '\r' => o.push_str("&#13;"),
             c if (c as u32) < 0x20 && c != '\n' && c != '\t' => {}
             c => o.push(c),
