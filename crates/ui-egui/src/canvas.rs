@@ -3148,7 +3148,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     let column = tool == QuickTool::ColumnSelect || ui.input(|inp| inp.modifiers.alt);
                     // A link or a form field under the pointer keeps its own cursor: a check box
                     // drawn with a glyph, or set on printed text, shows the hand, not the I-beam.
-                    let cursor_free = !over_link && !over_field;
+                    // So do the mode bar and side panels over a page scrolled under them (#2755),
+                    // unless a selection is being dragged there.
+                    let cursor_free = !over_link && !over_field && (resp.contains_pointer() || resp.dragged());
                     if column && cursor_free {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
                     } else if over_text && cursor_free {
