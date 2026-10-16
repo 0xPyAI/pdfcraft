@@ -5755,6 +5755,74 @@ trailer << /Root 1 0 R >>
         }
     }
 
+    /// Comma-below letters in non-embedded standard fonts (vendored hayro-interpret patch to
+    /// `StandardKind`). The stand-ins have neither these letters nor a `commaaccent` to build
+    /// them from, so Romanian ș Ș (a form laid out from its XFA template names `/scommaaccent`)
+    /// and Latvian ķ ļ ņ ŗ Ģ drew nothing, and ț Ț drew a cedilla. Each is now its letter with a
+    /// comma under it, apart from the letter and inside the descender.
+    #[test]
+    fn comma_below_letters_in_standard_fonts_draw_a_comma_under_the_letter() {
+        let pairs = [
+            ("s", "scommaaccent"),
+            ("S", "Scommaaccent"),
+            ("t", "tcommaaccent"),
+            ("T", "Tcommaaccent"),
+            ("k", "kcommaaccent"),
+            ("K", "Kcommaaccent"),
+            ("l", "lcommaaccent"),
+            ("L", "Lcommaaccent"),
+            ("n", "ncommaaccent"),
+            ("N", "Ncommaaccent"),
+            ("r", "rcommaaccent"),
+            ("R", "Rcommaaccent"),
+            ("G", "Gcommaaccent"),
+        ];
+        let letters: Vec<&str> = pairs.iter().flat_map(|(base, accented)| [*base, *accented]).collect();
+        let (size, baseline) = (40u32, 60u32);
+        for font in ["Helvetica", "Times-Roman", "Courier", "Helvetica-BoldOblique"] {
+            let mut content = String::new();
+            for i in 0..letters.len() {
+                content.push_str(&format!("BT /F1 {size} Tf {} {} Td <{:02X}> Tj ET\n", 10 + 40 * i, 80 - baseline, 1 + i));
+            }
+            let differences = letters.iter().map(|n| format!("/{n}")).collect::<Vec<_>>().join(" ");
+            let pdf = format!(
+                "%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 {} 80] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}endstream endobj
+5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /{font}
+  /Encoding << /Type /Encoding /BaseEncoding /WinAnsiEncoding /Differences [1 {differences}] >> >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+                20 + 40 * letters.len(),
+                content.len()
+            );
+            let mut r = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default());
+            let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(p.error.is_none(), "{font}: {:?}", p.error);
+            // The rows (y down) of the i-th letter that have dark pixels.
+            let ink_rows = |i: u32| -> Vec<u32> {
+                (0..p.height)
+                    .filter(|y| ((8 + 40 * i)..(48 + 40 * i).min(p.width)).any(|x| p.rgba[((y * p.width + x) * 4) as usize] < 128))
+                    .collect()
+            };
+            for (pair, (_, name)) in pairs.iter().enumerate() {
+                let (base, accented) = (ink_rows(2 * pair as u32), ink_rows(2 * pair as u32 + 1));
+                let (Some(&base_bottom), Some(&bottom)) = (base.last(), accented.last()) else {
+                    panic!("{font} {name}: draws nothing ({} rows of its base letter)", base.len());
+                };
+                assert!(bottom > base_bottom + 2, "{font} {name}: a mark hangs below the letter ({bottom} vs {base_bottom})");
+                assert!(
+                    (base_bottom + 1..bottom).any(|y| !accented.contains(&y)),
+                    "{font} {name}: the mark is apart from the letter, a comma and not a cedilla"
+                );
+                assert!(bottom < baseline + size * 3 / 10, "{font} {name}: the comma stays within the descender ({bottom})");
+            }
+        }
+    }
+
     // Contributor-original classic-xref vector fixtures; no embedded or external assets.
     fn raw_crop_unit_pdf(unit: f64, rotation: i32, crop: [f64; 4], marker: Option<[f64; 4]>) -> Vec<u8> {
         let bounds = crop.map(|n| n.to_string()).join(" ");
