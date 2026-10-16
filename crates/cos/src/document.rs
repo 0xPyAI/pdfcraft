@@ -1947,9 +1947,6 @@ fn generated_id(seed: &[u8; 32]) -> Vec<u8> {
     out
 }
 
-/// Object numbers must fit the representation used by references and the xref map.
-/// Validate the whole subsection before adding entries, so neither arithmetic overflow nor
-/// truncation can turn a damaged range into entries for unrelated objects.
 /// The object number a classic xref subsection really starts at. A common producer bug heads the
 /// table `1 n` and then writes object 0's free entry (`0000000000 65535 f`) as its first row, so
 /// every row would be read one number too high and object 1 as free. Such a subsection is read
@@ -1978,6 +1975,9 @@ fn subsection_start(data: &[u8], rows: usize, start: i64, count: i64) -> i64 {
     }
 }
 
+/// Object numbers must fit the representation used by references and the xref map.
+/// Validate the whole subsection before adding entries, so neither arithmetic overflow nor
+/// truncation can turn a damaged range into entries for unrelated objects.
 fn valid_xref_range(start: i64, count: i64) -> bool {
     u32::try_from(start).is_ok() && count >= 0 && start.checked_add(count).is_some_and(|end| end <= i64::from(u32::MAX) + 1)
 }
@@ -2162,35 +2162,11 @@ endobj
             );
         }
         let xref = out.len();
-        out.extend_from_slice(
-            format!(
-                "xref
-{start} 4
-0000000000 65535 f 
-"
-            )
-            .as_bytes(),
-        );
+        out.extend_from_slice(format!("xref\n{start} 4\n0000000000 65535 f \n").as_bytes());
         for o in offsets {
-            out.extend_from_slice(
-                format!(
-                    "{o:010} 00000 n 
-"
-                )
-                .as_bytes(),
-            );
+            out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
         }
-        out.extend_from_slice(
-            format!(
-                "trailer
-<< /Size 4 /Root 3 0 R >>
-startxref
-{xref}
-%%EOF
-"
-            )
-            .as_bytes(),
-        );
+        out.extend_from_slice(format!("trailer\n<< /Size 4 /Root 3 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
         out
     }
 
@@ -2211,39 +2187,15 @@ startxref
     fn a_table_that_really_starts_at_1_keeps_its_numbers() {
         // Object 1 deleted for good (generation 65535) in a subsection that does start at 1: its
         // second row locates object 2, so nothing is shifted.
-        let mut bytes = b"%PDF-1.7
-"
-        .to_vec();
+        let mut bytes = b"%PDF-1.7\n".to_vec();
         let pages = bytes.len();
-        bytes.extend_from_slice(
-            b"2 0 obj
-<< /Type /Pages /Kids [] /Count 0 >>
-endobj
-",
-        );
+        bytes.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
         let catalog = bytes.len();
-        bytes.extend_from_slice(
-            b"3 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-",
-        );
+        bytes.extend_from_slice(b"3 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
         let xref = bytes.len();
         bytes.extend_from_slice(
             format!(
-                "xref
-0 1
-0000000000 65535 f 
-1 3
-0000000000 65535 f 
-{pages:010} 00000 n 
-{catalog:010} 00000 n 
-trailer
-<< /Size 4 /Root 3 0 R >>
-startxref
-{xref}
-%%EOF
-"
+                "xref\n0 1\n0000000000 65535 f \n1 3\n0000000000 65535 f \n{pages:010} 00000 n \n{catalog:010} 00000 n \ntrailer\n<< /Size 4 /Root 3 0 R >>\nstartxref\n{xref}\n%%EOF\n"
             )
             .as_bytes(),
         );
