@@ -758,6 +758,17 @@ fn populate_xref_impl<'a>(data: &'a [u8], pos: usize, xref_map: &mut XrefMap) ->
     populate_xref_impl_inner(data, pos, xref_map, &mut visited)
 }
 
+/// The offset of the previous xref section (`Prev`).
+// PdfCraft patch: (#2366) some writers (tiff2pdf, in JHOVE's PDF-HUL-157 files) give `Prev` as
+// a reference `N 0 R`; its object number is the offset, as other readers take it.
+fn prev_offset(trailer: &Dict<'_>) -> Option<usize> {
+    let prev = trailer
+        .get::<i32>(PREV)
+        .or_else(|| trailer.get_ref(PREV).map(|r| r.obj_number))?;
+
+    usize::try_from(prev).ok()
+}
+
 /// Maximum number of allowed xref `Prev` pointers before we abort.
 const MAX_XREF_CHAIN_DEPTH: usize = 256;
 
@@ -834,9 +845,9 @@ fn populate_from_xref_table<'a>(
 
     let mut max_obj = 0;
 
-    if let Some(prev) = trailer.get::<i32>(PREV) {
+    if let Some(prev) = prev_offset(&trailer) {
         // First insert the entries from any previous xref tables.
-        populate_xref_impl_inner(data, prev as usize, insert_map, visited)?;
+        populate_xref_impl_inner(data, prev, insert_map, visited)?;
     }
 
     // In hybrid files, entries in `XRefStm` should have higher priority, therefore we insert them
@@ -880,9 +891,9 @@ fn populate_from_xref_stream<'a>(
         .read_with_context::<IndirectObject<Stream<'_>>>(&ReaderContext::dummy())?
         .get();
 
-    if let Some(prev) = stream.dict().get::<i32>(PREV) {
+    if let Some(prev) = prev_offset(stream.dict()) {
         // First insert the entries from any previous xref tables.
-        let _ = populate_xref_impl_inner(data, prev as usize, insert_map, visited)?;
+        let _ = populate_xref_impl_inner(data, prev, insert_map, visited)?;
     }
 
     let size = stream.dict().get::<u32>(SIZE)?;
@@ -1355,6 +1366,40 @@ mod tests {
         let mut xref_map = FxHashMap::default();
         let xref_pos = find_last_xref_pos(pdf.as_ref()).unwrap();
         let _result = populate_xref_impl(pdf.as_ref(), xref_pos, &mut xref_map);
+    }
+
+    #[test]
+    fn prev_as_reference_reaches_the_earlier_section() {
+        let mut pdf = b"%PDF-1.0\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_vec();
+        let first_xref_pos = pdf.len();
+        pdf.extend_from_slice(
+            format!(
+                "xref\n\
+                 0 2\n\
+                 0000000000 65535 f \n\
+                 0000000009 00000 n \n\
+                 trailer\n<< /Size 2 /Root 1 0 R >>\n\
+                 startxref\n{first_xref_pos}\n%%EOF\n"
+            )
+            .as_bytes(),
+        );
+        let second_xref_pos = pdf.len();
+        pdf.extend_from_slice(
+            format!(
+                "xref\n\
+                 0 1\n\
+                 0000000000 65535 f \n\
+                 trailer\n<< /Size 2 /Root 1 0 R /Prev {first_xref_pos} 0 R >>\n\
+                 startxref\n{second_xref_pos}\n%%EOF"
+            )
+            .as_bytes(),
+        );
+
+        let mut xref_map = FxHashMap::default();
+        let xref_pos = find_last_xref_pos(pdf.as_ref()).unwrap();
+        assert_eq!(xref_pos, second_xref_pos);
+        populate_xref_impl(pdf.as_ref(), xref_pos, &mut xref_map).unwrap();
+        assert!(xref_map.contains_key(&ObjectIdentifier::new(1, 0)));
     }
 
     #[test]
