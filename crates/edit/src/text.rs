@@ -1772,7 +1772,8 @@ pub(crate) fn replace_line_with_limit(doc: &mut Document, page: usize, line: usi
     }
     // Rebuild: the line's first operator becomes the replacement, its others go. Copies of the
     // line drawn on the same baseline go too, so the replacement is all that shows.
-    let drops = coincident_ops(&lines, &[&target]);
+    let mut drops = coincident_ops(&lines, &[&target]);
+    drops.extend(target.ops.iter().copied());
     let new_data = splice(&pieces, &ops, |i| if i == first { (std::mem::take(&mut replacement), false) } else { (Vec::new(), !drops.contains(&i)) });
     let contents = rewritten_contents(doc, &streams, new_data);
     let page_ref = p.obj;
@@ -1804,7 +1805,10 @@ fn coincident_ops(lines: &[TextLine], targets: &[&TextLine]) -> std::collections
     let area = |r: [f64; 4]| ((r[2] - r[0]) * (r[3] - r[1])).max(0.0);
     let mut drop = std::collections::HashSet::new();
     for line in lines {
-        let copy = targets.iter().any(|target| overlaps_half(line.rect, target.rect, area) && on_same_baseline(line, target));
+        let copy = targets.iter().any(|target| {
+            let same_text = line.text.trim() == target.text.trim() || (line.origin.state.render_mode == 3) != (target.origin.state.render_mode == 3);
+            same_text && overlaps_half(line.rect, target.rect, area) && on_same_baseline(line, target)
+        });
         if copy {
             drop.extend(line.ops.iter().copied());
         }
@@ -1822,13 +1826,16 @@ fn overlaps_half(a: [f64; 4], b: [f64; 4], area: impl Fn([f64; 4]) -> f64) -> bo
 /// Perpendicular distance between baselines, in user space. Horizontal text compares height;
 /// turned text compares the distance across the writing direction.
 fn on_same_baseline(line: &TextLine, target: &TextLine) -> bool {
+    let (dir, target_dir) = (line.direction(), target.direction());
+    let same_dir = (dir.0 - target_dir.0).abs() < 1e-3 && (dir.1 - target_dir.1).abs() < 1e-3;
+    let same_size = line.size.min(target.size) >= line.size.max(target.size) * 0.8;
     let angle = target.rotation().to_radians();
     let (sin, cos) = if angle.is_finite() { angle.sin_cos() } else { (0.0, 1.0) };
     let dx = line.origin.x - target.origin.x;
     let dy = line.origin.baseline - target.origin.baseline;
     let offset = dx.mul_add(-sin, dy * cos).abs();
     let size = line.size.min(target.size).max(1.0);
-    offset.is_finite() && offset < size * 0.3
+    same_dir && same_size && offset.is_finite() && offset < size * 0.3
 }
 
 /// The paragraphs on a page (0-based).
