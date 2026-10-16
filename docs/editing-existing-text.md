@@ -94,3 +94,16 @@ invalid ranges, font selection and root confinement. CLI acceptance repeats inse
 and two saves/reopens on four pages; independent PDFium checks extraction and rendering.
 No private document, font or screenshot
 is included in the repository.
+
+## Paragraph numbers (automation)
+
+A paragraph's number is its position in a list that is regrouped from geometry on every read,
+so an edit that merges two paragraphs, or splits one, moves the others. After `text_paragraphs`
+the numbers name the paragraphs *that listing showed*: `text_edit` and `text_edit_layout` find
+the paragraph again by its text and box, so editing paragraph 3 then paragraph 1 still edits the
+two the listing showed. A paragraph an edit merged into a neighbour (or changed) is refused with
+a message to list the page again, instead of rewriting whichever paragraph took its number
+(#2516). The result of an edit names the numbers that are gone in `stale_paragraphs`. Listing
+a page again renumbers it. Without a listing, a number is a position in the page's current
+paragraphs, as before. The inline editor holds the paragraph a switching click asked for the
+same way. What is still missing is an identity that survives save and reopen (design: #2508).

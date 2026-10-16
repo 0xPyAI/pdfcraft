@@ -2010,6 +2010,57 @@ fn on_same_baseline(line: &TextLine, target: &TextLine) -> bool {
     same_dir && same_size && offset.is_finite() && offset < size * 0.3
 }
 
+/// How a listing of [`text_blocks`] records a paragraph so that it can be found again.
+///
+/// The index of a paragraph is its position in a list regrouped from geometry on every read, so
+/// an edit that merges or splits paragraphs makes the same index name another one (#2516). A key
+/// names the paragraph by what it says and where it is; a paragraph that no longer exists as
+/// such has no match, instead of a neighbour taking its place.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlockKey {
+    text: String,
+    rect: [f64; 4],
+}
+
+impl BlockKey {
+    /// Two boxes are the same box within this many points.
+    const TOLERANCE: f64 = 0.01;
+
+    pub fn of(block: &TextBlock) -> Self {
+        Self { text: block.text.clone(), rect: block.rect }
+    }
+
+    /// The paragraph's box when it was recorded (user space).
+    pub fn rect(&self) -> [f64; 4] {
+        self.rect
+    }
+
+    /// The paragraph in `blocks` with this text and box. `hint` is tried first, so two
+    /// paragraphs drawn on top of one another are told apart by their order.
+    pub fn find(&self, blocks: &[TextBlock], hint: usize) -> Option<usize> {
+        let matches = |b: &TextBlock| b.text == self.text && b.rect.iter().zip(&self.rect).all(|(a, b)| (a - b).abs() <= Self::TOLERANCE);
+        match blocks.get(hint) {
+            Some(b) if matches(b) => Some(hint),
+            _ => blocks.iter().position(matches),
+        }
+    }
+}
+
+/// The paragraph in `blocks` whose box overlaps `rect` the most, if any overlaps it at all. An
+/// edit rewrites a paragraph in place, so this is the paragraph it became.
+pub fn block_overlapping(blocks: &[TextBlock], rect: [f64; 4]) -> Option<usize> {
+    // `f64::min` and `max` skip a NaN, which would make a box that isn't a number overlap anything.
+    let area = |b: &TextBlock| {
+        if !rect.iter().chain(&b.rect).all(|v| v.is_finite()) {
+            return 0.0;
+        }
+        let w = b.rect[2].min(rect[2]) - b.rect[0].max(rect[0]);
+        let h = b.rect[3].min(rect[3]) - b.rect[1].max(rect[1]);
+        if w > 0.0 && h > 0.0 { w * h } else { 0.0 }
+    };
+    blocks.iter().enumerate().map(|(i, b)| (i, area(b))).filter(|(_, a)| *a > 0.0).max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(i, _)| i)
+}
+
 /// The paragraphs on a page (0-based).
 pub fn text_blocks(doc: &Document, page: usize) -> Result<Vec<TextBlock>, EditError> {
     let lines = text_lines(doc, page)?;
@@ -2788,6 +2839,55 @@ pub(crate) fn translate_blocks(doc: &mut Document, page: usize, indexes: &[usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn block(text: &str, rect: [f64; 4]) -> TextBlock {
+        TextBlock {
+            text: text.into(),
+            rect,
+            base_font: String::new(),
+            size: 12.0,
+            bold: false,
+            italic: false,
+            color: [0.0; 3],
+            rotation: 0.0,
+            lines: Vec::new(),
+            rows: Vec::new(),
+            editor_text: text.into(),
+            spans: Vec::new(),
+            invisible: false,
+        }
+    }
+
+    #[test]
+    fn a_block_key_finds_its_paragraph_after_others_move_and_not_a_neighbour_in_its_place() {
+        let (a, b, c) = (block("Alpha", [0.0, 80.0, 50.0, 100.0]), block("Bravo", [0.0, 50.0, 50.0, 60.0]), block("Charlie", [0.0, 0.0, 50.0, 20.0]));
+        let key = BlockKey::of(&b);
+        assert_eq!(key.find(&[a.clone(), b.clone(), c.clone()], 1), Some(1));
+        // Alpha and Bravo became one paragraph: Bravo's number now belongs to Charlie.
+        let merged = block("Alpha Bravo", [0.0, 50.0, 50.0, 100.0]);
+        assert_eq!(key.find(&[merged, c.clone()], 1), None);
+        // A paragraph that split in two shifts the others down.
+        assert_eq!(key.find(&[a.clone(), block("x", [0.0; 4]), b.clone(), c], 1), Some(2));
+        // The same words somewhere else, or other words in the same place, are not the paragraph.
+        assert_eq!(key.find(&[block("Bravo", [0.0, 40.0, 50.0, 50.0])], 0), None);
+        assert_eq!(key.find(&[block("Bravo!", b.rect)], 0), None);
+        assert_eq!(key.find(&[], 0), None);
+        // Two paragraphs drawn on top of one another are told apart by the hint.
+        assert_eq!(key.find(&[b.clone(), b], 1), Some(1));
+        // A box that is not a number matches nothing, and cannot panic.
+        let nan = BlockKey::of(&block("Bravo", [f64::NAN; 4]));
+        assert_eq!(nan.find(&[block("Bravo", [f64::NAN; 4])], 0), None);
+    }
+
+    #[test]
+    fn the_block_that_overlaps_most_is_the_edited_paragraph() {
+        let blocks = [block("a", [0.0, 80.0, 50.0, 100.0]), block("b", [0.0, 40.0, 50.0, 70.0])];
+        assert_eq!(block_overlapping(&blocks, [0.0, 60.0, 50.0, 95.0]), Some(0));
+        assert_eq!(block_overlapping(&blocks, [0.0, 35.0, 50.0, 75.0]), Some(1));
+        assert_eq!(block_overlapping(&blocks, [200.0, 0.0, 250.0, 10.0]), None, "a box that overlaps nothing");
+        assert_eq!(block_overlapping(&[], [0.0, 0.0, 1.0, 1.0]), None);
+        assert_eq!(block_overlapping(&blocks, [f64::NAN; 4]), None);
+    }
 
     #[test]
     fn paragraph_wrapping_keeps_ideographic_spaces() {

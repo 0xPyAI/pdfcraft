@@ -36,7 +36,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use pdfcraft_engine::{CombineSource, DocId, Document, Edit, Session, commands};
+use pdfcraft_engine::{BlockKey, CombineSource, DocId, Document, Edit, Session, TextBlock, block_overlapping, commands};
 use pdfcraft_platform::staging::{StagingName, staging_suffixes};
 use pdfcraft_render::{PageRenderer, PageText, RenderConfig, RenderRequest, RequestKind};
 use serde_json::{Value, json};
@@ -118,6 +118,9 @@ pub struct Automation {
     renderers: HashMap<DocId, (Arc<Vec<u8>>, PageRenderer)>,
     /// Extracted page text, under one memory budget across all open documents.
     texts: TextCache,
+    /// The paragraphs of the last `text_paragraphs` listing of each page, so a paragraph number
+    /// keeps naming that paragraph after edits regroup the page (#2516).
+    listed: HashMap<(DocId, usize), Vec<BlockKey>>,
 }
 
 impl Default for Automation {
@@ -128,7 +131,7 @@ impl Default for Automation {
 
 impl Automation {
     pub fn new() -> Self {
-        Self { session: Session::new(), root: None, roots: None, renderers: HashMap::new(), texts: TextCache::default() }
+        Self { session: Session::new(), root: None, roots: None, renderers: HashMap::new(), texts: TextCache::default(), listed: HashMap::new() }
     }
 
     /// Confine every path the tools read or write to `root` (relative paths resolve inside it).
@@ -530,8 +533,9 @@ impl Automation {
                 let doc = self.doc_to_copy(&a)?;
                 let info = &doc.info.pages[page];
                 let r = |x: f32| (x as f64 * 100.0).round() / 100.0;
-                let blocks: Vec<Value> = doc
-                    .text_blocks(page)
+                let current = doc.text_blocks(page);
+                let id = doc.id;
+                let blocks: Vec<Value> = current
                     .iter()
                     .enumerate()
                     .map(|(i, b)| {
@@ -548,6 +552,7 @@ impl Automation {
                         })
                     })
                     .collect();
+                self.record_listing(id, page, &current);
                 json!({ "page": page + 1, "count": blocks.len(), "paragraphs": blocks })
             }
             "text_font_files" => {
@@ -605,10 +610,8 @@ impl Automation {
                 let doc = self.doc(&a)?;
                 let k = a.int("paragraph")?;
                 let blocks = doc.text_blocks(page);
-                if k < 1 || k as usize > blocks.len() {
-                    return Err(ToolError::InvalidArgs("paragraph is out of range".into()));
-                }
-                let source = &blocks[k as usize - 1];
+                let index = self.paragraph_index(doc.id, page, k, &blocks)?;
+                let source = blocks.get(index).ok_or_else(|| ToolError::InvalidArgs("paragraph is out of range".into()))?;
                 let text = a.opt_str("text")?.unwrap_or(&source.editor_text);
                 let style = pdfcraft_engine::BlockStyle {
                     size: a.opt_num("size")?,
@@ -617,7 +620,7 @@ impl Automation {
                     ranges: parse_style_ranges(a.get("ranges"))?,
                     ..Default::default()
                 };
-                let layout = doc.text_edit_layout(page, k as usize - 1, text, &style).map_err(failed)?;
+                let layout = doc.text_edit_layout(page, index, text, &style).map_err(failed)?;
                 let info = &doc.info.pages[page];
                 let view_rect = |r: [f64; 4]| {
                     let a = info.user_to_view(r[0] as f32, r[1] as f32);
@@ -630,12 +633,13 @@ impl Automation {
             }
             "text_edit" if a.get("paragraph").is_some() => {
                 let page = self.page(&a)?;
-                let n = self.doc(&a)?.text_blocks(page).len();
                 let k = a.int("paragraph")?;
-                if k < 1 || k as usize > n {
-                    return Err(ToolError::InvalidArgs(format!("paragraph {k} is out of range: page {} has {n} paragraphs", page + 1)));
-                }
-                let block = self.doc(&a)?.text_blocks(page)[k as usize - 1].clone();
+                let (id, blocks) = {
+                    let doc = self.doc(&a)?;
+                    (doc.id, doc.text_blocks(page))
+                };
+                let index = self.paragraph_index(id, page, k, &blocks)?;
+                let block = blocks.get(index).cloned().ok_or_else(|| ToolError::InvalidArgs(format!("paragraph {k} is out of range")))?;
                 let text = a.opt_str("text")?.map(str::to_owned).unwrap_or(block.text);
                 let mut style = pdfcraft_engine::BlockStyle {
                     ranges: parse_style_ranges(a.get("ranges"))?,
@@ -674,9 +678,18 @@ impl Automation {
                         other => return Err(ToolError::InvalidArgs(format!("unknown align {other:?}"))),
                     });
                 }
-                let mut out = self.apply(&a, Edit::EditTextBlock { page, block: k as usize - 1, text, style })?;
-                if let Some(b) = self.doc(&a)?.text_blocks(page).get(k as usize - 1) {
+                // Where the paragraph is drawn after the edit: moved by dx, dy (up is +dy).
+                let [dx, dy] = style.offset.unwrap_or([0.0, 0.0]);
+                let moved = [block.rect[0] + dx, block.rect[1] + dy, block.rect[2] + dx, block.rect[3] + dy];
+                let mut out = self.apply(&a, Edit::EditTextBlock { page, block: index, text, style })?;
+                let after = self.doc(&a)?.text_blocks(page);
+                let edited = block_overlapping(&after, moved);
+                if let Some(b) = edited.and_then(|i| after.get(i)) {
                     out["paragraph"] = json!({ "text": b.text, "lines": b.lines.len(), "font": b.base_font });
+                }
+                let stale = self.follow_edit(id, page, k, edited.and_then(|i| after.get(i)), &after);
+                if !stale.is_empty() {
+                    out["stale_paragraphs"] = json!(stale);
                 }
                 out
             }
@@ -880,6 +893,51 @@ impl Automation {
         let id = a.int("doc")?;
         let id = u64::try_from(id).map_err(|_| ToolError::InvalidArgs("doc must be positive".into()))?;
         self.session.get(DocId(id)).ok_or_else(|| ToolError::Failed(format!("no open document with id {id} (see doc_list)")))
+    }
+
+    /// Most pages whose paragraph listing is remembered.
+    const MAX_LISTINGS: usize = 256;
+
+    /// Remember the paragraphs `text_paragraphs` just listed for `page`, so their numbers can be
+    /// resolved against that listing.
+    fn record_listing(&mut self, doc: DocId, page: usize, blocks: &[TextBlock]) {
+        if self.listed.len() >= Self::MAX_LISTINGS && !self.listed.contains_key(&(doc, page)) {
+            self.listed.clear();
+        }
+        self.listed.insert((doc, page), blocks.iter().map(BlockKey::of).collect());
+    }
+
+    /// The index in `blocks` (the page's paragraphs now) of paragraph number `k` (1-based).
+    ///
+    /// After `text_paragraphs` a number names the paragraph that listing showed, wherever it is
+    /// now. Without a listing it is a position in `blocks`. A paragraph an edit merged into a
+    /// neighbour (or changed) is refused: the number would otherwise rewrite another paragraph
+    /// and lose its text (#2516).
+    fn paragraph_index(&self, doc: DocId, page: usize, k: i64, blocks: &[TextBlock]) -> Result<usize> {
+        let keys = self.listed.get(&(doc, page));
+        let n = keys.map_or(blocks.len(), Vec::len);
+        let i = usize::try_from(k)
+            .ok()
+            .and_then(|k| k.checked_sub(1))
+            .filter(|i| *i < n)
+            .ok_or_else(|| ToolError::InvalidArgs(format!("paragraph {k} is out of range: page {} has {n} paragraphs", page + 1)))?;
+        let Some(keys) = keys else { return Ok(i) };
+        keys.get(i).and_then(|key| key.find(blocks, i)).ok_or_else(|| {
+            ToolError::InvalidArgs(format!(
+                "paragraph {k} of page {} is no longer a paragraph of its own: an edit changed it or how the page is grouped. List the page again with text_paragraphs",
+                page + 1
+            ))
+        })
+    }
+
+    /// Update the listing after paragraph `k` was edited into `edited`, one of the page's
+    /// paragraphs `after`. Returns the numbers of the listed paragraphs that are gone.
+    fn follow_edit(&mut self, doc: DocId, page: usize, k: i64, edited: Option<&TextBlock>, after: &[TextBlock]) -> Vec<usize> {
+        let Some(keys) = self.listed.get_mut(&(doc, page)) else { return Vec::new() };
+        if let (Some(edited), Some(key)) = (edited, usize::try_from(k).ok().and_then(|k| k.checked_sub(1)).and_then(|i| keys.get_mut(i))) {
+            *key = BlockKey::of(edited);
+        }
+        keys.iter().enumerate().filter(|(i, key)| key.find(after, *i).is_none()).map(|(i, _)| i + 1).collect()
     }
 
     /// The document, if its security allows copying text and images out of it (Table 22, bit 5).

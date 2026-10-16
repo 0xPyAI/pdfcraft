@@ -1000,10 +1000,15 @@ pub(crate) fn page_input(
     // applied and `lines`/`boxes` are the document's new inventory (#2022).
     if allow_interaction
         && active.is_none()
-        && let Some((open_page, block)) = view.pending_text_open
+        && let Some((open_page, key)) = view.pending_text_open.clone()
         && open_page == page
     {
-        open_editor(ui, xf, doc, lines, &boxes, page, block, view);
+        // The edit may have regrouped the page: open the paragraph that was clicked, wherever it
+        // is now, and none if it was merged into another (#2516).
+        match key.find(lines, 0) {
+            Some(block) => open_editor(ui, xf, doc, lines, &boxes, page, block, view),
+            None => view.pending_text_open = None,
+        }
     }
     if !allow_interaction {
         return false;
@@ -1105,7 +1110,7 @@ pub(crate) fn page_input(
                 }
             }
             // The clicked box opens next frame, from the document with that edit applied.
-            view.pending_text_open = Some((page, hit));
+            view.pending_text_open = lines.get(hit).map(|l| (page, pdfcraft_engine::BlockKey::of(l)));
             return true;
         }
         open_editor(ui, xf, doc, lines, &boxes, page, hit, view);
