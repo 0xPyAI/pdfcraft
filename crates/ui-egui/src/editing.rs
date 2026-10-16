@@ -52,6 +52,12 @@ impl PdfCraftApp {
                 let Some(doc) = self.session.get(id) else { return true };
                 let info = &doc.info;
                 let view = &mut self.views[i];
+                // A picture picked with the Select tool may be the one this edit removed or moved:
+                // drop its highlight now, not on the next frame (which only comes with the next input).
+                view.picked_image = None;
+                if let Some(ctx) = &self.ctx {
+                    ctx.request_repaint();
+                }
                 if !matches!(edit, Edit::AddAnnotation(_)) {
                     // Only a new drawing waits on its raster; any other edit may remove or move it.
                     view.comments.settling.clear();

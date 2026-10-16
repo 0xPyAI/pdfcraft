@@ -3279,6 +3279,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             if tool == QuickTool::Select && !consumed {
                 crate::image_pick::page_input(&resp, &xf, i, info, doc, pointer, view);
             }
+            crate::image_pick::drop_stale(doc, view);
             crate::image_pick::paint(painter, &xf, i, info, view);
             comments::page_after_text(&resp, &pcx, view);
             if tool == QuickTool::Redact && can_modify {
