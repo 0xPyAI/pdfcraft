@@ -453,5 +453,6 @@ fn incremental_saves_of_a_file_whose_offsets_count_from_its_first_byte_keep_coun
     assert!(back.repair_log().is_empty(), "{:?}", back.repair_log());
     assert_eq!(back.revisions().len(), 2);
     assert!(back.xref_entry_is_exact(1));
-    assert_qpdf_clean(&saved);
+    // No qpdf check here: qpdf counts every offset from the header in a file with bytes before
+    // it, so it already reconstructs this input before anything is appended.
 }
