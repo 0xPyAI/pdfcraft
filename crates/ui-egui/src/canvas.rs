@@ -2150,11 +2150,20 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_s
     if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::F))) {
         view.open_find();
     }
+    let cmd = |k| KeyboardShortcut::new(Modifiers::COMMAND, k);
+    let pressed = |s: KeyboardShortcut| ctx.input_mut(|i| i.consume_shortcut(&s));
+    // ⌘G / ⇧⌘G step through the matches from the find field too, as in Acrobat and Preview
+    // (#2669): ahead of the text-input check, but only while there is a search to step.
+    if view.find.is_some() {
+        if pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::G)) {
+            view.find_step(false);
+        } else if pressed(cmd(Key::G)) {
+            view.find_step(true);
+        }
+    }
     if ctx.egui_wants_keyboard_input() {
         return;
     }
-    let cmd = |k| KeyboardShortcut::new(Modifiers::COMMAND, k);
-    let pressed = |s: KeyboardShortcut| ctx.input_mut(|i| i.consume_shortcut(&s));
     // Rotation first: egui matches ⌘+ loosely with respect to Shift.
     if pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Plus))
         || pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Equals))
@@ -2194,11 +2203,6 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_s
     if pressed(cmd(Key::Num2)) {
         view.fit = Fit::Width;
         view.goto = Some((view.current, 0.0));
-    }
-    if pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::G)) {
-        view.find_step(false);
-    } else if pressed(cmd(Key::G)) {
-        view.find_step(true);
     }
     if pressed(cmd(Key::OpenBracket)) {
         view.view_history(false);

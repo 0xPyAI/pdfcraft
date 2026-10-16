@@ -175,6 +175,36 @@ fn find_shortcuts_advance_and_retreat_matches() {
     assert_eq!(h.state().views[0].find.as_ref().unwrap().current, Some((start + n - 1) % n));
 }
 
+/// #2669: ⌘G and ⇧⌘G step through the matches while the find field still has the focus.
+#[test]
+fn find_shortcuts_work_from_the_find_field() {
+    let mut h = harness();
+    h.state_mut().active = Some(0);
+    h.run_steps(2);
+    h.state_mut().views[0].open_find();
+    h.state_mut().views[0].find.as_mut().unwrap().query = "page".into();
+    h.state_mut().views[0].rerun_find();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while std::time::Instant::now() < deadline {
+        h.run_steps(2);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        if h.state().views[0].find.as_ref().unwrap().matches.len() >= 15 {
+            break;
+        }
+    }
+    let n = h.state().views[0].find.as_ref().unwrap().matches.len();
+    assert_eq!(n, 15);
+    assert!(h.ctx.egui_wants_keyboard_input(), "the find field has the focus");
+    let start = h.state().views[0].find.as_ref().unwrap().current.unwrap();
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::G);
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].find.as_ref().unwrap().current, Some((start + 1) % n));
+    h.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::G);
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].find.as_ref().unwrap().current, Some(start));
+    assert!(h.ctx.egui_wants_keyboard_input(), "and keeps it");
+}
+
 #[test]
 fn marking_while_searching_does_not_jitter_or_reset_search_state() {
     let mut h = harness();
