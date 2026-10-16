@@ -2571,7 +2571,11 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     } else if let Some((page, frac)) = view.goto.take() {
         let page = page.min(rects.len() - 1);
         let r = rects[page];
-        scroll = scroll.vertical_scroll_offset((r.top() - y_shift - GAP + frac * r.height()).max(0.0));
+        // Clamped here: egui clamps only after drawing, so a page that fits was drawn MARGIN - GAP
+        // too high for a frame and then hopped into place. (`avail` is the viewport, as the
+        // scroll bars float.)
+        let max_y = (content_h - avail.height()).max(0.0);
+        scroll = scroll.vertical_scroll_offset((r.top() - y_shift - GAP + frac * r.height()).max(0.0).min(max_y));
     }
     let ppp = ui.ctx().pixels_per_point();
     let scale = view.render_scale(ppp);
