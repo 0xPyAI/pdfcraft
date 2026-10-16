@@ -4666,6 +4666,11 @@ impl Session {
         write_full(doc, &opts).map(Arc::new).map_err(|e| EditError::Write(e.to_string()))
     }
 
+    /// Whether a changed document still needs a recovery snapshot. This does not consume it.
+    pub fn has_pending_autosave(&self) -> bool {
+        self.docs.iter().any(|d| d.dirty && d.generation != d.snapshot_generation)
+    }
+
     /// Documents with unsaved changes made since the last call: their current working file,
     /// for crash recovery. Encrypted documents stay encrypted in the snapshot.
     pub fn autosave_snapshots(&mut self) -> Vec<RecoverySnapshot> {

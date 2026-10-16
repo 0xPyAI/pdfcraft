@@ -290,13 +290,21 @@ impl PdfCraftApp {
     }
 
     /// Autosave when the interval has passed (called every frame).
-    pub(crate) fn autosave_tick(&mut self, now: f64) {
+    pub(crate) fn autosave_tick(&mut self, ctx: &egui::Context, now: f64) {
         if self.recovery.is_none() {
             return;
         }
         if now - self.last_autosave >= AUTOSAVE_SECS {
             self.last_autosave = now;
             self.autosave_now();
+        }
+        // An idle native window has no input-driven frames. Wake it at the existing
+        // autosave deadline, without keeping clean or already-snapshotted documents awake.
+        if self.session.has_pending_autosave() {
+            let remaining = (self.last_autosave + AUTOSAVE_SECS - now).clamp(0.0, AUTOSAVE_SECS);
+            if let Ok(delay) = std::time::Duration::try_from_secs_f64(remaining) {
+                ctx.request_repaint_after(delay);
+            }
         }
     }
 
@@ -382,6 +390,89 @@ impl PdfCraftApp {
                 store.remove(key);
             }
             self.recovery_keys.clear();
+        }
+    }
+}
+
+#[cfg(test)]
+mod idle_tests {
+    use super::*;
+    use std::time::Duration;
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let path = std::env::temp_dir().join(format!("pdfcraft-idle-recovery-{}-{nonce}", std::process::id()));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn frame(app: &mut PdfCraftApp, ctx: &egui::Context, now: f64) -> Duration {
+        let mut out = ctx.run_ui(egui::RawInput { time: Some(now), ..Default::default() }, |ui| {
+            app.autosave_tick(ui.ctx(), now);
+        });
+        // Headless timer test: acknowledge texture uploads without a GPU backend.
+        out.textures_delta.clear();
+        out.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+    }
+
+    #[test]
+    fn idle_dirty_document_requests_its_deadline_and_writes_without_input() {
+        let dir = TestDir::new();
+        let store = RecoveryStore::new(dir.path());
+        let mut app = PdfCraftApp::new();
+        app.enable_recovery(store.clone());
+        let bytes = app.session.create_blank(200.0, 300.0, 1).unwrap();
+        let id = app.session.open_new("Untitled.pdf", bytes).unwrap();
+        let ctx = egui::Context::default();
+        let mut delay = Duration::ZERO;
+        for _ in 0..4 {
+            delay = frame(&mut app, &ctx, 15.0);
+        }
+        assert!(delay > Duration::ZERO && delay <= Duration::from_secs(45), "idle deadline: {delay:?}");
+        assert!(store.list().is_empty());
+        frame(&mut app, &ctx, 60.0);
+        assert_eq!(store.list().len(), 1, "timer frame writes the snapshot without input");
+        assert!(app.session.get(id).unwrap().dirty, "autosave does not mark the document saved");
+        assert!(!app.session.has_pending_autosave());
+        for _ in 0..4 {
+            delay = frame(&mut app, &ctx, 61.0);
+        }
+        assert_eq!(delay, Duration::MAX, "unchanged snapshot needs no periodic wake");
+    }
+
+    #[test]
+    fn clean_documents_and_disabled_recovery_do_not_schedule_autosave() {
+        for recovery_enabled in [false, true] {
+            let dir = TestDir::new();
+            let mut app = PdfCraftApp::new();
+            if recovery_enabled {
+                app.enable_recovery(RecoveryStore::new(dir.path()));
+            }
+            let bytes = app.session.create_blank(200.0, 300.0, 1).unwrap();
+            if recovery_enabled {
+                app.session.open("Clean.pdf", None, bytes, None).unwrap();
+            } else {
+                app.session.open_new("Unsaved.pdf", bytes).unwrap();
+            }
+            let ctx = egui::Context::default();
+            let mut delay = Duration::ZERO;
+            for _ in 0..4 {
+                delay = frame(&mut app, &ctx, 15.0);
+            }
+            assert_eq!(delay, Duration::MAX);
         }
     }
 }
