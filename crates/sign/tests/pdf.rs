@@ -13,14 +13,20 @@ fn data(name: &str) -> Vec<u8> {
 
 /// One page with text and an unsigned signature field "Approval".
 fn fixture() -> Vec<u8> {
-    let objs: Vec<&[u8]> = vec![
-        b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [6 0 R] >> >>",
+    fixture_with(b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [6 0 R] >> >>", &[])
+}
+
+/// [`fixture`] with its catalog replaced by `catalog` and `more` objects from number 7 on.
+fn fixture_with(catalog: &[u8], more: &[&[u8]]) -> Vec<u8> {
+    let mut objs: Vec<&[u8]> = vec![
+        catalog,
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>",
         b"<< /Length 44 >>\nstream\nBT /F1 14 Tf 20 250 Td (Contract text) Tj ET\nendstream",
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
         b"<< /Type /Annot /Subtype /Widget /FT /Sig /T (Approval) /Rect [150 20 280 70] /P 3 0 R /F 4 >>",
     ];
+    objs.extend_from_slice(more);
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();
     for (i, o) in objs.iter().enumerate() {
@@ -747,6 +753,59 @@ fn declaring_a_form_xfa_does_not_excuse_replacing_the_pages() {
         assert_eq!(s.status, Status::Invalid, "{certify:?}: {:?}", s.details);
         assert!(matches!(&s.modification, Modification::Disallowed(k) if k.contains(&kind::STRUCTURE)), "{:?}", s.modification);
     }
+}
+
+/// A form whose AcroForm carries its XFA as packets: template (7), datasets (8), form (9).
+fn xfa_fixture() -> Vec<u8> {
+    fixture_with(
+        b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [6 0 R] /XFA [(template) 7 0 R (datasets) 8 0 R (form) 9 0 R] >> >>",
+        &[
+            b"<< /Length 11 >>\nstream\n<template/>\nendstream",
+            b"<< /Length 22 >>\nstream\n<xfa:datasets><a>1</a>\nendstream",
+            b"<< /Length 7 >>\nstream\n<form/>\nendstream",
+        ],
+    )
+}
+
+/// Rewrite object `num` as a stream holding `body`.
+fn rewrite_stream(num: u32, body: &'static [u8]) -> impl FnOnce(&mut Document) {
+    move |doc| doc.set(pdfcraft_cos::ObjRef { num, generation: 0 }, stream_of(body))
+}
+
+/// #2759: filling a certified XFA form rewrites its `datasets` (and `form`) packets, as a Reader
+/// Extensions save of the IRCC forms does. That is form fill, which certification level 2
+/// permits; level 1 still refuses it, and rewriting the template is not a form fill. The packets'
+/// roles come from the signed revision: a later revision that names the template "datasets"
+/// doesn't make rewriting it a form fill.
+#[test]
+fn rewriting_a_certified_forms_xfa_data_is_a_form_fill() {
+    let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    let trust = TrustStore { certs: vec![id.certificate.clone()] };
+    let check = |bytes: &[u8]| signatures(&open(bytes), bytes, &trust).into_iter().find(|s| s.signed).unwrap();
+    let certified = pdfcraft_sign::sign(&open(&xfa_fixture()), &id, &SignOptions { certify: Some(2), ..opts() }).unwrap();
+    assert_eq!(check(&certified).status, Status::Valid);
+    for num in [8, 9] {
+        let s = check(&edit_after(&certified, rewrite_stream(num, b"<xfa:datasets><a>2</a></xfa:datasets>")));
+        assert_eq!((s.status, s.modification.clone()), (Status::Valid, Modification::Allowed(vec![kind::FORM_FILL])), "{num}: {:?}", s.details);
+    }
+    let s = check(&edit_after(&certified, rewrite_stream(7, b"<template><subform/></template>")));
+    assert_eq!((s.status, s.modification), (Status::Invalid, Modification::Disallowed(vec![kind::OTHER])));
+    let renamed = edit_after(&certified, |doc| {
+        let root = doc.root().unwrap();
+        doc.update_dict(root, |c| {
+            if let Some(Object::Dict(form)) = c.get_mut(b"AcroForm") {
+                form.set(b"XFA".to_vec(), Object::Array(vec![Object::String(PdfString::text("datasets")), oref(7)]));
+            }
+        })
+        .unwrap();
+        rewrite_stream(7, b"<template><subform/></template>")(doc);
+    });
+    let s = check(&renamed);
+    assert_eq!(s.status, Status::Invalid, "{:?}", s.modification);
+    assert!(matches!(&s.modification, Modification::Disallowed(k) if k.contains(&kind::OTHER)), "{:?}", s.modification);
+    let locked = pdfcraft_sign::sign(&open(&xfa_fixture()), &id, &SignOptions { certify: Some(1), ..opts() }).unwrap();
+    let s = check(&edit_after(&locked, rewrite_stream(8, b"<xfa:datasets><a>2</a></xfa:datasets>")));
+    assert_eq!((s.status, s.modification), (Status::Invalid, Modification::Disallowed(vec![kind::FORM_FILL])));
 }
 
 /// Re-encode a DER CMS the way Windows CryptoAPI / Adobe PPKMS / `openssl cms -stream` write it:

@@ -1200,6 +1200,8 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
         .collect();
     // The signed revision's document-level XMP stream.
     let old_metadata = old.root().and_then(|root| old.get(root).as_dict().and_then(|c| c.get(b"Metadata").and_then(Object::as_ref)));
+    // The signed revision's XFA data packets: filling the form rewrites them.
+    let old_xfa_data = xfa_data_packets(&old);
     // What each object was in the signed revision: its pages, and its trailer /Info. A changed
     // object is judged by the role it held when signed, never by the labels or keys its new,
     // attacker-written version carries (relabelling a signed page /Type /Sig, or dropping its
@@ -1295,6 +1297,12 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
                     // else, even one it already had when signed (a page's Form XObject: the
                     // renderer ignores /Type), does not make rewriting it a metadata change.
                     kind::METADATA
+                } else if old_xfa_data.contains(&r) {
+                    // The form's XFA data (`datasets`) or state (`form`) as the signed revision
+                    // named it: filling an XFA form rewrites these, as a Reader Extensions (UR3)
+                    // save of a certified form does (#2759). The role comes from the signed
+                    // revision, so a later one can't name page content as XFA data.
+                    kind::FORM_FILL
                 } else {
                     kind::OTHER
                 }
@@ -1316,6 +1324,21 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
         }
     }
     if disallowed.is_empty() { Modification::Allowed(allowed) } else { Modification::Disallowed(disallowed) }
+}
+
+/// The streams of `doc`'s XFA form that hold its data and state: the `datasets` and `form`
+/// packets of the AcroForm's `/XFA` array (name, stream, name, stream, …). A form given as one
+/// XFA stream holds its template too, and is not listed.
+fn xfa_data_packets(doc: &Document) -> HashSet<ObjRef> {
+    let Some(form) = acroform(doc) else { return HashSet::new() };
+    let Some(xfa) = form.get(b"XFA").map(|x| doc.resolve(x)) else { return HashSet::new() };
+    let Object::Array(xfa) = &*xfa else { return HashSet::new() };
+    xfa.as_chunks::<2>()
+        .0
+        .iter()
+        .filter(|[name, _]| doc.resolve(name).as_string().is_some_and(|s| matches!(s.to_text().as_str(), "datasets" | "form")))
+        .filter_map(|[_, packet]| packet.as_ref())
+        .collect()
 }
 
 /// Where an object sits in the Document Security Store (ISO 32000-2 §12.8.4.3).
