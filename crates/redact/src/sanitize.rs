@@ -286,6 +286,8 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
             || (which.contains(&Hidden::Attachments) && s == b"FileAttachment")
             || (which.contains(&Hidden::LinksActionsScripts) && s == b"Link")
     };
+    // Every annotation taken off a page, for the structure tree below.
+    let mut gone: std::collections::HashSet<ObjRef> = std::collections::HashSet::new();
     for p in pdfcraft_model::pages(doc) {
         let list = annots_of(doc, &p.dict);
         let mut removed: Vec<ObjRef> = Vec::new();
@@ -305,6 +307,7 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
             let d = doc.get(r).as_dict().cloned().unwrap_or_default();
             let parent_gone = d.get(b"Parent").and_then(Object::as_ref).is_some_and(|x| removed.contains(&x));
             if removed.contains(&r) || (d.name(b"Subtype") == Some(b"Popup") && parent_gone) {
+                gone.insert(r);
                 continue;
             }
             if which.contains(&Hidden::LinksActionsScripts) && (d.contains(b"AA") || (d.name(b"Subtype") == Some(b"Widget") && d.contains(b"A"))) {
@@ -335,6 +338,9 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
             }
         })?;
     }
+    // A tagged PDF's structure tree still points at the removed links and comments (#2447): drop
+    // those references, or the full rewrite keeps the annotations, URLs and text included.
+    crate::tags::drop_object_refs(doc, &gone)?;
     let off = hidden_layers(doc);
     let mut cat = doc.get(root).as_dict().cloned().unwrap_or_default();
     let mut names = sub(doc, &cat, b"Names");
