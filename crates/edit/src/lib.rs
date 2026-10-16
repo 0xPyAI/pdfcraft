@@ -65,12 +65,24 @@ pub struct HeaderFooter {
     pub margins: [f64; 4],
     /// The number `<<1>>` shows on the first page of the range.
     pub start_number: u32,
+    /// Shrink the page content so the header and footer don't cover it (Acrobat's Appearance
+    /// Options): the original content is scaled down evenly into the band the header and footer
+    /// leave free, centred across the page. Remove and Update take the scaling away again.
+    pub shrink: bool,
 }
 
 impl Default for HeaderFooter {
     /// Acrobat's defaults: 8 pt black, margins 0.5 in top and bottom, 1 in left and right.
     fn default() -> Self {
-        Self { text: Default::default(), font_size: 8.0, color: [0.0; 3], underline: false, margins: [36.0, 36.0, 72.0, 72.0], start_number: 1 }
+        Self {
+            text: Default::default(),
+            font_size: 8.0,
+            color: [0.0; 3],
+            underline: false,
+            margins: [36.0, 36.0, 72.0, 72.0],
+            start_number: 1,
+            shrink: false,
+        }
     }
 }
 
@@ -83,6 +95,42 @@ impl HeaderFooter {
     pub fn first_undrawable(&self) -> Option<char> {
         self.text.iter().flat_map(|t| t.lines()).find_map(pdfcraft_fonts::first_non_win_ansi)
     }
+
+    /// The room the header and the footer take at the top and the bottom of a page, in points:
+    /// the margin, the lines of the tallest box, and a clearance of half the font size. A side
+    /// without text takes none. This is the room [`HeaderFooter::shrink`] keeps free.
+    pub fn bands(&self) -> (f64, f64) {
+        let size = self.font_size;
+        let line_h = size * 1.2;
+        let lines = |boxes: &[String]| boxes.iter().filter(|t| !t.trim().is_empty()).map(|t| t.lines().count().max(1)).max();
+        let (header, footer) = self.text.split_at(3);
+        // Header lines hang below the top margin (a full line each); the footer's last line sits
+        // on the bottom margin, so only its capitals (0.8 of the size) rise above it.
+        let top = lines(header).map_or(0.0, |n| self.margins[0] + size + (n - 1) as f64 * line_h + size / 2.0);
+        let bottom = lines(footer).map_or(0.0, |n| self.margins[1] + size * 0.8 + (n - 1) as f64 * line_h + size / 2.0);
+        (top, bottom)
+    }
+}
+
+/// The `cm` that shrinks a page's original content (user space) into the band `hf` leaves free,
+/// for a page shown `size` (display space) with view matrix `view` (display to user space): an
+/// even scale, centred across, the content's bottom on the footer's band.
+fn shrink_matrix(hf: &HeaderFooter, size: (f64, f64), view: [f64; 6]) -> Result<[f64; 6], EditError> {
+    let (w, h) = size;
+    let (top, bottom) = hf.bands();
+    let free = h - top - bottom;
+    if !(free.is_finite() && free >= 1.0 && w.is_finite() && w > 0.0) {
+        return Err(EditError::Invalid("the header and footer margins leave no room for the page content to shrink into".into()));
+    }
+    let k = free / h;
+    let v = kurbo::Affine::new(view);
+    let det = v.determinant();
+    if !(det.is_finite() && det.abs() > 1e-12) {
+        return Err(EditError::Invalid("the page can't be shrunk: its view matrix is degenerate".into()));
+    }
+    let shrink = kurbo::Affine::new([k, 0.0, 0.0, k, (w - w * k) / 2.0, bottom]);
+    // User space to display space, shrink there, and back.
+    Ok((v * shrink * v.inverse()).as_coeffs())
 }
 
 /// A picture for a background or watermark (Acrobat: Source ▸ File): an XObject already in
@@ -552,6 +600,18 @@ fn place_tagged(doc: &mut Document, page: &pdfcraft_model::Page, tag: &str, cont
     Ok(())
 }
 
+/// Put content tagged `tag` first inside the q/Q wrapper, so it applies to the page's original
+/// content and nothing else (a header's shrink). A page without a wrapper has no original content
+/// on it and is left alone.
+fn place_inside_wrapper(doc: &mut Document, page: &pdfcraft_model::Page, tag: &str, content: Vec<u8>) -> Result<(), EditError> {
+    let mut list = contents(doc, page)?;
+    let Some(open) = list.iter().position(|o| stream_tag(doc, o).as_deref() == Some("Wrap")) else { return Ok(()) };
+    let stream = Object::Ref(doc.add(Object::Stream(Stream::flate(tagged(tag), &content))));
+    list.insert(open + 1, stream);
+    doc.update_dict(page.obj, |d| d.set(b"Contents".to_vec(), Object::Array(list)))?;
+    Ok(())
+}
+
 /// Draw `content` on top of a page (0-based) as permanent page content, with standard Helvetica
 /// available as `/PCHelv`. The stream is tagged `tag` (not a mark kind, so Remove never takes
 /// it away); the original content is wrapped in q/Q first. Used for applied redaction boxes.
@@ -632,6 +692,11 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
             u64::MAX
         )));
     }
+    // Shrinking needs room on every page: refuse before anything is drawn or replaced.
+    let shrinks = pages
+        .iter()
+        .map(|&i| hf.shrink.then(|| shrink_matrix(hf, all[i].display_size(doc), all[i].view_matrix(doc))).transpose())
+        .collect::<Result<Vec<_>, _>>()?;
     if replace {
         remove_marks(doc, pages, MarkKind::HeaderFooter)?;
     }
@@ -679,6 +744,11 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
         add_resources(doc, page, None, None)?;
         let page = &page_list(doc)[i];
         place(doc, page, MarkKind::HeaderFooter, content, false)?;
+        if let Some(Some(m)) = shrinks.get(k) {
+            let cm = format!("{} cm\n", m.map(matrix_number).join(" "));
+            let page = &page_list(doc)[i];
+            place_inside_wrapper(doc, page, MarkKind::HeaderFooter.tag(), cm.into_bytes())?;
+        }
     }
     Ok(())
 }
