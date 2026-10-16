@@ -1457,6 +1457,7 @@ mod tests {
             "Text",
             "Index",
             "Metadata",
+            "metadata",
             "Model",
             "{field}: {e}",
             "{0}: {1}",
@@ -1542,6 +1543,69 @@ mod tests {
         assert_eq!(action_label("Delete 12 fields"), "Odstranit 12 polí");
         assert_eq!(fmt(t("{n} pages selected"), &[("n", "3")]), "Vybráno stránek: 3");
         set_current(Lang::EN);
+    }
+
+    /// Czech says everything the layers below word for themselves (see
+    /// `spanish_covers_what_the_engine_says`), and keeps each sentence's holes.
+    #[test]
+    fn czech_covers_what_the_engine_says() {
+        let cs = Lang::from_code("cs").expect("cs registered");
+        let lists: [(&str, &[&str]); 8] = [
+            ("accessibility finding", pdfcraft_engine::a11y::WORDINGS),
+            ("accessibility report", pdfcraft_engine::a11y::REPORT_WORDS),
+            ("PDF/A problem", pdfcraft_engine::pdfa::WORDINGS),
+            ("signature detail", pdfcraft_engine::sign::pdf::WORDINGS),
+            ("change after signing", pdfcraft_engine::sign::pdf::kind::ALL),
+            ("pages to print", pdfcraft_engine::print::WORDINGS),
+            ("edit label", pdfcraft_engine::EDIT_LABELS),
+            ("batch label", pdfcraft_engine::BATCH_LABELS),
+        ];
+        for (what, list) in lists {
+            assert!(!list.is_empty(), "no {what} wordings to cover");
+            for wording in list {
+                assert!(has(cs, wording), "missing {what}: {wording}");
+                let said = tr(cs, wording);
+                assert_eq!(wording.matches("{}").count(), said.matches("{}").count(), "the Czech of {wording:?} loses a hole: {said:?}");
+                for hole in wording.split('{').skip(1).filter_map(|rest| rest.split_once('}')).map(|(name, _)| name).filter(|n| !n.is_empty()) {
+                    assert!(said.contains(&format!("{{{hole}}}")), "the Czech of {wording:?} loses {{{hole}}}: {said:?}");
+                }
+            }
+        }
+        assert_eq!(tr(cs, "Signature is valid"), "Podpis je platný");
+    }
+
+    /// The date picker's weekday heads and the certificate viewer's fields are looked up in their
+    /// own contexts, which the `tl!` scan doesn't see: none of them may fall back to English.
+    #[test]
+    fn czech_covers_weekdays_and_certificate_fields() {
+        let cs = Lang::from_code("cs").expect("cs registered");
+        assert_eq!(
+            ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map(|day| tr_ctx(cs, "calendar weekday", day)),
+            ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"]
+        );
+        assert_eq!(tr_ctx(cs, "certificate", "Subject"), "Subjekt");
+        for field in [
+            "Issued to",
+            "Issued by",
+            "Valid from",
+            "Valid to",
+            "Intended usage",
+            "Serial number",
+            "Issuer",
+            "Validity starts",
+            "Validity ends",
+            "Public key",
+            "Basic constraints",
+            "Key usage",
+            "Self-signed",
+            "SHA-1 digest",
+            "SHA-256 digest",
+            "Version",
+        ] {
+            assert_ne!(tr_ctx(cs, "certificate", field), field, "certificate field remains untranslated: {field}");
+        }
+        assert_eq!(trn(cs, 3, "{n} file", "{n} files"), "3 soubory");
+        assert_eq!(fmt(tr(cs, "{n} tags"), &[("n", "1")]), "Tagy: 1");
     }
 
     /// Turkish covers every registered menu title and menu command label, keeps ellipses, and

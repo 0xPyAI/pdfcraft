@@ -1,7 +1,7 @@
 # Localization parity
 
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (Vietnamese 100% of current key union; native-speaker community review; twelve-language mean ≈68%) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (Italian count after completing its catalog) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-16 · **Change:** minor (Czech catalog completed and reviewed) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 
 Per-language status of PdfCraft's interface against Acrobat Pro's. How translations work and how to
 add a language: [localization.md](localization.md). Summary in [ROADMAP.md](../ROADMAP.md).
@@ -59,7 +59,7 @@ none has translated help. Vietnamese's **To `full`** hours are therefore residua
 | Traditional Chinese | `zh-hant` | 2,016 (94.1%) | partial (same Hans/Hant face caveat) | yes |
 | Russian | `ru` | 2,043 (95.3%) | partial | yes |
 | Bulgarian | `bg` | 2,094 (97.7%) | partial | no |
-| Czech | `cs` | 135 (6.3%) | menus only | yes |
+| Czech | `cs` | 2,674 entries (every key of the other catalogs, the engine's sentences, weekdays and certificate fields) | partial | yes |
 | Telugu | `te` | 2,058 (96.0%) | partial (the release-pinned craft-fonts has no Telugu face yet) | no |
 | Hungarian | `hu` | 2,126 (99.2%) | partial | yes |
 | Ukrainian | `uk` | 2,142 (100%) | partial | yes |
@@ -82,6 +82,7 @@ Acrobat languages PdfCraft lacks: Danish, Dutch, Finnish, Norwegian, Swedish, He
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-16 | minor | Czech: 2,674 entries after adding the keys the other catalogs had (the engine's sentences, weekday heads, certificate fields, shared buttons) and unifying "tag" as *tag* (not *značka*, which is a redaction mark) |
 | 2026-10-13 | minor | Vietnamese (`vi`) catalog: 2,591 entries (100% of current key union + `theme`/`Appearance`); twelve-language mean ≈ 68%; native-speaker community review; registered with `plural_none` |
 | 2026-10-14 | minor | Italian: 2,528 entries after adding the 201 keys the other catalogs had and the code looks up |
 | 2026-10-12 | minor | Added current counts for Kazakh, Polish, Slovenian, Greek, Turkish and Lithuanian; retained existing language assessments and the original percentage snapshot |
