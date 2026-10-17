@@ -1276,8 +1276,18 @@ fn reading_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError
     let streams = content_streams(doc, &p.dict);
     let mut w = Walk { doc, lines: Vec::new(), next_stream: streams.len(), path: Vec::new(), visits: 0 };
     let mut carry = Carry::new();
-    for (si, (_, data)) in streams.into_iter().enumerate() {
-        walk(&mut w, &parse(&data).ops, &res, &mut carry, si);
+    // Read the page's streams as the one stream they are, as rendering and editing do: a
+    // comment or an operator's operands can run on from one stream into the next. Each operator
+    // still counts as its first stream's, which keeps lines from different streams apart.
+    let pieces = Pieces::join(&streams.into_iter().map(|(_, data)| data).collect::<Vec<_>>());
+    let mut grouped: Vec<Vec<Op>> = (0..pieces.len()).map(|_| Vec::new()).collect();
+    for op in pieces.parse().ops {
+        if let Some(group) = grouped.get_mut(pieces.pieces_of(&op).0) {
+            group.push(op);
+        }
+    }
+    for (si, ops) in grouped.iter().enumerate() {
+        walk(&mut w, ops, &res, &mut carry, si);
     }
     let mut lines = w.lines;
     // A visual-order Indic font draws pre-base vowel signs before their consonant.

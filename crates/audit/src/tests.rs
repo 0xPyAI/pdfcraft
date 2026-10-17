@@ -500,3 +500,22 @@ fn forms_nested_past_depth_limit_fail_closed() {
     let result = audit_redactions(&open(nested_forms(33)));
     assert!(matches!(result, Err(crate::AuditError::TooDeep)), "{result:?}");
 }
+
+#[test]
+fn comment_across_streams_neither_invents_text_nor_a_cover() {
+    let doc = open(two_streams(b"BT /F1 24 Tf 72 700 Td (Visible text) Tj ET % note", b"0 g 70 690 200 40 re f"));
+    assert!(audit_redactions(&doc).unwrap().is_empty(), "commented cover must not be reported");
+    let doc = open(two_streams(b"BT /F1 24 Tf 72 700 Td (Before comment) Tj ET % note", b"BT /F1 24 Tf 72 650 Td (After comment) Tj ET"));
+    let text: String = pdfcraft_edit::text_lines(&doc, 0).unwrap().into_iter().map(|line| line.text).collect();
+    assert!(!text.contains("After comment"), "editor exposed phantom text: {text}");
+}
+
+#[test]
+fn reading_blocks_respect_stream_comments_and_split_operands() {
+    let doc = open(two_streams(b"BT /F1 24 Tf 72 700 Td (Before comment) Tj ET % note", b"BT /F1 24 Tf 72 650 Td (After comment) Tj ET"));
+    let text: String = pdfcraft_edit::reading_blocks(&doc, 0).unwrap().into_iter().map(|block| block.editor_text).collect();
+    assert_eq!(text, "Before comment");
+    let doc = open(two_streams(b"BT /F1 24 Tf 72 700 Td (Split operand)", b"Tj ET"));
+    let text: String = pdfcraft_edit::reading_blocks(&doc, 0).unwrap().into_iter().map(|block| block.editor_text).collect();
+    assert_eq!(text, "Split operand");
+}
