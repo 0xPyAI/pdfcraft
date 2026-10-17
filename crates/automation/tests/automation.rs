@@ -2474,6 +2474,43 @@ fn editing_existing_text_through_tools() {
     assert_eq!(p["lines"].as_array().map(Vec::len), Some(2), "{p}");
 }
 
+#[test]
+fn styled_cyrillic_fallback_is_batched_through_tools_and_reopen() {
+    if pdfcraft_fonts::document_japanese_font().is_none() {
+        eprintln!("skipping: built without craft-fonts");
+        return;
+    }
+    let dir = workdir("styled-fallback");
+    std::fs::write(
+        dir.join("mixed.pdf"),
+        helvetica_page(
+            "BT /F1 12 Tf 14.4 TL 72 700 Td (The quick brown fox jumps over the lazy dog) Tj T* (and keeps running through the long field.) Tj ET",
+        ),
+    )
+    .unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path": "mixed.pdf"}))["doc"].as_u64().unwrap();
+    let replacement = "The quick brown fox jumps over the lazy dog шалом\nand keeps running through the long field.";
+    ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":1,"text":replacement,"width":520}));
+    ok(&mut a, "doc_save", json!({"doc":doc,"path":"saved.pdf"}));
+    let saved = pdfcraft_cos::Document::open(std::sync::Arc::new(std::fs::read(dir.join("saved.pdf")).unwrap())).unwrap();
+    let page = pdfcraft_model::pages(&saved).swap_remove(0);
+    let resources = saved.dict(page.dict.get(b"Resources").unwrap()).unwrap();
+    let fonts = saved.dict(resources.get(b"Font").unwrap()).unwrap();
+    let fallback_count = fonts.iter().filter(|(name, _)| name.starts_with(b"PCJp")).count();
+    assert_eq!(fallback_count, 1, "one shared fallback font for the new word");
+    ok(&mut a, "edit_undo", json!({"doc":doc}));
+    assert!(!page_text(&mut a, doc)[0].contains("шалом"));
+    ok(&mut a, "edit_redo", json!({"doc":doc}));
+    assert!(page_text(&mut a, doc)[0].contains("шалом"));
+    let reopened = ok(&mut a, "doc_open", json!({"path":"saved.pdf"}))["doc"].as_u64().unwrap();
+    let lines = ok(&mut a, "text_lines", json!({"doc":reopened,"page":1}));
+    let runs = lines["lines"].as_array().unwrap();
+    assert!(runs.iter().any(|l| l["text"].as_str().is_some_and(|t| t.starts_with("The quick")) && l["font"] == "Helvetica"), "{lines}");
+    assert_eq!(runs.iter().filter(|l| l["text"] == "шалом").count(), 1, "{lines}");
+    assert!(page_text(&mut a, reopened)[0].contains("шалом"));
+}
+
 /// One page whose content is one stream in three pieces (#155): a `TJ` array ends the middle
 /// piece and its operator starts the last one.
 fn split_streams_pdf() -> Vec<u8> {

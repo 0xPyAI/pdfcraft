@@ -1153,6 +1153,135 @@ fn japanese_replacement_over_240_unique_glyphs_is_split_across_fallback_fonts() 
     assert_eq!(glyphs, 300);
 }
 
+#[test]
+fn styled_paragraph_batches_cyrillic_without_changing_source_fonts() {
+    if without_craft_fonts("styled_paragraph_batches_cyrillic_without_changing_source_fonts") {
+        return;
+    }
+    let mut doc = text_page(
+        "BT /F1 12 Tf 14.4 TL 1 0 0 1 72 700 Tm (The quick brown fox jumps over the lazy dog) Tj T* (and keeps running through the long field.) Tj ET",
+    );
+    let replacement = "The quick brown fox jumps over the lazy dog шалом\nand keeps running through the long field.";
+    text::rewrite_block(&mut doc, 0, 0, Some(replacement), &text::BlockStyle { width: Some(520.0), ..Default::default() }).unwrap();
+    let doc = reopen(&doc);
+    assert_eq!(fallback_fonts(&doc).len(), 1, "the five letters must share one font");
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert!(lines.iter().any(|l| l.base_font == "Helvetica" && l.text.starts_with("The quick brown fox")), "{lines:?}");
+    let fallback: Vec<_> = lines.iter().filter(|l| l.font.starts_with("PCJp")).collect();
+    assert_eq!(fallback.len(), 1, "one word must be one text run: {fallback:?}");
+    assert_eq!(fallback[0].text, "шалом");
+    assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<String>().replace(' ', ""), replacement.replace([' ', '\n'], ""));
+}
+
+#[test]
+fn styled_paragraph_over_240_fallback_glyphs_splits_and_refuses_atomically() {
+    let replacement = format!("{}\nLatin", covered_japanese_chars(300));
+    let mut doc = text_page("BT /F1 12 Tf 14.4 TL 72 700 Td (Original) Tj T* (Latin) Tj ET");
+    let original = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    if without_craft_fonts("styled_paragraph_over_240_fallback_glyphs_splits_and_refuses_atomically") {
+        assert!(text::replace_block(&mut doc, 0, 0, &replacement).is_err());
+        assert_eq!(write_incremental(&doc, &SaveOptions::default()).unwrap(), original);
+        return;
+    }
+    text::rewrite_block(&mut doc, 0, 0, Some(&replacement), &text::BlockStyle { width: Some(14000.0), ..Default::default() }).unwrap();
+    let reopened = reopen(&doc);
+    let fonts = fallback_fonts(&reopened);
+    assert_eq!(fonts.len(), 2, "300 glyphs need two fonts, not an error at glyph 241");
+    let counts: Vec<_> = fonts.iter().map(|(_, f)| reopened.dict(f.get(b"CharProcs").unwrap()).unwrap().len()).collect();
+    assert_eq!(counts.iter().sum::<usize>(), 300);
+    assert!(counts.iter().all(|n| *n <= 240));
+    assert_eq!(text::text_lines(&reopened, 0).unwrap().iter().map(|l| l.text.as_str()).collect::<String>(), replacement.replace('\n', ""));
+    let before = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    let snapshot = doc.clone();
+    let err = text::replace_block(&mut doc, 0, 0, &format!("{replacement}\u{10ffff}")).unwrap_err();
+    assert!(err.to_string().contains("U+10FFFF"), "{err}");
+    assert_eq!(write_incremental(&doc, &SaveOptions::default()).unwrap(), before);
+    assert_eq!(write_incremental(&snapshot, &SaveOptions::default()).unwrap(), before);
+}
+
+#[test]
+fn styled_fallback_batches_keep_face_choices_and_range_styles() {
+    if without_craft_fonts("styled_fallback_batches_keep_face_choices_and_range_styles") {
+        return;
+    }
+    if !pdfcraft_fonts::CRAFT_FONTS.iter().any(|f| f.family == "BIZ UDPGothic" && f.style == "Bold") {
+        eprintln!("skipping: no bold Gothic face");
+        return;
+    }
+    let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Original) Tj ET");
+    let range = |range, family, bold| text::RangeStyle {
+        range,
+        family: Some((family, bold, false)),
+        resource: None,
+        size: None,
+        color: None,
+        underline: None,
+        char_spacing: None,
+        scale: None,
+    };
+    let style = text::BlockStyle {
+        width: Some(520.0),
+        ranges: vec![
+            range(3..6, added::Family::Times, false),
+            range(6..9, added::Family::Helvetica, true),
+            range(9..11, added::Family::Times, false),
+        ],
+        ..Default::default()
+    };
+    let original = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    let err = text::rewrite_block(&mut doc, 0, 0, Some("見見見ш見ш\nLatin\u{10ffff}"), &style).unwrap_err();
+    assert!(err.to_string().contains("U+10FFFF"), "{err}");
+    assert_eq!(write_incremental(&doc, &SaveOptions::default()).unwrap(), original, "all faces must validate before writing fallback objects");
+    text::rewrite_block(&mut doc, 0, 0, Some("見見見ш見ш\nLatin"), &style).unwrap();
+    let doc = reopen(&doc);
+    let fonts = fallback_fonts(&doc);
+    let mut summary: Vec<_> = fonts
+        .iter()
+        .map(|(_, f)| {
+            let face = pdfcraft_fonts::pdf::Metrics::from_dict(&doc, f).base_font;
+            let count = doc.dict(f.get(b"CharProcs").unwrap()).unwrap().len();
+            (face, count)
+        })
+        .collect();
+    summary.sort();
+    assert_eq!(
+        summary,
+        [
+            ("BIZUDMincho-Regular".into(), 1),
+            ("BIZUDPGothic-Bold".into(), 1),
+            ("BIZUDPGothic-Regular".into(), 2),
+            ("ShipporiMincho-Regular".into(), 1)
+        ]
+    );
+    assert_eq!(text::text_lines(&doc, 0).unwrap().iter().map(|l| l.text.as_str()).collect::<String>(), "見見見ш見шLatin");
+}
+
+#[test]
+fn styled_fallback_shards_keep_text_advances_and_alignment() {
+    if without_craft_fonts("styled_fallback_shards_keep_text_advances_and_alignment") {
+        return;
+    }
+    let source = "BT /F1 12 Tf 0.5 Tc 5 Tw 80 Tz 14.4 TL 72 700 Td (Original row) Tj T* (Second row) Tj ET";
+    let style =
+        text::BlockStyle { width: Some(520.0), align: Some(added::Align::Center), char_spacing: Some(0.7), scale: Some(80.0), ..Default::default() };
+    let mut whole = text_page(source);
+    let mut split = text_page(source);
+    let replacement = "Latin шалом ш\nSecond row";
+    text::rewrite_block_with_limit(&mut whole, 0, 0, Some(replacement), &style, 240).unwrap();
+    text::rewrite_block_with_limit(&mut split, 0, 0, Some(replacement), &style, 2).unwrap();
+    let (whole, split) = (reopen(&whole), reopen(&split));
+    assert_eq!(fallback_fonts(&whole).len(), 1);
+    assert_eq!(fallback_fonts(&split).len(), 3);
+    let (one, many) = (text::text_lines(&whole, 0).unwrap(), text::text_lines(&split, 0).unwrap());
+    assert_eq!(one.len(), many.len(), "{one:?} vs {many:?}");
+    for (a, b) in one.iter().zip(&many) {
+        assert_eq!(a.text, b.text);
+        for (a, b) in a.rect.iter().zip(b.rect) {
+            assert!((a - b).abs() < 0.002, "sharding must preserve alignment and advances: {a} vs {b}");
+        }
+    }
+}
+
 /// A replacement whose last glyph no face draws (in a later font) changes nothing: neither the
 /// document nor a snapshot taken before the edit, which is what undo restores.
 #[test]
