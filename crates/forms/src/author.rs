@@ -486,6 +486,163 @@ fn add_to_fields(doc: &mut Document, af: ObjRef, field: ObjRef) -> Result<(), Fo
     Ok(())
 }
 
+/// The most parts a dotted field name may have ("a.b.c" has three).
+const MAX_NAME_PARTS: usize = 32;
+
+/// The field attributes a field inherits from its parents (ISO 32000-2 §12.7.4.1).
+const INHERITED_KEYS: [&[u8]; 7] = [b"FT", b"Ff", b"V", b"DV", b"DA", b"Q", b"MaxLen"];
+
+/// The parts of a full field name: `a.b` is the field `b` under the parent field `a`, since a
+/// field's own (partial) name can't contain a period (ISO 32000-2 §12.7.4.2) (#2696).
+fn name_parts(name: &str) -> Result<Vec<&str>, FormError> {
+    let parts: Vec<&str> = name.split('.').take(MAX_NAME_PARTS.saturating_add(1)).collect();
+    if parts.len() > MAX_NAME_PARTS {
+        return invalid(format!("field names can have at most {MAX_NAME_PARTS} parts"));
+    }
+    if parts.iter().any(|p| p.trim().is_empty()) {
+        return invalid("field names can't be empty, or have an empty part between periods");
+    }
+    Ok(parts)
+}
+
+/// Why the full name `name` can't be used beside the field named `other`, if it can't: the
+/// same name, or one inside the other (a field that has a value can't also hold fields).
+fn clash(name: &str, other: &str) -> Option<String> {
+    if name == other {
+        return Some(format!("a field named {name:?} already exists"));
+    }
+    let inside = |a: &str, b: &str| a.strip_prefix(b).is_some_and(|rest| rest.starts_with('.'));
+    (inside(name, other) || inside(other, name)).then(|| format!("{name:?} can't be used beside the field {other:?}"))
+}
+
+/// The array `key` of `holder` (`/Fields` of the form, `/Kids` of a field).
+fn list_of(doc: &Document, holder: ObjRef, key: &[u8]) -> Vec<Object> {
+    let d = doc.get(holder).as_dict().cloned().unwrap_or_default();
+    d.get(key).map(|o| doc.resolve(o)).and_then(|o| o.as_array().cloned()).unwrap_or_default()
+}
+
+/// Add `field` to `parent`'s `/Kids`, or to the form's `/Fields` at the top.
+fn link(doc: &mut Document, af: ObjRef, parent: Option<ObjRef>, field: ObjRef) -> Result<(), FormError> {
+    let Some(p) = parent else { return add_to_fields(doc, af, field) };
+    let mut kids = list_of(doc, p, b"Kids");
+    kids.push(Object::Ref(field));
+    doc.update_dict(p, |d| d.set(b"Kids".to_vec(), Object::Array(kids)))?;
+    Ok(())
+}
+
+/// Put `field` in the field tree under the full name `parts`: its own `/T` is the last part,
+/// and the parts before it name parent fields, reused where the tree has them and made where
+/// not (Acrobat makes `a.b` a field `b` under a field `a`).
+fn attach(doc: &mut Document, af: ObjRef, field: ObjRef, parts: &[&str]) -> Result<(), FormError> {
+    let Some((own, parents)) = parts.split_last() else { return invalid("field names can't be empty") };
+    let mut parent: Option<ObjRef> = None;
+    let mut inherits = false;
+    for part in parents {
+        let list = match parent {
+            Some(p) => list_of(doc, p, b"Kids"),
+            None => list_of(doc, af, b"Fields"),
+        };
+        let found = list.iter().filter_map(|o| o.as_ref()).find(|r| {
+            doc.get(*r).as_dict().and_then(|d| d.get(b"T").cloned()).and_then(|t| crate::text_of(&doc.resolve(&t))).as_deref() == Some(*part)
+        });
+        let next = match found {
+            Some(r) => {
+                inherits |= doc.get(r).as_dict().is_some_and(|d| d.contains(b"Ff") || d.contains(b"Q"));
+                r
+            }
+            None => {
+                let mut d = Dict::new();
+                d.set(b"T".to_vec(), PdfString::text(part));
+                d.set(b"Kids".to_vec(), Object::Array(Vec::new()));
+                if let Some(p) = parent {
+                    d.set(b"Parent".to_vec(), Object::Ref(p));
+                }
+                let r = doc.add(Object::Dict(d));
+                link(doc, af, parent, r)?;
+                r
+            }
+        };
+        parent = Some(next);
+    }
+    doc.update_dict(field, |d| {
+        d.set(b"T".to_vec(), PdfString::text(own));
+        match parent {
+            Some(p) => d.set(b"Parent".to_vec(), Object::Ref(p)),
+            None => {
+                d.remove(b"Parent");
+            }
+        }
+        // An existing parent's flags and alignment would otherwise pass to this field.
+        if inherits {
+            for k in [&b"Ff"[..], b"Q"] {
+                if !d.contains(k) {
+                    d.set(k.to_vec(), Object::Int(0));
+                }
+            }
+        }
+    })?;
+    link(doc, af, parent, field)
+}
+
+/// Copy onto `field` what it inherits from its parents, so it keeps them when it moves.
+fn own_inherited(doc: &mut Document, field: ObjRef) -> Result<(), FormError> {
+    let own = doc.get(field).as_dict().cloned().unwrap_or_default();
+    let mut add = Dict::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut parent = own.reference(b"Parent");
+    while let Some(p) = parent {
+        if seen.len() > 64 || !seen.insert(p) {
+            break;
+        }
+        let Some(d) = doc.get(p).as_dict().cloned() else { break };
+        for k in INHERITED_KEYS {
+            if let Some(v) = d.get(k).filter(|_| !own.contains(k) && !add.contains(k)) {
+                add.set(k.to_vec(), v.clone());
+            }
+        }
+        parent = d.reference(b"Parent");
+    }
+    if add.iter().next().is_some() {
+        doc.update_dict(field, |d| {
+            for (k, v) in add.iter() {
+                d.set(k.to_vec(), v.clone());
+            }
+        })?;
+    }
+    Ok(())
+}
+
+/// Take `field` out of the field tree: from its parent's `/Kids`, or from `/Fields`.
+fn detach(doc: &mut Document, field: ObjRef) -> Result<(), FormError> {
+    let parent = doc.get(field).as_dict().and_then(|d| d.reference(b"Parent"));
+    let remove_from = |doc: &mut Document, holder: ObjRef, key: &[u8]| -> Result<(), FormError> {
+        let mut d = doc.get(holder).as_dict().cloned().unwrap_or_default();
+        let list = d.get(key).map(|o| doc.resolve(o)).and_then(|o| o.as_array().cloned()).unwrap_or_default();
+        let kept: Vec<Object> = list.into_iter().filter(|o| o.as_ref() != Some(field)).collect();
+        d.set(key.to_vec(), Object::Array(kept));
+        doc.set(holder, Object::Dict(d));
+        Ok(())
+    };
+    match parent {
+        Some(p) => remove_from(doc, p, b"Kids")?,
+        None => {
+            let root = doc.root().ok_or(FormError::NoForm)?;
+            match doc.get(root).as_dict().and_then(|d| d.get(b"AcroForm").cloned()) {
+                Some(Object::Ref(af)) => remove_from(doc, af, b"Fields")?,
+                // A form dictionary held directly in the catalog.
+                Some(Object::Dict(mut af)) => {
+                    let list = af.get(b"Fields").map(|o| doc.resolve(o)).and_then(|o| o.as_array().cloned()).unwrap_or_default();
+                    let kept: Vec<Object> = list.into_iter().filter(|o| o.as_ref() != Some(field)).collect();
+                    af.set(b"Fields".to_vec(), Object::Array(kept));
+                    doc.update_dict(root, |d| d.set(b"AcroForm".to_vec(), Object::Dict(af)))?;
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The first free "<base>N" name.
 fn free_name(existing: &[Field], base: &str) -> String {
     (1..=u64::MAX)
@@ -527,20 +684,18 @@ pub fn add_field(doc: &mut Document, page: usize, rect: [f64; 4], kind: &NewFiel
         _ => name,
     };
     let name = match name.map(str::trim) {
-        Some(n) if !n.is_empty() => {
-            if n.contains('.') {
-                return invalid("field names can't contain a period");
-            }
-            n.to_string()
-        }
+        Some(n) if !n.is_empty() => n.to_string(),
         _ => free_name(&existing, kind.base_name()),
     };
+    let parts = name_parts(&name)?;
     let radio_group = match kind {
         NewField::Radio { group, .. } => existing.iter().find(|f| f.kind == FieldKind::Radio && Some(&f.name) == group.as_ref()).cloned(),
         _ => None,
     };
-    if radio_group.is_none() && existing.iter().any(|f| f.name == name) {
-        return invalid(format!("a field named {name:?} already exists"));
+    if radio_group.is_none()
+        && let Some(why) = existing.iter().find_map(|f| clash(&name, &f.name))
+    {
+        return invalid(why);
     }
     let af = ensure_form(doc)?;
     let mut w = widget_dict(page_ref, rect);
@@ -637,12 +792,11 @@ pub fn add_field(doc: &mut Document, page: usize, rect: [f64; 4], kind: &NewFiel
                     let mut g = Dict::new();
                     g.set(b"FT".to_vec(), Object::name("Btn"));
                     g.set(b"Ff".to_vec(), Object::Int((flags::RADIO | flags::NO_TOGGLE_TO_OFF) as i64));
-                    g.set(b"T".to_vec(), PdfString::text(&field_name));
                     g.set(b"V".to_vec(), Object::name("Off"));
                     g.set(b"DA".to_vec(), PdfString::literal(b"/ZaDb 0 Tf 0 g".to_vec()));
                     g.set(b"Kids".to_vec(), Object::Array(Vec::new()));
                     let g = doc.add(Object::Dict(g));
-                    add_to_fields(doc, af, g)?;
+                    attach(doc, af, g, &parts)?;
                     g
                 }
             };
@@ -669,10 +823,7 @@ pub fn add_field(doc: &mut Document, page: usize, rect: [f64; 4], kind: &NewFiel
             let ap = appearance::check_box_states(doc, &w, FieldKind::Radio, export);
             doc.update_dict(widget, |d| d.set(b"AP".to_vec(), Object::Dict(ap)))?;
         }
-        _ => {
-            doc.update_dict(widget, |d| d.set(b"T".to_vec(), PdfString::text(&name)))?;
-            add_to_fields(doc, af, widget)?;
-        }
+        _ => attach(doc, af, widget, &parts)?,
     }
     add_to_page(doc, page_ref, widget)?;
     redraw_field(doc, &field_name)?;
@@ -919,18 +1070,31 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
     }
     let mut new_name = name.to_string();
     if let Some(n) = props.name.as_deref().map(str::trim).filter(|n| *n != f.name) {
-        if n.is_empty() || n.contains('.') {
-            return invalid("field names can't be empty or contain a period");
+        if n.contains('.') {
+            // A full name: the field moves under the parent fields it names (#2696).
+            let parts = name_parts(n)?;
+            if let Some(why) = all.iter().filter(|x| x.obj != f.obj).find_map(|x| clash(n, &x.name)) {
+                return invalid(why);
+            }
+            let af = ensure_form(doc)?;
+            own_inherited(doc, f.obj)?;
+            detach(doc, f.obj)?;
+            attach(doc, af, f.obj, &parts)?;
+            new_name = n.to_string();
+        } else {
+            if n.is_empty() {
+                return invalid("field names can't be empty");
+            }
+            // Rename the terminal part (the field's own /T). The parents' part stays, so the name
+            // that must be free is the full one: `MASTER.a` renamed to `b` takes `MASTER.b` (ISO
+            // 32000-2 §12.7.4.2). The field itself is no clash when it keeps its own name.
+            let prefix = f.name.rsplit_once('.').map(|(p, _)| format!("{p}.")).unwrap_or_default();
+            new_name = format!("{prefix}{n}");
+            if let Some(why) = all.iter().filter(|x| x.obj != f.obj).find_map(|x| clash(&new_name, &x.name)) {
+                return invalid(why);
+            }
+            doc.update_dict(f.obj, |d| d.set(b"T".to_vec(), PdfString::text(n)))?;
         }
-        // Rename the terminal part (the field's own /T). The parents' part stays, so the name that
-        // must be free is the full one: `MASTER.a` renamed to `b` takes `MASTER.b` (ISO 32000-2
-        // §12.7.4.2). The field itself is no clash when it keeps its own name.
-        let prefix = f.name.rsplit_once('.').map(|(p, _)| format!("{p}.")).unwrap_or_default();
-        new_name = format!("{prefix}{n}");
-        if all.iter().any(|x| x.obj != f.obj && x.name == new_name) {
-            return invalid(format!("a field named {new_name:?} already exists"));
-        }
-        doc.update_dict(f.obj, |d| d.set(b"T".to_vec(), PdfString::text(n)))?;
         // Calculations read the field by its new name, unless another field keeps the old one.
         if all.iter().filter(|x| x.name == f.name).count() == 1 {
             rename_in_calculations(doc, &all, &f.name, &new_name)?;
@@ -1253,33 +1417,7 @@ pub fn delete_field(doc: &mut Document, name: &str) -> Result<(), FormError> {
             }
         }
     }
-    // Out of the field tree: from its parent's /Kids, or from /Fields.
-    let parent = doc.get(f.obj).as_dict().and_then(|d| d.reference(b"Parent"));
-    let remove_from = |doc: &mut Document, holder: ObjRef, key: &[u8]| -> Result<(), FormError> {
-        let mut d = doc.get(holder).as_dict().cloned().unwrap_or_default();
-        let list = d.get(key).map(|o| doc.resolve(o)).and_then(|o| o.as_array().cloned()).unwrap_or_default();
-        let kept: Vec<Object> = list.into_iter().filter(|o| o.as_ref() != Some(f.obj)).collect();
-        d.set(key.to_vec(), Object::Array(kept));
-        doc.set(holder, Object::Dict(d));
-        Ok(())
-    };
-    match parent {
-        Some(p) => remove_from(doc, p, b"Kids")?,
-        None => {
-            let root = doc.root().ok_or(FormError::NoForm)?;
-            match doc.get(root).as_dict().and_then(|d| d.get(b"AcroForm").cloned()) {
-                Some(Object::Ref(af)) => remove_from(doc, af, b"Fields")?,
-                // A form dictionary held directly in the catalog.
-                Some(Object::Dict(mut af)) => {
-                    let list = af.get(b"Fields").map(|o| doc.resolve(o)).and_then(|o| o.as_array().cloned()).unwrap_or_default();
-                    let kept: Vec<Object> = list.into_iter().filter(|o| o.as_ref() != Some(f.obj)).collect();
-                    af.set(b"Fields".to_vec(), Object::Array(kept));
-                    doc.update_dict(root, |d| d.set(b"AcroForm".to_vec(), Object::Dict(af)))?;
-                }
-                _ => {}
-            }
-        }
-    }
+    detach(doc, f.obj)?;
     // Out of the calculation order too: a `/CO` entry would keep the field, its value and its
     // widgets reachable for a full save.
     drop_from_calculation_order(doc, |r| r == f.obj || widgets.contains(&r))

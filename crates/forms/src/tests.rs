@@ -3056,3 +3056,64 @@ fn a_skipped_field_leaves_its_widget_to_the_next() {
     let widgets: Vec<(&str, usize)> = all.iter().map(|f| (f.name.as_str(), f.widgets.len())).collect();
     assert_eq!(widgets, [("b", 1)]);
 }
+
+/// #2696: a dotted name is a full name. `MASTER.first` is a field `first` under a parent field
+/// `MASTER` (a partial name can't contain a period, ISO 32000-2 §12.7.4.2); a second `MASTER.`
+/// name joins that parent; renaming to a dotted name moves the field, keeping what it inherited;
+/// and a name that would make one field both hold a value and hold fields is refused.
+#[test]
+fn dotted_field_names_are_made_with_parent_fields() {
+    let mut doc = fixture();
+    let top = |doc: &Document| {
+        let root = doc.root().unwrap();
+        let af = doc.get(root).as_dict().and_then(|d| d.reference(b"AcroForm")).unwrap();
+        doc.get(af).as_dict().and_then(|d| d.get(b"Fields").and_then(|o| o.as_array().map(|a| a.len()))).unwrap()
+    };
+    let own_name = |doc: &Document, f: &Field| doc.get(f.obj).as_dict().and_then(|d| d.get(b"T").and_then(text_of));
+    let parent_of = |doc: &Document, f: &Field| doc.get(f.obj).as_dict().and_then(|d| d.reference(b"Parent")).unwrap();
+    let text = NewField::Text { multiline: false };
+    let before = top(&doc);
+    assert_eq!(add_field(&mut doc, 0, [50.0, 300.0, 200.0, 320.0], &text, Some("MASTER.account_firstname")).unwrap(), "MASTER.account_firstname");
+    add_field(&mut doc, 0, [50.0, 260.0, 200.0, 280.0], &text, Some("MASTER.street1")).unwrap();
+    assert_eq!(top(&doc), before + 1, "one parent field at the top");
+    let saved = reopen(&doc);
+    let all = fields(&saved);
+    let (a, b) = (field(&all, "MASTER.account_firstname"), field(&all, "MASTER.street1"));
+    assert_eq!(own_name(&saved, b).as_deref(), Some("street1"), "the field's own name has no period");
+    let master = parent_of(&saved, a);
+    assert_eq!(parent_of(&saved, b), master, "both under one MASTER");
+    assert_eq!(saved.get(master).as_dict().and_then(|d| d.get(b"T").and_then(text_of)).as_deref(), Some("MASTER"));
+
+    // Renaming to a dotted name moves the field: zip joins the existing address parent.
+    assert_eq!(set_props(&mut doc, "zip", &FieldProps { name: Some("address.zip".into()), ..FieldProps::default() }).unwrap(), "address.zip");
+    assert_eq!(top(&doc), before, "zip left the top");
+    let all = fields(&doc);
+    let (zip, city) = (field(&all, "address.zip"), field(&all, "address.city"));
+    assert_eq!(parent_of(&doc, zip), parent_of(&doc, city));
+    assert_eq!(zip.max_len, Some(5), "its own settings move with it");
+
+    // What a moved field inherited stays; what a new field would inherit from a parent it
+    // joins doesn't apply to it.
+    let address = parent_of(&doc, city);
+    doc.update_dict(address, |d| {
+        d.set(b"Ff".to_vec(), Object::Int(flags::READ_ONLY as i64));
+        d.set(b"V".to_vec(), Object::String(PdfString::literal(b"Springfield".to_vec())));
+    })
+    .unwrap();
+    let city = field(&fields(&doc), "address.city").clone();
+    assert!(city.read_only() && city.value == ["Springfield"]);
+    set_props(&mut doc, "address.city", &FieldProps { name: Some("billing.city".into()), ..FieldProps::default() }).unwrap();
+    add_field(&mut doc, 0, [300.0, 300.0, 450.0, 320.0], &text, Some("address.street")).unwrap();
+    let all = fields(&doc);
+    let moved = field(&all, "billing.city");
+    assert!(moved.read_only() && moved.value == ["Springfield"], "the moved field keeps what it inherited");
+    assert!(!field(&all, "address.street").read_only(), "a new field doesn't take its parent's flags");
+
+    for bad in ["MASTER", "MASTER.street1.x", "MASTER..x", ".x", "x.", "MASTER. "] {
+        assert!(add_field(&mut doc, 0, [300.0, 200.0, 450.0, 220.0], &text, Some(bad)).is_err(), "{bad:?}");
+        assert!(set_props(&mut doc, "name", &FieldProps { name: Some(bad.into()), ..FieldProps::default() }).is_err(), "{bad:?}");
+    }
+    let deep = vec!["p"; 33].join(".");
+    assert!(add_field(&mut doc, 0, [300.0, 200.0, 450.0, 220.0], &text, Some(&deep)).is_err(), "too deep");
+    assert!(set_props(&mut doc, "name", &FieldProps { name: Some("MASTER.street1".into()), ..FieldProps::default() }).is_err(), "taken");
+}
