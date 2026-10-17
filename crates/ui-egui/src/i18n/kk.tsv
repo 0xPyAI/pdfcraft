@@ -2113,6 +2113,7 @@ calendar date	October	Қазан
 calendar date	November	Қараша
 calendar date	December	Желтоқсан
 	Reopen the files that were open when PdfCraft last closed	PdfCraft соңғы рет жабылғанда ашық болған файлдарды қайта ашу
+	Restore the last view (page, zoom and page display) when a document is opened again	Құжат қайта ашылғанда соңғы көріністі (бет, масштаб және бет көрсетілімі) қалпына келтіру
 	Clear Recent Files	Соңғы файлдарды тазарту
 	Remove from Recent	Соңғылардан алып тастау
 	Remove {name} from Recent	{name} дегенді соңғылардан алып тастау

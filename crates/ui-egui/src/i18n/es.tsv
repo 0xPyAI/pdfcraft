@@ -2160,6 +2160,7 @@ action wizard	Start	Iniciar
 	Lines +/−	Líneas +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{bin_added} / −{bin_deleted} binary assets, {first} – {last}	@{login}: {prs} PR, {commits} commits, +{added} / −{deleted} líneas (Δ {delta}), +{bin_added} / −{bin_deleted} recursos binarios, {first} – {last}
 	Reopen the files that were open when PdfCraft last closed	Volver a abrir los archivos que estaban abiertos al cerrar PdfCraft por última vez
+	Restore the last view (page, zoom and page display) when a document is opened again	Restaurar la última vista (página, zoom y presentación de páginas) al volver a abrir un documento
 	Add {what}	Añadir {what}
 	Use {what}	Usar {what}
 	Place saved {what}	Colocar {what} desde lo guardado

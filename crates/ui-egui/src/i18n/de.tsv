@@ -2186,6 +2186,7 @@ signature pad	Type	Tippen
 certificate	Subject	Zertifikatsinhaber
 action wizard	Start	Starten
 	Reopen the files that were open when PdfCraft last closed	Beim Start die Dateien wieder öffnen, die beim letzten Beenden von PdfCraft geöffnet waren
+	Restore the last view (page, zoom and page display) when a document is opened again	Beim erneuten Öffnen eines Dokuments die letzte Ansicht (Seite, Zoom und Seitenanzeige) wiederherstellen
 
 # Labels that reach tl!() through a variable (Fill & Sign buttons, link prompts, notices, history labels, checker and certificate rows)
 	Add {what}	{what} hinzufügen

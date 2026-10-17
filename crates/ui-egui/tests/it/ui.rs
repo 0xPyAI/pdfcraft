@@ -1570,3 +1570,83 @@ fn short_window_rail_buttons_scroll_clear_of_page_navigation() {
     assert!(tags.bottom() <= page.top(), "Tags {tags:?} scrolls into view above the page field {page:?}");
     assert_eq!(h.get(By::new().role(egui::accesskit::Role::TextInput).value("1")).rect(), page, "navigation stays put");
 }
+
+/// A PDF with `n` empty 200×300 pt pages.
+fn pages_fixture(n: usize) -> Vec<u8> {
+    let mut objs: Vec<Vec<u8>> = vec![b"<< /Type /Catalog /Pages 2 0 R >>".to_vec()];
+    let kids: Vec<String> = (0..n).map(|i| format!("{} 0 R", 3 + i)).collect();
+    objs.push(format!("<< /Type /Pages /Kids [{}] /Count {n} /MediaBox [0 0 200 300] >>", kids.join(" ")).into_bytes());
+    for _ in 0..n {
+        objs.push(b"<< /Type /Page /Parent 2 0 R >>".to_vec());
+    }
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend_from_slice(o);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+/// A file opened again shows the page, zoom and page display it was last shown with (#1767,
+/// Acrobat's "Restore last view settings when reopening documents"): remembered when its tab
+/// closes and when settings are saved with it open, applied over the file's own initial view,
+/// and not at all with the preference off. Settings are untrusted: bad entries are ignored.
+#[test]
+fn a_file_opened_again_shows_its_last_view() {
+    use pdfcraft_ui_egui::canvas::{Fit, PageLayout};
+    let path = std::env::temp_dir().join(format!("pdfcraft-last-view-{}.pdf", std::process::id())).to_string_lossy().into_owned();
+    let p = path.clone();
+    let mut h = harness(move |app| app.open_bytes("doc.pdf", Some(p), pages_fixture(3)).expect("opens"));
+    let p = path.clone();
+    assert!(h.state().restore_last_view, "on by default");
+    {
+        let app = h.state_mut();
+        app.set_option("zoom", "50").unwrap();
+        let view = &mut app.views[0];
+        view.set_display(PageLayout::TwoUp, false);
+        view.go_to_page(2);
+    }
+    h.run_steps(3);
+    // Saved with the tab still open: quitting remembers it.
+    let saved_open = h.state().persist();
+    h.state_mut().close_tab(0);
+    let saved_closed = h.state().persist();
+    for (label, saved) in [("open", saved_open), ("closed", saved_closed)] {
+        let (saved, p) = (saved.clone(), p.clone());
+        let h = harness(move |app| {
+            app.restore(&saved);
+            app.open_bytes("doc.pdf", Some(p), pages_fixture(3)).expect("opens");
+        });
+        let v = &h.state().views[0];
+        assert_eq!((v.current, v.fit, v.zoom, v.layout, v.continuous), (2, Fit::None, 0.5, PageLayout::TwoUp, false), "{label}");
+    }
+    // The preference off: the defaults.
+    let saved = h.state().persist();
+    let p = path.clone();
+    let h = harness(move |app| {
+        app.restore(&saved);
+        app.restore_last_view = false;
+        app.open_bytes("doc.pdf", Some(p), pages_fixture(3)).expect("opens");
+    });
+    let v = &h.state().views[0];
+    assert_eq!((v.current, v.fit, v.layout, v.continuous), (0, Fit::Width, PageLayout::Single, true));
+    // Garbage in the settings is ignored, a usable entry among it is kept.
+    let mut app = PdfCraftApp::new();
+    app.restore(&format!(
+        r#"{{"restore_last_view": "yes", "last_views": [5, {{"path": ""}}, {{"path": "{}", "page": -1, "zoom": "huge", "display": "single"}}, {{"path": "{}", "page": 1, "zoom": "fit-page", "display": "two-up"}}]}}"#,
+        path.replace('\\', "/"),
+        path.replace('\\', "/")
+    ));
+    assert!(app.restore_last_view, "a non-boolean keeps the default");
+    assert_eq!(app.last_views.len(), 1);
+    assert_eq!((app.last_views[0].page, app.last_views[0].zoom.as_str()), (1, "fit-page"));
+}

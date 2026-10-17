@@ -1506,6 +1506,7 @@
 	Rename bookmark	Preimenuj zaznamek
 	Rendering: hayro (bootstrap) · UI: egui · Icons: Lucide (ISC) · Fonts: Inter, JetBrains Mono, Dancing Script (OFL)	Izris: hayro (bootstrap) · Vmesnik: egui · Ikone: Lucide (ISC) · Pisave: Inter, JetBrains Mono, Dancing Script (OFL)
 	Reopen the files that were open when PdfCraft last closed	Ponovno odpri datoteke, ki so bile odprte ob zadnjem zaprtju PdfCrafta
+	Restore the last view (page, zoom and page display) when a document is opened again	Ob ponovnem odprtju dokumenta obnovi zadnji pogled (stran, povečavo in prikaz strani)
 	Repair log	Dnevnik popravil
 	Repairs	Popravila
 	Repeat overlay text	Ponovi besedilo prekrivanja

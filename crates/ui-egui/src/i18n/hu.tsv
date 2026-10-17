@@ -2170,6 +2170,7 @@ comment menu	Edit	Szerkesztés
 signature pad	Type	Gépelés
 action wizard	Start	Indítás
 	Reopen the files that were open when PdfCraft last closed	A PdfCraft legutóbbi bezárásakor megnyitott fájlok újranyitása
+	Restore the last view (page, zoom and page display) when a document is opened again	A legutóbbi nézet (oldal, nagyítás és oldalmegjelenítés) visszaállítása a dokumentum újbóli megnyitásakor
 	Clear Recent Files	Legutóbbi fájlok listájának törlése
 	Remove from Recent	Eltávolítás a legutóbbiak közül
 	Remove {name} from Recent	{name} eltávolítása a legutóbbiak közül
