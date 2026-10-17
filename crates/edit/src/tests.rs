@@ -1257,6 +1257,85 @@ fn styled_fallback_batches_keep_face_choices_and_range_styles() {
 }
 
 #[test]
+fn styled_fallback_budget_is_enforced_before_objects_are_written() {
+    let glyphs = covered_japanese_chars(65);
+    let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Original) Tj ET");
+    let original = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    let snapshot = doc.clone();
+    let style = text::BlockStyle { width: Some(14000.0), ..Default::default() };
+    let over_budget = format!("{glyphs}\nLatin");
+    let err = text::rewrite_block_with_limit(&mut doc, 0, 0, Some(&over_budget), &style, 1).unwrap_err().to_string();
+    assert_eq!(write_incremental(&doc, &SaveOptions::default()).unwrap(), original, "refusal must add no objects");
+    assert_eq!(write_incremental(&snapshot, &SaveOptions::default()).unwrap(), original);
+    if without_craft_fonts("styled_fallback_budget_is_enforced_before_objects_are_written") {
+        assert!(err.contains("CRAFT_FONTS_DIR"), "{err}");
+        return;
+    }
+    assert!(err.contains("more than 64 fallback glyphs"), "{err}");
+    // One glyph per font gives a small, real budget of 64 distinct glyphs. At the
+    // boundary a repeated glyph is free: this is not a limit on text length.
+    let at_budget: String = glyphs.chars().take(64).chain(glyphs.chars().take(1)).collect();
+    text::rewrite_block_with_limit(&mut doc, 0, 0, Some(&format!("{at_budget}\nLatin")), &style, 1).unwrap();
+    let doc = reopen(&doc);
+    assert_eq!(fallback_fonts(&doc).len(), 64);
+    assert_eq!(text::text_lines(&doc, 0).unwrap().iter().map(|l| l.text.as_str()).collect::<String>(), format!("{at_budget}Latin"));
+}
+
+#[test]
+fn styled_fallback_same_base_font_and_character_keep_both_weights() {
+    if without_craft_fonts("styled_fallback_same_base_font_and_character_keep_both_weights") {
+        return;
+    }
+    if !pdfcraft_fonts::CRAFT_FONTS.iter().any(|f| f.family == "BIZ UDPGothic" && f.style == "Bold") {
+        eprintln!("skipping: no bold Gothic face");
+        return;
+    }
+    let mut doc = text_page("BT /F1 12 Tf 72 700 Td (alpha ) Tj /F2 12 Tf (beta ) Tj ET");
+    let source = doc.get(pdfcraft_cos::ObjRef::new(5, 0)).as_dict().unwrap().clone();
+    for (object, weight) in [(5, 400), (6, 700)] {
+        let mut font = source.clone();
+        // The same BaseFont can have different descriptor weights. Changing a
+        // RangeStyle family would also rename BaseFont and miss this cache key.
+        font.set(b"BaseFont".to_vec(), Object::name("NeutralFace"));
+        let mut descriptor = Dict::new();
+        descriptor.set(b"FontName".to_vec(), Object::name("NeutralFace"));
+        descriptor.set(b"FontWeight".to_vec(), Object::Int(weight));
+        font.set(b"FontDescriptor".to_vec(), Object::Dict(descriptor));
+        doc.set(pdfcraft_cos::ObjRef::new(object, 0), Object::Dict(font));
+    }
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].base_font, lines[1].base_font);
+    assert_eq!((lines[0].bold, lines[1].bold), (false, true));
+    // Unchanged words anchor each inserted copy of the same letter in its own source style.
+    let block = text::text_blocks(&doc, 0).unwrap().remove(0);
+    let mut inherited = Vec::new();
+    for (range, source) in block.edited_spans("alpha ш beta ш") {
+        for _ in "alpha ш beta ш".get(range).unwrap().chars().filter(|ch| *ch == 'ш') {
+            inherited.push(lines[source].bold);
+        }
+    }
+    assert_eq!(inherited, [false, true], "the fixture must exercise both weights of the same BaseFont");
+    text::replace_block(&mut doc, 0, 0, "alpha ш beta ш").unwrap();
+    let doc = reopen(&doc);
+    let fonts = fallback_fonts(&doc);
+    let mut names: Vec<_> = fonts.iter().map(|(_, f)| pdfcraft_fonts::pdf::Metrics::from_dict(&doc, f).base_font).collect();
+    names.sort();
+    assert_eq!(names, ["BIZUDPGothic-Bold", "BIZUDPGothic-Regular"]);
+    let outlines: Vec<_> = fonts
+        .iter()
+        .map(|(_, f)| {
+            let procs = doc.dict(f.get(b"CharProcs").unwrap()).unwrap();
+            assert_eq!(procs.len(), 1, "each weight needs just the shared letter");
+            stream_bytes(&doc, procs.iter().next().unwrap().1).unwrap()
+        })
+        .collect();
+    assert_ne!(outlines[0], outlines[1], "weight must change the outline, not only the descriptor");
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<String>(), "alpha ш beta ш");
+}
+
+#[test]
 fn styled_fallback_shards_keep_text_advances_and_alignment() {
     if without_craft_fonts("styled_fallback_shards_keep_text_advances_and_alignment") {
         return;

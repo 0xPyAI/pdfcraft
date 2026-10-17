@@ -3,7 +3,9 @@
 use super::*;
 
 // The draft is capped at 4 MiB; also bound the outline data prepared across all fallback faces.
-const MAX_STYLED_FALLBACK_GLYPHS: usize = MAX_TYPE3_GLYPHS * 64;
+// A glyph budget worth 64 full batches (15,360 glyphs with the production batch size).
+// Lowering the internal batch size for tests lowers the budget by the same ratio.
+const MAX_STYLED_FALLBACK_BATCHES: usize = 64;
 
 struct FallbackGroup {
     face: &'static CraftFont,
@@ -405,6 +407,7 @@ pub(super) fn rewrite_styled_block(
     let mut fallback_names: std::collections::BTreeMap<(String, bool, char), usize> = std::collections::BTreeMap::new();
     let mut fallback_glyphs = 0_usize;
     let per_font = max_glyphs.clamp(1, MAX_TYPE3_GLYPHS);
+    let fallback_budget = per_font.saturating_mul(MAX_STYLED_FALLBACK_BATCHES);
     let mut full_faces: HashMap<String, String> = HashMap::new();
     let mut programs: HashMap<String, Option<std::sync::Arc<Vec<u8>>>> = HashMap::new();
     for (range, index) in styled_spans {
@@ -487,9 +490,9 @@ pub(super) fn rewrite_styled_block(
                     };
                     let group = fallback_groups.get_mut(group_index).ok_or_else(|| EditError::Invalid("the fallback face is missing".into()))?;
                     if group.seen.insert(ch) {
-                        if fallback_glyphs >= MAX_STYLED_FALLBACK_GLYPHS {
+                        if fallback_glyphs >= fallback_budget {
                             return Err(EditError::Invalid(format!(
-                                "the replacement needs more than {MAX_STYLED_FALLBACK_GLYPHS} fallback glyphs; edit a smaller paragraph or load a complete font"
+                                "the replacement needs more than {fallback_budget} fallback glyphs; edit a smaller paragraph or load a complete font"
                             )));
                         }
                         let (path, width) = type3_path(group.face, ch)?;
