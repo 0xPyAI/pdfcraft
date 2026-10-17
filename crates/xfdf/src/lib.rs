@@ -1114,7 +1114,8 @@ fn import_table(doc: &mut Document, text: &str) -> Result<Report, DataError> {
             .map(|c| {
                 let name =
                     c.attributes().find(|a| a.name() == "original").map(|a| a.value().to_string()).unwrap_or_else(|| c.tag_name().name().to_string());
-                (name, vec![c.text().unwrap_or("").to_string()])
+                // Comments and processing instructions do not end a field's character data.
+                (name, vec![c.children().filter(|node| node.is_text()).filter_map(|node| node.text()).collect()])
             })
             .collect()
     } else if t.lines().next().is_some_and(|l| l.contains('\t')) {
