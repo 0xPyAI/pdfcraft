@@ -215,6 +215,17 @@ fn refers_to(doc: &Document, o: &Object, gone: &HashSet<ObjRef>) -> bool {
 /// reference keeps the annotation, its URL or text included, in a full rewrite after the page
 /// no longer lists it. Returns how many references were dropped.
 pub(crate) fn drop_object_refs(doc: &mut Document, gone: &HashSet<ObjRef>) -> Result<usize, pdfcraft_cos::CosError> {
+    drop_object_refs_within(doc, gone, MAX_STRUCT_REFS)
+}
+
+/// The most structure-tree references [`drop_object_refs`] visits.
+const MAX_STRUCT_REFS: usize = 2_000_000;
+
+/// [`drop_object_refs`], visiting at most `limit` references. A tree too large to walk in full
+/// could keep a reference the walk never reached, so then the whole structure tree goes instead
+/// (with `/MarkInfo`, which would claim tags there no longer are): fail-closed, at the cost of
+/// the document's tags.
+pub(crate) fn drop_object_refs_within(doc: &mut Document, gone: &HashSet<ObjRef>, limit: usize) -> Result<usize, pdfcraft_cos::CosError> {
     if gone.is_empty() {
         return Ok(0);
     }
@@ -232,8 +243,16 @@ pub(crate) fn drop_object_refs(doc: &mut Document, gone: &HashSet<ObjRef>) -> Re
         match k {
             Object::Array(a) => todo.extend(a),
             Object::Ref(r) => {
-                if !seen.insert(r) || seen.len() > 2_000_000 {
+                if !seen.insert(r) {
                     continue;
+                }
+                if seen.len() > limit {
+                    let Some(catalog) = doc.root() else { return Ok(0) };
+                    doc.update_dict(catalog, |c| {
+                        c.remove(b"StructTreeRoot");
+                        c.remove(b"MarkInfo");
+                    })?;
+                    return Ok(0);
                 }
                 let object = doc.get(r);
                 if let Object::Array(a) = &*object {
@@ -274,11 +293,18 @@ pub(crate) fn drop_object_refs(doc: &mut Document, gone: &HashSet<ObjRef>) -> Re
         n += before - keep.len();
         doc.update_dict(r, |e| {
             if array {
-                e.set(b"K".to_vec(), Object::Array(keep));
-            } else if let Some(k) = keep.into_iter().next() {
+                e.set(b"K".to_vec(), Object::Array(keep.clone()));
+            } else if let Some(k) = keep.first().cloned() {
                 e.set(b"K".to_vec(), k);
             } else {
                 e.remove(b"K");
+            }
+            // An element left with nothing to tag keeps no text describing what it tagged:
+            // a link's alternate text often repeats the URL, an annotation's its comment.
+            if keep.is_empty() {
+                for key in [&b"Alt"[..], b"ActualText", b"T", b"E"] {
+                    e.remove(key);
+                }
             }
         })?;
     }
