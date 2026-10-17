@@ -102,6 +102,8 @@
 	Next view	Келесі көрініс
 	Page display	Беттерді көрсету
 	Continuous scrolling	Үздіксіз айналдыру
+	Show gaps between pages	Беттер арасындағы бос орындарды көрсету
+	Hide gaps to join page edges. Margins inside the PDF remain unchanged.	Беттердің шеттерін біріктіру үшін олардың арасындағы бос орындарды жасырыңыз. PDF ішіндегі жиектер өзгеріссіз қалады.
 	Two-page view	Екі беттік көрініс
 	Single page	Бір бет
 	Show cover page in two-page view	Екі беттік көріністе мұқаба бетін көрсету

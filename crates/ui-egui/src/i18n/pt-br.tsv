@@ -882,6 +882,8 @@
 	Next view	Próxima exibição
 	Page display	Exibição de página
 	Continuous scrolling	Rolagem contínua
+	Show gaps between pages	Mostrar espaços entre páginas
+	Hide gaps to join page edges. Margins inside the PDF remain unchanged.	Oculte os espaços para unir as bordas das páginas. As margens dentro do PDF permanecem inalteradas.
 	Two-page view	Exibição de duas páginas
 	Single page	Página única
 	Show cover page in two-page view	Mostrar página de capa na exibição de duas páginas

@@ -1001,6 +1001,20 @@ mod tests {
         }
     }
 
+    /// Both page-gap labels must be translated, even in catalogs without full UI coverage.
+    #[test]
+    fn page_gap_labels_are_translated_in_every_catalog() {
+        for language in LANGUAGES.iter().filter(|language| !language.source.is_empty()) {
+            let lang = Lang::from_code(language.code).expect("registered language");
+            for label in ["Show gaps between pages", "Hide gaps to join page edges. Margins inside the PDF remain unchanged."] {
+                assert!(has(lang, label), "{} lacks {label:?}", language.code);
+                let translated = tr(lang, label);
+                assert!(!translated.trim().is_empty(), "{} has an empty translation for {label:?}", language.code);
+                assert_ne!(translated, label, "{} falls back to English for {label:?}", language.code);
+            }
+        }
+    }
+
     /// Every catalog says the labels of a visible signature, which are looked up by the sign
     /// crate's own English words (so the `tl!` scan can't see them), and the note shown when they
     /// fall back to English. Each label that runs into its value keeps a separator at its end.

@@ -936,6 +936,8 @@
 	Next view	Следващ изглед
 	Page display	Показване на страниците
 	Continuous scrolling	Непрекъснато превъртане
+	Show gaps between pages	Показване на разстоянията между страниците
+	Hide gaps to join page edges. Margins inside the PDF remain unchanged.	Скрийте разстоянията, за да съедините ръбовете на страниците. Полетата вътре в PDF остават непроменени.
 	Two-page view	Изглед с две страници
 	Single page	Единична страница
 	Show cover page in two-page view	Показвай корицата в изглед с две страници

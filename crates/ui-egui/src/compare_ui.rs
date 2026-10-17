@@ -318,17 +318,24 @@ pub(crate) fn compare_area(app: &mut PdfCraftApp, old: usize, new: usize, ui: &m
     let leader = app.compare.as_ref().map_or(1, |c| c.leader);
     let (lead, follow) = if leader == 0 { (old, new) } else { (new, old) };
     // The follower takes the leader's zoom and layout before either is drawn.
-    let (zoom, fit, layout, continuous, rotation) = {
+    let (zoom, fit, layout, continuous, page_gaps, rotation) = {
         let v = &app.views[lead];
-        (v.zoom, v.fit, v.layout, v.continuous, v.rotation)
+        (v.zoom, v.fit, v.layout, v.continuous, v.show_page_gaps, v.rotation)
     };
     {
         let v = &mut app.views[follow];
-        if v.zoom != zoom || v.fit != fit || v.layout != layout || v.continuous != continuous || v.rotation != rotation {
+        if v.zoom != zoom
+            || v.fit != fit
+            || v.layout != layout
+            || v.continuous != continuous
+            || v.show_page_gaps != page_gaps
+            || v.rotation != rotation
+        {
             v.zoom = zoom;
             v.fit = fit;
             v.layout = layout;
             v.continuous = continuous;
+            v.show_page_gaps = page_gaps;
             v.rotation = rotation;
         }
     }

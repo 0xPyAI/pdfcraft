@@ -147,6 +147,94 @@ fn continuous_layout_stacks_pages_vertically() {
 }
 
 #[test]
+fn page_gaps_toggle_joins_edges_without_changing_the_document() {
+    let mut h = harness(&[("layout", "continuous"), ("zoom", "50")]);
+    let zoom = h.state().views[0].zoom;
+    let original = rect(&h, 1).unwrap().top() - rect(&h, 0).unwrap().bottom();
+    assert!(original > 1.0);
+    h.state_mut().set_option("page-gaps", "off").unwrap();
+    h.run_steps(4);
+    for page in 0..2 {
+        let (a, b) = (rect(&h, page).unwrap(), rect(&h, page + 1).unwrap());
+        assert!((b.top() - a.bottom()).abs() < 0.01, "pages must touch: {a:?} {b:?}");
+    }
+    assert_eq!(h.state().views[0].zoom, zoom);
+    let id = h.state().views[0].id;
+    assert!(!h.state().session.get(id).unwrap().dirty, "a view option must not edit the PDF");
+    assert!(h.state_mut().execute("view.page_gaps"));
+    h.run_steps(4);
+    assert!(((rect(&h, 1).unwrap().top() - rect(&h, 0).unwrap().bottom()) - original).abs() < 0.01);
+}
+
+#[test]
+fn page_gaps_default_survives_restart_and_applies_to_new_documents() {
+    let mut app = PdfCraftApp::new();
+    app.set_option("default-page-gaps", "off").unwrap();
+    let mut restored = PdfCraftApp::new();
+    restored.restore(&app.persist());
+    restored.open_bytes("pages.pdf", None, PAGES.to_vec()).unwrap();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| restored);
+    h.run_steps(8);
+    h.state_mut().set_option("zoom", "50").unwrap();
+    h.run_steps(4);
+    assert!((rect(&h, 1).unwrap().top() - rect(&h, 0).unwrap().bottom()).abs() < 0.01);
+    assert!(h.state_mut().set_option("page-gaps", "invalid").is_err());
+}
+
+#[test]
+fn page_gaps_menu_joins_pages_without_a_shadow_at_the_seam() {
+    use egui_kittest::kittest::Queryable;
+    let _gpu = gpu();
+    let mut h = harness(&[("layout", "continuous"), ("zoom", "50"), ("theme", "light")]);
+    h.get_by_label_contains("Page display").click();
+    h.run_steps(3);
+    h.get_by_label("Show gaps between pages").click();
+    h.run_steps(4);
+    let (a, b) = (rect(&h, 0).unwrap(), rect(&h, 1).unwrap());
+    assert!((b.top() - a.bottom()).abs() < 0.01);
+    let ppp = h.ctx.pixels_per_point();
+    let image = h.render().expect("renders the gapless view");
+    for dy in [-3.0, 0.0, 3.0] {
+        let pixel = image.get_pixel((a.center().x * ppp) as u32, ((a.bottom() + dy) * ppp) as u32);
+        assert_eq!(*pixel, image::Rgba([255, 255, 255, 255]), "no gap or shadow at the seam");
+    }
+}
+
+#[test]
+fn page_gaps_work_for_mixed_sizes_and_two_page_rows() {
+    let h = mixed_harness(&[("layout", "continuous"), ("zoom", "50"), ("page-gaps", "off")]);
+    let (a, b) = (rect(&h, 0).unwrap(), rect(&h, 1).unwrap());
+    assert!((b.top() - a.bottom()).abs() < 0.01);
+    assert!((a.center().x - b.center().x).abs() < 0.01);
+    let mut h = harness(&[("layout", "two-up"), ("zoom", "50"), ("page-gaps", "off")]);
+    let (a, b, c) = (rect(&h, 0).unwrap(), rect(&h, 1).unwrap(), rect(&h, 2).unwrap());
+    assert!((b.left() - a.right()).abs() < 0.01);
+    assert!((c.top() - a.bottom()).abs() < 0.01);
+    let info = h.state().session.get(h.state().views[0].id).unwrap().info.clone();
+    h.state_mut().views[0].document_replaced(&info);
+    assert!(!h.state().views[0].show_page_gaps, "a file reload preserves the view setting");
+}
+
+#[test]
+fn page_gaps_stay_closed_at_fractional_device_scales() {
+    for ppp in [1.0, 1.25, 1.5, 2.0] {
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_pixels_per_point(ppp).build_eframe(|_cc| {
+            let mut app = PdfCraftApp::new();
+            app.open_bytes("pages.pdf", None, PAGES.to_vec()).unwrap();
+            for (key, value) in [("left", "closed"), ("panel", "none"), ("layout", "continuous"), ("zoom", "43"), ("page-gaps", "off")] {
+                app.set_option(key, value).unwrap();
+            }
+            app
+        });
+        h.run_steps(8);
+        for page in 0..2 {
+            let (a, b) = (rect(&h, page).unwrap(), rect(&h, page + 1).unwrap());
+            assert!((b.top() - a.bottom()).abs() < 0.01, "{ppp} pixels/point: {a:?} {b:?}");
+        }
+    }
+}
+
+#[test]
 fn two_up_layout_places_pages_side_by_side() {
     let mut h = harness(&[("layout", "two-up"), ("zoom", "50")]);
     h.run_steps(4);
