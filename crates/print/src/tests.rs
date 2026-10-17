@@ -499,6 +499,8 @@ mod cups_options {
 
     const RECORD: &str = "PDFCRAFT_LPOPTIONS_TEST_RECORD";
     const ANSWER: &str = "PDFCRAFT_LPOPTIONS_TEST_ANSWER";
+    /// Generous: these tests are about what is read, not how long it takes.
+    const LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
 
     /// The child process stands in for lpoptions, recording its real arguments.
     #[test]
@@ -506,8 +508,31 @@ mod cups_options {
         let Some(record) = std::env::var_os(RECORD) else { return };
         let args: Vec<String> = std::env::args().skip_while(|a| a != "--").skip(1).collect();
         std::fs::write(std::path::Path::new(&record).join("args"), args.join("\n")).unwrap();
+        let answer = std::env::var(ANSWER).unwrap();
+        // A queue that never answers (CUPS stopped responding).
+        if answer == "HANG" {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
         // Serial libtest prints its test label without a newline before this helper's stdout.
-        println!("\n{}", std::env::var(ANSWER).unwrap());
+        println!("\n{answer}");
+    }
+
+    /// `lpoptions` that never answers is stopped at the deadline: the PPD's defaults stand and
+    /// whoever asked is not held (#1818).
+    #[test]
+    fn a_queue_that_never_answers_is_given_up_at_the_deadline() {
+        let dir = folder();
+        std::fs::write(
+            dir.join("Office.ppd"),
+            "*OpenUI *InputSlot/Paper tray: PickOne\n*DefaultInputSlot: Auto\n*InputSlot Auto/Automatic: \"\"\n*InputSlot Tray2/Tray 2: \"\"\n*CloseUI: *InputSlot\n",
+        )
+        .unwrap();
+        let started = std::time::Instant::now();
+        let options = spool::printer_options_via_within("Office", &dir, command(&dir, "HANG"), std::time::Duration::from_millis(500));
+        assert!(started.elapsed() < std::time::Duration::from_secs(20), "given up at the deadline, not when the command does");
+        assert_eq!(options.len(), 1, "the PPD is still read");
+        assert_eq!(options[0].default, "Auto", "the PPD default stands when the queue does not answer");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     fn command(record: &std::path::Path, answer: &str) -> std::process::Command {
@@ -557,7 +582,7 @@ mod cups_options {
             (boundary_queue.as_str(), "Tray2", "Tray2"),
             (boundary_instance.as_str(), "Tray2", "Tray2"),
         ] {
-            let options = spool::printer_options_via(destination, &dir, command(&dir, &format!("InputSlot/Paper tray: *{current}")));
+            let options = spool::printer_options_via_within(destination, &dir, command(&dir, &format!("InputSlot/Paper tray: *{current}"), LIMIT));
             assert_eq!(options.len(), 1, "{destination}: the queue's PPD must be read");
             assert_eq!(options[0].default, expected, "{destination}: only valid instance choices override the PPD default");
             assert_eq!(options[0].choices, [("Auto".into(), "Automatic".into()), ("Tray2".into(), "Tray 2".into())]);
@@ -598,7 +623,7 @@ mod cups_options {
             long_queue_instance.as_str(),
             long_instance.as_str(),
         ] {
-            assert!(spool::printer_options_via(destination, &dir, command(&dir, "InputSlot: *Auto")).is_empty(), "{destination:?}");
+            assert!(spool::printer_options_via_within(destination, &dir, command(&dir, "InputSlot: *Auto"), LIMIT).is_empty(), "{destination:?}");
             assert!(!dir.join("args").exists(), "{destination:?}: rejected before spawning");
         }
         std::fs::remove_dir_all(dir).unwrap();
@@ -742,5 +767,41 @@ fn imposed_pages_preserve_large_user_unit_matrices() {
         for (actual, expected) in to_sheet(raw).into_iter().zip(expected) {
             assert!((actual - expected).abs() < 1e-9, "unit={unit}: {actual} != {expected}");
         }
+    }
+}
+
+/// `output_within` (#1818): the bounded wait every platform's `lpoptions` call goes through.
+#[cfg(not(target_arch = "wasm32"))]
+mod bounded_commands {
+    const MODE: &str = "PDFCRAFT_COMMAND_TEST_MODE";
+
+    /// The child process stands in for a command: it answers, or it never does.
+    #[test]
+    fn stand_in_for_a_command() {
+        match std::env::var(MODE).as_deref() {
+            Ok("answer") => println!("hello from the command"),
+            Ok("hang") => std::thread::sleep(std::time::Duration::from_secs(60)),
+            _ => {}
+        }
+    }
+
+    fn command(mode: &str) -> std::process::Command {
+        let mut c = std::process::Command::new(std::env::current_exe().unwrap());
+        c.args(["--exact", "tests::bounded_commands::stand_in_for_a_command", "--nocapture", "--"]).env(MODE, mode);
+        c
+    }
+
+    #[test]
+    fn a_command_that_answers_gives_its_output() {
+        let out = crate::spool::output_within(&mut command("answer"), std::time::Duration::from_secs(60)).unwrap();
+        assert!(String::from_utf8_lossy(&out).contains("hello from the command"));
+    }
+
+    #[test]
+    fn a_command_that_never_answers_is_stopped_at_the_deadline() {
+        let started = std::time::Instant::now();
+        let err = crate::spool::output_within(&mut command("hang"), std::time::Duration::from_millis(500)).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < std::time::Duration::from_secs(20), "stopped soon after the deadline, not when the command gives up");
     }
 }

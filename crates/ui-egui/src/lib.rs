@@ -105,7 +105,7 @@ mod signature_drag;
 pub mod units;
 mod web_print;
 mod word_count_ui;
-pub use print_ui::{Handling as PrintHandling, PrintDraft, PrinterSource, Which as PrintWhich, system_printers};
+pub use print_ui::{Handling as PrintHandling, OptionsSource, PrintDraft, PrinterSource, Which as PrintWhich, system_printers};
 mod redact_ui;
 pub use redact_ui::{HiddenDraft, PagesDraft as RedactPagesDraft, RedactPrefs, SearchDraft as RedactSearchDraft, SearchMode as RedactSearchMode};
 pub mod i18n;
@@ -557,6 +557,8 @@ pub struct PdfCraftApp {
     /// Lists the Print dialog's printers in the background (the desktop app sets it; see
     /// [`PrinterSource`]).
     pub printer_source: Option<PrinterSource>,
+    /// Where Properties… reads a printer's driver options: the spooler's unless a test stands in.
+    pub options_source: Option<OptionsSource>,
     // A browser has no background print work: the type is empty there.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) print_tasks: print_ui::PrintTasks,
@@ -925,6 +927,7 @@ impl PdfCraftApp {
             update_source: None,
             updates: updates::Updates::default(),
             printer_source: None,
+            options_source: None,
             print_tasks: print_ui::PrintTasks::default(),
             palette_open: false,
             palette_query: String::new(),
