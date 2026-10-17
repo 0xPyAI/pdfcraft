@@ -119,18 +119,26 @@ fn get_property(xmp: &str, name: &str, shape: Shape) -> Option<String> {
         let inner = element.get(open_end + 1..)?.strip_suffix(&format!("</{name}>"))?;
         let items = list_items(inner);
         if items.is_empty() {
-            unescape(inner.trim())
+            // An empty `<rdf:Alt/>` or `<rdf:Seq></rdf:Seq>` has no value, not its markup.
+            text_value(inner)?
         } else if shape == Shape::LangAlt {
             let (_, text) = items.iter().find(|(lang, _)| lang.as_deref() == Some("x-default")).or(items.first())?;
-            unescape(text.trim())
+            text_value(text)?
         } else {
-            items.iter().map(|(_, text)| unescape(text.trim())).filter(|t| !t.is_empty()).collect::<Vec<_>>().join("; ")
+            items.iter().filter_map(|(_, text)| text_value(text)).filter(|t| !t.is_empty()).collect::<Vec<_>>().join("; ")
         }
     } else {
         let (_, value_start, value_end, _) = attribute_span(xmp, name)?;
         unescape(xmp.get(value_start..value_end)?.trim())
     };
     Some(value).filter(|v| !v.trim().is_empty())
+}
+
+/// Character data `text` as a value, unescaped; `None` when it still holds markup (a `<`, which
+/// a value escapes as `&lt;`), so a structure the reader doesn't take apart never shows as text.
+fn text_value(text: &str) -> Option<String> {
+    let text = text.trim();
+    (!text.contains('<')).then(|| unescape(text))
 }
 
 /// The `rdf:li` items of a property's content: each one's `xml:lang` (if any) and its text.
@@ -334,6 +342,12 @@ mod tests {
         assert_eq!(get_property(seq, "dc:creator", Shape::Seq).as_deref(), Some("Ada"));
         // Unfinished markup reads as nothing rather than as a wrong value.
         assert_eq!(get_property("<dc:title><rdf:Alt><rdf:li>Cut", "dc:title", Shape::LangAlt), None);
+        // An empty alternative or list, or an item holding markup, has no value: never the markup.
+        assert_eq!(get_property("<dc:title><rdf:Alt/></dc:title>", "dc:title", Shape::LangAlt), None);
+        assert_eq!(get_property("<dc:title><rdf:Alt></rdf:Alt></dc:title>", "dc:title", Shape::LangAlt), None);
+        assert_eq!(get_property("<dc:creator><rdf:Seq/></dc:creator>", "dc:creator", Shape::Seq), None);
+        let nested = "<dc:creator><rdf:Seq><rdf:li><rdf:Description/></rdf:li><rdf:li>Ada</rdf:li></rdf:Seq></dc:creator>";
+        assert_eq!(get_property(nested, "dc:creator", Shape::Seq).as_deref(), Some("Ada"));
     }
 
     #[test]
