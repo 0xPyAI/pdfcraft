@@ -6047,14 +6047,20 @@ trailer << /Root 1 0 R >>
     fn blend_modes_over_an_empty_part_of_the_page_keep_their_colour() {
         let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..4].to_vec();
         for (mode, over_red) in [
-            ("Normal", [0, 255, 0]),
-            ("Multiply", [0, 0, 0]),
-            ("Screen", [255, 255, 0]),
-            ("Lighten", [255, 255, 0]),
-            ("Difference", [255, 255, 0]),
-            ("Exclusion", [255, 255, 0]),
-            ("ColorDodge", [255, 0, 0]),
-            ("Overlay", [255, 0, 0]),
+            ("Normal", Some([0, 255, 0])),
+            ("Multiply", Some([0, 0, 0])),
+            ("Screen", Some([255, 255, 0])),
+            ("Lighten", Some([255, 255, 0])),
+            ("Difference", Some([255, 255, 0])),
+            ("Exclusion", Some([255, 255, 0])),
+            ("ColorDodge", Some([255, 0, 0])),
+            ("Overlay", Some([255, 0, 0])),
+            // The non-separable modes mix hue, saturation and luminosity; over an empty part of
+            // the page they too must keep the source colour.
+            ("Hue", None),
+            ("Saturation", None),
+            ("Color", None),
+            ("Luminosity", None),
         ] {
             let content = "1 0 0 rg 20 20 150 150 re f /G1 gs 0 1 0 rg 100 50 150 120 re f";
             let pdf = format!(
@@ -6081,7 +6087,9 @@ trailer << /Root 1 0 R >>
             assert!(p.error.is_none(), "{mode}: {:?}", p.error);
             // Pixel rows run top down: PDF (210, 100) and (130, 100) are rows 100 from the top.
             assert_eq!(px(&p, 210, 100), vec![0, 255, 0, 255], "{mode} over the empty page");
-            assert_eq!(px(&p, 130, 100)[..3], over_red, "{mode} over the red square");
+            if let Some(over_red) = over_red {
+                assert_eq!(px(&p, 130, 100)[..3], over_red, "{mode} over the red square");
+            }
             assert_eq!(px(&p, 280, 10), vec![255, 255, 255, 255], "{mode}: the paper stays white");
         }
     }
