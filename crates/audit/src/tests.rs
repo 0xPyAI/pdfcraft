@@ -518,4 +518,14 @@ fn reading_blocks_respect_stream_comments_and_split_operands() {
     let doc = open(two_streams(b"BT /F1 24 Tf 72 700 Td (Split operand)", b"Tj ET"));
     let text: String = pdfcraft_edit::reading_blocks(&doc, 0).unwrap().into_iter().map(|block| block.editor_text).collect();
     assert_eq!(text, "Split operand");
+    // Marked content opened in one stream applies to text in the next: its /ActualText replaces
+    // the glyphs, as when the streams are read joined.
+    for (s1, s2) in [
+        (b"BT /F1 24 Tf 72 700 Td /Span <</ActualText (Replacement text)".as_slice(), b">> BDC (Glyphs) Tj EMC ET".as_slice()),
+        (b"BT /F1 24 Tf 72 700 Td /Span <</ActualText (Replacement text)>> BDC", b"(Glyphs) Tj EMC ET"),
+    ] {
+        let doc = open(two_streams(s1, s2));
+        let text: String = pdfcraft_edit::reading_blocks(&doc, 0).unwrap().into_iter().map(|block| block.editor_text).collect();
+        assert_eq!(text, "Replacement text", "{}", String::from_utf8_lossy(s1));
+    }
 }
