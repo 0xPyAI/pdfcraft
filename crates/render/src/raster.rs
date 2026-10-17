@@ -5822,6 +5822,44 @@ trailer << /Root 1 0 R >>
         assert_eq!(pixel(&on, 150, 55), &[255, 255, 255, 255], "the image's white quadrant stays white");
     }
 
+    /// #2975: a stencil mask (`/ImageMask true`) is painted in the fill colour at the fill
+    /// opacity, once: at `ca 0.5` it is as opaque as a rectangle filled at `ca 0.5` beside it
+    /// (it was a quarter as opaque, the opacity applied by both the image's group and its paint).
+    #[test]
+    fn stencil_masks_are_drawn_at_the_fill_opacity_once() {
+        let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..3].to_vec();
+        for alpha in ["1", "0.5", "0.25"] {
+            let content = "/A gs 0 0 1 rg q 100 0 0 100 20 50 cm /Msk Do Q 160 50 100 100 re f";
+            let pdf = format!(
+                "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /ExtGState << /A << /ca {alpha} >> >> /XObject << /Msk 5 0 R >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 2 /ImageMask true /Length 2 >> stream
+  
+endstream endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+                content.len()
+            );
+            let p = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default()).render(RenderRequest {
+                page: 0,
+                kind: RequestKind::Pixels,
+                tile: None,
+                scale: 1.0,
+                tag: 0,
+                ..Default::default()
+            });
+            assert!(p.error.is_none(), "ca {alpha}: {:?}", p.error);
+            // Pixel rows run top down: PDF (70, 100) is in the mask, (210, 100) in the rectangle.
+            let (mask, rect) = (px(&p, 70, 100), px(&p, 210, 100));
+            assert!(mask.iter().zip(&rect).all(|(m, r)| m.abs_diff(*r) <= 1), "ca {alpha}: mask {mask:?}, rectangle {rect:?}");
+        }
+    }
+
     /// Reading colours replace *document* colours, never annotation colours (issue #1548): a
     /// highlight keeps its `/C`, so on a dark background the content under it shows through the
     /// Multiply blend in the highlight's colour instead of being darkened into invisibility.
