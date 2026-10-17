@@ -78,6 +78,23 @@ pub trait Device<'a> {
     /// elements drawn before it in the group (ISO 32000-2, knockout groups), until the
     /// matching `pop_transparency_group`.
     fn set_knockout(&mut self) {}
+    /// PdfCraft patch (39): an element whose shape is `shape` (device space) is about to be
+    /// drawn into a transparency group of its own. In a knockout group (`set_knockout`) the
+    /// element replaces what the group drew under its shape, so a device clears that first;
+    /// the element's layer then composites over the cleared area as usual.
+    fn knockout_shape(&mut self, _shape: &BezPath) {}
+    /// PdfCraft patch (39): whether a transparency group drawn now is an element of a knockout
+    /// group that the device wants cleared under the group's shape first. If so the
+    /// interpreter draws the group's content once between `begin_knockout_erase` and
+    /// `end_knockout_erase`, in which every paint clears what is under its shape instead of
+    /// painting, and then draws the group as usual, in a layer of its own.
+    fn knockout_erase_wanted(&mut self) -> bool {
+        false
+    }
+    /// PdfCraft patch (39): see `knockout_erase_wanted`.
+    fn begin_knockout_erase(&mut self) {}
+    /// PdfCraft patch (39): see `knockout_erase_wanted`.
+    fn end_knockout_erase(&mut self) {}
 }
 
 /// A device that discards all drawing operations.

@@ -159,7 +159,38 @@ pub(crate) fn draw_form_xobject<'a, 'b>(
             && state.soft_mask.is_none()
             && state.blend_mode == BlendMode::Normal
     };
-    let own_layer = x_object.is_transparency_group && !neutral;
+    // PdfCraft patch (39): a group drawn as an element of a knockout group replaces what that
+    // group drew under its shape, the union of its own elements' shapes (#2971). The shape is
+    // cleared by drawing the group's content once in the device's erase mode; the group then
+    // composites over the cleared area in a layer of its own (also when it would otherwise be
+    // drawn straight onto its parent, where its elements would knock each other out).
+    let knockout_element = x_object.is_transparency_group && device.knockout_erase_wanted();
+    if knockout_element {
+        context.save_state();
+        device.begin_knockout_erase();
+        device.push_clip_path(&ClipPath {
+            path: context.get().ctm
+                * Rect::new(
+                    x_object.bbox[0] as f64,
+                    x_object.bbox[1] as f64,
+                    x_object.bbox[2] as f64,
+                    x_object.bbox[3] as f64,
+                )
+                .to_path(0.1),
+            fill: FillRule::NonZero,
+        });
+        interpret(
+            TypedIter::new(x_object.decoded.as_ref()),
+            &Resources::from_parent(x_object.resources.clone(), resources.clone()),
+            context,
+            device,
+        );
+        device.pop_clip_path();
+        device.end_knockout_erase();
+        context.restore_state(device);
+        context.path_mut().truncate(0);
+    }
+    let own_layer = x_object.is_transparency_group && (!neutral || knockout_element);
 
     if own_layer {
         device.push_transparency_group(
@@ -253,6 +284,14 @@ pub(crate) fn draw_image_xobject<'a, 'b>(
     // If image has smask, the soft mask from the graphics state should be discarde.
     if has_alpha {
         soft_mask = None;
+    }
+
+    // PdfCraft patch (39): an image without a mask covers its whole placement rectangle, so in
+    // a knockout group it replaces what the group drew there (#2971). A stencil's or a masked
+    // image's shape is its mask; those composite as before (exact where the mask is opaque or
+    // transparent, which is what masks mostly are).
+    if !x_object.is_mask && !has_alpha {
+        device.knockout_shape(&(transform * Rect::new(0.0, 0.0, width, height).to_path(0.1)));
     }
 
     device.push_transparency_group(

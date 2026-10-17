@@ -6039,11 +6039,12 @@ trailer << /Root 1 0 R >>
     }
 
     /// #2971: in a knockout transparency group (`/K true`) each element composites with the
-    /// group's initial backdrop, not with the elements drawn before it in the group. A blue
-    /// square at 50 % opacity over a red one at 50 % shows only the blue where they overlap;
-    /// without `/K` the two blend. An element drawn through a layer of its own (here a nested
-    /// group, a stencil mask) doesn't knock out yet, but it must not erase what was drawn before it
-    /// either.
+    /// group's initial backdrop, not with the elements drawn before it in the group, over the
+    /// element's shape. A blue square at 50 % opacity over a red one at 50 % shows only the blue
+    /// where they overlap; without `/K` the two blend. The same holds for an image (its shape
+    /// is its rectangle; a soft-masked image's shape is its mask, so its transparent part leaves
+    /// what is under it) and for a nested group (its shape is the union of its elements'
+    /// shapes, while its own elements still blend with each other).
     #[test]
     fn knockout_groups_replace_what_their_elements_cover() {
         let render = |group: &str, form: &str| {
@@ -6055,14 +6056,35 @@ trailer << /Root 1 0 R >>
 4 0 obj << /Length 39 >> stream
 /Fm1 Do /G gs 0 1 0 rg 10 10 30 30 re f
 endstream endobj
-5 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency {group} >> /Resources << /ExtGState << /A << /ca 0.5 >> >> /XObject << /In 6 0 R /Msk 7 0 R >> >> /Length {} >> stream
+5 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency {group} >> /Resources << /ExtGState << /A << /ca 0.5 >> >> /XObject << /In 6 0 R /Msk 7 0 R /Neu 8 0 R /Img 9 0 R /Sm 10 0 R /Nimg 12 0 R /Deep 13 0 R >> >> /Length {} >> stream
 {form}
 endstream endobj
 6 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /A << /ca 0.5 >> >> >> /Length 30 >> stream
 /A gs 0 0 1 rg 100 50 150 120 re f
 endstream endobj
-7 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 2 /ImageMask true /Length 2 >> stream
-  
+7 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 2 /ImageMask true /Filter /ASCIIHexDecode /Length 5 >> stream
+0000>
+endstream endobj
+8 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /H << /ca 0.5 >> >> >> /Length 62 >> stream
+/H gs 0 1 0 rg 80 40 100 100 re f 0 0 1 rg 130 80 100 100 re f
+endstream endobj
+9 0 obj << /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 7 >> stream
+0000FF>
+endstream endobj
+10 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask 11 0 R /Filter /ASCIIHexDecode /Length 13 >> stream
+0000FF0000FF>
+endstream endobj
+11 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 5 >> stream
+00FF>
+endstream endobj
+12 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /H << /ca 0.5 >> >> /XObject << /Img 9 0 R >> >> /Length 38 >> stream
+/H gs q 160 0 0 100 60 50 cm /Img Do Q
+endstream endobj
+13 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /H << /ca 0.5 >> >> /XObject << /In3 14 0 R >> >> /Length 13 >> stream
+/H gs /In3 Do
+endstream endobj
+14 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Length 28 >> stream
+0 0 1 rg 100 50 150 120 re f
 endstream endobj
 trailer << /Root 1 0 R >>
 %%EOF",
@@ -6079,27 +6101,56 @@ trailer << /Root 1 0 R >>
             assert!(p.error.is_none(), "{group} {form}: {:?}", p.error);
             p
         };
-        let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..3].to_vec();
-        let near = |a: &[u8], b: [u8; 3]| a.iter().zip(b).all(|(a, b)| a.abs_diff(b) <= 2);
-        let squares = "/A gs 1 0 0 rg 20 20 150 150 re f 0 0 1 rg 100 50 150 120 re f";
-        let nested = "/A gs 1 0 0 rg 20 20 150 150 re f /In Do";
-        // Pixel rows run top down: PDF (x, y) is (x, 200 - y).
-        let knockout = render("/I true /K true", squares);
-        assert!(near(&px(&knockout, 130, 100), [128, 128, 255]), "knocked out: {:?}", px(&knockout, 130, 100));
-        assert!(near(&px(&knockout, 50, 160), [255, 128, 128]), "red alone: {:?}", px(&knockout, 50, 160));
-        assert!(near(&px(&knockout, 210, 100), [128, 128, 255]), "blue alone: {:?}", px(&knockout, 210, 100));
-        assert!(near(&px(&knockout, 280, 10), [255, 255, 255]), "paper: {:?}", px(&knockout, 280, 10));
+        // Pixel rows run top down: PDF (x, y) is pixel (x, 200 - y).
+        let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((200 - y) * p.width + x) as usize * 4..][..3].to_vec();
+        let check = |p: &RenderedPage, x: u32, y: u32, want: [u8; 3], what: &str| {
+            let got = px(p, x, y);
+            assert!(got.iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 2), "{what}: {got:?}, expected {want:?}");
+        };
+        let red = "/A gs 1 0 0 rg 20 20 150 150 re f ";
+        let ko = "/I true /K true";
+
+        let squares = render(ko, &format!("{red}0 0 1 rg 100 50 150 120 re f"));
+        check(&squares, 130, 100, [128, 128, 255], "knocked out");
+        check(&squares, 50, 40, [255, 128, 128], "red alone");
+        check(&squares, 210, 100, [128, 128, 255], "blue alone");
+        check(&squares, 280, 190, [255, 255, 255], "paper");
         // Page content after the group composites normally again: green at 50 % over the red.
-        assert!(near(&px(&knockout, 30, 170), [128, 191, 64]), "after the group: {:?}", px(&knockout, 30, 170));
-        let plain = render("/I true", squares);
-        assert!(near(&px(&plain, 130, 100), [128, 64, 191]), "blended: {:?}", px(&plain, 130, 100));
-        // The nested group is drawn at the outer 50 % as well: blue at 25 %.
-        let nested = render("/I true /K true", nested);
-        assert!(near(&px(&nested, 50, 160), [255, 128, 128]), "red kept: {:?}", px(&nested, 50, 160));
-        assert!(near(&px(&nested, 210, 100), [191, 191, 255]), "nested blue: {:?}", px(&nested, 210, 100));
-        // So is a stencil mask, drawn through a layer of its own.
-        let stencil = render("/I true /K true", "/A gs 1 0 0 rg 20 20 150 150 re f 0 0 1 rg q 150 0 0 120 100 50 cm /Msk Do Q");
-        assert!(near(&px(&stencil, 50, 160), [255, 128, 128]), "red kept beside a stencil: {:?}", px(&stencil, 50, 160));
+        check(&squares, 30, 30, [128, 191, 64], "after the group");
+        let plain = render("/I true", &format!("{red}0 0 1 rg 100 50 150 120 re f"));
+        check(&plain, 130, 100, [128, 64, 191], "blended without /K");
+
+        // An image at 50 % replaces the red under its rectangle.
+        let image = render(ko, &format!("{red}q 160 0 0 100 60 50 cm /Img Do Q"));
+        check(&image, 100, 100, [128, 128, 255], "image knocks out");
+        check(&image, 40, 40, [255, 128, 128], "red beside the image");
+        // A soft-masked image: its transparent left half leaves the red, its opaque half replaces it.
+        let masked = render(ko, "1 0 0 rg 20 20 150 150 re f q 160 0 0 100 60 50 cm /Sm Do Q");
+        check(&masked, 100, 100, [255, 0, 0], "under the transparent half");
+        check(&masked, 155, 100, [0, 0, 255], "under the opaque half");
+
+        // A nested group entered at 50 % (blue at 25 % in all) replaces the red under its shape.
+        let nested = render(ko, &format!("{red}/In Do"));
+        check(&nested, 130, 100, [191, 191, 255], "nested group knocks out");
+        check(&nested, 50, 40, [255, 128, 128], "red beside the nested group");
+        // A nested group at full opacity: it knocks out the red as a whole, and its own two
+        // squares at 50 % still blend with each other where they overlap.
+        let neutral = render(ko, "1 0 0 rg 20 20 150 150 re f /Neu Do");
+        check(&neutral, 100, 60, [128, 255, 128], "green over the knocked-out red");
+        check(&neutral, 150, 110, [64, 128, 191], "the nested squares blend");
+        check(&neutral, 40, 40, [255, 0, 0], "red beside the nested group");
+
+        // An image inside a nested group is drawn once (blue at 50 %), over the knocked-out red.
+        let nested_image = render(ko, "1 0 0 rg 20 20 150 150 re f /Nimg Do");
+        check(&nested_image, 100, 100, [128, 128, 255], "image in a nested group");
+        // A group inside a nested group knocks out the red as well.
+        let deep = render(ko, "1 0 0 rg 20 20 150 150 re f /Deep Do");
+        check(&deep, 130, 100, [128, 128, 255], "group in a nested group");
+        check(&deep, 40, 40, [255, 0, 0], "red beside it");
+
+        // A stencil mask must not erase the red beside it.
+        let stencil = render(ko, &format!("{red}0 0 1 rg q 150 0 0 120 100 50 cm /Msk Do Q"));
+        check(&stencil, 50, 40, [255, 128, 128], "red beside a stencil");
     }
 
     /// Reading colours replace *document* colours, never annotation colours (issue #1548): a
