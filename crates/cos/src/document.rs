@@ -1668,7 +1668,7 @@ impl Document {
                     log.push(format!("xref at {off} unreadable ({e}); retrying relative to the header"));
                     sect.clear();
                     odd.clear();
-                    self.read_section(off as usize + self.header_offset, &mut sect, &mut odd, log)?
+                    (self.read_section(off as usize + self.header_offset, &mut sect, &mut odd, log)?, true)
                 }
                 Err(e) => {
                     // An unreadable older section loses every object only it locates (the page
