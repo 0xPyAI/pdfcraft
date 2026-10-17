@@ -5218,3 +5218,58 @@ fn a_clipping_copy_on_the_same_baseline_is_refused() {
     assert!(matches!(&block, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{block:?}");
     assert_eq!(text::text_lines(&doc, 0).unwrap().len(), 2, "refused means untouched");
 }
+
+/// #2992: the colour a page is painted with before anything else is its background, for exports
+/// that keep a page colour. Edit a PDF ▸ Background's fill is found under the text it goes
+/// behind; a page that paints anything else first, a fill that doesn't cover the page, a
+/// translucent or clipped one, or a colour that isn't plain gray, RGB or CMYK has none.
+#[test]
+fn a_page_painted_first_with_a_full_page_fill_has_that_background() {
+    let mut doc = fixture();
+    assert_eq!(page_background(&doc, 0).unwrap(), None, "text first");
+    add_background(&mut doc, &[0, 1], &Background { color: [0.0, 0.5, 0.5], opacity: 1.0, ..Background::default() }, false).unwrap();
+    let doc = reopen(&doc);
+    let teal = page_background(&doc, 0).unwrap().expect("Background's fill");
+    assert!(teal.iter().zip([0.0, 0.5, 0.5]).all(|(a, b)| (a - b).abs() < 1e-6), "{teal:?}");
+    assert!(page_background(&doc, 1).unwrap().is_some(), "on a turned page too");
+    assert_eq!(page_background(&doc, 2).unwrap(), None, "a page with no content");
+    assert!(page_background(&doc, 9).is_err());
+
+    let page = |content: &str, resources: &str| {
+        let objs: Vec<String> = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /CropBox [0 0 500 700] /Contents 4 0 R /Resources << {resources} >> >>"),
+            format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offs = Vec::new();
+        for (i, o) in objs.iter().enumerate() {
+            offs.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+        }
+        let x = out.len();
+        out.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
+        for o in offs {
+            out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n").as_bytes());
+        page_background(&Document::open(Arc::new(out)).unwrap(), 0).unwrap()
+    };
+    let gs = "/ExtGState << /Half << /ca 0.5 >> /Mul << /BM /Multiply >> /Full << /ca 1 /SMask /None >> >>";
+    assert_eq!(page("1 g 0 0 600 800 re f", ""), Some([1.0; 3]), "a producer's white page fill");
+    assert_eq!(page("0 0 1 0 k 0 0 500 700 re f", ""), Some([1.0, 1.0, 0.0]), "CMYK, covering the crop box");
+    assert_eq!(page("/DeviceRGB cs 1 0 0 sc 0 0 500 700 re f", ""), Some([1.0, 0.0, 0.0]), "cs and sc");
+    assert_eq!(page("/Full gs q 2 0 0 2 0 0 cm 0 1 0 rg 0 0 300 400 re f Q", gs), Some([0.0, 1.0, 0.0]), "under a cm");
+    assert_eq!(page("1 0 0 rg 0 0 300 800 re f", ""), None, "half the page");
+    assert_eq!(page("1 0 0 rg 0 0 300 800 re 300 0 300 800 re f", ""), None, "two halves are not one covering rectangle");
+    assert_eq!(page("1 0 0 rg 0 0 300 800 re 0 0 600 800 re f", ""), Some([1.0, 0.0, 0.0]), "one of the rectangles covers it");
+    assert_eq!(page("/Half gs 1 0 0 rg 0 0 600 800 re f", gs), None, "translucent");
+    assert_eq!(page("/Mul gs 1 0 0 rg 0 0 600 800 re f", gs), None, "blended");
+    assert_eq!(page("0 0 100 100 re W n 1 0 0 rg 0 0 600 800 re f", ""), None, "clipped to a corner");
+    assert_eq!(page("0 0 600 800 re W n 1 0 0 rg 0 0 600 800 re f", ""), Some([1.0, 0.0, 0.0]), "a page-sized clip");
+    assert_eq!(page("/Pattern cs /P1 scn 0 0 600 800 re f", ""), None, "a pattern");
+    assert_eq!(page("BT ET 0 0 600 800 re S 1 0 0 rg 0 0 600 800 re f", ""), None, "a stroke first");
+    assert_eq!(page("0 0 m 600 0 l 600 800 l 0 800 l h f", ""), None, "a path that isn't a rectangle");
+    assert_eq!(page("1 0 0 rg 0 0 600 800 re 100 100 m 200 100 l 200 200 l h f*", ""), None, "a page fill with a hole cut in it");
+}

@@ -847,6 +847,8 @@ pub fn marks_present(doc: &Document) -> Vec<MarkKind> {
     added::scan_markers(doc).marks
 }
 
+mod background;
+pub use background::page_background;
 pub mod objects;
 pub use objects::{EditableObject, MAX_MOVE_OBJECTS, ObjectKind, ObjectTarget, editable_objects, move_objects};
 
