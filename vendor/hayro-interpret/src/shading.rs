@@ -375,6 +375,24 @@ impl Triangle {
         self.kurbo_tri.winding(pos) != 0
     }
 
+    /// PdfCraft patch (36): whether the point is inside the triangle or on one of its edges.
+    /// Two triangles of a mesh share an edge; a sample on it belongs to both (their colours
+    /// agree there), where `contains_point` can give it to neither and leave a seam. A
+    /// degenerate triangle covers nothing.
+    pub fn covers(&self, pos: Point) -> bool {
+        // Relative to the barycentric coordinates' scale (1), well above f64 rounding.
+        const EDGE: f64 = 1e-9;
+        let (a, b, c) = (self.p0.point, self.p1.point, self.p2.point);
+        let (v0, v1, v2) = (b - a, c - a, pos - a);
+        let denom = self.d00 * self.d11 - self.d01 * self.d01;
+        let (d20, d21) = (v2.dot(v0), v2.dot(v1));
+        let v = (self.d11 * d20 - self.d01 * d21) / denom;
+        let w = (self.d00 * d21 - self.d01 * d20) / denom;
+        // A degenerate triangle divides by zero: NaN fails every comparison, and infinite
+        // coordinates can't sum to at most one.
+        v >= -EDGE && w >= -EDGE && v + w <= 1.0 + EDGE
+    }
+
     /// Return the bounding box of the triangle.
     pub fn bounding_box(&self) -> kurbo::Rect {
         self.kurbo_tri.bounding_box()

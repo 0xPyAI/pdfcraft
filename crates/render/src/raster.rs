@@ -5001,6 +5001,87 @@ trailer << /Root 1 0 R >>
         assert!(p != [255, 255, 255, 255] && p[3] == 255, "the triangles are drawn: {p:?}");
     }
 
+    /// Two triangles of a mesh that share an edge cover it together. The sampler tested each
+    /// pixel's corner, and only strictly inside a triangle, so the diagonal two triangles share
+    /// was left white wherever it ran through the samples, and so was a pixel row or column
+    /// along the mesh's own sides. Vendored hayro-interpret patch 41.
+    #[test]
+    fn mesh_triangles_sharing_an_edge_leave_no_seam() {
+        // A red square from 10 to 40 on a 50 × 50 page, cut along its diagonal; in device space
+        // the diagonal runs through pixel centres and corners alike.
+        let vertex = |flag: u8, x: u8, y: u8| [flag, x, y, 255, 0, 0];
+        let (lo, hi) = (10, 40);
+        let mut triangles = Vec::new();
+        for [a, b, c] in [[(lo, lo), (hi, lo), (hi, hi)], [(lo, lo), (hi, hi), (lo, hi)]] {
+            for (x, y) in [a, b, c] {
+                triangles.extend(vertex(0, x, y));
+            }
+        }
+        // Each triangle as its own three vertices, and the second one as a strip (flag 1).
+        let mut strip = Vec::new();
+        for (flag, (x, y)) in [(0, (lo, lo)), (0, (hi, lo)), (0, (hi, hi)), (2, (lo, hi))] {
+            strip.extend(vertex(flag, x, y));
+        }
+        for (label, data) in [("separate triangles", triangles), ("a strip", strip)] {
+            let content = b"/Sh0 sh";
+            let mut pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 50 50] /Contents 4 0 R /Resources << /Shading << /Sh0 5 0 R >> >> >> endobj\n".to_vec();
+            pdf.extend_from_slice(format!("4 0 obj << /Length {} >> stream\n", content.len()).as_bytes());
+            pdf.extend_from_slice(content);
+            pdf.extend_from_slice(format!("\nendstream endobj\n5 0 obj << /ShadingType 4 /ColorSpace /DeviceRGB /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 /Decode [0 255 0 255 0 1 0 1 0 1] /Length {} >> stream\n", data.len()).as_bytes());
+            pdf.extend_from_slice(&data);
+            pdf.extend_from_slice(b"\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n");
+            let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+            let page = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(page.error.is_none(), "{label}: {:?}", page.error);
+            assert_eq!((page.width, page.height), (50, 50));
+            let (mut white_inside, mut red_outside) = (Vec::new(), Vec::new());
+            for y in 0..50_usize {
+                for x in 0..50_usize {
+                    let p = &page.rgba[(y * 50 + x) * 4..][..4];
+                    let inside = (10..40).contains(&x) && (10..40).contains(&y);
+                    if inside && p != [255, 0, 0, 255] {
+                        white_inside.push((x, y));
+                    } else if !inside && p != [255, 255, 255, 255] {
+                        red_outside.push((x, y));
+                    }
+                }
+            }
+            assert!(white_inside.is_empty(), "{label}: unshaded pixels inside the square: {white_inside:?}");
+            assert!(red_outside.is_empty(), "{label}: shaded pixels outside the square: {red_outside:?}");
+        }
+
+        // One triangle alone, the square's upper left half: a pixel whose corner lies on its
+        // diagonal is taken by its centre, so one wholly across the diagonal (x + y ≥ 50 in
+        // device space) is not shaded, and one wholly inside is.
+        let mut data = Vec::new();
+        for (x, y) in [(lo, lo), (hi, hi), (lo, hi)] {
+            data.extend(vertex(0, x, y));
+        }
+        let content = b"/Sh0 sh";
+        let mut pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 50 50] /Contents 4 0 R /Resources << /Shading << /Sh0 5 0 R >> >> >> endobj\n".to_vec();
+        pdf.extend_from_slice(format!("4 0 obj << /Length {} >> stream\n", content.len()).as_bytes());
+        pdf.extend_from_slice(content);
+        pdf.extend_from_slice(format!("\nendstream endobj\n5 0 obj << /ShadingType 4 /ColorSpace /DeviceRGB /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 /Decode [0 255 0 255 0 1 0 1 0 1] /Length {} >> stream\n", data.len()).as_bytes());
+        pdf.extend_from_slice(&data);
+        pdf.extend_from_slice(b"\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n");
+        let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+        let page = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+        assert!(page.error.is_none(), "{:?}", page.error);
+        let (mut spilled, mut missing) = (Vec::new(), Vec::new());
+        for y in 10..40_usize {
+            for x in 10..40_usize {
+                let p = &page.rgba[(y * 50 + x) * 4..][..4];
+                if x + y >= 50 && p == [255, 0, 0, 255] {
+                    spilled.push((x, y));
+                } else if x + y + 2 <= 50 && p != [255, 0, 0, 255] {
+                    missing.push((x, y));
+                }
+            }
+        }
+        assert!(spilled.is_empty(), "shaded pixels wholly across the diagonal: {spilled:?}");
+        assert!(missing.is_empty(), "unshaded pixels wholly inside the triangle: {missing:?}");
+    }
+
     /// Review of the mesh-shading patch: every patch was cut into 722 triangles before anything
     /// limited them (about 150 KB per patch), and a lattice mesh with `/VerticesPerRow 0` pushed
     /// empty rows for ever. Vendored hayro-interpret patch: patches are triangulated one at a

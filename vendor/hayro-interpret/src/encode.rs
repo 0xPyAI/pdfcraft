@@ -321,9 +321,17 @@ impl TriangleSampler {
                     return false;
                 }
                 self.visits_left -= 1;
-                let point = Point::new(x as f64, y as f64);
-                if t.contains_point(point) {
-                    self.map.insert((x, y), t.interpolate(point));
+                let corner = Point::new(x as f64, y as f64);
+                if t.contains_point(corner) {
+                    self.map.insert((x, y), t.interpolate(corner));
+                } else if t.covers(Point::new(x as f64 + 0.5, y as f64 + 0.5)) {
+                    // PdfCraft patch (36): a pixel whose corner no triangle holds strictly (it
+                    // lies on an edge two triangles share, or on the mesh's side) still belongs
+                    // to the triangle that covers its centre, edges included. Testing only the
+                    // corner left a white seam along every shared edge. Such a pixel takes the
+                    // colour at its corner, as every other pixel does (where MuPDF's colours
+                    // agree), unless a triangle that holds the corner gives it one.
+                    self.map.entry((x, y)).or_insert_with(|| t.interpolate(corner));
                 }
             }
         }
