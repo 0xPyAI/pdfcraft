@@ -337,6 +337,22 @@ fn dates_convert_between_iso_and_acrobat_patterns() {
 }
 
 #[test]
+fn month_and_weekday_names_in_date_patterns() {
+    // 2001-02-03 was a Saturday.
+    assert_eq!(iso_to_pattern("2001-02-03", "mmm d, yyyy"), "Feb 3, 2001");
+    assert_eq!(iso_to_pattern("2001-02-03", "mmmm d, yyyy"), "February 3, 2001");
+    assert_eq!(iso_to_pattern("2001-02-03", "ddd, mmm d"), "Sat, Feb 3");
+    assert_eq!(iso_to_pattern("2001-02-03", "dddd, mmmm dd, yyyy"), "Saturday, February 03, 2001");
+    assert_eq!(pattern_to_iso("Feb 3, 2001", "mmm d, yyyy").as_deref(), Some("2001-02-03"));
+    assert_eq!(pattern_to_iso("February 3, 2001", "mmmm d, yyyy").as_deref(), Some("2001-02-03"));
+    assert_eq!(pattern_to_iso("Saturday, February 03, 2001", "dddd, mmmm dd, yyyy").as_deref(), Some("2001-02-03"));
+    assert_eq!(pattern_to_iso("Smarch 3, 2001", "mmm d, yyyy"), None);
+    // A token the converter can't render leaves the value as it is.
+    assert_eq!(iso_to_pattern("2001-02-03", "mmmmm d"), "2001-02-03");
+    assert_eq!(pattern_to_iso("Feb 3", "mmmmm d"), None);
+}
+
+#[test]
 fn data_fills_the_fields_and_adds_rows() {
     let form = layout_xml(&template_with_data(1, DATA)).unwrap();
     let all: Vec<&Widget> = form.pages.iter().flat_map(widgets).collect();
