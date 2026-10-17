@@ -1,5 +1,5 @@
-use hayro_syntax::object::dict::keys::{BASE_STATE, D, OCGS, OCMD, OCPROPERTIES, OFF, ON, P, TYPE};
-use hayro_syntax::object::{Array, Dict, Name, ObjectIdentifier};
+use hayro_syntax::object::dict::keys::{BASE_STATE, D, OCGS, OCMD, OCPROPERTIES, OFF, ON, P, TYPE, VE};
+use hayro_syntax::object::{Array, Dict, MaybeRef, Name, Object, ObjectIdentifier};
 use std::collections::HashSet;
 
 pub(crate) struct OcgState {
@@ -72,6 +72,14 @@ impl OcgState {
     }
 
     pub(crate) fn begin_ocmd(&mut self, ocmd: &Dict<'_>) {
+        // PdfCraft patch (40): a visibility expression takes precedence over /OCGs and /P
+        // (ISO 32000-2 §8.11.2.2); a malformed one is ignored and they decide instead.
+        if let Some(visible) = ocmd.get::<Array<'_>>(VE).and_then(|ve| self.visibility_expression(&ve, 0)) {
+            let visible = self.is_visible() && visible;
+            self.visibility_stack.push(visible);
+            return;
+        }
+
         let policy = ocmd
             .get::<Name<'_>>(P)
             .and_then(|n| OcmdPolicy::from_name(n.as_ref()))
@@ -102,6 +110,39 @@ impl OcgState {
 
         let visible = self.is_visible() && is_active;
         self.visibility_stack.push(visible);
+    }
+
+    /// PdfCraft patch (40): evaluate a visibility expression (`/VE`, PDF 1.6): `[/And e…]`,
+    /// `[/Or e…]` or `[/Not e]`, each `e` an optional content group (by reference) or a nested
+    /// expression. `None` for a malformed expression: an unknown operator, a `/Not` without
+    /// exactly one operand, an `/And` or `/Or` without any, an operand that is neither, or
+    /// nesting deeper than `MAX_VISIBILITY_EXPRESSION_DEPTH`.
+    fn visibility_expression(&self, expr: &Array<'_>, depth: usize) -> Option<bool> {
+        if depth > MAX_VISIBILITY_EXPRESSION_DEPTH {
+            return None;
+        }
+        let mut items = expr.raw_iter();
+        let operator = match items.next()? {
+            MaybeRef::NotRef(Object::Name(name)) => name,
+            _ => return None,
+        };
+        let (mut count, mut all, mut any) = (0usize, true, false);
+        for item in items {
+            let value = match item {
+                MaybeRef::Ref(r) => !self.inactive_ocgs.contains(&r.into()),
+                MaybeRef::NotRef(Object::Array(nested)) => self.visibility_expression(&nested, depth + 1)?,
+                _ => return None,
+            };
+            count = count.saturating_add(1);
+            all &= value;
+            any |= value;
+        }
+        match (operator.as_ref(), count) {
+            (b"And", 1..) => Some(all),
+            (b"Or", 1..) => Some(any),
+            (b"Not", 1) => Some(!all),
+            _ => None,
+        }
     }
 
     pub(crate) fn begin_ocg(&mut self, props: &Dict<'_>, ref_id: ObjectIdentifier) {
@@ -139,6 +180,9 @@ impl Default for OcgState {
         Self::dummy()
     }
 }
+
+/// PdfCraft patch (40): how deep visibility expressions may nest; deeper ones are malformed.
+const MAX_VISIBILITY_EXPRESSION_DEPTH: usize = 32;
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 enum BaseState {
