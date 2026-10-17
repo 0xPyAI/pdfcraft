@@ -239,7 +239,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Hindi UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "86ed26696b854a47d95ad5d2ca2256066aec4954ba2254e807df65a731180c1e"
+sha256 = "59ea339766c9ea8c2cd071812932a9f180fb07d55e4ee97227fc83777eeb23cf"
 [[asset]]
 path = "crates/ui-egui/src/i18n/id.tsv"
 title = "Indonesian interface translation catalog"
@@ -249,7 +249,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Indonesian UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "6350a843669f3bc2111491bce0d213183bafe74e1752b50263a451f8e93ca24e"
+sha256 = "fa756e44a07b33e24983b97e9710a78fd8ffa2f1cf5fd74ffba060fe43c9036a"
 [[asset]]
 path = "crates/ui-egui/src/i18n/ko.tsv"
 title = "Korean interface translation catalog"
@@ -259,7 +259,7 @@ licence = "MIT OR Apache-2.0"
 licence_file = "LICENSE-MIT"
 kind = "translation"
 usage = "Korean UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
-sha256 = "489f94ee729d2cf44f79b4f5203d3ccceed927fb4fcc31cb0a65e313135640c6"
+sha256 = "0d8860c466c6b0d7bdaff65dcf633c5db1f4386df4e20871b7aeb1e1e4c916e7"
 
 
 [[asset]]
