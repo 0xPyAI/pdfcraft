@@ -2594,3 +2594,83 @@ certificate	SHA-256 digest	SHA-256 डाइजेस्ट
 	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	विंडो बटनों के लिए एक साधारण शीर्षक पट्टी दिखाएँ, टैब स्ट्रिप के बजाय। GNOME ऐप्स के लिए शीर्षक पट्टी नहीं बनाता, इसलिए यह उसकी थीम का पालन नहीं करता।
 	This document is trying to open a local file:	यह दस्तावेज़ एक स्थानीय फ़ाइल खोलने का प्रयास कर रहा है:
 	Use system title bar	सिस्टम शीर्षक पट्टी का उपयोग करें
+	Hide hover previews for highlights without comment text	बिना टिप्पणी टेक्स्ट वाली हाइलाइट का होवर पूर्वावलोकन छिपाएँ
+	Set page transitions	पृष्ठ संक्रमण सेट करें
+	What takes up the space in this file, by kind of content.	इस फ़ाइल में स्थान किस प्रकार की सामग्री ने घेरा है, यह दिखाता है।
+	Digitally signed by	द्वारा डिजिटल हस्ताक्षरित
+	DN: 	DN: 
+	Reason: 	कारण: 
+	Location: 	स्थान: 
+	Date: 	दिनांक: 
+	The labels are in English: the signature's font can't draw them in this language.	लेबल अंग्रेज़ी में हैं: हस्ताक्षर का फ़ॉन्ट इन्हें इस भाषा में नहीं बना सकता।
+	Font size	फ़ॉन्ट आकार
+	Make Properties Default	गुण डिफ़ॉल्ट बनाएँ
+	Save over the changed file?	बदली हुई फ़ाइल के ऊपर सहेजें?
+	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	“{name}” खोले जाने या अंतिम बार सहेजे जाने के बाद डिस्क पर बदल गई है। अभी सहेजने पर वह नया संस्करण इस संस्करण से बदल जाएगा।
+	Save anyway	फिर भी सहेजें
+	Sending sheet {s} of {n} to {printer}…	शीट {n} में से {s} को {printer} पर भेजा जा रहा है…
+	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	कोई प्रिंटर नहीं मिला। जाँच लें कि प्रिंटर इंस्टॉल है और प्रिंट स्पूलर चल रहा है, फिर से प्रिंट खोलें।
+	Collapse all pages	सभी पृष्ठ समेटें
+	Expand all pages	सभी पृष्ठ विस्तृत करें
+	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	यह फ़ाइल डिस्क पर बदल गई है। पुनः लोड करने पर नया संस्करण दिखेगा और आपके सहेजे न गए बदलाव हट जाएँगे; सहेजने पर डिस्क का संस्करण इस संस्करण से बदल जाएगा।
+	Scroll speed (mouse wheel and arrow keys)	स्क्रॉल गति (माउस व्हील और तीर कुंजियाँ)
+	Cut Image	छवि काटें
+	Redact Image	छवि रिडैक्ट करें
+	Create Link…	लिंक बनाएँ…
+	Recognize Text…	टेक्स्ट पहचानें…
+	Open in Full Screen mode?	फ़ुल स्क्रीन मोड में खोलें?
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	यह दस्तावेज़ फ़ुल स्क्रीन मोड में खुलने का अनुरोध करता है: पृष्ठ पूरी स्क्रीन भर देता है और बाकी कुछ नहीं दिखता। बाहर निकलने के लिए कभी भी Esc दबाएँ।
+	Full Screen	फ़ुल स्क्रीन
+	Not now	अभी नहीं
+	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	आप “{from}” का हस्ताक्षरित संस्करण (संशोधन {rev}) देख रहे हैं। यह एक स्नैपशॉट है: यहाँ किए गए बदलाव मूल फ़ाइल को प्रभावित नहीं करेंगे।
+	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.	आप “{from}” का संशोधन {rev} देख रहे हैं। यह एक स्नैपशॉट है: यहाँ किए गए बदलाव मूल फ़ाइल को प्रभावित नहीं करेंगे।
+	Turn upside down (180°)	उल्टा घुमाएँ (180°)
+	4 x 6 in label (101.6 x 152.4 mm)	4 x 6 इंच लेबल (101.6 x 152.4 mm)
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	प्रत्येक पृष्ठ को उसके मुद्रित क्षेत्र तक काटता है, उसे सीधा करता है और बिना खिंचाव के शीट पर फ़िट करता है। प्रति शीट एक लेबल।
+	Find untagged content	बिना टैग वाली सामग्री खोजें
+	No untagged content was found.	कोई बिना टैग वाली सामग्री नहीं मिली।
+	Found {n} untagged content problems.	{n} बिना टैग वाली सामग्री की समस्याएँ मिलीं।
+	Tag form fields	फ़ॉर्म फ़ील्ड टैग करें
+	Mark as artifact	आर्टिफ़ैक्ट के रूप में चिह्नित करें
+	Remove this leaf tag from reading order and mark its direct content as an artifact	इस लीफ़ टैग को पढ़ने के क्रम से हटाएँ और इसके अंतर्गत सीधे आने वाली सामग्री को आर्टिफ़ैक्ट के रूप में चिह्नित करें
+	Mark content as artifact	सामग्री को आर्टिफ़ैक्ट के रूप में चिह्नित करें
+	Word count	शब्द गणना
+	Current page only	केवल वर्तमान पृष्ठ
+	Exclude tagged tables	टैग की गई तालिकाएँ बाहर रखें
+	Exclude tagged code blocks	टैग किए गए कोड ब्लॉक बाहर रखें
+	Exclude image/OCR text	छवि/OCR टेक्स्ट बाहर रखें
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	बाहर रखने के नियम PDF टैग पर आधारित हैं। बिना टैग वाली तालिकाएँ और कोड शामिल रहते हैं। छवि बाहर रखने से अदृश्य टेक्स्ट भी हट जाता है।
+	Words	शब्द
+	Characters	वर्ण
+	Characters without spaces	रिक्त स्थान के बिना वर्ण
+	Pages counted	गिने गए पृष्ठ
+	Some pages contain no countable text. Scanned images need OCR first.	कुछ पृष्ठों में गिनने योग्य टेक्स्ट नहीं है। स्कैन की गई छवियों को पहले OCR करना होगा।
+	Some content could not be classified safely and was kept in the count.	कुछ सामग्री को सुरक्षित रूप से वर्गीकृत नहीं किया जा सका, इसलिए उसे गिनती में रखा गया।
+	Counting words… {n} pages read	शब्द गिने जा रहे हैं… {n} पृष्ठ पढ़े गए
+	Word counting stopped unexpectedly.	शब्द गणना अप्रत्याशित रूप से रुक गई।
+	Word count…	शब्द गणना…
+@id	file.word_count	शब्द गणना…
+	Standard	मानक
+	Mobile	मोबाइल
+	Merge image fragments	छवि खंड मर्ज करें
+	Optimizing… merging image fragments	ऑप्टिमाइज़ किया जा रहा है… छवि खंड मर्ज किए जा रहे हैं
+	Side by side	एक के बगल में एक
+	New file only	केवल नई फ़ाइल
+	Old file: {name}	पुरानी फ़ाइल: {name}
+	New file: {name}	नई फ़ाइल: {name}
+	Print as image	छवि के रूप में प्रिंट करें
+	Resolution:	रेज़ोल्यूशन:
+	Use it when a printer skips text, shading or transparency. The print is no longer searchable text; with Print in grayscale, the pictures are grey.	जब प्रिंटर टेक्स्ट, छायांकन या पारदर्शिता छोड़ दे, तब इसका उपयोग करें। प्रिंट अब खोजने योग्य टेक्स्ट नहीं रहता; ग्रेस्केल में प्रिंट करने पर चित्र सलेटे होते हैं।
+	Crop Image	छवि क्रॉप करें
+	Remove Crop	क्रॉप हटाएँ
+	Trim the picture with its handles; Enter or Done applies	हैंडल से चित्र को ट्रिम करें; Enter या Done दबाने पर लागू होता है
+	Redaction mark appearance	रिडैक्शन चिह्न का स्वरूप
+	Outline colour:	रूपरेखा रंग:
+	Fill colour:	भरण रंग:
+	Shown while the pointer is over a mark.	जब पॉइंटर किसी चिह्न के ऊपर होता है, तब यह दिखता है।
+	Opacity:	अपारदर्शिता:
+	Make properties default	गुण डिफ़ॉल्ट बनाएँ
+	Pages selected	चयनित पृष्ठ
+	Page properties	पृष्ठ गुण
+	The password must have at least 8 characters.	पासवर्ड में कम से कम 8 वर्ण होने चाहिए।
+theme	Appearance	स्वरूप

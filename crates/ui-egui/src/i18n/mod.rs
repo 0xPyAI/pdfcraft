@@ -207,12 +207,12 @@ pub static LANGUAGES: [LangInfo; 26] = [
     LangInfo { code: "tr", name: "Türkçe", source: include_str!("tr.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Lithuanian; every `lt-*` locale (`lt-LT`, `lt_LT.UTF-8`) resolves here. Three plural forms (one, few, other).
     LangInfo { code: "lt", name: "Lietuvių", source: include_str!("lt.tsv"), plural: plural_lithuanian, rtl: false, catalog: OnceLock::new() },
-    // Vietnamese; every `vi-*` locale (`vi-VN`, `vi_VN.UTF-8`) resolves here. CLDR `vi` counts have
-    // one form ("other"), so `@plural` entries list a single form.
-    LangInfo { code: "vi", name: "Tiếng Việt", source: include_str!("vi.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Indonesian; every `id-*` locale (`id-ID`, `id_ID.UTF-8`) resolves here. CLDR `id` counts have
     // one form ("other"), so `@plural` entries list a single form.
     LangInfo { code: "id", name: "Bahasa Indonesia", source: include_str!("id.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
+    // Vietnamese; every `vi-*` locale (`vi-VN`, `vi_VN.UTF-8`) resolves here. CLDR `vi` counts have
+    // one form ("other"), so `@plural` entries list a single form.
+    LangInfo { code: "vi", name: "Tiếng Việt", source: include_str!("vi.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Hindi; every `hi-*` locale (`hi-IN`, `hi_IN.UTF-8`) resolves here. CLDR `hi` has "one"
     // (0 and 1) and "other", but the catalog's nouns are the same in both ("{n} पृष्ठ"), so
     // `@plural` entries list a single form.
@@ -2701,7 +2701,7 @@ mod tests {
             assert_eq!(trn(id, n, "{n} page", "{n} pages"), format!("{n} halaman"));
             assert_eq!(trn(vi, n, "{n} page", "{n} pages"), format!("{n} trang"));
             assert_eq!(trn(id, n, "{n} field", "{n} fields"), format!("{n} kolom"));
-            assert_eq!(trn(vi, n, "{n} field", "{n} fields"), format!("{n} ô"));
+            assert_eq!(trn(vi, n, "{n} field", "{n} fields"), format!("{n} trường"));
         }
         let mut app = crate::PdfCraftApp::default();
         app.set_option("language", "ID").unwrap();

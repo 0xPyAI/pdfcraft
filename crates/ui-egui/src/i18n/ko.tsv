@@ -2594,3 +2594,83 @@ certificate	SHA-256 digest	SHA-256 다이제스트
 	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	탭 스트립 대신 창 버튼이 있는 기본 제목 표시줄을 표시합니다. GNOME은 앱에 제목 표시줄을 그리지 않으므로 이 표시줄은 해당 테마를 따르지 않습니다.
 	This document is trying to open a local file:	이 문서가 로컬 파일을 열려고 합니다:
 	Use system title bar	시스템 제목 표시줄 사용
+	Hide hover previews for highlights without comment text	주석 텍스트가 없는 강조 표시의 마우스오버 미리 보기 숨기기
+	Set page transitions	페이지 전환 설정
+	What takes up the space in this file, by kind of content.	이 파일의 공간을 어떤 종류의 콘텐츠가 차지하는지 보여 줍니다.
+	Digitally signed by	디지털 서명자
+	DN: 	DN: 
+	Reason: 	사유: 
+	Location: 	위치: 
+	Date: 	날짜: 
+	The labels are in English: the signature's font can't draw them in this language.	레이블은 영어로 표시됩니다. 서명에 사용된 글꼴이 이 언어의 문자를 표시할 수 없기 때문입니다.
+	Font size	글꼴 크기
+	Make Properties Default	속성을 기본값으로 설정
+	Save over the changed file?	변경된 파일을 덮어쓸까요?
+	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	“{name}” 파일이 열리거나 마지막으로 저장된 후 디스크에서 변경되었습니다. 지금 저장하면 디스크의 최신 버전이 이 버전으로 대체됩니다.
+	Save anyway	그래도 저장
+	Sending sheet {s} of {n} to {printer}…	용지 {n}장 중 {s}장을 {printer}(으)로 보내는 중…
+	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	프린터를 찾을 수 없습니다. 프린터가 설치되어 있고 인쇄 스풀러가 실행 중인지 확인한 다음 인쇄를 다시 여세요.
+	Collapse all pages	모든 페이지 접기
+	Expand all pages	모든 페이지 펼치기
+	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	이 파일이 디스크에서 변경되었습니다. 다시 로드하면 새 버전이 표시되고 저장하지 않은 변경 내용은 사라지며, 저장하면 디스크의 버전이 이 버전으로 대체됩니다.
+	Scroll speed (mouse wheel and arrow keys)	스크롤 속도(마우스 휠 및 화살표 키)
+	Cut Image	이미지 잘라내기
+	Redact Image	이미지 제거 표시
+	Create Link…	링크 만들기…
+	Recognize Text…	텍스트 인식…
+	Open in Full Screen mode?	전체 화면 모드로 여시겠습니까?
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	이 문서에서 전체 화면 모드로 열기를 요청합니다. 페이지가 화면을 가득 채우고 다른 내용은 표시되지 않습니다. 언제든 Esc 키를 눌러 종료할 수 있습니다.
+	Full Screen	전체 화면
+	Not now	지금은 안 함
+	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	서명된 “{from}”(리비전 {rev}) 버전을 보고 있습니다. 이는 스냅샷이므로 여기서 변경해도 원본에 영향을 주지 않습니다.
+	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.	“{from}”의 리비전 {rev}을(를) 보고 있습니다. 이는 스냅샷이므로 여기서 변경해도 원본에 영향을 주지 않습니다.
+	Turn upside down (180°)	거꾸로 뒤집기(180°)
+	4 x 6 in label (101.6 x 152.4 mm)	4 x 6인치 라벨(101.6 x 152.4 mm)
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	각 페이지를 인쇄 영역에 맞게 자르고 바로 세운 다음 늘리지 않고 용지에 맞춥니다. 용지마다 라벨 하나가 인쇄됩니다.
+	Find untagged content	태그 없는 콘텐츠 찾기
+	No untagged content was found.	태그 없는 콘텐츠를 찾지 못했습니다.
+	Found {n} untagged content problems.	태그 없는 콘텐츠 문제 {n}개를 찾았습니다.
+	Tag form fields	양식 필드 태그 지정
+	Mark as artifact	아티팩트로 표시
+	Remove this leaf tag from reading order and mark its direct content as an artifact	이 리프 태그를 읽기 순서에서 제거하고 직접 콘텐츠를 아티팩트로 표시
+	Mark content as artifact	콘텐츠를 아티팩트로 표시
+	Word count	단어 수
+	Current page only	현재 페이지만
+	Exclude tagged tables	태그 있는 표 제외
+	Exclude tagged code blocks	태그 있는 코드 블록 제외
+	Exclude image/OCR text	이미지/OCR 텍스트 제외
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	제외는 PDF 태그를 기준으로 합니다. 태그 없는 표와 코드는 계속 포함됩니다. 이미지 제외 시 보이지 않는 텍스트도 함께 제거됩니다.
+	Words	단어
+	Characters	문자
+	Characters without spaces	공백 제외 문자
+	Pages counted	계산된 페이지
+	Some pages contain no countable text. Scanned images need OCR first.	일부 페이지에 계산 가능한 텍스트가 없습니다. 스캔한 이미지는 먼저 OCR을 실행해야 합니다.
+	Some content could not be classified safely and was kept in the count.	일부 콘텐츠는 안전하게 분류할 수 없어 개수에 그대로 포함되었습니다.
+	Counting words… {n} pages read	단어 수 계산 중… {n}페이지 읽음
+	Word counting stopped unexpectedly.	단어 수 계산이 예기치 않게 중지되었습니다.
+	Word count…	단어 수 계산…
+@id	file.word_count	단어 개수…
+	Standard	표준
+	Mobile	모바일
+	Merge image fragments	이미지 조각 병합
+	Optimizing… merging image fragments	최적화 중… 이미지 조각 병합 중
+	Side by side	나란히 보기
+	New file only	새 파일만
+	Old file: {name}	이전 파일: {name}
+	New file: {name}	새 파일: {name}
+	Print as image	이미지로 인쇄
+	Resolution:	해상도:
+	Use it when a printer skips text, shading or transparency. The print is no longer searchable text; with Print in grayscale, the pictures are grey.	프린터에서 텍스트, 음영 또는 투명 효과가 누락될 때 사용하세요. 인쇄물은 더 이상 검색 가능한 텍스트가 아니며, 회색조로 인쇄하면 그림이 회색으로 인쇄됩니다.
+	Crop Image	이미지 자르기
+	Remove Crop	자르기 제거
+	Trim the picture with its handles; Enter or Done applies	핸들로 그림을 다듬으세요. Enter 또는 완료를 누르면 적용됩니다
+	Redaction mark appearance	제거 대상 표시 모양
+	Outline colour:	윤곽선 색:
+	Fill colour:	채우기 색:
+	Shown while the pointer is over a mark.	포인터를 표시 위에 올리면 나타납니다.
+	Opacity:	불투명도:
+	Make properties default	속성을 기본값으로 설정
+	Pages selected	선택한 페이지
+	Page properties	페이지 속성
+	The password must have at least 8 characters.	암호는 8자 이상이어야 합니다.
+theme	Appearance	모양

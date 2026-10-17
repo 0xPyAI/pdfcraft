@@ -2595,3 +2595,83 @@ key	Space	Space
 	Show a basic title bar for the window buttons instead of the tab strip. GNOME doesn't draw title bars for apps, so this one doesn't follow its theme.	Tampilkan bilah judul sederhana untuk tombol jendela alih-alih strip tab. GNOME tidak menggambar bilah judul untuk aplikasi, jadi yang ini tidak mengikuti temanya.
 	This document is trying to open a local file:	Dokumen ini mencoba membuka file lokal:
 	Use system title bar	Gunakan bilah judul sistem
+	Hide hover previews for highlights without comment text	Sembunyikan pratinjau saat kursor diarahkan ke sorotan tanpa teks komentar
+	Set page transitions	Atur transisi halaman
+	What takes up the space in this file, by kind of content.	Apa yang memakan ruang dalam berkas ini, berdasarkan jenis konten.
+	Digitally signed by	Ditandatangani secara digital oleh
+	DN: 	DN: 
+	Reason: 	Alasan: 
+	Location: 	Lokasi: 
+	Date: 	Tanggal: 
+	The labels are in English: the signature's font can't draw them in this language.	Label ditampilkan dalam bahasa Inggris: font tanda tangan tidak dapat menggambarnya dalam bahasa ini.
+	Font size	Ukuran font
+	Make Properties Default	Jadikan properti default
+	Save over the changed file?	Simpan menimpa berkas yang berubah?
+	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	“{name}” telah berubah di disk setelah dibuka atau terakhir kali disimpan. Menyimpan sekarang akan mengganti versi yang lebih baru itu dengan versi ini.
+	Save anyway	Tetap simpan
+	Sending sheet {s} of {n} to {printer}…	Mengirim lembar {s} dari {n} ke {printer}…
+	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Tidak ada printer yang ditemukan. Pastikan printer telah terinstal dan print spooler sedang berjalan, lalu buka Cetak lagi.
+	Collapse all pages	Ciutkan semua halaman
+	Expand all pages	Perluas semua halaman
+	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Berkas ini telah berubah di disk. Muat ulang akan menampilkan versi baru dan membuang perubahan Anda yang belum disimpan; Simpan akan menggantinya dengan versi ini.
+	Scroll speed (mouse wheel and arrow keys)	Kecepatan gulir (roda mouse dan tombol panah)
+	Cut Image	Potong gambar
+	Redact Image	Redaksi gambar
+	Create Link…	Buat tautan…
+	Recognize Text…	Kenali teks…
+	Open in Full Screen mode?	Buka dalam mode layar penuh?
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	Dokumen ini meminta untuk dibuka dalam mode layar penuh: halaman memenuhi layar dan tidak ada hal lain yang ditampilkan. Tekan Esc kapan saja untuk keluar.
+	Full Screen	Layar penuh
+	Not now	Jangan sekarang
+	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	Anda melihat versi yang telah ditandatangani dari “{from}” (revisi {rev}). Ini adalah snapshot: perubahan di sini tidak akan memengaruhi berkas asli.
+	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.	Anda melihat revisi {rev} dari “{from}”. Ini adalah snapshot: perubahan di sini tidak akan memengaruhi berkas asli.
+	Turn upside down (180°)	Putar terbalik (180°)
+	4 x 6 in label (101.6 x 152.4 mm)	Label 4 x 6 inci (101,6 x 152,4 mm)
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Memotong setiap halaman sesuai area cetaknya, menegakkannya, dan menyesuaikannya dengan lembar tanpa meregangkan. Satu label per lembar.
+	Find untagged content	Temukan konten tanpa tag
+	No untagged content was found.	Tidak ditemukan konten tanpa tag.
+	Found {n} untagged content problems.	Ditemukan {n} masalah konten tanpa tag.
+	Tag form fields	Beri tag pada kolom formulir
+	Mark as artifact	Tandai sebagai artefak
+	Remove this leaf tag from reading order and mark its direct content as an artifact	Hapus tag daun ini dari urutan baca dan tandai konten langsungnya sebagai artefak
+	Mark content as artifact	Tandai konten sebagai artefak
+	Word count	Jumlah kata
+	Current page only	Hanya halaman saat ini
+	Exclude tagged tables	Kecualikan tabel bertag
+	Exclude tagged code blocks	Kecualikan blok kode bertag
+	Exclude image/OCR text	Kecualikan teks gambar/OCR
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	Pengecualian menggunakan tag PDF. Tabel dan kode tanpa tag tetap disertakan. Pengecualian gambar juga menghapus teks tak terlihat.
+	Words	Kata
+	Characters	Karakter
+	Characters without spaces	Karakter tanpa spasi
+	Pages counted	Halaman yang dihitung
+	Some pages contain no countable text. Scanned images need OCR first.	Beberapa halaman tidak berisi teks yang dapat dihitung. Gambar hasil pemindaian memerlukan OCR terlebih dahulu.
+	Some content could not be classified safely and was kept in the count.	Beberapa konten tidak dapat diklasifikasikan dengan aman dan tetap dihitung.
+	Counting words… {n} pages read	Menghitung kata… {n} halaman dibaca
+	Word counting stopped unexpectedly.	Penghitungan kata berhenti secara tidak terduga.
+	Word count…	Hitung kata…
+@id	file.word_count	Hitung kata…
+	Standard	Standar
+	Mobile	Seluler
+	Merge image fragments	Gabungkan fragmen gambar
+	Optimizing… merging image fragments	Mengoptimalkan… menggabungkan fragmen gambar
+	Side by side	Berdampingan
+	New file only	Hanya berkas baru
+	Old file: {name}	Berkas lama: {name}
+	New file: {name}	Berkas baru: {name}
+	Print as image	Cetak sebagai gambar
+	Resolution:	Resolusi:
+	Use it when a printer skips text, shading or transparency. The print is no longer searchable text; with Print in grayscale, the pictures are grey.	Gunakan saat printer melewatkan teks, arsiran atau transparansi. Hasil cetakan tidak lagi berupa teks yang dapat dicari; dengan Cetak dalam skala abu-abu, gambar menjadi abu-abu.
+	Crop Image	Pangkas gambar
+	Remove Crop	Hapus pangkasan
+	Trim the picture with its handles; Enter or Done applies	Pangkas gambar dengan pegangannya; Enter atau Selesai menerapkannya
+	Redaction mark appearance	Tampilan tanda redaksi
+	Outline colour:	Warna garis tepi:
+	Fill colour:	Warna isian:
+	Shown while the pointer is over a mark.	Ditampilkan saat pointer berada di atas tanda.
+	Opacity:	Opasitas:
+	Make properties default	Jadikan properti default
+	Pages selected	Halaman yang dipilih
+	Page properties	Properti halaman
+	The password must have at least 8 characters.	Kata sandi harus memiliki minimal 8 karakter.
+theme	Appearance	Tampilan
