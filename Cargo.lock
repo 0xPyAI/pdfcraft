@@ -1145,6 +1145,7 @@ dependencies = [
 [[package]]
 name = "craft-docpath"
 version = "0.1.0"
+source = "git+https://github.com/aiongg/craft-libs?rev=12281d07fedff5c955bb68344fb287aa5d87971e#12281d07fedff5c955bb68344fb287aa5d87971e"
 
 [[package]]
 name = "craft-print"
