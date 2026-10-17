@@ -5804,9 +5804,7 @@ trailer << /Root 1 0 R >>
             assert!(p.error.is_none(), "{font}: {:?}", p.error);
             // The rows (y down) of the i-th letter that have dark pixels.
             let ink_rows = |i: u32| -> Vec<u32> {
-                (0..p.height)
-                    .filter(|y| ((8 + 40 * i)..(48 + 40 * i).min(p.width)).any(|x| p.rgba[((y * p.width + x) * 4) as usize] < 128))
-                    .collect()
+                (0..p.height).filter(|y| ((8 + 40 * i)..(48 + 40 * i).min(p.width)).any(|x| p.rgba[((y * p.width + x) * 4) as usize] < 128)).collect()
             };
             for (pair, (_, name)) in pairs.iter().enumerate() {
                 let (base, accented) = (ink_rows(2 * pair as u32), ink_rows(2 * pair as u32 + 1));
