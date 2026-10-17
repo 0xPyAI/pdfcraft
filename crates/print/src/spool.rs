@@ -48,32 +48,41 @@ pub(crate) fn output_within(command: &mut std::process::Command, limit: std::tim
     };
     // Read on a thread of its own, so a full pipe never holds the command while the deadline is
     // kept here. Past the cap the rest is drained and dropped, so the command still finishes.
+    // The output comes back over a channel rather than through `join`: a process the command
+    // started can keep the pipe open after the command itself has exited or been killed, and
+    // the wait for the output must end at the deadline too. Such a reader is left to finish on
+    // its own when that process closes the pipe.
+    let (tx, rx) = std::sync::mpsc::channel();
     let reader = std::thread::Builder::new().name("command output".into()).spawn(move || {
         let mut out = Vec::new();
         let read = (&mut stdout).take(OUTPUT_CAP).read_to_end(&mut out);
         let _ = std::io::copy(&mut stdout, &mut std::io::sink());
-        read.map(|_| out)
+        let _ = tx.send(read.map(|_| out));
     });
-    let reader = match reader {
-        Ok(reader) => reader,
-        Err(e) => {
-            stop(&mut child);
-            return Err(e);
-        }
-    };
+    if let Err(e) = reader {
+        stop(&mut child);
+        return Err(e);
+    }
+    let timed_out = || std::io::Error::new(std::io::ErrorKind::TimedOut, format!("the command did not answer within {limit:?}"));
     let deadline = std::time::Instant::now() + limit;
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => return reader.join().map_err(|_| std::io::Error::other("the command's output was lost"))?,
+            Ok(Some(_)) => {
+                // A moment's grace, so output written just before an exit at the deadline counts.
+                let left = deadline.saturating_duration_since(std::time::Instant::now()).max(std::time::Duration::from_millis(100));
+                return match rx.recv_timeout(left) {
+                    Ok(read) => read,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(timed_out()),
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(std::io::Error::other("the command's output was lost")),
+                };
+            }
             Ok(None) if std::time::Instant::now() >= deadline => {
                 stop(&mut child);
-                let _ = reader.join();
-                return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("the command did not answer within {limit:?}")));
+                return Err(timed_out());
             }
             Ok(None) => std::thread::sleep(std::time::Duration::from_millis(10)),
             Err(e) => {
                 stop(&mut child);
-                let _ = reader.join();
                 return Err(e);
             }
         }

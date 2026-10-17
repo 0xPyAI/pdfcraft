@@ -303,6 +303,22 @@ fn default_printer(printers: &[spool::Printer]) -> Option<String> {
     printers.iter().find(|p| p.default).or(printers.first()).map(|p| p.name.clone())
 }
 
+/// Asks for a frame when a worker thread ends, also when it panics: [`PdfCraftApp::poll_print`]
+/// then sees the answer, or the disconnected channel of a worker that died, without waiting
+/// for some other event to draw (#2108 review). Declared before the worker's sender, so the
+/// sender is dropped first and the frame finds the channel closed.
+#[cfg(not(target_arch = "wasm32"))]
+struct WakeOnExit(Option<egui::Context>);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for WakeOnExit {
+    fn drop(&mut self) {
+        if let Some(ctx) = &self.0 {
+            ctx.request_repaint();
+        }
+    }
+}
+
 impl PdfCraftApp {
     pub fn open_print(&mut self) {
         let Some((i, _)) = self.active_ids() else { return };
@@ -394,13 +410,12 @@ impl PdfCraftApp {
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
-        let ctx = self.ctx.clone();
+        let wake = WakeOnExit(self.ctx.clone());
         std::thread::spawn(move || {
+            let _wake = wake;
+            let tx = tx;
             // The receiver may be gone (the app quit): nothing to report to then.
             let _ = tx.send(source());
-            if let Some(ctx) = ctx {
-                ctx.request_repaint();
-            }
         });
         self.print_tasks.printers = Some(rx);
     }
@@ -414,14 +429,13 @@ impl PdfCraftApp {
         }
         let source: OptionsSource = self.options_source.clone().unwrap_or_else(|| std::sync::Arc::new(|p: &str| spool::printer_options(p)));
         let (tx, rx) = std::sync::mpsc::channel();
-        let ctx = self.ctx.clone();
+        let wake = WakeOnExit(self.ctx.clone());
         let name = printer.clone();
         let spawned = std::thread::Builder::new().name("printer options".into()).spawn(move || {
+            let _wake = wake;
+            let tx = tx;
             // The receiver may be gone (the app quit): nothing to report to then.
             let _ = tx.send(source(&name));
-            if let Some(ctx) = ctx {
-                ctx.request_repaint();
-            }
         });
         match spawned {
             Ok(_) => self.print_tasks.options.push((printer, rx)),

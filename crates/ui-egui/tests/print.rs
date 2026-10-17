@@ -486,3 +486,40 @@ fn printer_options_are_read_off_the_gui_thread_and_a_dead_read_offers_nothing() 
     assert_eq!(h.state().print_draft.driver_options, Some(("Dead".into(), Vec::new())), "a dead read offers nothing, and the panel says so");
     h.get_by_label("This printer offers no settings of its own.");
 }
+
+/// A read of the printer's options that dies still asks for a frame, so an idle dialog stops
+/// saying it is reading without waiting for the mouse to move (#2108 review).
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_dead_options_read_wakes_an_idle_dialog() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    let mut h = harness();
+    let gate = Arc::new(Mutex::new(()));
+    let hold = gate.lock().unwrap();
+    let wait = gate.clone();
+    let dying = Arc::new(AtomicBool::new(false));
+    let flag = dying.clone();
+    h.state_mut().options_source = Some(Arc::new(move |_: &str| {
+        let _open = wait.lock();
+        flag.store(true, Ordering::SeqCst);
+        panic!("the read died");
+    }));
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(2);
+    let d = &mut h.state_mut().print_draft;
+    d.driver_options = None;
+    d.driver_options_loading = Some("Office".into());
+    d.read_options_for = Some("Office".into());
+    d.show_driver_options = true;
+    h.run();
+    assert!(!h.ctx.has_requested_repaint(), "the dialog is idle while the read waits");
+    drop(hold);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !(dying.load(Ordering::SeqCst) && h.ctx.has_requested_repaint()) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(h.ctx.has_requested_repaint(), "the dead read asked for a frame");
+    h.run();
+    assert_eq!(h.state().print_draft.driver_options, Some(("Office".into(), Vec::new())));
+}

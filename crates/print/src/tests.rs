@@ -781,9 +781,21 @@ mod bounded_commands {
         match std::env::var(MODE).as_deref() {
             Ok("answer") => println!("hello from the command"),
             Ok("hang") => std::thread::sleep(std::time::Duration::from_secs(60)),
+            // Holds the output pipe it inherited for a while, as a daemon a command starts can.
+            Ok("linger") => std::thread::sleep(LINGER),
+            // Starts a lingering process on its own output, then exits or hangs itself.
+            Ok(mode @ ("orphan-exit" | "orphan-hang")) => {
+                let _ = command("linger").spawn();
+                println!("started");
+                if mode == "orphan-hang" {
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                }
+            }
             _ => {}
         }
     }
+
+    const LINGER: std::time::Duration = std::time::Duration::from_secs(8);
 
     fn command(mode: &str) -> std::process::Command {
         let mut c = std::process::Command::new(std::env::current_exe().unwrap());
@@ -803,5 +815,18 @@ mod bounded_commands {
         let err = crate::spool::output_within(&mut command("hang"), std::time::Duration::from_millis(500)).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
         assert!(started.elapsed() < std::time::Duration::from_secs(20), "stopped soon after the deadline, not when the command gives up");
+    }
+
+    /// A process the command started keeps the output pipe open after the command has exited,
+    /// or after it was killed at the deadline: the wait still ends at the deadline (#2108
+    /// review), not when that process lets go of the pipe.
+    #[test]
+    fn a_process_left_holding_the_output_does_not_extend_the_wait() {
+        for mode in ["orphan-exit", "orphan-hang"] {
+            let started = std::time::Instant::now();
+            let err = crate::spool::output_within(&mut command(mode), std::time::Duration::from_millis(1500)).unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::TimedOut, "{mode}");
+            assert!(started.elapsed() < LINGER / 2, "{mode}: returned after {:?}, when the lingering process let go", started.elapsed());
+        }
     }
 }
