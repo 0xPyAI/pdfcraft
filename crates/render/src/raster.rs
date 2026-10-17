@@ -6038,6 +6038,54 @@ trailer << /Root 1 0 R >>
         assert_eq!(pixel(&on, 150, 55), &[255, 255, 255, 255], "the image's white quadrant stays white");
     }
 
+    /// #2970: a page's objects composite with a transparent backdrop and the page group is then
+    /// put on the paper, so a separable blend mode only blends where something was drawn. A
+    /// green fill with `/BM /Screen` (or Lighten, Difference…) half over a red square is yellow
+    /// (or whatever the mode gives) over the red, and plain green over the empty page: blending
+    /// with the white paper made it white or magenta.
+    #[test]
+    fn blend_modes_over_an_empty_part_of_the_page_keep_their_colour() {
+        let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..4].to_vec();
+        for (mode, over_red) in [
+            ("Normal", [0, 255, 0]),
+            ("Multiply", [0, 0, 0]),
+            ("Screen", [255, 255, 0]),
+            ("Lighten", [255, 255, 0]),
+            ("Difference", [255, 255, 0]),
+            ("Exclusion", [255, 255, 0]),
+            ("ColorDodge", [255, 0, 0]),
+            ("Overlay", [255, 0, 0]),
+        ] {
+            let content = "1 0 0 rg 20 20 150 150 re f /G1 gs 0 1 0 rg 100 50 150 120 re f";
+            let pdf = format!(
+                "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /ExtGState << /G1 5 0 R >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /ExtGState /BM /{mode} >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+                content.len()
+            );
+            let p = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default()).render(RenderRequest {
+                page: 0,
+                kind: RequestKind::Pixels,
+                tile: None,
+                scale: 1.0,
+                tag: 0,
+                ..Default::default()
+            });
+            assert!(p.error.is_none(), "{mode}: {:?}", p.error);
+            // Pixel rows run top down: PDF (210, 100) and (130, 100) are rows 100 from the top.
+            assert_eq!(px(&p, 210, 100), vec![0, 255, 0, 255], "{mode} over the empty page");
+            assert_eq!(px(&p, 130, 100)[..3], over_red, "{mode} over the red square");
+            assert_eq!(px(&p, 280, 10), vec![255, 255, 255, 255], "{mode}: the paper stays white");
+        }
+    }
+
     /// Reading colours replace *document* colours, never annotation colours (issue #1548): a
     /// highlight keeps its `/C`, so on a dark background the content under it shows through the
     /// Multiply blend in the highlight's colour instead of being darkened into invisibility.
