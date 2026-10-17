@@ -2149,11 +2149,11 @@ impl PdfCraftApp {
     }
 
     /// Changes the workspace and the tool that goes with it. The mode bar (through
-    /// [`Self::select_mode`]) and the Read mode command both come here, so they leave Edit alike.
-    /// Edit turns on Edit text & images at once, as Acrobat does: every paragraph and image on the
-    /// page gets its box and is editable with one click. Leaving Edit puts the editing tools down
-    /// again and applies a paragraph still open in the editor.
-    fn enter_mode(&mut self, mode: Mode) {
+    /// [`Self::select_mode`]), the Read mode command and the tool panels' back arrows all come
+    /// here, so they leave Edit alike. Edit turns on Edit text & images at once, as Acrobat does:
+    /// every paragraph and image on the page gets its box and is editable with one click. Leaving
+    /// Edit puts the editing tools down again and applies a paragraph still open in the editor.
+    pub(crate) fn enter_mode(&mut self, mode: Mode) {
         self.mode = mode;
         if mode == Mode::Edit {
             self.quick_tool = QuickTool::EditText;
