@@ -582,7 +582,7 @@ mod cups_options {
             (boundary_queue.as_str(), "Tray2", "Tray2"),
             (boundary_instance.as_str(), "Tray2", "Tray2"),
         ] {
-            let options = spool::printer_options_via_within(destination, &dir, command(&dir, &format!("InputSlot/Paper tray: *{current}"), LIMIT));
+            let options = spool::printer_options_via_within(destination, &dir, command(&dir, &format!("InputSlot/Paper tray: *{current}")), LIMIT);
             assert_eq!(options.len(), 1, "{destination}: the queue's PPD must be read");
             assert_eq!(options[0].default, expected, "{destination}: only valid instance choices override the PPD default");
             assert_eq!(options[0].choices, [("Auto".into(), "Automatic".into()), ("Tray2".into(), "Tray 2".into())]);
