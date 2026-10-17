@@ -2579,6 +2579,7 @@ certificate	Key usage	키 용도
 certificate	Self-signed	자체 서명됨
 certificate	SHA-1 digest	SHA-1 다이제스트
 certificate	SHA-256 digest	SHA-256 다이제스트
+	the name is not a plain file name	이름이 일반 파일 이름이 아닙니다
 @plural	{n} file|{n} files	파일 {n}개
 @plural	{n} comment|{n} comments	주석 {n}개
 @plural	{n} result|{n} results	결과 {n}개

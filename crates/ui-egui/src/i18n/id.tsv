@@ -2583,6 +2583,7 @@ key	Esc	Esc
 key	Home	Home
 key	End	End
 key	Space	Space
+	the name is not a plain file name	nama tersebut bukan nama berkas biasa
 	Allow	Izinkan
 	Maximize	Maksimalkan
 	Minimize	Minimalkan

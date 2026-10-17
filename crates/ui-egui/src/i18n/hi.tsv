@@ -2579,6 +2579,7 @@ certificate	Key usage	कुंजी उपयोग
 certificate	Self-signed	स्व-हस्ताक्षरित
 certificate	SHA-1 digest	SHA-1 डाइजेस्ट
 certificate	SHA-256 digest	SHA-256 डाइजेस्ट
+	the name is not a plain file name	नाम एक सामान्य फ़ाइल नाम नहीं है
 @plural	{n} file|{n} files	{n} फ़ाइल
 @plural	{n} comment|{n} comments	{n} टिप्पणी
 @plural	{n} result|{n} results	{n} परिणाम
