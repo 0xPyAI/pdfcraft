@@ -209,6 +209,8 @@ const NTE_DEVICE_NOT_READY: u32 = 0x8009_0030;
 const NTE_DEVICE_NOT_FOUND: u32 = 0x8009_0035;
 const NTE_USER_CANCELLED: u32 = 0x8009_0036;
 const CRYPT_E_NO_KEY_PROPERTY: u32 = 0x8009_200B;
+// An NTSTATUS (ntstatus.h) that some key providers pass through unchanged.
+const STATUS_NOT_FOUND: u32 = 0xC000_0225;
 
 /// A CNG error with the Windows code and, for the usual ones, what it means.
 fn describe(e: &CngError) -> String {
@@ -223,6 +225,10 @@ fn describe(e: &CngError) -> String {
         // that exists only as 32-bit code, which a 64-bit process can't load.
         NTE_PROVIDER_DLL_FAIL => {
             "its key provider's software failed to load (a smart card or token driver that is missing or broken, or a 32-bit-only provider)"
+        }
+        // #1535: an A3 certificate (key on a token) whose provider can't find the key.
+        STATUS_NOT_FOUND => {
+            "its key provider can't find the key (the smart card or token holding it isn't connected, or its driver doesn't see the key)"
         }
         NTE_NOT_SUPPORTED => "its key provider doesn't support the operation",
         NTE_DEVICE_NOT_READY | NTE_DEVICE_NOT_FOUND => "the smart card or token isn't available",
@@ -250,6 +256,11 @@ mod tests {
             describe(&CngError::WindowsError(0x8009_001D)),
             "its key provider's software failed to load (a smart card or token driver that is missing or broken, or a 32-bit-only provider) (Windows error 0x8009001D)",
             "#2207"
+        );
+        assert_eq!(
+            describe(&CngError::WindowsError(0xC000_0225)),
+            "its key provider can't find the key (the smart card or token holding it isn't connected, or its driver doesn't see the key) (Windows error 0xC0000225)",
+            "#1535"
         );
         assert_eq!(describe(&CngError::WindowsError(0x57)), "Windows error 0x00000057");
         assert_eq!(describe(&CngError::InvalidHashLength), "Invalid hash length");
