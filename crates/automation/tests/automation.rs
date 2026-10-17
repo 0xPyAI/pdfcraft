@@ -64,6 +64,65 @@ fn remote_link_pdf(file: &str, destination: Option<&str>) -> Vec<u8> {
     bytes
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn saving_a_pdf_keeps_the_destinations_extended_attributes() {
+    use rustix::fs::{XattrFlags, getxattr, setxattr};
+    let dir = workdir("save-xattrs");
+    let target = dir.join("a.pdf");
+    let tags = b"<plist version=\"1.0\"><array><string>PdfCraft\n6</string></array></plist>";
+    let binary = b"\0\xffpdfcraft\0";
+    let attributes: &[(&str, &[u8])] = &[("com.apple.metadata:_kMDItemUserTags", tags), ("com.pdfcraft.test", binary)];
+    for (name, value) in attributes {
+        setxattr(&target, *name, value, XattrFlags::empty()).unwrap();
+    }
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path": "a.pdf"}))["doc"].as_u64().unwrap();
+    for full in [false, true] {
+        ok(&mut a, "page_rotate", json!({"doc": doc, "pages": [1], "degrees": 90}));
+        let saved = ok(&mut a, "doc_save", json!({"doc": doc, "full": full}));
+        assert_eq!(saved["incremental"], !full);
+        for (name, value) in attributes {
+            let mut bytes = [0u8; 256];
+            let len = getxattr(&target, *name, &mut bytes[..]).unwrap();
+            assert_eq!(&bytes[..len], *value, "full={full}, {name}");
+        }
+    }
+    // Save As preserves the destination's metadata, not attributes from the open input file.
+    let other = dir.join("other.pdf");
+    std::fs::write(&other, fixture(1)).unwrap();
+    setxattr(&other, "com.pdfcraft.test", b"destination", XattrFlags::empty()).unwrap();
+    ok(&mut a, "doc_save", json!({"doc": doc, "path": "other.pdf"}));
+    let mut bytes = [0u8; 256];
+    let len = getxattr(&other, "com.pdfcraft.test", &mut bytes[..]).unwrap();
+    assert_eq!(&bytes[..len], b"destination");
+    assert_eq!(getxattr(&other, "com.apple.metadata:_kMDItemUserTags", &mut bytes[..]).unwrap_err(), rustix::io::Errno::NOATTR);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_metadata_preservation_error_keeps_the_pdf_and_unsaved_edit() {
+    use rustix::fs::{XattrFlags, setxattr};
+    let dir = workdir("save-xattrs-error");
+    let target = dir.join("a.pdf");
+    let original = std::fs::read(&target).unwrap();
+    setxattr(&target, "com.apple.ResourceFork", &vec![42u8; 16 * 1024 * 1024 + 1], XattrFlags::empty()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path": "a.pdf"}))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_rotate", json!({"doc": doc, "pages": [1], "degrees": 90}));
+    let failure = err(&mut a, "doc_save", json!({"doc": doc}));
+    assert!(failure.to_string().contains("extended attributes"), "{failure}");
+    assert!(failure.to_string().contains("Save As"), "{failure}");
+    assert_eq!(std::fs::read(&target).unwrap(), original);
+    assert_eq!(ok(&mut a, "doc_info", json!({"doc": doc}))["document"]["dirty"], true);
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2, "only the two original PDFs remain");
+    // A fresh name remains usable: metadata refusal doesn't discard the accepted edit.
+    ok(&mut a, "doc_save", json!({"doc": doc, "path": "copy.pdf"}));
+    assert_ne!(std::fs::read(dir.join("copy.pdf")).unwrap(), original);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 fn protected_fixture(password: &str) -> Vec<u8> {
     use pdfcraft_engine::{Edit, Protection, Session};
     let mut session = Session::new();
