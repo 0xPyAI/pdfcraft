@@ -599,7 +599,7 @@ fn interpret_window<'a>(
                 context.get_mut().graphics_state.non_stroke_pattern = n.1.and_then(|name| {
                     resources
                         .get_pattern(name)
-                        .and_then(|d| Pattern::new(d, context, resources))
+                        .and_then(|d| Pattern::new(d, context, resources, &defaults))
                 });
             }
             TypedInstruction::StrokeColorNamed(n) => {
@@ -608,7 +608,7 @@ fn interpret_window<'a>(
                 context.get_mut().graphics_state.stroke_pattern = n.1.and_then(|name| {
                     resources
                         .get_pattern(name)
-                        .and_then(|d| Pattern::new(d, context, resources))
+                        .and_then(|d| Pattern::new(d, context, resources, &defaults))
                 });
             }
             TypedInstruction::BeginMarkedContentWithProperties(bdc) => {
@@ -860,7 +860,13 @@ fn interpret_window<'a>(
                     .get_shading(s.0)
                     .and_then(|o| {
                         let (dict, stream) = dict_or_stream(&o)?;
-                        Shading::new(dict, stream, &context.interpreter_cache.object_cache)
+                        // PdfCraft patch (38): a shading in a device space draws in its default.
+                        Shading::new(
+                            dict,
+                            stream,
+                            &context.interpreter_cache.object_cache,
+                            &defaults,
+                        )
                     })
                     .map(|s| {
                         Pattern::Shading(ShadingPattern {

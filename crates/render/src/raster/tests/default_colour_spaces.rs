@@ -1,8 +1,8 @@
 //! #1201: the `/DefaultGray`, `/DefaultRGB` and `/DefaultCMYK` colour spaces of a resource
-//! dictionary stand in for the device spaces its content selects, with colour operators and
-//! with images (ISO 32000-2 §8.6.5.6, vendored hayro-interpret patch 38). hayro drew device
-//! colour as it was, so pages that calibrate their device colour this way (common in PDF/A)
-//! came out in the wrong colours.
+//! dictionary stand in for the device spaces its content selects, with colour operators, with
+//! images and with shadings (ISO 32000-2 §8.6.5.6, vendored hayro-interpret patch 38). hayro
+//! drew device colour as it was, so pages that calibrate their device colour this way (common
+//! in PDF/A) came out in the wrong colours.
 //!
 //! The defaults are synthetic ICC profiles built here, each sending device colour somewhere it
 //! cannot go uncalibrated: red to green (or blue), black to mid grey, black ink to blue.
@@ -250,6 +250,61 @@ fn device_images_draw_in_the_default_colour_spaces() {
     assert_eq!(device[5], BLACK, "inline /G image without DefaultGray");
 }
 
+/// Shadings whose `/ColorSpace` is a device space are drawn in the default for it too: painted
+/// by `sh` or as a shading pattern, with their colours from a function (axial) or from their
+/// vertices (a Type 4 mesh).
+#[test]
+fn device_shadings_draw_in_the_default_colour_spaces() {
+    let axial = |space: &str, colour: &str| {
+        format!(
+            "<< /ShadingType 2 /ColorSpace /{space} /Coords [0 0 130 0] /Extend [true true] \
+             /Function << /FunctionType 2 /Domain [0 1] /C0 [{colour}] /C1 [{colour}] /N 1 >> >>"
+        )
+    };
+    // Two red triangles over the page: a flag, x, y and red, green and blue, a byte each.
+    let mut mesh: Vec<u8> = Vec::new();
+    for (x, y) in [(0, 0), (255, 0), (0, 255), (255, 0), (255, 255), (0, 255)] {
+        mesh.extend_from_slice(&[0, x, y, 255, 0, 0]);
+    }
+    let objects = [
+        profile_stream(3, rgb_profile([1, 2, 0])),
+        profile_stream(1, gray_profile()),
+        (
+            format!(
+                "<< /ShadingType 4 /ColorSpace /DeviceRGB /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 \
+                 /Decode [0 255 0 255 0 1 0 1 0 1] /Length {} >>",
+                mesh.len()
+            ),
+            mesh,
+        ),
+    ];
+    let content = "q 0 0 30 70 re W n /A sh Q /Pattern cs /P scn 32 0 30 70 re f \
+                   q 64 0 30 70 re W n /M sh Q q 96 0 30 70 re W n /G sh Q";
+    let points = [(15, 35), (47, 35), (79, 35), (111, 35)];
+    let shadings = format!(
+        "/Shading << /A {} /M 7 0 R /G {} >> /Pattern << /P << /PatternType 2 /Shading {} >> >>",
+        axial("DeviceRGB", "1 0 0"),
+        axial("DeviceGray", "0"),
+        axial("DeviceRGB", "1 0 0")
+    );
+    let calibrated = colours(
+        content,
+        &format!("<< /ColorSpace << /DefaultRGB [/ICCBased 5 0 R] /DefaultGray [/ICCBased 6 0 R] >> {shadings} >>"),
+        &objects,
+        &points,
+    );
+    assert_near(calibrated[0], GREEN, "sh, an axial shading in DeviceRGB");
+    assert_near(calibrated[1], GREEN, "a shading pattern in DeviceRGB");
+    assert_near(calibrated[2], GREEN, "sh, a Type 4 mesh in DeviceRGB");
+    assert_near(calibrated[3], MID_GREY, "sh, an axial shading in DeviceGray");
+
+    let device = colours(content, &format!("<< {shadings} >>"), &objects, &points);
+    assert_near(device[0], RED, "sh, an axial shading without DefaultRGB");
+    assert_near(device[1], RED, "a shading pattern without DefaultRGB");
+    assert_near(device[2], RED, "sh, a Type 4 mesh without DefaultRGB");
+    assert_near(device[3], BLACK, "sh, an axial shading without DefaultGray");
+}
+
 /// One image drawn by a page with DefaultRGB and by a form that switches it off is decoded
 /// for each: the decoded-image cache keeps the two apart (hayro-interpret patch 32 shares a
 /// decode between every draw of an image).
@@ -271,9 +326,11 @@ fn an_image_drawn_with_and_without_a_default_keeps_both_colours() {
 }
 
 /// A form XObject draws device colour in the default of the resources it is drawn with: its
-/// own when it has one, else the page's (with or without a `/Resources` of its own, and
-/// through a form nested in it). A form whose own default is a device space or not a usable
-/// default draws device colour, not the page's default.
+/// own when it has one, else the page's (with or without a `/Resources` of its own, with a
+/// `/ColorSpace` of its own that has no default, and through a form nested in it). Poppler and
+/// MuPDF draw these forms in the page's default too, though §8.6.5.6 names only the current
+/// resource dictionary. A form whose own default is a device space or not a usable default
+/// draws device colour, not the page's default.
 #[test]
 fn forms_inherit_the_default_colour_spaces_they_do_not_override() {
     let blue = rgb_profile([2, 0, 1]);
@@ -288,12 +345,13 @@ fn forms_inherit_the_default_colour_spaces_they_do_not_override() {
         form("/Resources << /ColorSpace << /DefaultRGB /DeviceRGB >> >>", "1 0 0 rg 88 37 20 33 re f"),
         form("/Resources << /ColorSpace << /DefaultRGB [/Lab << /WhitePoint [0.9642 1 0.8249] >>] >> >>", "1 0 0 rg 110 37 20 33 re f"),
         form("", "1 0 0 rg 0 0 20 33 re f"),
+        form("/Resources << /ColorSpace << /CS1 /DeviceGray >> >>", "1 0 0 rg 22 0 20 33 re f"),
     ];
     let got = colours(
-        "1 0 0 rg 0 37 20 33 re f /A Do /B Do /C Do /D Do /E Do",
-        "<< /ColorSpace << /DefaultRGB [/ICCBased 5 0 R] >> /XObject << /A 7 0 R /B 8 0 R /C 9 0 R /D 10 0 R /E 11 0 R >> >>",
+        "1 0 0 rg 0 37 20 33 re f /A Do /B Do /C Do /D Do /E Do /F Do",
+        "<< /ColorSpace << /DefaultRGB [/ICCBased 5 0 R] >> /XObject << /A 7 0 R /B 8 0 R /C 9 0 R /D 10 0 R /E 11 0 R /F 13 0 R >> >>",
         &objects,
-        &[(10, 17), (32, 17), (54, 17), (76, 17), (98, 17), (120, 17), (10, 53)],
+        &[(10, 17), (32, 17), (54, 17), (76, 17), (98, 17), (120, 17), (10, 53), (32, 53)],
     );
     assert_near(got[0], GREEN, "the page");
     assert_near(got[1], GREEN, "a form without /Resources");
@@ -302,6 +360,7 @@ fn forms_inherit_the_default_colour_spaces_they_do_not_override() {
     assert_eq!(got[4], RED, "a form whose DefaultRGB is /DeviceRGB");
     assert_eq!(got[5], RED, "a form whose DefaultRGB is a Lab space");
     assert_near(got[6], BLUE, "a form nested in the one with its own DefaultRGB");
+    assert_near(got[7], GREEN, "a form whose /ColorSpace has no DefaultRGB");
 }
 
 /// A default that cannot stand in for its device space (ISO 32000-2 §8.6.5.6: a Lab, Indexed
