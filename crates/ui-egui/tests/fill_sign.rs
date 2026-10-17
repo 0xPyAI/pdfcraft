@@ -168,6 +168,60 @@ fn fill_text_size_controls_new_text_and_survives_settings_restore() {
     assert_eq!(restored.fill_text_size, 24.0, "invalid settings do not change the size");
 }
 
+/// #1274: with a placed Fill & Sign text selected, the Font size control resizes that text,
+/// not only text typed afterwards; with nothing selected it changes nothing on the page.
+#[test]
+fn fill_text_size_resizes_the_selected_text() {
+    let mut h = harness();
+    h.state_mut().execute("sign.fill.text");
+    click(&mut h, 50.0, 250.0);
+    h.event(egui::Event::Text("Resize me".into()));
+    h.run_steps(1);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    let height = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        let a = s.session.get(s.views[0].id).unwrap().info.annotations.iter().find(|a| a.contents.as_deref() == Some("Resize me")).cloned().unwrap();
+        a.rect[3] - a.rect[1]
+    };
+    let before = height(&h);
+    let set_size = |h: &mut Harness<'static, PdfCraftApp>, value: &str| {
+        h.query_all_by_role(egui::accesskit::Role::SpinButton)
+            .find(|n| n.value().is_some_and(|v| v.ends_with(" pt")))
+            .expect("the Font size control")
+            .click();
+        h.run_steps(2);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.event(egui::Event::Text(value.into()));
+        h.run_steps(1);
+        h.key_press(egui::Key::Enter);
+        h.run_steps(4);
+    };
+    // Nothing selected: only the size for new text changes.
+    h.state_mut().views[0].comments.selected = None;
+    set_size(&mut h, "18");
+    assert_eq!(h.state().fill_text_size, 18.0);
+    assert_eq!(height(&h), before, "an unselected placed text keeps its size");
+    // The placed text picked up with the Add text tool, then resized.
+    let annotation = {
+        let s = h.state();
+        s.session
+            .get(s.views[0].id)
+            .unwrap()
+            .info
+            .annotations
+            .iter()
+            .find(|a| a.contents.as_deref() == Some("Resize me"))
+            .map(|a| (a.page, a.index))
+            .unwrap()
+    };
+    h.state_mut().views[0].comments.selected = Some(annotation);
+    set_size(&mut h, "36");
+    assert_eq!(h.state().fill_text_size, 36.0);
+    let after = height(&h);
+    assert!(after > before * 2.0, "36 pt text has a taller box than 10 pt text: {before} -> {after}");
+}
+
 #[test]
 fn the_type_box_grows_as_text_is_typed() {
     let mut h = harness();
