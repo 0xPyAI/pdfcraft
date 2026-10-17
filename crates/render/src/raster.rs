@@ -6038,6 +6038,70 @@ trailer << /Root 1 0 R >>
         assert_eq!(pixel(&on, 150, 55), &[255, 255, 255, 255], "the image's white quadrant stays white");
     }
 
+    /// #2971: in a knockout transparency group (`/K true`) each element composites with the
+    /// group's initial backdrop, not with the elements drawn before it in the group. A blue
+    /// square at 50 % opacity over a red one at 50 % shows only the blue where they overlap;
+    /// without `/K` the two blend. An element drawn through a layer of its own (here a nested
+    /// group, a stencil mask) doesn't knock out yet, but it must not erase what was drawn before it
+    /// either.
+    #[test]
+    fn knockout_groups_replace_what_their_elements_cover() {
+        let render = |group: &str, form: &str| {
+            let pdf = format!(
+                "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /XObject << /Fm1 5 0 R >> /ExtGState << /G << /ca 0.5 >> >> >> >> endobj
+4 0 obj << /Length 39 >> stream
+/Fm1 Do /G gs 0 1 0 rg 10 10 30 30 re f
+endstream endobj
+5 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency {group} >> /Resources << /ExtGState << /A << /ca 0.5 >> >> /XObject << /In 6 0 R /Msk 7 0 R >> >> /Length {} >> stream
+{form}
+endstream endobj
+6 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /A << /ca 0.5 >> >> >> /Length 30 >> stream
+/A gs 0 0 1 rg 100 50 150 120 re f
+endstream endobj
+7 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 2 /ImageMask true /Length 2 >> stream
+  
+endstream endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+                form.len()
+            );
+            let p = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default()).render(RenderRequest {
+                page: 0,
+                kind: RequestKind::Pixels,
+                tile: None,
+                scale: 1.0,
+                tag: 0,
+                ..Default::default()
+            });
+            assert!(p.error.is_none(), "{group} {form}: {:?}", p.error);
+            p
+        };
+        let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..3].to_vec();
+        let near = |a: &[u8], b: [u8; 3]| a.iter().zip(b).all(|(a, b)| a.abs_diff(b) <= 2);
+        let squares = "/A gs 1 0 0 rg 20 20 150 150 re f 0 0 1 rg 100 50 150 120 re f";
+        let nested = "/A gs 1 0 0 rg 20 20 150 150 re f /In Do";
+        // Pixel rows run top down: PDF (x, y) is (x, 200 - y).
+        let knockout = render("/I true /K true", squares);
+        assert!(near(&px(&knockout, 130, 100), [128, 128, 255]), "knocked out: {:?}", px(&knockout, 130, 100));
+        assert!(near(&px(&knockout, 50, 160), [255, 128, 128]), "red alone: {:?}", px(&knockout, 50, 160));
+        assert!(near(&px(&knockout, 210, 100), [128, 128, 255]), "blue alone: {:?}", px(&knockout, 210, 100));
+        assert!(near(&px(&knockout, 280, 10), [255, 255, 255]), "paper: {:?}", px(&knockout, 280, 10));
+        // Page content after the group composites normally again: green at 50 % over the red.
+        assert!(near(&px(&knockout, 30, 170), [128, 191, 64]), "after the group: {:?}", px(&knockout, 30, 170));
+        let plain = render("/I true", squares);
+        assert!(near(&px(&plain, 130, 100), [128, 64, 191]), "blended: {:?}", px(&plain, 130, 100));
+        // The nested group is drawn at the outer 50 % as well: blue at 25 %.
+        let nested = render("/I true /K true", nested);
+        assert!(near(&px(&nested, 50, 160), [255, 128, 128]), "red kept: {:?}", px(&nested, 50, 160));
+        assert!(near(&px(&nested, 210, 100), [191, 191, 255]), "nested blue: {:?}", px(&nested, 210, 100));
+        // So is a stencil mask, drawn through a layer of its own.
+        let stencil = render("/I true /K true", "/A gs 1 0 0 rg 20 20 150 150 re f 0 0 1 rg q 150 0 0 120 100 50 cm /Msk Do Q");
+        assert!(near(&px(&stencil, 50, 160), [255, 128, 128]), "red kept beside a stencil: {:?}", px(&stencil, 50, 160));
+    }
+
     /// Reading colours replace *document* colours, never annotation colours (issue #1548): a
     /// highlight keeps its `/C`, so on a dark background the content under it shows through the
     /// Multiply blend in the highlight's colour instead of being darkened into invisibility.

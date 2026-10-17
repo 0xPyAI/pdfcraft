@@ -170,6 +170,10 @@ pub(crate) fn draw_form_xobject<'a, 'b>(
 
         context.get_mut().graphics_state.non_stroke_alpha = 1.0;
         context.get_mut().graphics_state.stroke_alpha = 1.0;
+        // PdfCraft patch (39): its elements knock each other out (#2971).
+        if x_object.is_knockout {
+            device.set_knockout();
+        }
     }
 
     device.set_soft_mask(context.get().graphics_state.soft_mask.clone());

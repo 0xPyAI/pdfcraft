@@ -73,6 +73,11 @@ pub trait Device<'a> {
     fn begin_annotations(&mut self) {}
     /// PdfCraft patch (29): the page's annotations are done; what follows is page content.
     fn end_annotations(&mut self) {}
+    /// PdfCraft patch (39): the transparency group just pushed is a knockout group (`/K true`):
+    /// each of its elements composites with the group's initial backdrop, not with the
+    /// elements drawn before it in the group (ISO 32000-2, knockout groups), until the
+    /// matching `pop_transparency_group`.
+    fn set_knockout(&mut self) {}
 }
 
 /// A device that discards all drawing operations.
