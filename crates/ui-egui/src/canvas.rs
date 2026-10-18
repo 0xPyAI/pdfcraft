@@ -299,6 +299,74 @@ pub struct RasterMemory {
     pub pending_requests: usize,
 }
 
+/// A historical snapshot opened from another document: View signed version opens the bytes
+/// a signature covers, View revision an earlier incremental revision. Repeats reuse the tab,
+/// and the tab and notice bar name what it is, instead of piling up identical tabs.
+/// What a historical snapshot shows: the bytes a signature covers, or an earlier
+/// incremental revision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapshotKind {
+    SignedVersion,
+    Revision,
+}
+
+#[derive(Clone, Debug)]
+pub struct Snapshot {
+    pub kind: SnapshotKind,
+    /// The 1-based revision shown.
+    pub revision: usize,
+    /// The name of the document it was opened from.
+    pub from: String,
+}
+
+/// A validation badge drawn over a signature widget: the widget rectangle (user space), the verdict it shows, and its hover text.
+pub(crate) struct SignatureBadge {
+    pub rect: [f64; 4],
+    pub status: pdfcraft_engine::SignatureStatus,
+    pub summary: &'static str,
+}
+
+/// The validation badges drawn over one page's signature widgets: signed, visible widgets
+/// on this page with coordinates that survive the cast to screen space. Hostile files can
+/// carry NaN, infinite or gigantic rectangles, which must never reach the painter.
+pub(crate) fn signature_badges(signatures: &[pdfcraft_engine::SignatureInfo], page: usize) -> Vec<SignatureBadge> {
+    signatures
+        .iter()
+        .filter(|s| s.signed && s.visible && s.page == Some(page))
+        .filter_map(|s| {
+            s.rect.filter(|r| r.iter().all(|v| v.is_finite() && v.abs() < f32::MAX as f64)).map(|rect| SignatureBadge {
+                rect,
+                status: s.status,
+                summary: s.summary(),
+            })
+        })
+        .collect()
+}
+
+/// The name shown for a document tab, the window title and the Combine picker.
+/// A snapshot reads like its source document, plus the snapshot suffix that tells
+/// the tabs apart. Without a title the file name (which already carries the suffix)
+/// is enough.
+pub(crate) fn tab_label(app: &PdfCraftApp, index: usize) -> Option<String> {
+    let view = app.views.get(index)?;
+    let doc = app.session.get(view.id)?;
+    let Some(snap) = view.snapshot.as_ref() else { return Some(doc.display_name()) };
+    Some(snapshot_tab_name(&doc.display_name(), &doc.name, snap))
+}
+
+/// A snapshot's tab name from its source title, file name and marker. Pure so the
+/// tab strip, window title and picker cannot disagree with each other.
+pub(crate) fn snapshot_tab_name(title: &str, file_name: &str, snapshot: &Snapshot) -> String {
+    if title == file_name {
+        return file_name.into();
+    }
+    if snapshot.kind == SnapshotKind::SignedVersion {
+        format!("{title} (signed version)")
+    } else {
+        format!("{title} (revision {})", snapshot.revision)
+    }
+}
+
 pub struct DocView {
     pub id: DocId,
     pub zoom: f32,
@@ -320,6 +388,11 @@ pub struct DocView {
     /// The file changed on disk while this document had unsaved changes: the notice bar asks
     /// before replacing it (#431).
     pub disk_changed: bool,
+    /// The snapshot notice bar's Close was clicked: the tab closes at the top of the next
+    /// frame, where no document borrow is held (the bar itself can't close it).
+    pub close_requested: bool,
+    /// A historical snapshot of another document (see [`Snapshot`]): `None` for real documents.
+    pub snapshot: Option<Snapshot>,
     /// Two-page view: show the first page alone, as a cover (View ▸ Page display).
     pub cover: bool,
     /// Previous view / Next view: pages visited before (and after, once going back).
@@ -350,6 +423,8 @@ pub struct DocView {
     /// This frame's consumers, with visible cells ahead of prefetch.
     thumb_demand: HashMap<usize, bool>,
     frame_queue: Vec<RenderRequest>,
+    /// A page-list edit after layout invalidates this frame's scales and page indexes.
+    frame_geometry_changed: bool,
     /// Pages on screen this frame. Their rasters and tiles are always admitted: the viewport
     /// bounds them, and the byte and count limits apply to prefetch only.
     frame_visible: HashSet<usize>,
@@ -379,6 +454,9 @@ pub struct DocView {
     last_press_time: f64,
     last_press_pos: Option<Pos2>,
     last_queue: Vec<RenderRequest>,
+    /// Finished renders wait in the pool instead of reaching the view (tests): what the view
+    /// shows before a raster arrives can be looked at however fast the renderer is.
+    pub hold_rasters: bool,
     viewport_w: f32,
     viewport_h: f32,
     page_count: usize,
@@ -504,6 +582,8 @@ pub struct DocView {
     pub(crate) last_scroll: Vec2,
     /// Side-by-side compare: scroll to here this frame, following the other half.
     pub(crate) sync_scroll: Option<Vec2>,
+    /// The page widget's id, by which the Hand tool finds its drag before the pages are laid out.
+    page_widget: Option<egui::Id>,
     pan_hold_until: f64,
     /// Pages whose raster proved slow (see `SLOW_MILLIS`): only these get the zoom/pan
     /// settle holds. Fast pages render straight through, with no added latency.
@@ -623,6 +703,8 @@ impl DocView {
             notice_dismissed: false,
             scripts_off_noted: false,
             disk_changed: false,
+            close_requested: false,
+            snapshot: None,
             cover: false,
             back: Vec::new(),
             forward: Vec::new(),
@@ -638,6 +720,7 @@ impl DocView {
             thumbs: HashMap::new(),
             thumb_demand: HashMap::new(),
             frame_queue: Vec::new(),
+            frame_geometry_changed: false,
             frame_visible: HashSet::new(),
             stale_thumbs: HashSet::new(),
             stale_tiles: HashSet::new(),
@@ -654,6 +737,7 @@ impl DocView {
             last_press_time: 0.0,
             last_press_pos: None,
             last_queue: Vec::new(),
+            hold_rasters: false,
             viewport_w: 800.0,
             viewport_h: 600.0,
             page_count: info.pages.len(),
@@ -695,6 +779,7 @@ impl DocView {
             sharp_hold_until: 0.0,
             last_scroll: Vec2::ZERO,
             sync_scroll: None,
+            page_widget: None,
             pan_hold_until: 0.0,
             slow_pages: HashSet::new(),
             comments: Default::default(),
@@ -723,6 +808,7 @@ impl DocView {
     /// adopt the new page geometry, keeping the reader's place where possible.
     pub fn document_changed(&mut self, info: &DocInfo) {
         self.invalidate_content();
+        self.frame_geometry_changed = true;
         self.page_count = info.pages.len();
         self.page_heights = info.pages.iter().map(|p| p.height).collect();
         let last = self.page_count.saturating_sub(1);
@@ -744,10 +830,11 @@ impl DocView {
     }
 
     /// The document was replaced by a newer version of its file (#431). The reader's place
-    /// stays: zoom, layout, rotation, page, scroll, view history and the find bar, and the page
-    /// images on screen until their replacements are drawn, so nothing flashes. Everything that
-    /// pointed into the old version (a selected comment, a field being typed in, text being
-    /// edited, a drag, page selection) starts afresh, so no stale index reaches the new one.
+    /// stays: zoom, layout, rotation, page, scroll, view history and the find bar, the snapshot
+    /// marker and its pending close, and the page images on screen until their replacements
+    /// are drawn, so nothing flashes. Everything that pointed into the old version (a selected
+    /// comment, a field being typed in, text being edited, a drag, page selection) starts
+    /// afresh, so no stale index reaches the new one.
     pub fn document_replaced(&mut self, info: &DocInfo) {
         let mut fresh = Self::new(self.id, info, ViewDefaults::default());
         fresh.zoom = self.zoom;
@@ -762,6 +849,8 @@ impl DocView {
         fresh.shown = self.shown;
         fresh.highlight_fields = self.highlight_fields;
         fresh.notice_dismissed = self.notice_dismissed;
+        fresh.snapshot = self.snapshot.clone();
+        fresh.close_requested = self.close_requested;
         fresh.cover = self.cover;
         fresh.back = std::mem::take(&mut self.back);
         fresh.forward = std::mem::take(&mut self.forward);
@@ -1435,6 +1524,7 @@ impl DocView {
 
     /// Start collecting demand from every consumer before scheduling or uploading results.
     pub(crate) fn begin_render_frame(&mut self) {
+        self.frame_geometry_changed = false;
         self.pages_panel = None;
         self.panel_gap = None;
         self.thumb_demand.clear();
@@ -1650,12 +1740,23 @@ impl DocView {
     }
 
     pub(crate) fn finish_render_frame(&mut self, ctx: &egui::Context, info: &DocInfo, pool: &RenderPool) {
+        if self.frame_geometry_changed {
+            // Dialogs and edits can replace pages after the canvas collected demand. Its
+            // scales and indexes belong to the old pages, not to the new renderer (#3149).
+            self.begin_render_frame();
+            self.last_queue.clear();
+            pool.set_queue(Vec::new());
+            ctx.request_repaint();
+            return;
+        }
         let queue = self.prepare_render_queue(info, ctx.pixels_per_point());
         if queue != self.last_queue {
             pool.set_queue(queue.clone());
             self.last_queue = queue;
         }
-        self.receive(ctx, pool);
+        if !self.hold_rasters {
+            self.receive(ctx, pool);
+        }
         if !self.last_queue.is_empty() {
             ctx.request_repaint_after(std::time::Duration::from_millis(30));
         }
@@ -1712,6 +1813,12 @@ impl DocView {
         if let Some(e) = r.error {
             log::warn!("page {}: {e}", r.request.page + 1);
             self.errors.insert(r.request.page, e);
+            return 0;
+        }
+        // Even current demand may have been sized with obsolete geometry or a different
+        // device limit. Check before cache eviction, conversion and every upload path.
+        let max_side = ctx.input(|i| i.max_texture_side);
+        if r.width == 0 || r.height == 0 || r.width as usize > max_side || r.height as usize > max_side {
             return 0;
         }
         // Remember heavy pages: only these get the zoom/pan settle holds, so fast pages
@@ -2204,6 +2311,19 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     {
         f.in_panel = false;
     }
+    // The snapshot notice bar's Close was clicked: close here, where no document borrow is
+    // held. The tab is looked up by id: indices may have shifted since the click, and the
+    // flag rides its own view, so a stale flag can never close the wrong tab.
+    let pending = app.views.get(index).filter(|v| v.close_requested).map(|v| v.id).and_then(|id| app.views.iter().position(|v| v.id == id));
+    if let Some(i) = pending {
+        app.views[i].close_requested = false;
+        if app.has_unsaved_work(i) {
+            app.close_request = Some(crate::CloseRequest::Tab(app.views[i].id));
+        } else {
+            app.close_tab(i);
+        }
+        return;
+    }
     let Some(doc) = app.session.get(app.views[index].id) else { return };
     let info = &doc.info;
     if info.pages.is_empty() {
@@ -2233,6 +2353,13 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         Some(Notice::Repairs) => app.dialog = Some(crate::Dialog::Properties(crate::PropsTab::Advanced)),
         Some(Notice::Security) => app.dialog = Some(crate::Dialog::Properties(crate::PropsTab::Security)),
         Some(Notice::Unlock) => app.unlock_prompt = Some(crate::UnlockPrompt::new(doc, None)),
+        // Flags the view: the tab closes at the top of the next frame, where no document
+        // borrow is held.
+        Some(Notice::Close) => {
+            if let Some(view) = app.views.get_mut(index) {
+                view.close_requested = true;
+            }
+        }
         Some(Notice::Signatures) => app.right = Some(RightPanel::Signatures),
         Some(Notice::FieldHighlights(on)) => app.view_defaults.highlight_fields = on,
         Some(Notice::Console) => app.dialog = Some(crate::Dialog::JsConsole),
@@ -2454,6 +2581,25 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if !std::mem::replace(&mut view.shown, true) {
         scroll = scroll.scroll_offset(Vec2::ZERO);
     }
+    // The Hand tool pans here, before the pages are laid out, so the page moves with the pointer
+    // in the frame the pointer moves (#924). Scrolling by the drag from inside the area moved the
+    // page only after that frame was drawn, a frame behind. The frame egui tells the drag from a
+    // click, the page catches up with all the pointer has moved since the press. A jump asked for
+    // below still wins.
+    if app.quick_tool == QuickTool::Hand
+        && !middle_gesture
+        && let Some(id) = view.page_widget.filter(|id| ui.ctx().is_being_dragged(*id))
+    {
+        let moved = if ui.ctx().drag_started_id() == Some(id) {
+            ui.input(|i| i.pointer.total_drag_delta()).unwrap_or(Vec2::ZERO)
+        } else {
+            ui.input(|i| i.pointer.delta())
+        };
+        // Within the content, as egui keeps it: past an end the page would show there for a
+        // frame and spring back. `max` is never NaN or below zero, so the clamp can't panic.
+        let max = vec2((content_w - avail.width()).max(0.0), (content_h - avail.height()).max(0.0));
+        scroll = scroll.scroll_offset((view.last_scroll - moved).clamp(Vec2::ZERO, max));
+    }
     if let Some(v) = view.sync_scroll.take() {
         scroll = scroll.scroll_offset(v);
     }
@@ -2535,6 +2681,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     };
     let mut open_signature = false;
     let mut hover_text: Option<(Pos2, String)> = None;
+    let mut badge_hover: Option<(Pos2, String)> = None;
     // A dialog, save prompt or palette covers the page. Hover tips are drawn above those
     // windows, so a comment under the pointer would otherwise float over the dialog.
     let page_covered = app.dialog.is_some()
@@ -2598,14 +2745,14 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             ui.scroll_with_delta_animation(delta, egui::style::ScrollAnimation::none());
         }
         let (resp_rect, resp) = ui.allocate_exact_size(vec2(content_w, content_h), Sense::click_and_drag());
+        view.page_widget = Some(resp.id);
         // A drag lasts only while egui reports it, so the mark can't outlive one.
         if !resp.dragged_by(egui::PointerButton::Primary) {
             view.selection_drag = false;
         }
-        // The Hand tool pans: the content widget takes every drag, so scroll by its delta.
+        // The Hand tool pans by this widget's drag, before the pages are laid out (above).
         if hand {
             if resp.dragged() {
-                ui.scroll_with_delta(resp.drag_delta());
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             } else if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -2636,6 +2783,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             view.links.context = None;
         }
         for &i in &visible_pages {
+            badge_hover = None;
             let r = snap_to_pixels(rects[i].translate(origin.to_vec2()), ppp);
             if !r.intersects(visible.expand(400.0)) {
                 continue;
@@ -3292,6 +3440,32 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     view.flash = None;
                 }
             }
+            // Validation is viewer chrome over the signer's original artwork, which
+            // may still say "Signature Not Verified". These badges never enter document
+            // streams, image/text exports, vector printing or Print as Image.
+            for badge in signature_badges(&doc.signatures, i) {
+                let [x0, y0, x1, y1] = badge.rect;
+                let sr = xf.user_rect(info, i, [x0 as f32, y0 as f32, x1 as f32, y1 as f32]);
+                let (icon, color) = crate::sign_ui::signature_status_style(badge.status);
+                painter.rect_stroke(sr, CornerRadius::same(2), Stroke::new(1.5, color), egui::StrokeKind::Outside);
+                // A widget too small for the mark keeps its outline: the verdict still shows.
+                if sr.width() < 4.0 || sr.height() < 4.0 {
+                    continue;
+                }
+                // Big enough to read at a glance, small enough to leave the signer's own
+                // text visible around it.
+                let side = (sr.width().min(sr.height()) * 0.8).clamp(24.0, 192.0);
+                let mark = Rect::from_center_size(sr.center(), vec2(side, side));
+                icons::paint(ui, mark, icon, side * 0.64, color);
+                if let Some(p) = pointer.filter(|p| mark.expand(2.0).contains(*p)) {
+                    badge_hover = Some((p, badge.summary.to_string()));
+                }
+            }
+            // Overlapping widgets paint in order, so the topmost badge owns the hover; an
+            // earlier link or annotation hover still wins over any badge.
+            if hover_text.is_none() {
+                hover_text = badge_hover.take();
+            }
         }
         // ScrollArea ignores the wheel while any widget is dragged, so a text-selection drag
         // scrolls the page itself (#721). After the page loop, so it keeps scrolling once the
@@ -3695,6 +3869,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     }
     if let Some((p, i)) = app.views[index].comments.default_request.take() {
         app.make_comment_default(p, i);
+    }
+    if let Some((p, i, open)) = app.views[index].comments.attachment_request.take() {
+        let doc = app.views[index].id;
+        app.comment_attachment_action(doc, p, i, open);
     }
     if let Some((name, w)) = field_props {
         app.open_field_props(&name, w);
@@ -4102,10 +4280,13 @@ enum Notice {
     Console,
     /// Unlock… (enter the permissions password).
     Unlock,
+    /// Close this historical snapshot tab (View signed version / View revision).
+    Close,
 }
 
-/// The notice bar above the pages: the signature status first (Acrobat's signature bar), then
-/// a form's scripts having been turned off, security, forms and warnings.
+/// The notice bar above the pages: a file changed on disk first, then what a historical
+/// snapshot is, then the signature status bar, a form's scripts having been turned
+/// off, security, forms and warnings.
 fn notices(
     view: &mut DocView,
     doc: &pdfcraft_engine::Document,
@@ -4139,6 +4320,30 @@ fn notices(
             });
         });
         return reload.then_some(Notice::Reload);
+    }
+    // A historical snapshot (View signed version / View revision): what it is, above the
+    // signature and security bars, so the tab is never mistaken for the live document.
+    if let Some(snap) = view.snapshot.as_ref() {
+        let mut close = false;
+        let text = if snap.kind == SnapshotKind::SignedVersion {
+            crate::i18n::fmt(
+                tl!("You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original."),
+                &[("from", &snap.from), ("rev", &snap.revision.to_string())],
+            )
+        } else {
+            crate::i18n::fmt(
+                tl!("You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original."),
+                &[("rev", &snap.revision.to_string()), ("from", &snap.from)],
+            )
+        };
+        notice_bar(ui, t, "clock", t.accent_text, text, |ui| {
+            if crate::widgets::pill_button(ui, tl!("Close"), true).clicked() {
+                close = true;
+            }
+        });
+        if close {
+            return Some(Notice::Close);
+        }
     }
     if let Some((icon, color, template, arg)) = signed {
         let mut open = false;
@@ -4997,6 +5202,84 @@ mod tests {
         assert_eq!(annotation_hover_text(&annotation(true)), None);
     }
 
+    fn signature(signed: bool, visible: bool, page: Option<usize>, rect: Option<[f64; 4]>) -> pdfcraft_engine::SignatureInfo {
+        pdfcraft_engine::SignatureInfo {
+            field: "Signature1".into(),
+            signed,
+            page,
+            rect,
+            visible,
+            signer: None,
+            certificate: None,
+            chain: Vec::new(),
+            date: None,
+            signing_time: None,
+            reason: None,
+            location: None,
+            contact: None,
+            sub_filter: None,
+            doc_timestamp: false,
+            certify: None,
+            revision: 1,
+            signed_len: 0,
+            digest: None,
+            algorithm: None,
+            timestamp: false,
+            timestamp_time: None,
+            status: pdfcraft_engine::SignatureStatus::Valid,
+            modification: pdfcraft_engine::sign::Modification::None,
+            details: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn signature_badges_keep_signed_visible_widgets_on_the_page() {
+        let rect = [10.0, 10.0, 100.0, 50.0];
+        let signatures =
+            vec![signature(true, true, Some(0), Some(rect)), signature(true, true, Some(1), Some(rect)), signature(true, true, Some(0), Some(rect))];
+        let badges = signature_badges(&signatures, 0);
+        assert_eq!(badges.len(), 2);
+        assert_eq!(badges[0].rect, rect);
+    }
+
+    #[test]
+    fn signature_badges_skip_unsigned_invisible_and_unplaced_fields() {
+        let rect = [10.0, 10.0, 100.0, 50.0];
+        let signatures = vec![
+            signature(false, true, Some(0), Some(rect)),
+            signature(true, false, Some(0), Some(rect)),
+            signature(true, true, Some(0), None),
+            signature(true, true, Some(0), Some(rect)),
+        ];
+        let badges = signature_badges(&signatures, 0);
+        assert_eq!(badges.len(), 1);
+        assert_eq!(badges[0].rect, rect);
+    }
+
+    #[test]
+    fn signature_badges_skip_rectangles_that_cannot_reach_the_screen() {
+        let hostile = vec![
+            [f64::NAN, 10.0, 100.0, 50.0],
+            [10.0, f64::INFINITY, 100.0, 50.0],
+            [10.0, 10.0, f64::NEG_INFINITY, 50.0],
+            [10.0, 10.0, 1e300, 50.0],
+            [10.0, 10.0, 100.0, 50.0],
+        ];
+        let signatures: Vec<_> = hostile.into_iter().map(|rect| signature(true, true, Some(0), Some(rect))).collect();
+        let badges = signature_badges(&signatures, 0);
+        assert_eq!(badges.len(), 1);
+    }
+
+    #[test]
+    fn snapshot_tabs_read_like_their_source_plus_the_suffix() {
+        let snap = Snapshot { kind: SnapshotKind::SignedVersion, revision: 1, from: "report.pdf".into() };
+        assert_eq!(snapshot_tab_name("Report", "report.pdf", &snap), "Report (signed version)");
+        let rev = Snapshot { kind: SnapshotKind::Revision, revision: 2, from: "report.pdf".into() };
+        assert_eq!(snapshot_tab_name("Report", "report.pdf", &rev), "Report (revision 2)");
+        assert_eq!(snapshot_tab_name("report.pdf", "report.pdf", &snap), "report.pdf");
+        assert_eq!(snapshot_tab_name("report (revision 2).pdf", "report (revision 2).pdf", &rev), "report (revision 2).pdf");
+    }
+
     #[test]
     fn grayscale_converts_colours_to_their_luminance() {
         let img = egui::ColorImage::new([2, 1], vec![Color32::from_rgb(255, 0, 0), Color32::from_rgba_premultiplied(0, 51, 102, 128)]);
@@ -5288,6 +5571,81 @@ trailer << /Root 1 0 R >>
         }
     }
 
+    /// #3149: the replacement dialog commits after the canvas collected this frame's demand.
+    #[test]
+    fn replacing_a_page_after_layout_never_uploads_an_oversized_texture() {
+        let ctx = egui::Context::default();
+        ctx.input_mut(|i| i.max_texture_side = 2048);
+        let mut app = PdfCraftApp::new();
+        let original = app.session.create_blank(200.0, 300.0, 1).unwrap();
+        let replacement = app.session.create_blank(400.0, 500.0, 1).unwrap();
+        app.open_bytes("original.pdf", None, original.as_ref().clone()).unwrap();
+        let request = RenderRequest { scale: 4.7, tag: scale_tag(4.7), ..Default::default() };
+        app.views[0].frame_queue = vec![request];
+        app.views[0].frame_visible.insert(0);
+        assert!(app.apply_edit(Edit::ReplacePages { pages: vec![0], name: "replacement.pdf".into(), bytes: replacement, src_pages: vec![0] }));
+        let doc = app.session.get(app.views[0].id).unwrap();
+        assert_eq!((doc.info.pages[0].width, doc.info.pages[0].height), (400.0, 500.0));
+        let edited_bytes = doc.bytes.clone();
+        let pool = RenderPool::new_inline(doc.display.clone(), Default::default());
+        app.views[0].finish_render_frame(&ctx, &doc.info, &pool);
+        assert!(app.views[0].last_queue.is_empty(), "old geometry must not reach the replacement renderer");
+
+        // The next layout can render a bounded backdrop and sharp tiles at the same zoom.
+        let backdrop = RenderRequest { scale: 2048.0 / 500.0, tag: scale_tag(2048.0 / 500.0), ..request };
+        let tile = RenderRequest { tile: Some(Tile { x: 0, y: 0, w: 1024, h: 1024 }), ..request };
+        for _ in 0..2 {
+            let view = &mut app.views[0];
+            view.begin_render_frame();
+            view.frame_visible.insert(0);
+            view.frame_queue = vec![backdrop, tile];
+            view.finish_render_frame(&ctx, &doc.info, &pool);
+        }
+        let view = &app.views[0];
+        assert_eq!(view.pages.get(&0).unwrap().tex.size(), [1639, 2048]);
+        assert_eq!(view.tiles.get(&(0, tile.tag, 0, 0)).unwrap().size(), [1024, 1024]);
+        assert!(view.errors.is_empty());
+        assert_eq!(doc.bytes, edited_bytes, "rendering preserves the unsaved edit");
+        assert!(doc.dirty);
+        assert_eq!(doc.can_undo(), Some("Replace page"));
+    }
+
+    #[test]
+    fn oversized_raster_results_do_not_replace_cached_textures() {
+        let ctx = egui::Context::default();
+        ctx.input_mut(|i| i.max_texture_side = 64);
+        for request in [
+            RenderRequest::default(),
+            RenderRequest { tag: THUMB_TAG, ..Default::default() },
+            RenderRequest { tag: GRID_TAG, ..Default::default() },
+            RenderRequest { tag: PRINT_TAG, ..Default::default() },
+            RenderRequest { tile: Some(Tile { x: 0, y: 0, w: 64, h: 32 }), ..Default::default() },
+        ] {
+            let mut view = DocView::new(DocId(1), &thumbnail_info(1), ViewDefaults::default());
+            view.last_queue = vec![request];
+            let texture = |v: &DocView| {
+                v.pages
+                    .values()
+                    .map(|p| &p.tex)
+                    .chain(v.thumbs.values().map(|p| &p.tex))
+                    .chain(v.grid_pages.values().map(|(_, t)| t))
+                    .chain(v.print_pages.values().map(|(_, t)| t))
+                    .chain(v.tiles.values())
+                    .map(|t| (t.id(), t.size()))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(view.receive_result(&ctx, solid_result(request, 64, 32)), 64 * 32 * 4);
+            let cached = texture(&view);
+            assert_eq!(cached.len(), 1);
+            for (w, h) in [(65, 32), (32, 65), (65, 65), (0, 32), (32, 0)] {
+                assert_eq!(view.receive_result(&ctx, solid_result(request, w, h)), 0, "{request:?}: {w}x{h}");
+                assert_eq!(texture(&view), cached, "an invalid result must keep the previous raster");
+            }
+            assert_eq!(view.receive_result(&ctx, solid_result(request, 32, 64)), 32 * 64 * 4);
+            assert_eq!(texture(&view)[0].1, [32, 64], "valid results still make progress");
+        }
+    }
+
     #[test]
     fn thumbnails_release_on_scroll_panel_close_and_request_again_after_eviction() {
         let ctx = egui::Context::default();
@@ -5347,6 +5705,30 @@ trailer << /Root 1 0 R >>
         v.page_changed(0);
         assert_eq!(v.prepare_render_queue(&info, 1.0), vec![req]);
         assert_eq!(v.pages.get(&0).unwrap().tag, STALE_TAG);
+    }
+
+    /// #1858: a released drawing stays painted from its points until a raster that has it
+    /// arrives. A page raster that lands before the drawing's edit is applied (in full screen the
+    /// edit waits for the next frame, and a render already under way can finish first) is of the
+    /// document without it, and must not end the preview.
+    #[test]
+    fn a_raster_from_before_a_drawing_is_committed_keeps_it_drawn() {
+        let ctx = egui::Context::default();
+        let info = thumbnail_info(1);
+        let mut v = DocView::new(DocId(1), &info, ViewDefaults::default());
+        let req = RenderRequest { scale: 1.0, tag: 1000, ..Default::default() };
+        v.comments.settle(0.0, 0, crate::comments::CommentTool::Ink, &[[10.0, 10.0], [40.0, 30.0]]);
+        v.last_queue = vec![req];
+        assert!(v.receive_result(&ctx, solid_result(req, 10, 10)) > 0, "the raster is taken");
+        assert_eq!(v.comments.settling_len(), 1, "a raster from before the commit doesn't have the stroke");
+        v.comments.drawings_committed();
+        v.last_queue = vec![req];
+        assert!(v.receive_result(&ctx, solid_result(req, 10, 10)) > 0);
+        assert_eq!(v.comments.settling_len(), 0, "a raster after the commit draws it");
+        // An edit that fails leaves nothing to wait for.
+        v.comments.settle(0.0, 0, crate::comments::CommentTool::Ink, &[[10.0, 10.0], [40.0, 30.0]]);
+        v.comments.drawings_refused();
+        assert_eq!(v.comments.settling_len(), 0, "a refused drawing isn't left painted");
     }
 
     #[test]

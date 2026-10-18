@@ -347,6 +347,7 @@ fn precise_touchpad_wheel_scrolls_one_to_one() {
 
 /// Steps `frames` frames and returns how far the document scrolled down over them, from the
 /// pages on screen in each pair of consecutive frames (a page can leave the screen on the way).
+/// Only the non-macOS glide tests below use it, hence the matching gate.
 #[cfg(not(target_os = "macos"))]
 fn scroll_over(h: &mut Harness<'static, PdfCraftApp>, frames: usize) -> f32 {
     let tops = |h: &Harness<'static, PdfCraftApp>| (0..3).map(|p| rect(h, p).map(|r| r.min.y)).collect::<Vec<_>>();
@@ -364,6 +365,7 @@ fn scroll_over(h: &mut Harness<'static, PdfCraftApp>, frames: usize) -> f32 {
 /// A two-finger swipe down the page, 25 points a frame for six frames, lifted the frame after
 /// (the axis stop Wayland sends), at 300 % so the document is long enough to glide in: how far
 /// it scrolled by the frame after the lift (the page is drawn a frame behind its scroll).
+/// Same gate as its callers below.
 #[cfg(not(target_os = "macos"))]
 fn swipe_and_lift(h: &mut Harness<'static, PdfCraftApp>) -> f32 {
     let at = h.state().views[0].viewport_rect().center();
@@ -1042,6 +1044,47 @@ fn the_hand_tool_pans_by_dragging() {
     let after = rect(&h, 0).expect("still on screen");
     assert!(before.top() - after.top() > 200.0, "dragging up scrolls down: {before:?} → {after:?}");
     assert!(h.state().views[0].selected_text().is_none(), "no text selection with the hand");
+}
+
+#[test]
+fn the_hand_tool_moves_the_page_with_the_pointer() {
+    // With the Hand tool the page stays under the pointer, point for point, in the frame the
+    // pointer moves (#924, #1992). The drag used to reach the scroll offset only after the frame
+    // was drawn (and, before the page view stopped animating its scrolls, eased in over several
+    // frames), so the page trailed behind the pointer; the points moved before egui tells a drag
+    // from a click were lost on top.
+    let mut h = harness_stepping(1.0 / 60.0, &[("layout", "continuous"), ("zoom", "600"), ("quick", "hand")]);
+    let start = h.state().views[0].viewport_rect().center();
+    h.hover_at(start);
+    h.run_steps(2);
+    let page = |h: &Harness<'static, PdfCraftApp>| rect(h, 0).expect("page 1 on screen").min;
+    let grabbed = page(&h);
+    let click_dist = h.ctx.options(|o| o.input_options.max_click_dist);
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+    h.event(button(start, true));
+    h.step();
+    // A slow start, two points a frame, then quick strokes both ways. Once the pointer is further
+    // than a click may wander, the page has moved exactly as far as it, in every frame.
+    let mut pointer = start;
+    let strokes = [egui::vec2(-2.0, -2.0); 5].into_iter().chain([egui::vec2(-40.0, -150.0), egui::vec2(25.0, 60.0)]);
+    for stroke in strokes {
+        pointer += stroke;
+        h.event(egui::Event::PointerMoved(pointer));
+        h.step();
+        if (pointer - start).length() > click_dist {
+            assert_eq!(page(&h) - grabbed, pointer - start, "the page keeps up with the pointer in the same frame");
+        }
+    }
+    // Held still, it stays: nothing is left to ease in.
+    h.run_steps(30);
+    assert_eq!(page(&h) - grabbed, pointer - start, "nothing moves the page once the pointer stops");
+    // Let go mid-stroke, it stops with the pointer: the Hand tool doesn't fling the page on.
+    pointer += egui::vec2(0.0, -30.0);
+    h.event(egui::Event::PointerMoved(pointer));
+    h.step();
+    h.event(button(pointer, false));
+    h.run_steps(30);
+    assert_eq!(page(&h) - grabbed, pointer - start, "the page stays where it was let go");
 }
 
 #[test]
