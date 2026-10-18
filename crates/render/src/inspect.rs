@@ -2786,7 +2786,8 @@ trailer << /Root 1 0 R >>
         );
         assert_eq!(text(&xdp).as_deref(), Some("required"));
         // Only in the data, or nested in the template: no configuration at all.
-        let xdp = format!("<xdp:xdp><xfa:datasets><xfa:data>{}</xfa:data></xfa:datasets></xdp:xdp>", config("<dynamicRender>forbidden</dynamicRender>"));
+        let xdp =
+            format!("<xdp:xdp><xfa:datasets><xfa:data>{}</xfa:data></xfa:datasets></xdp:xdp>", config("<dynamicRender>forbidden</dynamicRender>"));
         assert_eq!(text(&xdp), None);
         let xdp = format!("<xdp:xdp><template>{}</template></xdp:xdp>", config("<dynamicRender>forbidden</dynamicRender>"));
         assert_eq!(text(&xdp), None);
