@@ -77,7 +77,8 @@ fn header_and_footer_are_drawn_in_display_space_and_wrap_the_original_content() 
     let s0 = streams(&doc, 0);
     // q-wrapper, original, Q-wrapper, header/footer.
     assert_eq!(s0.len(), 4, "{s0:?}");
-    assert_eq!((s0[0].as_str(), s0[2].as_str()), ("q %PdfCraft\n", "Q %PdfCraft\n"));
+    // The close starts on a new line, so a comment the original ends in can't swallow it.
+    assert_eq!((s0[0].as_str(), s0[2].as_str()), ("q %PdfCraft\n", "\nQ %PdfCraft\n"));
     let mark = &s0[3];
     assert!(mark.contains("/PCMark /HeaderFooter") && mark.contains("(Page 1 of 3) Tj") && mark.contains("(Confidential \\(draft\\)) Tj"), "{mark}");
     assert!(mark.contains("1 0 0 1 0 0 cm"), "upright page: identity");
@@ -1918,6 +1919,31 @@ fn repeated_image_edits_change_one_transform_instead_of_nesting() {
         let caption: Vec<_> = text::text_lines(&doc, 0).unwrap().into_iter().map(|l| l.text).collect();
         assert_eq!(caption.is_empty(), !content.contains("Caption"), "{content}: the text after the image is untouched");
     }
+}
+
+#[test]
+fn repeated_group_moves_of_a_cropped_image_change_one_clip_transform() {
+    // The crop is smaller than the image, so a clip left behind would shrink `visible_rect`.
+    let mut doc = image_page_with("q 150 120 100 50 re W n 200 0 0 100 100 100 cm /Im0 Do Q BT /F1 12 Tf 72 700 Td (Caption) Tj ET");
+    let operators = |doc: &Document| pdfcraft_content::parse(&page_content_bytes(doc, 0)).ops.len();
+    let start = images::page_images(&doc, 0).unwrap()[0].clone();
+    let mut first = 0;
+    for i in 0..20 {
+        images::translate_images(&mut doc, 0, &[0], [1.0, -2.0]).unwrap();
+        if i == 0 {
+            first = operators(&doc);
+        }
+    }
+    let moved = |r: [f64; 4]| [r[0] + 20.0, r[1] - 40.0, r[2] + 20.0, r[3] - 40.0];
+    let now = images::page_images(&doc, 0).unwrap()[0].clone();
+    assert!(close(now.rect, moved(start.rect)), "{:?}", now.rect);
+    assert!(close(now.visible_rect.unwrap(), moved(start.visible_rect.unwrap())), "the crop moves with the image: {:?}", now.visible_rect);
+    assert_eq!(operators(&doc), first, "twenty group moves add no more operators than one");
+    assert_eq!(q_depth(&doc), 1);
+    let doc = reopen(&doc);
+    assert!(close(images::page_images(&doc, 0).unwrap()[0].visible_rect.unwrap(), moved(start.visible_rect.unwrap())));
+    let caption: Vec<_> = text::text_lines(&doc, 0).unwrap().into_iter().map(|l| l.text).collect();
+    assert_eq!(caption, ["Caption"]);
 }
 
 #[test]
@@ -4248,4 +4274,267 @@ fn japanese_paragraphs_wrap_between_characters_without_closing_marks_at_a_row_st
             assert!(!row.starts_with(['、', '。', '」', 'っ']) && !row.ends_with('「'), "{row:?} in {rows:?}");
         }
     }
+}
+
+/// Small graphics-state oracle for synthetic streams: every tracked state change must
+/// have been restored when a probe XObject would draw. No external assets are involved.
+fn probe_states(doc: &Document) -> Vec<std::collections::BTreeMap<Vec<u8>, Vec<Object>>> {
+    let bytes = streams(doc, 0);
+    let joined = pdfcraft_content::Pieces::join(&bytes);
+    let mut state = std::collections::BTreeMap::new();
+    let mut stack = Vec::new();
+    let mut probes = Vec::new();
+    for op in joined.parse().ops {
+        match op.op.as_slice() {
+            b"q" => stack.push(state.clone()),
+            b"Q" => state = stack.pop().expect("balanced graphics state"),
+            b"cm" | b"W" | b"W*" | b"Tz" | b"Tc" | b"Tw" | b"Tr" | b"cs" => {
+                state.insert(op.op, op.operands);
+            }
+            b"Do" if op.name(0) == Some(b"PCProbe") => probes.push(state.clone()),
+            _ => {}
+        }
+    }
+    probes
+}
+
+fn isolation_fixture(parts: &[(&str, &str)]) -> Document {
+    let mut doc = fixture();
+    let page = page_list(&doc).remove(0);
+    let list = parts
+        .iter()
+        .map(|(tag, bytes)| {
+            Object::Ref(doc.add(Object::Stream(Stream::from_raw(if tag.is_empty() { Dict::new() } else { tagged(tag) }, bytes.as_bytes().to_vec()))))
+        })
+        .collect();
+    doc.update_dict(page.obj, |d| d.set(b"Contents".to_vec(), Object::Array(list))).unwrap();
+    doc
+}
+
+#[test]
+fn new_marks_isolate_state_appended_after_old_wrappers() {
+    for dirt in ["0.5 0 0 0.5 0 0 cm", "0 0 200 200 re W n", "50 Tz", "5 Tc 20 Tw", "3 Tr", "/Pattern cs"] {
+        for tag in ["", "OCR", "Wrap"] {
+            let mut doc = isolation_fixture(&[
+                ("Wrap", "q %PdfCraft\n"),
+                ("", "2 0 0 2 0 0 cm"),
+                ("Wrap", "Q %PdfCraft\n"),
+                ("Added", "q /PCProbe Do Q"),
+                (tag, dirt),
+            ]);
+            let before = probe_states(&doc);
+            stamp(&mut doc, 0, "Probe", b"q /PCProbe Do Q\n".to_vec()).unwrap();
+            let after = probe_states(&reopen(&doc));
+            assert_eq!(&after[..before.len()], &before, "existing content must not change");
+            assert!(after.last().unwrap().is_empty(), "tag={tag}, dirt={dirt}: {after:?}");
+        }
+    }
+}
+
+#[test]
+fn new_marks_isolate_dirty_tagged_only_pages() {
+    let mut doc = isolation_fixture(&[("OCR", "50 Tz 5 Tc 20 Tw")]);
+    stamp(&mut doc, 0, "Probe", b"q /PCProbe Do Q\n".to_vec()).unwrap();
+    assert!(probe_states(&doc).last().unwrap().is_empty());
+}
+
+#[test]
+fn new_marks_do_not_accumulate_wrappers_for_self_contained_marks() {
+    let mut doc = isolation_fixture(&[("", "2 0 0 2 0 0 cm")]);
+    for _ in 0..10 {
+        stamp(&mut doc, 0, "Probe", b"q /PCProbe Do Q\n".to_vec()).unwrap();
+    }
+    assert_eq!(streams(&doc, 0).len(), 13);
+    assert!(probe_states(&doc).iter().all(|s| s.is_empty()));
+}
+
+#[test]
+fn new_marks_close_wrapper_after_an_unterminated_comment() {
+    let mut doc = isolation_fixture(&[("", "50 Tz % no final newline")]);
+    stamp(&mut doc, 0, "Probe", b"q /PCProbe Do Q\n".to_vec()).unwrap();
+    // Check literal concatenation too: a separator must exist in the saved stream itself,
+    // not just in the inspection parser, or the comment can swallow the closing Q.
+    let bytes = streams(&doc, 0).concat();
+    let parsed = pdfcraft_content::parse(bytes.as_bytes());
+    assert_eq!(parsed.ops.iter().filter(|op| op.is("Q")).count(), 2);
+    assert!(probe_states(&doc).last().unwrap().is_empty());
+}
+
+#[test]
+fn new_marks_wrap_unbalanced_graphics_state_whole_without_changing_it() {
+    // Content that can't be isolated precisely is wrapped whole, as before #3084, instead of
+    // refusing: redaction stamps its boxes after removing the text, so it can't back out.
+    for (data, probe_clean) in [("q 50 Tz", true), ("50 Tz q", true), ("q q Q", true), ("Q 50 Tz", false), ("q Q Q 50 Tz", false)] {
+        let mut doc = isolation_fixture(&[("Wrap", data)]);
+        let page = page_list(&doc).remove(0);
+        place_tagged(&mut doc, &page, "Probe", b"q /PCProbe Do Q".to_vec(), false).unwrap();
+        let after = streams(&doc, 0);
+        assert_eq!(after.len(), 4, "{data}: {after:?}");
+        assert_eq!((after[0].as_str(), after[1].as_str()), ("q %PdfCraft\n", data), "{data}");
+        // A `q` the content leaves open is closed after it, so the mark starts clean. A stray
+        // `Q` pops the wrapper itself: nothing placed after it can undo that.
+        let probe = probe_states_lenient(&doc);
+        assert_eq!(probe.last().unwrap().is_empty(), probe_clean, "{data}: {after:?}");
+    }
+}
+
+/// [`probe_states`] for unbalanced content: a `Q` with nothing saved leaves the state as is,
+/// as renderers do.
+fn probe_states_lenient(doc: &Document) -> Vec<std::collections::BTreeMap<Vec<u8>, Vec<Object>>> {
+    let joined = pdfcraft_content::Pieces::join(&streams(doc, 0));
+    let mut state = std::collections::BTreeMap::new();
+    let mut stack = Vec::new();
+    let mut probes = Vec::new();
+    for op in joined.parse().ops {
+        match op.op.as_slice() {
+            b"q" => stack.push(state.clone()),
+            b"Q" => state = stack.pop().unwrap_or(state),
+            b"cm" | b"W" | b"W*" | b"Tz" | b"Tc" | b"Tw" | b"Tr" | b"cs" => {
+                state.insert(op.op, op.operands);
+            }
+            b"Do" if op.name(0) == Some(b"PCProbe") => probes.push(state.clone()),
+            _ => {}
+        }
+    }
+    probes
+}
+
+#[test]
+fn new_marks_preserve_cross_stream_operands_and_q_pairs() {
+    let mut doc = isolation_fixture(&[("", "q 2 0 0 2"), ("", "0 0 cm Q 50"), ("", "Tz")]);
+    stamp(&mut doc, 0, "Probe", b"q /PCProbe Do Q\n".to_vec()).unwrap();
+    assert!(probe_states(&doc).last().unwrap().is_empty());
+}
+
+#[test]
+fn removing_marks_keeps_wrappers_needed_by_later_external_content() {
+    let mut doc = isolation_fixture(&[
+        ("Wrap", "q %PdfCraft\n"),
+        ("", "2 0 0 2 0 0 cm"),
+        ("Wrap", "Q %PdfCraft\n"),
+        ("HeaderFooter", "q /PCProbe Do Q"),
+        ("", "/PCProbe Do"),
+    ]);
+    remove_marks(&mut doc, &[0], MarkKind::HeaderFooter).unwrap();
+    assert_eq!(probe_states(&doc).len(), 1);
+    assert!(probe_states(&doc)[0].is_empty(), "the external content still needs the original reset");
+}
+
+#[test]
+fn new_marks_wrap_unfinished_text_paths_and_operands_whole() {
+    for data in ["BT", "ET", "BT BT ET", "0 0 10 10 re", "q 0 0 m Q", "50"] {
+        let mut doc = isolation_fixture(&[("Background", "q Q"), ("", data)]);
+        let page = page_list(&doc).remove(0);
+        place_tagged(&mut doc, &page, "Probe", b"q /PCProbe Do Q".to_vec(), false).unwrap();
+        // The behind-mark stays outside the wrapper and the content itself is untouched.
+        assert_eq!(streams(&doc, 0), ["q Q", "q %PdfCraft\n", data, "\nQ %PdfCraft\n", "q /PCProbe Do Q"], "{data}");
+    }
+}
+
+#[test]
+fn new_marks_do_not_reveal_cross_stream_comments() {
+    let mut doc = isolation_fixture(&[("", "q 50 Tz % comment continues"), ("", "Q 20 Tc\nQ 5 Tw")]);
+    stamp(&mut doc, 0, "Probe", b"q /PCProbe Do Q\n".to_vec()).unwrap();
+    assert!(probe_states(&doc).last().unwrap().is_empty());
+    let joined = pdfcraft_content::Pieces::join(&streams(&doc, 0));
+    assert!(!joined.parse().ops.iter().any(|op| op.is("Tc")), "commented content must remain inert");
+}
+
+#[test]
+fn new_marks_follow_clean_streams_ending_in_comments() {
+    let mut doc = isolation_fixture(&[("Added", "q 50 Tz Q % no newline")]);
+    stamp(&mut doc, 0, "Probe", b"q /PCProbe Do Q\n".to_vec()).unwrap();
+    assert_eq!(probe_states(&doc).len(), 1, "the new mark must not be swallowed by a comment");
+    assert!(probe_states(&doc)[0].is_empty());
+}
+
+#[test]
+fn removing_marks_does_not_strip_arbitrary_wrap_tagged_content() {
+    let mut doc = isolation_fixture(&[("Wrap", "q /PCProbe Do Q"), ("HeaderFooter", "q Q")]);
+    assert_eq!(remove_marks(&mut doc, &[0], MarkKind::HeaderFooter).unwrap(), 1);
+    assert_eq!(probe_states(&doc).len(), 1);
+}
+
+#[test]
+fn removing_marks_strips_nested_trailing_wrapper_pairs() {
+    let mut doc = isolation_fixture(&[
+        ("Wrap", "q %PdfCraft\n"),
+        ("Wrap", "q %PdfCraft\n"),
+        ("", "2 0 0 2 0 0 cm"),
+        ("Wrap", "Q %PdfCraft\n"),
+        ("Wrap", "Q %PdfCraft\n"),
+        ("HeaderFooter", "q Q"),
+    ]);
+    assert_eq!(remove_marks(&mut doc, &[0], MarkKind::HeaderFooter).unwrap(), 1);
+    assert_eq!(streams(&doc, 0), ["2 0 0 2 0 0 cm"]);
+}
+
+#[test]
+fn updating_marks_on_unreadable_content_does_not_nest_wrappers() {
+    for data in ["q 50 Tz", "Q 50 Tz", "BT"] {
+        let mut doc = isolation_fixture(&[("", data)]);
+        let page = page_list(&doc).remove(0);
+        for _ in 0..3 {
+            place_tagged(&mut doc, &page, MarkKind::HeaderFooter.tag(), b"q /PCProbe Do Q".to_vec(), false).unwrap();
+            assert_eq!(streams(&doc, 0).len(), 4, "{data}: {:?}", streams(&doc, 0));
+            assert_eq!(remove_marks(&mut doc, &[0], MarkKind::HeaderFooter).unwrap(), 1);
+            assert_eq!(streams(&doc, 0), [data], "{data}: the original list comes back");
+        }
+    }
+}
+
+#[test]
+fn removing_marks_strips_wrappers_that_closed_open_state() {
+    let mut doc = isolation_fixture(&[("", "q 2 0 0 2 0 0 cm")]);
+    stamp(&mut doc, 0, "Probe", b"q /PCProbe Do Q\n".to_vec()).unwrap();
+    assert!(probe_states(&doc).last().unwrap().is_empty());
+    // Now balanced, the page reads cleanly: the close (with its extra `Q`) still pairs.
+    let page = page_list(&doc).remove(0);
+    place_tagged(&mut doc, &page, MarkKind::Watermark.tag(), b"q /PCProbe Do Q\n".to_vec(), false).unwrap();
+    assert_eq!(streams(&doc, 0).len(), 5, "no second wrapper: {:?}", streams(&doc, 0));
+    let mut doc = isolation_fixture(&[("", "q 2 0 0 2 0 0 cm")]);
+    let page = page_list(&doc).remove(0);
+    place_tagged(&mut doc, &page, MarkKind::Watermark.tag(), b"q /PCProbe Do Q\n".to_vec(), false).unwrap();
+    assert_eq!(remove_marks(&mut doc, &[0], MarkKind::Watermark).unwrap(), 1);
+    assert_eq!(streams(&doc, 0), ["q 2 0 0 2 0 0 cm"]);
+}
+
+/// #3087: flattening comments leaves alone what isn't a comment: links, and the non-markup
+/// multimedia and print-production annotations (3D, Screen, Movie, RichMedia, PrinterMark,
+/// TrapNet, Watermark), which it used to bake into the page and delete with their data.
+/// Flattening fields only leaves them alone too; real comments are still flattened.
+#[test]
+fn flattening_comments_keeps_annotations_that_are_not_comments() {
+    let kept = ["Widget", "Link", "3D", "Screen", "Movie", "RichMedia", "PrinterMark", "TrapNet", "Watermark"];
+    let flattened = ["Text", "Square", "FileAttachment"];
+    let all: Vec<&str> = flattened.iter().chain(kept.iter()).copied().collect();
+    let form = "<< /Type /XObject /Subtype /Form /BBox [0 0 40 20] /Length 26 >>\nstream\n0 0 1 rg 0 0 40 20 re f\nendstream";
+    let annots: Vec<String> = all
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            format!("<< /Type /Annot /Subtype /{s} /Rect [{x} 700 {r} 720] /AP << /N 4 0 R >> /Contents ({s}) >>", x = 20 + 50 * i, r = 60 + 50 * i)
+        })
+        .collect();
+    let refs: Vec<String> = (0..all.len()).map(|i| format!("{} 0 R", 6 + i)).collect();
+    let page = format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << >> /Contents 5 0 R /Annots [{}] >>", refs.join(" "));
+    let content = stream("", " ");
+    let mut objs: Vec<&str> = vec!["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", &page, form, &content];
+    objs.extend(annots.iter().map(String::as_str));
+    let left = |doc: &Document| -> Vec<String> {
+        let p = &pdfcraft_model::pages(doc)[0];
+        let Some(a) = p.dict.get(b"Annots").map(|a| doc.resolve(a)) else { return Vec::new() };
+        a.as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|o| doc.resolve(o).as_dict().and_then(|d| d.name(b"Subtype")).map(|s| String::from_utf8_lossy(s).into_owned()))
+            .collect()
+    };
+    let mut doc = build(&objs);
+    assert_eq!(flatten(&mut doc, &[0], true, false).unwrap(), flattened.len());
+    assert_eq!(left(&reopen(&doc)), kept, "only the comments were flattened");
+    let mut doc = build(&objs);
+    assert_eq!(flatten(&mut doc, &[0], false, true).unwrap(), 1, "the widget");
+    let without_widget: Vec<&str> = all.iter().copied().filter(|s| *s != "Widget").collect();
+    assert_eq!(left(&reopen(&doc)), without_widget, "flattening fields touches no annotation that isn't a widget");
 }

@@ -472,6 +472,26 @@ pub fn move_pages(doc: &mut Document, indices: &[usize], to: usize) -> Result<()
     rebuild(doc, &rest)
 }
 
+/// Reverse the order of the pages at `indices` among the positions they occupy; every other
+/// page stays where it is. Fewer than two distinct pages is refused, since nothing would change.
+pub fn reverse_pages(doc: &mut Document, indices: &[usize]) -> Result<(), OrganizeError> {
+    let mut all = walk(doc)?;
+    check(indices, all.len())?;
+    let mut slots = indices.to_vec();
+    slots.sort_unstable();
+    slots.dedup();
+    if slots.len() < 2 {
+        return Err(OrganizeError::Invalid("reversing needs at least two pages".into()));
+    }
+    let pages: Vec<(ObjRef, Dict)> = slots.iter().filter_map(|i| all.get(*i).cloned()).collect();
+    for (slot, page) in slots.iter().zip(pages.into_iter().rev()) {
+        if let Some(entry) = all.get_mut(*slot) {
+            *entry = page;
+        }
+    }
+    rebuild(doc, &all)
+}
+
 /// Duplicate pages: copies of `indices` (in order) are inserted after the last of them, sharing
 /// fonts and images with the originals.
 pub fn duplicate_pages(doc: &mut Document, indices: &[usize]) -> Result<(), OrganizeError> {
