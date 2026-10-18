@@ -673,7 +673,8 @@ pub(crate) fn glyph_name_to_unicode(name: &str) -> Option<char> {
 /// Adobe Glyph List Specification's full mapping: drop everything from the first `.`
 /// (`hyphen.case`, `a.sc`), split the rest on `_` into components (`f_i`, `f_f_l`), and map each
 /// one through the glyph list, as `uniXXXX[XXXX…]` (BMP values, four hex digits each) or as
-/// `uXXXX` to `uXXXXXX`. A component it can't map adds nothing; `None` when nothing is left.
+/// `uXXXX` to `uXXXXXX`. A component it can't map, or a `uni` component with any group that
+/// isn't a character, adds nothing; `None` when nothing is left.
 pub(crate) fn glyph_name_to_text(name: &str) -> Option<BfString> {
     let hex = |h: &str| u32::from_str_radix(h, 16).ok().and_then(char::from_u32);
     let base = name.split('.').next().unwrap_or_default();
@@ -685,10 +686,13 @@ pub(crate) fn glyph_name_to_text(name: &str) -> Option<BfString> {
             .strip_prefix("uni")
             .filter(|d| !d.is_empty() && d.len() % 4 == 0 && d.bytes().all(|b| b.is_ascii_hexdigit()))
         {
-            // All ASCII, so every fourth byte is a char boundary.
-            for at in (0..digits.len()).step_by(4) {
-                text.extend(digits.get(at..at + 4).and_then(hex));
-            }
+            // All ASCII, so every fourth byte is a char boundary. A group that isn't a
+            // character (a surrogate) makes the whole component map to nothing.
+            let chars: Option<String> = (0..digits.len())
+                .step_by(4)
+                .map(|at| digits.get(at..at + 4).and_then(hex))
+                .collect();
+            text.extend(chars);
         } else if let Some(c) = part
             .strip_prefix('u')
             .filter(|d| (4..=6).contains(&d.len()) && d.bytes().all(|b| b.is_ascii_hexdigit()))
@@ -709,6 +713,8 @@ pub(crate) fn glyph_name_to_text(name: &str) -> Option<BfString> {
 /// digits (`C39`, `c251`, `g12`), so it says nothing about the character. ZapfDingbats' own
 /// names (`a1` to `a191`) are left out: they name dingbats, not the code's letter.
 pub(crate) fn numbered_glyph_name(name: &str) -> bool {
+    // As in the glyph list's mapping, a suffix (`C39.sc`) is dropped first.
+    let name = name.split('.').next().unwrap_or_default();
     let letters = name.bytes().take_while(u8::is_ascii_alphabetic).count();
     (1..=2).contains(&letters)
         && name.len() > letters

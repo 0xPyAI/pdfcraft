@@ -1917,11 +1917,13 @@ mod tests {
                 Object::Integer(30), name("f_i"), name("f_l"), Object::Integer(2), name("hyphen.case"),
                 Object::Integer(39), name("C39"), Object::Integer(97), name("c251"), Object::Integer(174), name("C174"),
                 Object::Integer(88), name("a12"), name("foo"), name("uni00660069"),
+                // #3239 review: a numbered name keeps its meaning under a suffix.
+                Object::Integer(61), name("C39.sc"),
             ],
         });
-        let pdf = encoded_pages(&[(differences, &b"BT /F1 20 Tf 1 0 0 1 20 150 Tm (\x1e\x1f\x02'a\xaeXYZ) Tj ET"[..])]);
+        let pdf = encoded_pages(&[(differences, &b"BT /F1 20 Tf 1 0 0 1 20 150 Tm (\x1e\x1f\x02'a\xaeXYZ=) Tj ET"[..])]);
         let texts = extract_page(&pdf, 0, &InterpreterSettings::default()).unwrap().glyphs.iter().map(|g| g.text.clone()).collect::<Vec<_>>();
-        assert_eq!(texts, ["fi", "fl", "-", "\u{2019}", "a", "\u{fb01}", "fi"]);
+        assert_eq!(texts, ["fi", "fl", "-", "\u{2019}", "a", "\u{fb01}", "fi", "="]);
     }
 
     #[test]

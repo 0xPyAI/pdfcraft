@@ -46,9 +46,10 @@ horizontal differencing and an 8-bit control) and
 
 Glyph names outside the Adobe Glyph List (#3169, #3170): hayro-interpret's `glyph_name_to_text`
 maps a name by the glyph list specification's full mapping (drop from the first `.`, split on `_`,
-each part through the list, `uniXXXX…` or `uXXXX`), so `f_i`, `f_l` and `hyphen.case` read as
-text. A simple Type 1 or CFF font whose name only numbers the glyph (`C39`, `c251`; one or two
-letters then digits, ZapfDingbats' `aN` excepted) reads as the code's StandardEncoding character,
+each part through the list, `uniXXXX…` or `uXXXX`; a `uni` part with any group that isn't a
+character maps to nothing), so `f_i`, `f_l` and `hyphen.case` read as text. A simple Type 1 or
+CFF font whose name only numbers the glyph (`C39`, `c251`, also with a suffix such as `C39.sc`;
+one or two letters then digits, ZapfDingbats' `aN` excepted) reads as the code's StandardEncoding character,
 so a book set in such fonts extracts instead of returning nothing. Embedded TrueType fonts take
 the full mapping only. Covered by `text::tests::glyph_names_outside_the_glyph_list_still_read_as_text`.
 
