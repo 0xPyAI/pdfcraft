@@ -1138,6 +1138,27 @@ endbfchar
     }
 
     #[test]
+    fn unresolved_usecmap_with_no_mappings_reports_failure() {
+        // A stream whose only content is a `usecmap` reference that cannot be
+        // resolved yields no mappings at all; returning an empty map here
+        // would block the caller's encoding fallback paths, so it must
+        // report failure exactly as a full parse failure did before.
+        assert!(CMap::parse(b"/Bogus usecmap", |_| None).is_none());
+    }
+
+    #[test]
+    fn unresolved_usecmap_keeps_local_mappings() {
+        // The same unresolved reference must not discard mappings the stream
+        // carries itself: only the missing base is dropped.
+        let cmap = CMap::parse(
+            b"/Bogus usecmap 1 beginbfchar <41> <0041> endbfchar",
+            |_| None,
+        )
+        .expect("local mappings survive an unresolved usecmap");
+        assert!(cmap.lookup_bf_string(0x41).is_some());
+    }
+
+    #[test]
     fn bad_bfchar_code_keeps_later_entries_aligned() {
         // The malformed 5-byte code still has a destination object; both
         // must be skipped or every later pair shifts by one object.
