@@ -256,7 +256,7 @@ pub(crate) fn show(
         }
         let thread = replies_of(a);
         let rotation = info.pages.get(a.page).map_or(0, |p| p.rotation);
-        if let Some(e) = card(ui, t, a, rotation, &thread, view, prefs, allowed, nav) {
+        if let Some(e) = card(ui, t, a, rotation, &thread, info, view, prefs, allowed, nav) {
             edit = Some(e);
         }
     }
@@ -271,6 +271,7 @@ fn card(
     // The clockwise `/Rotate` of the comment's page.
     rotation: u16,
     thread: &[&Annotation],
+    info: &DocInfo,
     view: &mut DocView,
     prefs: &CommentPrefs,
     allowed: bool,
@@ -450,6 +451,7 @@ fn card(
         .layout(Layout::top_down_justified(Align::Min))
         .show(|ui| {
             ui.set_min_width(160.0);
+            crate::comments::attachment_items(ui, view, info, a);
             if ui.button(tl_ctx!("comment menu", "Edit")).clicked() {
                 view.comments.editing = Some((a.page, a.index, a.contents.clone().unwrap_or_default()));
                 ui.close();

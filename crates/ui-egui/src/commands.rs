@@ -629,6 +629,12 @@ impl PdfCraftApp {
             "page.duplicate" => {
                 self.apply_edit(Edit::DuplicatePages { pages: targets });
             }
+            // Two or more selected pages reverse among themselves; otherwise the whole document.
+            "page.reverse" => {
+                let all = active.and_then(|i| self.views.get(i)).map_or(0, |v| v.page_count());
+                let pages = if targets.len() >= 2 { targets } else { (0..all).collect() };
+                self.apply_edit(Edit::ReversePages { pages });
+            }
             "ocr.enhance_camera" => {
                 // The corners start on the document's edges when they can be found, else
                 // inset on the current page (camera_ui::page_input).

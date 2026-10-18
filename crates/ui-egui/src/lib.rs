@@ -1520,7 +1520,8 @@ impl PdfCraftApp {
         match (data, open) {
             (Err(e), _) => self.notify_fmt("Couldn't read {name}: {e}", &[("name", &att.name), ("e", &e.to_string())]),
             (Ok(bytes), true) => {
-                if let Err(e) = self.open_bytes(&att.name, None, bytes) {
+                // The tab name later names files written from the tab (Split, Extract pages).
+                if let Err(e) = self.open_bytes(&crate::files::attachment_file_name(&att.name), None, bytes) {
                     self.notify_fmt("Couldn't open {name}: {e}", &[("name", &att.name), ("e", &e.to_string())]);
                 }
             }
@@ -1537,6 +1538,15 @@ impl PdfCraftApp {
                 #[cfg(target_arch = "wasm32")]
                 self.notify_fmt("Downloading attachments on the web arrives with M3.10 ({n} bytes ready)", &[("n", &bytes.len().to_string())]);
             }
+        }
+    }
+
+    /// [`Self::attachment_action`] for the file of the attachment comment at (page, index).
+    pub fn comment_attachment_action(&mut self, doc: DocId, page: usize, index: usize, open: bool) {
+        let source = pdfcraft_render::AttachmentSource::Annotation { page, index };
+        // The menus offer the items only for a listed file, so a miss is a comment gone since.
+        if let Some(i) = self.session.get(doc).and_then(|d| d.info.attachments.iter().position(|a| a.source == source)) {
+            self.attachment_action(doc, i, open);
         }
     }
 
