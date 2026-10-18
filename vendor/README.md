@@ -41,6 +41,13 @@ Covered by `raster::tests::tiff_predictor_packed_rgb_rows_keep_their_byte_bounda
 horizontal differencing and an 8-bit control) and
 `raster::tests::tiff_predictor_packed_rgb_image_renders_every_row`.
 
+JPEG 2000 palettes (#3179): `hayro-syntax::filter::jpx::decode` applies a JP2 palette (`pclr`)
+when the image dictionary has no `/ColorSpace`, since the colour then comes from the JP2 header
+(ISO 32000-2 §7.4.9). With a `/ColorSpace` the raw indices are kept, as an `/Indexed` space needs.
+Without the patch a palette image with no `/ColorSpace` was drawn as its indices, in gray.
+Covered by `filter::jpx::tests::jpx_palette_is_applied_without_a_color_space` and
+`filter::jpx::tests::jpx_palette_indices_stay_raw_for_an_indexed_color_space`.
+
 Text extraction: hayro-interpret exposes `OutlineGlyph::is_vertical` from a Type0 font’s CMap writing mode. PdfCraft follows negative glyph-space y for WMode 1 so upright vertical columns can be searched (#126).
 
 Lab Bradford follow-up to #1237: Lab adapts XYZ to D65 with white-point ratios
