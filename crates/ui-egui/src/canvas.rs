@@ -1399,7 +1399,7 @@ impl DocView {
         if self.show_page_gaps == show {
             return;
         }
-        if self.viewport_screen.is_positive() {
+        if !self.organize && self.viewport_screen.is_positive() {
             let at = self.viewport_screen.center();
             if let Some((page, r)) = self
                 .screen_rects
@@ -1414,6 +1414,7 @@ impl DocView {
         self.show_page_gaps = show;
     }
 
+    /// Separation between adjacent page rectangles, in logical screen points.
     fn page_gap(&self) -> f32 {
         if self.show_page_gaps { GAP } else { 0.0 }
     }

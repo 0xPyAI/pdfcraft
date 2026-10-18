@@ -2599,13 +2599,13 @@ impl PdfCraftApp {
                 "off" => v.set_continuous(false),
                 _ => return Err("continuous must be on or off".into()),
             },
-            ("page-gaps", Some(v)) => {
+            ("page-gaps", Some(_)) => {
                 let show = match value {
                     "on" => true,
                     "off" => false,
                     _ => return Err("page-gaps must be on or off".into()),
                 };
-                v.set_page_gaps(show);
+                self.set_active_page_gaps(show);
             }
             ("default-page-gaps", _) => {
                 self.view_defaults.show_page_gaps = match value {

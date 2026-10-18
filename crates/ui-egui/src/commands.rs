@@ -252,9 +252,8 @@ impl PdfCraftApp {
                 }
             }
             "view.page_gaps" => {
-                if let Some(i) = active {
-                    let v = &mut self.views[i];
-                    v.set_page_gaps(!v.show_page_gaps);
+                if let Some(view) = active.and_then(|i| self.views.get(i)) {
+                    self.set_active_page_gaps(!view.show_page_gaps);
                 }
             }
             "view.layout.cover" => {

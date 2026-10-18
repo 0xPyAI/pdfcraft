@@ -163,6 +163,17 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, state: &Option<CompareState>,
 }
 
 impl PdfCraftApp {
+    /// Set gaps for the active document and both visible comparison panes, leaving other tabs alone.
+    pub(crate) fn set_active_page_gaps(&mut self, show: bool) {
+        let Some((index, id)) = self.active_ids() else { return };
+        let partner = side_by_side(self, index).and_then(|(old, _)| self.views.get(old).map(|v| v.id));
+        for view in &mut self.views {
+            if view.id == id || partner == Some(view.id) {
+                view.set_page_gaps(show);
+            }
+        }
+    }
+
     /// Compare the chosen older document with the active one and show the differences.
     pub fn run_compare(&mut self) {
         let Some((i, new)) = self.active_ids() else { return };
