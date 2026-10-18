@@ -172,6 +172,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 ## Progress log
 
 - **2026-10-18 (M6, #2892):** Push-button normal labels are editable per widget through Options and form_set_props, independently of field names; rendering, undo/redo and incremental/full save/reopen are covered. Estimates unchanged.
+
+- **2026-10-18 (M7, #3212):** Headers, Bates numbers, watermarks and added text stay visible after unfinished marked content, with original content preserved.
 - **2026-10-15 (M7, Edit text caret):** In a text region that mixes sizes (a 24 pt title over 12 pt lines), the inline editor's caret on a small row was as tall as the region's first size and reached into the row below: egui draws the caret at least one row of the text field's font tall, and that font had the paragraph's first size. The field's font is now half the region's smallest size, so each row's own height decides. Kittest regression; checked in the app on a real document. Estimates unchanged.
 - **2026-10-16 (M3, #2781):** The Pages panel follows the current page, as Acrobat's page thumbnails do: going to a page whose thumbnail is out of sight (scrolling, Page Down, Go to page, a bookmark) scrolls the panel just enough to show it. A thumbnail already in view, or clicked, leaves the panel where it is, and a page change while the user scrolls the panel or drags thumbnails does not move it. Estimates unchanged.
 - **2026-10-16 (M12, #1645):** CLI info, text and render use the engine's dynamic XFA layout rather than placeholder pages. Synthetic two-page and encrypted-form regressions cover counts, text, pixels, copy permissions and unchanged input bytes. Estimates unchanged.
