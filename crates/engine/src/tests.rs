@@ -3339,6 +3339,35 @@ fn recognize_text_reads_the_euro_sign() {
     assert!(text.contains("€250"), "{text}");
 }
 
+const SYNTHETIC_SCAN_DPI: f64 = 300.0;
+
+/// A scan of the OCR sentence at the source page's physical size, without a text layer.
+fn synthetic_ocr_scan(s: &mut Session) -> (DocId, [f32; 2]) {
+    let text = s.create_from_text("t", "The quick brown fox jumps over the lazy dog.").unwrap();
+    let id = s.open("text.pdf", None, text, None).unwrap();
+    let original = &s.get(id).unwrap().info.pages[0];
+    let size = [original.width, original.height];
+    // A typical 300 DPI scan keeps the small leading glyph in "quick" legible to OCR.
+    let png = export::Exporter::new(s.get(id).unwrap()).png(0, SYNTHETIC_SCAN_DPI).unwrap();
+    // Exported PNGs have no resolution metadata. The 72 DPI import default would enlarge
+    // the page and change the PDF-point coordinates the placement assertions exercise.
+    let scan = s.create_from_images_with_resolution(&[("scan.png".into(), png)], ImageResolution::Dpi(SYNTHETIC_SCAN_DPI)).unwrap();
+    (s.open("scan.pdf", None, scan, None).unwrap(), size)
+}
+
+#[test]
+fn synthetic_ocr_scan_keeps_the_original_page_size_without_models() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let (id, expected) = synthetic_ocr_scan(&mut s);
+    let page = &s.get(id).unwrap().info.pages[0];
+    // Rounding to whole raster pixels may change a page edge by at most one pixel.
+    let tolerance = 72.0 / SYNTHETIC_SCAN_DPI;
+    for (actual, expected) in [page.width, page.height].into_iter().zip(expected) {
+        assert!(f64::from((actual - expected).abs()) <= tolerance, "page edge {actual} pt, expected {expected} pt");
+    }
+    assert_eq!(page_texts(&s, id), [""], "the scan has no text until OCR runs");
+}
+
 #[test]
 fn recognize_text_makes_a_scanned_page_searchable() {
     if !ocr::available() {
@@ -3346,12 +3375,7 @@ fn recognize_text_makes_a_scanned_page_searchable() {
         return;
     }
     let mut s = Session::new().with_clock(|| 1_700_000_000);
-    let text = s.create_from_text("t", "The quick brown fox jumps over the lazy dog.").unwrap();
-    let id = s.open("text.pdf", None, text, None).unwrap();
-    // A typical 300 DPI scan keeps the small leading glyph in "quick" legible to OCR.
-    let png = export::Exporter::new(s.get(id).unwrap()).png(0, 300.0).unwrap();
-    let scan = s.create_from_images(&[("scan.png".into(), png)]).unwrap();
-    let id = s.open("scan.pdf", None, scan, None).unwrap();
+    let (id, _) = synthetic_ocr_scan(&mut s);
     assert_eq!(page_texts(&s, id), [""], "a picture has no text");
 
     let found = s.recognize_text(id, &[], ocr::OcrSettings::default()).unwrap();
