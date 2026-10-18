@@ -1710,25 +1710,29 @@ fn next_tag(xml: &str, mut from: usize) -> Option<Tag<'_>> {
 /// it closes itself, or it is never closed.
 fn xml_child_body<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
     let mut at = 0;
-    let mut depth = 0_usize;
+    // The elements open around `at`, innermost last: a closing tag must name the innermost one,
+    // or the markup is malformed and has no value.
+    let mut open_tags: Vec<&str> = Vec::new();
     // Where the wanted element's content starts, once its opening tag is seen at the top level.
     let mut open = None;
     loop {
         let tag = next_tag(xml, at)?;
         at = tag.end;
         if tag.close {
-            depth = depth.checked_sub(1)?;
-            if depth == 0
+            if open_tags.pop()? != tag.local {
+                return None;
+            }
+            if open_tags.is_empty()
                 && let Some(start) = open
             {
                 return xml.get(start..tag.start);
             }
         } else if !tag.empty {
-            if depth == 0 && tag.local == name {
+            if open_tags.is_empty() && tag.local == name {
                 open = Some(tag.end);
             }
-            depth = depth.saturating_add(1);
-        } else if depth == 0 && tag.local == name {
+            open_tags.push(tag.local);
+        } else if open_tags.is_empty() && tag.local == name {
             return None;
         }
     }
@@ -2771,6 +2775,9 @@ trailer << /Root 1 0 R >>
         assert_eq!(text(&config("<dynamicRender/>")), None);
         assert_eq!(text(&config("<dynamicRender></dynamicRender>")), None);
         assert_eq!(text(&config("<dynamicRender><b>forbidden</b></dynamicRender>")), None);
+        // Closing tags that don't match what they close: malformed, no value (review on #3192).
+        assert_eq!(text(&config("<dynamicRender>forbidden</other>")), None);
+        assert_eq!(text("<config><acrobat><acrobat7><dynamicRender>forbidden</dynamicRender></acrobat></acrobat7></config>"), None);
         // The same name anywhere but config/acrobat/acrobat7 (form data, another config branch).
         let xdp = "<xdp:xdp><xfa:datasets><xfa:data><dynamicRender>forbidden</dynamicRender></xfa:data></xfa:datasets><config><present><dynamicRender>forbidden</dynamicRender></present></config></xdp:xdp>";
         assert_eq!(text(xdp), None);
