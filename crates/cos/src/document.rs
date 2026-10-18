@@ -1915,30 +1915,39 @@ impl Document {
         self.entries = Arc::new(XrefIndex::Materialized(Arc::new(entries)));
         self.cache.lock().map_err(|_| CosError::Poisoned)?.clear();
         // Trailer: the last `trailer` dictionary or cross-reference stream dictionary with a
-        // usable /Root (last in the file, whichever kind), else the catalog itself. A file whose
-        // only trailers are cross-reference streams (and whose `startxref` is gone or points
-        // nowhere) keeps its /Info, /ID and /Encrypt this way.
-        let usable = |d: &Dict| d.reference(b"Root").is_some_and(|r| matches!(self.try_get(r.num).as_deref(), Ok(Object::Dict(_))));
-        let mut trailer: Option<(usize, Dict)> = None;
+        // usable /Root (last in the file, whichever kind), else the catalog itself. One whose
+        // /Root is a catalog (as `root_is_catalog` judges it) beats one whose /Root is another
+        // dictionary, such as /Info, wherever it is; an FDF's /Root (no /Type, no /Pages) still
+        // counts when nothing better is there.
+        // A file whose only trailers are cross-reference streams (and whose `startxref` is gone
+        // or points nowhere) keeps its /Info, /ID and /Encrypt this way.
+        let rank = |at: usize, d: &Dict| {
+            let root = self.try_get(d.reference(b"Root")?.num).ok()?;
+            let Object::Dict(c) = &*root else { return None };
+            Some((c.name(b"Type") == Some(b"Catalog") || c.contains(b"Pages"), at))
+        };
+        let mut trailer: Option<((bool, usize), Dict)> = None;
         let mut from = 0;
         while let Some(p) = find(&data, b"trailer", from, data.len()) {
             from = p + 7;
             let mut lx = Lexer::new(&data, from);
             if let Ok(Object::Dict(d)) = lx.object()
-                && usable(&d)
+                && let Some(r) = rank(p, &d)
+                && trailer.as_ref().is_none_or(|(best, _)| r > *best)
             {
-                trailer = Some((p, d));
+                trailer = Some((r, d));
             }
         }
         for at in xref_streams {
-            if trailer.as_ref().is_some_and(|(p, _)| *p > at) {
+            if trailer.as_ref().is_some_and(|((catalog, p), _)| *catalog && *p > at) {
                 continue;
             }
             if let Ok((_, Object::Stream(s))) = parse_indirect_shared(&data, at, &|_| None)
                 && s.dict.name(b"Type") == Some(b"XRef")
-                && usable(&s.dict)
+                && let Some(r) = rank(at, &s.dict)
+                && trailer.as_ref().is_none_or(|(best, _)| r > *best)
             {
-                trailer = Some((at, s.dict));
+                trailer = Some((r, s.dict));
             }
         }
         let trailer = match trailer {
@@ -2750,6 +2759,22 @@ mod tests {
         let info = back.trailer().reference(b"Info").expect("the full save keeps /Info");
         let field = |key: &[u8]| back.get(info).as_dict().unwrap().get(key).unwrap().as_string().unwrap().bytes.clone();
         assert_eq!((field(b"Title"), field(b"Creator"), field(b"Subject")), (b"Kept".to_vec(), b"Me".to_vec(), b"new".to_vec()));
+    }
+
+    /// A rebuild prefers a trailer whose /Root is the catalog (as `root_is_catalog` judges it): a
+    /// later cross-reference stream whose /Root points at the Info dictionary does not replace an
+    /// earlier good trailer, or a full save would write the Info dictionary as /Root.
+    #[test]
+    fn reconstruction_skips_a_trailer_whose_root_is_not_the_catalog() {
+        let mut bytes =
+            build(&["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [] /Count 0 >>", "<< /Title (Kept) >>"], "/Root 1 0 R /Info 3 0 R");
+        bytes.extend_from_slice(b"4 0 obj\n<< /Type /XRef /Size 5 /W [1 1 1] /Root 3 0 R /Length 3 >>\nstream\nabc\nendstream\nendobj\n");
+        let appended = format!("%PDF-1.3\n90 0 obj\n<< /Length 5000 >>\nstream\n{}\nendstream\nendobj\n", "x".repeat(5000));
+        bytes.extend_from_slice(appended.as_bytes());
+        let doc = Document::open(Arc::new(bytes)).unwrap();
+        assert!(doc.repair_log().iter().any(|l| l.contains("rebuilt")), "{:?}", doc.repair_log());
+        assert_eq!(doc.trailer().reference(b"Root").map(|r| r.num), Some(1), "the catalog, not the Info dictionary");
+        assert_eq!(doc.trailer().reference(b"Info").map(|r| r.num), Some(3));
     }
 
     #[test]
