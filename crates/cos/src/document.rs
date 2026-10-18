@@ -857,6 +857,14 @@ impl Document {
         &self.revisions
     }
 
+    /// There is no cross-reference chain to append to: the index was rebuilt from object
+    /// headers because the file's own was unusable (see [`Self::repair_log`]), or the document
+    /// was built from scratch ([`Self::new_empty`]). A save writes such a document in full, even
+    /// when nothing was edited: for a repaired file that is what puts the repair on disk.
+    pub fn reconstructed(&self) -> bool {
+        self.revisions.is_empty()
+    }
+
     /// Where each revision of the file ends (oldest first): the byte after the `%%EOF` (and its
     /// end-of-line) that closes its cross-reference section. `data[..end]` is that revision as it
     /// was saved. A linearized file's first-page section belongs to the revision it precedes, so
