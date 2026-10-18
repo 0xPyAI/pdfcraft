@@ -1225,17 +1225,17 @@ fn unicode_map(doc: &Document, font: &Dict, composite: bool) -> Unicode {
 }
 
 /// A ToUnicode CMap mapping each two-byte code to the same UTF-16 code unit, leaving out the
-/// surrogates (which are not characters on their own) and the C0 controls. One `bfrange` per
-/// high byte, so no range crosses a last-byte boundary (§9.10.3).
+/// surrogates (which are not characters on their own) and the controls (C0, DEL and C1, as the
+/// renderer's text layer does). No range crosses a last-byte boundary (§9.10.3).
 fn identity_to_unicode() -> Vec<u8> {
-    let highs: Vec<u32> = (0u32..=0xFF).filter(|h| !(0xD8..=0xDF).contains(h)).collect();
+    let mut ranges = vec![(0x20u32, 0x7Eu32), (0xA0, 0xFF)];
+    ranges.extend((0x01u32..=0xFF).filter(|h| !(0xD8..=0xDF).contains(h)).map(|h| (h << 8, (h << 8) | 0xFF)));
     let mut cmap = String::from("1 begincodespacerange <0000> <FFFF> endcodespacerange\n");
     // At most 100 entries per section (§9.7.5.2 limits for CMap files).
-    for chunk in highs.chunks(100) {
+    for chunk in ranges.chunks(100) {
         cmap.push_str(&format!("{} beginbfrange\n", chunk.len()));
-        for h in chunk {
-            let low = if *h == 0 { 0x20 } else { 0 };
-            cmap.push_str(&format!("<{h:02X}{low:02X}> <{h:02X}FF> <{h:02X}{low:02X}>\n"));
+        for (lo, hi) in chunk {
+            cmap.push_str(&format!("<{lo:04X}> <{hi:04X}> <{lo:04X}>\n"));
         }
         cmap.push_str("endbfrange\n");
     }
@@ -1537,6 +1537,10 @@ mod tests {
             let m = Metrics::from_dict(&doc, &f);
             assert_eq!(m.decode(&[0, b'Z', 0, 0xFC, 0, b'r', 0x20, 0xAC, 0x4E, 0x2D]), "Zür€中", "{name}");
             assert_eq!(m.text_of(0x0001), None);
+            assert_eq!(m.text_of(0x007F), None, "DEL is a control");
+            assert_eq!(m.text_of(0x0085), None, "a C1 control");
+            assert_eq!(m.text_of(0x00A0).as_deref(), Some("\u{A0}"), "the range resumes after C1");
+            assert_eq!(m.text_of(0x007E).as_deref(), Some("~"));
             assert_eq!(m.text_of(0xD800), None);
             assert_eq!(m.text_of(0xFFFD).as_deref(), Some("\u{FFFD}"));
         }
