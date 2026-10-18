@@ -422,6 +422,32 @@ mod tests {
         assert_eq!(*got.lock().unwrap(), vec![PathBuf::from("c.pdf")]);
     }
 
+    /// A one-page document showing `text`, with an unencoded content stream long enough that
+    /// Reduce File Size makes a smaller copy (it saves none otherwise).
+    fn text_pdf(text: &str) -> Vec<u8> {
+        let content = format!("BT /F1 12 Tf 20 250 Td ({text}) Tj ET\n{}", "q Q\n".repeat(500));
+        let objs = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 300] >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_string(),
+            format!("<< /Length {} >>\nstream\n{content}endstream", content.len()),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, o) in objs.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+        for o in offsets {
+            out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+        out
+    }
+
     /// #2150: Reduce File Size finishing under an open Save As panel used to drop its bytes.
     #[test]
     fn a_reduced_copy_finished_under_another_dialog_is_saved_once_it_closes() {
@@ -431,17 +457,24 @@ mod tests {
         let out = dir.join("notes (reduced).pdf");
         let mut app = PdfCraftApp::new();
         app.set_option("language", "en").unwrap();
-        app.open_bytes("notes.txt", None, b"hello".to_vec()).unwrap();
+        let source = text_pdf("Minutes of the harbour board");
+        app.open_bytes("notes.pdf", None, source.clone()).unwrap();
         let (_, doc) = app.active_ids().unwrap();
+        let (reduced, _) = app.session.optimize_job(doc, &pdfcraft_engine::optimize::Settings::default(), &[]).unwrap().run(|_| true).unwrap();
+        assert!(reduced.len() < source.len(), "a copy that isn't smaller would not be saved at all");
         app.pick_override = Some(vec![out.to_string_lossy().into_owned()]);
         // Save As is still open on another tab when the optimizer finishes.
         app.pickers.showing.store(true, Ordering::SeqCst);
-        let reduced = Arc::new(b"%PDF-1.7 reduced".to_vec());
         app.save_optimized(doc, crate::optimize_ui::OptimizeKind::Reduce, Ok((reduced.clone(), String::new())));
         app.pickers.deliver(None, vec![], Box::new(|_, _| {}));
         app.process_picked();
         app.process_picked();
-        assert_eq!(std::fs::read(&out).ok(), Some(reduced.to_vec()), "the reduced copy is saved where the user chose");
+        let written = std::fs::read(&out).unwrap_or_default();
+        assert!(written == *reduced, "the reduced copy is saved where the user chose, byte for byte");
+        let mut again = pdfcraft_engine::Session::new();
+        let id = again.open("notes (reduced).pdf", None, Arc::new(written), None).unwrap();
+        let text = pdfcraft_engine::export::Exporter::new(again.get(id).unwrap()).text(0).unwrap();
+        assert!(text.contains("Minutes of the harbour board"), "the saved copy reopens with its text: {text:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
