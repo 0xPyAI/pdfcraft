@@ -1613,6 +1613,7 @@ fn a_file_opened_again_shows_its_last_view() {
         app.set_option("zoom", "50").unwrap();
         let view = &mut app.views[0];
         view.set_display(PageLayout::TwoUp, false);
+        view.set_cover(true);
         view.go_to_page(2);
     }
     h.run_steps(3);
@@ -1627,7 +1628,7 @@ fn a_file_opened_again_shows_its_last_view() {
             app.open_bytes("doc.pdf", Some(p), pages_fixture(3)).expect("opens");
         });
         let v = &h.state().views[0];
-        assert_eq!((v.current, v.fit, v.zoom, v.layout, v.continuous), (2, Fit::None, 0.5, PageLayout::TwoUp, false), "{label}");
+        assert_eq!((v.current, v.fit, v.zoom, v.layout, v.continuous, v.cover), (2, Fit::None, 0.5, PageLayout::TwoUp, false, true), "{label}");
     }
     // The preference off: the defaults.
     let saved = h.state().persist();
@@ -1638,7 +1639,7 @@ fn a_file_opened_again_shows_its_last_view() {
         app.open_bytes("doc.pdf", Some(p), pages_fixture(3)).expect("opens");
     });
     let v = &h.state().views[0];
-    assert_eq!((v.current, v.fit, v.layout, v.continuous), (0, Fit::Width, PageLayout::Single, true));
+    assert_eq!((v.current, v.fit, v.layout, v.continuous, v.cover), (0, Fit::Width, PageLayout::Single, true, false));
     // Garbage in the settings is ignored, a usable entry among it is kept.
     let mut app = PdfCraftApp::new();
     app.restore(&format!(

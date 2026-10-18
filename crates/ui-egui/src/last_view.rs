@@ -1,7 +1,7 @@
 //! Restore last view settings when reopening documents (Acrobat's Preferences ▸ Documents
-//! option; #1767): the page, zoom and page display a file was last shown with, remembered by
-//! its path when its tab is closed or settings are saved, and applied when the file is opened
-//! again. Desktop only: a document without a file has nothing to be found by.
+//! option; #1767): the page, zoom and page display (with the two-page cover setting) a file was
+//! last shown with, remembered by its path when its tab is closed or settings are saved, and
+//! applied when the file is opened again. Desktop only: a document without a file has nothing to be found by.
 
 use serde::Serialize;
 
@@ -22,6 +22,8 @@ pub struct LastView {
     pub zoom: String,
     /// The page display token (`canvas::display_token`).
     pub display: String,
+    /// Whether two-page view showed a cover page (the first page on its own).
+    pub cover: bool,
 }
 
 /// As `last_session` keys files (and the web has no paths to remember).
@@ -41,7 +43,13 @@ impl PdfCraftApp {
         let view = self.views.get(index)?;
         let path = self.session.get(view.id)?.path.as_deref()?;
         let zoom = ViewDefaults { fit: view.fit, zoom: view.zoom, ..ViewDefaults::default() }.zoom_name();
-        Some(LastView { path: absolute(path), page: view.current, zoom, display: canvas::display_token(view.layout, view.continuous).to_string() })
+        Some(LastView {
+            path: absolute(path),
+            page: view.current,
+            zoom,
+            display: canvas::display_token(view.layout, view.continuous).to_string(),
+            cover: view.cover,
+        })
     }
 
     /// Remember how view `index` shows its document (when its tab closes).
@@ -78,7 +86,8 @@ impl PdfCraftApp {
                 let zoom = e["zoom"].as_str().filter(|z| ViewDefaults::default().with_zoom(z).is_some())?.to_string();
                 let display = e["display"].as_str().filter(|d| canvas::parse_display_token(d).is_some())?.to_string();
                 let page = usize::try_from(e["page"].as_u64().unwrap_or(0)).unwrap_or(0);
-                Some(LastView { path, page, zoom, display })
+                let cover = e["cover"].as_bool().unwrap_or(false);
+                Some(LastView { path, page, zoom, display, cover })
             })
             .collect();
     }
@@ -99,6 +108,7 @@ impl PdfCraftApp {
         if let Some((layout, continuous)) = canvas::parse_display_token(&last.display) {
             view.set_display(layout, continuous);
         }
+        view.set_cover(last.cover);
         if let Some(defaults) = ViewDefaults::default().with_zoom(&last.zoom) {
             match defaults.fit {
                 canvas::Fit::None => view.set_zoom(defaults.zoom),
