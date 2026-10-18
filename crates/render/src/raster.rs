@@ -4708,7 +4708,7 @@ trailer << /Root 1 0 R >>
             .find(|e| &e[..4] == b"post")
             .map(|e| u32::from_be_bytes([e[8], e[9], e[10], e[11]]) as usize)
             .expect("the test font has a post table");
-        let render = |version: [u8; 4]| -> Vec<u8> {
+        let render_with = |version: [u8; 4], encoding: &str| -> Vec<u8> {
             let mut program = font.to_vec();
             program[post..post + 4].copy_from_slice(&version);
             let content = b"BT /F1 28 Tf 10 40 Td (Hamburg 0123) Tj ET";
@@ -4718,7 +4718,7 @@ trailer << /Root 1 0 R >>
                 b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
                 b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 80] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_vec(),
                 [format!("<< /Length {} >>\nstream\n", content.len()).into_bytes(), content.to_vec(), b"\nendstream".to_vec()].concat(),
-                format!("<< /Type /Font /Subtype /TrueType /BaseFont /JetBrainsMono-Regular /FirstChar 32 /LastChar 126 /Widths [{widths}] /FontDescriptor 6 0 R /Encoding /WinAnsiEncoding >>").into_bytes(),
+                format!("<< /Type /Font /Subtype /TrueType /BaseFont /JetBrainsMono-Regular /FirstChar 32 /LastChar 126 /Widths [{widths}] /FontDescriptor 6 0 R /Encoding {encoding} >>").into_bytes(),
                 b"<< /Type /FontDescriptor /FontName /JetBrainsMono-Regular /Flags 32 /FontBBox [-1000 -300 1000 1000] /ItalicAngle 0 /Ascent 1020 /Descent -300 /CapHeight 730 /StemV 80 /FontFile2 7 0 R >>".to_vec(),
                 [format!("<< /Length {} >>\nstream\n", program.len()).into_bytes(), program, b"\nendstream".to_vec()].concat(),
             ];
@@ -4747,10 +4747,16 @@ trailer << /Root 1 0 R >>
             assert!(page.error.is_none(), "{:?}", page.error);
             page.rgba.to_vec()
         };
+        let render = |version: [u8; 4]| render_with(version, "/WinAnsiEncoding");
         let correct = render([0, 3, 0, 0]);
         assert_eq!(render([0, 0, 0, 3]), correct, "3.0 with swapped halves draws with the embedded font");
         assert_eq!(render([0, 0, 0, 2]), render([0, 2, 0, 0]), "2.0 with swapped halves too");
         assert_ne!(render([0, 9, 0, 0]), correct, "an unknown version is still refused");
+        // A /Differences name only the font's own post table knows (W's alternate, `W.cv07`)
+        // is found through a swapped 2.0 table too (review on #2949).
+        let alternate = |version: [u8; 4]| render_with(version, "<< /BaseEncoding /WinAnsiEncoding /Differences [72 /W.cv07] >>");
+        assert_ne!(alternate([0, 2, 0, 0]), render([0, 2, 0, 0]), "the alternate W draws instead of H");
+        assert_eq!(alternate([0, 0, 0, 2]), alternate([0, 2, 0, 0]), "and also with swapped halves");
     }
 
     /// A page whose content expands far beyond its compressed stream stops at the expansion budget,

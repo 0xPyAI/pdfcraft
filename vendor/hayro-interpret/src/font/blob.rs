@@ -256,6 +256,27 @@ impl OpenTypeFontBlob {
             return glyph_names;
         };
 
+        // PdfCraft patch: a version written with its halves swapped (`00 00 00 02`, accepted in
+        // `new`) is read as the version it means, from a copy of the table with the version
+        // written correctly: read-fonts reads a 2.0 table's name index only under version 2.0,
+        // so otherwise its glyph names were never found (#2946).
+        let repaired = match post.version().to_be_bytes() {
+            [0, 0, 0, n @ 1..=3] => self
+                .font_ref()
+                .table_data(skrifa::raw::types::Tag::new(b"post"))
+                .map(|data| {
+                    let mut bytes = data.as_bytes().to_vec();
+                    if let Some(version) = bytes.get_mut(..4) {
+                        version.copy_from_slice(&[0, n, 0, 0]);
+                    }
+                    bytes
+                }),
+            _ => None,
+        };
+        let repaired_post = repaired.as_deref().and_then(|b| {
+            skrifa::raw::tables::post::Post::read(ReadFontData::new(b)).ok()
+        });
+        let post = repaired_post.as_ref().unwrap_or(&post);
         match post.version().to_major_minor() {
             (1, 0) => {
                 for (gid, name) in DEFAULT_GLYPH_NAMES.iter().enumerate() {
