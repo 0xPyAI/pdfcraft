@@ -2105,9 +2105,9 @@ tier = "P0"
 milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text"]
-tools = ["image_edit"]
-evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
-notes = "existing raster images and grouped Form artwork: rotate either way about the centre, flip horizontally or vertically (a q/cm/Q wrapper); Forms stay intact as groups; added images too"
+tools = ["image_edit", "content_update"]
+evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools", "crates/automation/tests/automation.rs::large_added_image_rotations_keep_orientation_and_undo", "crates/automation/tests/automation.rs::large_added_image_rotations_round_trip_through_mcp"]
+notes = "Existing raster images and grouped Form artwork: rotate either way about the centre, flip horizontally or vertically (a q/cm/Q wrapper); Forms stay intact as groups; added images too. Added-image content_update rotation accepts positive or negative integer multiples of 90 degrees; reducing the angle before addition prevents overflow at signed 64-bit limits and preserves the current orientation through full turns, Undo/Redo and save/reopen. Added-image rotations remain limited to 90-degree steps."
 
 [[feature]]
 id = "edit.image-move-resize"
