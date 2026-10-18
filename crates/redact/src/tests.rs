@@ -708,6 +708,140 @@ fn hidden_information_is_counted_and_removed() {
     assert!(shown, "the field's value stays visible as page content");
 }
 
+/// Issue #2447: in a tagged PDF the structure tree points at the link and the comment it tags
+/// (`/OBJR`). Removing them must drop those references too, or the full rewrite keeps the
+/// annotations, the URL and the comment text included, while the page no longer lists them.
+#[test]
+fn removed_links_and_comments_leave_the_structure_tree_and_the_saved_file() {
+    use crate::sanitize::{Hidden, remove_hidden};
+    let objs: Vec<Vec<u8>> = vec![
+        // 1 catalog, with a structure tree
+        b"<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 8 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        // 3 page: a tagged paragraph (MCID 0), a link and a comment, both tagged
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R 7 0 R] /StructParents 0 >>".to_vec(),
+        stream("", b"/P << /MCID 0 >> BDC BT /F1 10 Tf 10 230 Td (See the site) Tj ET EMC"),
+        FONT.replace("95 0 R", "13 0 R").into_bytes(),
+        // 6 link, 7 comment
+        b"<< /Type /Annot /Subtype /Link /Rect [10 228 80 240] /StructParent 1 /A << /S /URI /URI (https://secret.example/token=ZX81) >> >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Text /Rect [200 200 220 220] /StructParent 2 /Contents (COMMENTSECRETNOTE) >>".to_vec(),
+        // 8 struct tree root, 9 document element, 10 paragraph, 11 link element (direct OBJR),
+        // 12 annotation element (OBJR by reference, as K's only kid)
+        b"<< /Type /StructTreeRoot /K 9 0 R /ParentTree << /Nums [0 [10 0 R] 1 11 0 R 2 12 0 R] >> /ParentTreeNextKey 3 >>".to_vec(),
+        b"<< /Type /StructElem /S /Document /P 8 0 R /K [10 0 R 11 0 R 12 0 R] >>".to_vec(),
+        b"<< /Type /StructElem /S /P /P 9 0 R /Pg 3 0 R /K 0 >>".to_vec(),
+        // the link element's alternate text repeats the URL
+        b"<< /Type /StructElem /S /Link /P 9 0 R /Pg 3 0 R /Alt (secret.example link) /K [<< /Type /OBJR /Obj 6 0 R /Pg 3 0 R >>] >>".to_vec(),
+        b"<< /Type /StructElem /S /Annot /P 9 0 R /Pg 3 0 R /K 14 0 R >>".to_vec(),
+        widths(),
+        b"<< /Type /OBJR /Obj 7 0 R /Pg 3 0 R >>".to_vec(),
+    ];
+    let mut doc = pdf(objs);
+    let done = remove_hidden(&mut doc, &[Hidden::LinksActionsScripts, Hidden::Comments]).unwrap();
+    assert!(done.contains(&(Hidden::LinksActionsScripts, 1)) && done.contains(&(Hidden::Comments, 1)), "{done:?}");
+    // Without object streams, whose compression would hide the strings from the search.
+    let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
+    let has = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
+    assert!(has(b"(See the site)"), "the search sees the saved objects");
+    assert!(!has(b"secret.example"), "the removed link's URL survived the save");
+    assert!(!has(b"COMMENTSECRETNOTE"), "the removed comment's text survived the save");
+    // The tagged paragraph and its content stay; the elements lose only the references.
+    let saved = Document::open(Arc::new(bytes)).unwrap();
+    assert!(content(&saved, 0).contains("(See the site)"));
+    let objrs = saved.object_numbers().into_iter().filter(|&n| {
+        let o = saved.get(ObjRef::new(n, saved.generation(n)));
+        let direct = o.as_dict().is_some_and(|d| d.name(b"Type") == Some(b"OBJR"));
+        let nested = o.as_dict().and_then(|d| d.get(b"K")).is_some_and(|k| match &*saved.resolve(k) {
+            Object::Array(a) => a.iter().any(|x| saved.resolve(x).as_dict().is_some_and(|d| d.name(b"Type") == Some(b"OBJR"))),
+            _ => false,
+        });
+        direct || nested
+    });
+    assert_eq!(objrs.count(), 0, "no object reference to a removed annotation is left");
+    let root = saved.get(saved.root().unwrap()).as_dict().cloned().unwrap();
+    assert!(root.contains(b"StructTreeRoot"), "the structure tree itself stays");
+}
+
+/// #2532 review: a tagged form's widgets, flattened when form fields are removed, leave the
+/// structure tree too (their field value with them), and a pop-up listed on another page than
+/// its removed comment goes with it.
+#[test]
+fn flattened_widgets_and_far_pop_ups_leave_the_structure_tree() {
+    use crate::sanitize::{Hidden, remove_hidden};
+    let objs: Vec<Vec<u8>> = vec![
+        // 1 catalog with a form and a structure tree
+        b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [6 0 R] >> /StructTreeRoot 8 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 13 0 R] /Count 2 >>".to_vec(),
+        // 3 page 1: a text field's widget and a comment
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R 7 0 R] /StructParents 0 >>".to_vec(),
+        stream("", b"BT /F1 10 Tf 10 230 Td (Name:) Tj ET"),
+        FONT.replace("95 0 R", "12 0 R").into_bytes(),
+        // 6 the field and its widget, with an appearance
+        b"<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /V (FIELDSECRETVALUE) /Rect [50 225 200 240] /StructParent 1 /AP << /N 11 0 R >> >>".to_vec(),
+        // 7 comment, its pop-up (15) listed on page 2
+        b"<< /Type /Annot /Subtype /Text /Rect [200 200 220 220] /Contents (note) /Popup 15 0 R >>".to_vec(),
+        // 8 struct tree root, 9 document, 10 form element tagging the widget
+        b"<< /Type /StructTreeRoot /K 9 0 R /ParentTree << /Nums [1 10 0 R] >> /ParentTreeNextKey 2 >>".to_vec(),
+        b"<< /Type /StructElem /S /Document /P 8 0 R /K [10 0 R] >>".to_vec(),
+        b"<< /Type /StructElem /S /Form /P 9 0 R /Pg 3 0 R /K [<< /Type /OBJR /Obj 6 0 R /Pg 3 0 R >>] >>".to_vec(),
+        stream("/Type /XObject /Subtype /Form /BBox [0 0 150 15] /Resources << /Font << /F1 5 0 R >> >>", b"BT /F1 10 Tf 2 3 Td (FIELDSECRETVALUE) Tj ET"),
+        widths(),
+        // 13 page 2, listing the pop-up of page 1's comment
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Annots [15 0 R 16 0 R] >>".to_vec(),
+        b"<< >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Popup /Rect [0 0 100 50] /Parent 7 0 R >>".to_vec(),
+        // 16 an unrelated link on page 2 stays
+        b"<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] >>".to_vec(),
+    ];
+    let mut doc = pdf(objs);
+    remove_hidden(&mut doc, &[Hidden::FormFields, Hidden::Comments]).unwrap();
+    let page2 = pdfcraft_model::pages(&doc)[1].dict.clone();
+    let left: Vec<Object> = page2.get(b"Annots").map(|a| doc.resolve(a).as_array().map(|a| a.to_vec()).unwrap_or_default()).unwrap_or_default();
+    assert_eq!(left, [Object::Ref(ObjRef::new(16, 0))], "the far pop-up went with its comment");
+    let form = doc.get(ObjRef::new(10, 0)).as_dict().cloned().unwrap();
+    let kids = form.get(b"K").map(|k| doc.resolve(k).as_array().map(Vec::len).unwrap_or(1));
+    assert!(kids.unwrap_or(0) == 0, "the form element no longer references the flattened widget");
+    let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
+    let saved = Document::open(Arc::new(bytes)).unwrap();
+    let field_left = saved.object_numbers().into_iter().any(|n| {
+        saved.get(ObjRef::new(n, saved.generation(n))).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Widget") || d.contains(b"FT"))
+    });
+    assert!(!field_left, "the flattened field didn't survive the save through the structure tree");
+}
+
+/// #2532 review: a structure tree larger than the walk's limit can't be searched in full, so a
+/// reference the walk never reached could keep a removed annotation. Then the whole tree goes
+/// (with `/MarkInfo`), rather than reporting success with references left behind; under the
+/// limit only the reference goes.
+#[test]
+fn a_structure_tree_too_large_to_walk_is_removed_whole() {
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 5 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] >>".to_vec(),
+        // 4: the removed link
+        b"<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /URI /URI (https://secret.example) >> >>".to_vec(),
+        // 5 root, 6 document, 7 section, 8 link element with the OBJR
+        b"<< /Type /StructTreeRoot /K 6 0 R >>".to_vec(),
+        b"<< /Type /StructElem /S /Document /P 5 0 R /K [7 0 R] >>".to_vec(),
+        b"<< /Type /StructElem /S /Sect /P 6 0 R /K [8 0 R] >>".to_vec(),
+        b"<< /Type /StructElem /S /Link /P 7 0 R /K [<< /Type /OBJR /Obj 4 0 R >>] >>".to_vec(),
+    ];
+    let gone: std::collections::HashSet<ObjRef> = [ObjRef::new(4, 0)].into();
+    let catalog = |doc: &Document| doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+
+    let mut doc = pdf(objs.clone());
+    assert_eq!(crate::tags::drop_object_refs_within(&mut doc, &gone, 100).unwrap(), 1);
+    assert!(catalog(&doc).contains(b"StructTreeRoot") && catalog(&doc).contains(b"MarkInfo"), "under the limit the tree stays");
+
+    let mut doc = pdf(objs);
+    crate::tags::drop_object_refs_within(&mut doc, &gone, 2).unwrap();
+    assert!(!catalog(&doc).contains(b"StructTreeRoot"), "a tree the walk couldn't finish goes whole");
+    assert!(!catalog(&doc).contains(b"MarkInfo"));
+    let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
+    assert!(!bytes.windows(14).any(|w| w == b"secret.example"), "the removed link can't be reached any more");
+}
+
 /// Issue #1325: removing comments keeps the annotations that are not comments: the multimedia
 /// and print-production ones (Watermark, PrinterMark, TrapNet, Screen, Movie, RichMedia, 3D).
 #[test]

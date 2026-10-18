@@ -367,6 +367,40 @@ fn selected_text_shows_actions_and_underlines_without_changing_tools() {
 }
 
 #[test]
+fn selected_text_copy_action_closes_the_bar_and_keeps_the_selection() {
+    let mut h = harness(|_| {});
+    h.state_mut().views[0].select_text(0, 4, 8);
+    h.run_steps(3);
+    h.get_by_label("Copy").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Add comment").is_none(), "the action bar closes after Copy");
+    assert!(h.state().views[0].selected_text().is_some_and(|t| !t.is_empty()), "the words stay selected");
+    // A new selection brings the bar back.
+    h.state_mut().views[0].select_text(0, 2, 6);
+    h.run_steps(3);
+    h.get_by_label("Add comment");
+}
+
+#[test]
+fn dragging_over_copied_text_again_brings_the_action_bar_back() {
+    let mut h = harness(|_| {});
+    let (a, b) = {
+        let v = &h.state().views[0];
+        (v.glyph_screen_pos(0, 4).expect("text layer"), v.glyph_screen_pos(0, 8).expect("glyph"))
+    };
+    drag(&mut h, a, b);
+    let copied = h.state().views[0].selected_text();
+    assert!(copied.is_some(), "the drag selects text");
+    h.get_by_label("Copy").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Add comment").is_none(), "the action bar closes after Copy");
+    // The same drag again selects the same words, which is a new selection: the bar is back.
+    drag(&mut h, a, b);
+    assert_eq!(h.state().views[0].selected_text(), copied, "the drag selects the same words");
+    assert!(h.query_by_label("Add comment").is_some(), "the action bar is back after a new drag");
+}
+
+#[test]
 fn selected_text_replace_action_opens_replacement_composer() {
     let mut h = harness(|_| {});
     h.state_mut().views[0].select_text(0, 4, 8);
