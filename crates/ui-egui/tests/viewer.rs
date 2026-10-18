@@ -1304,6 +1304,70 @@ fn pages_panel_thumbnails_have_a_context_menu() {
     assert_eq!(h.state().page_clipboard.as_ref().map(|c| c.pages.clone()), Some(vec![2]));
 }
 
+/// Where the Pages panel draws page `n`'s thumbnail.
+fn thumbnail_rect(h: &Harness<'static, PdfCraftApp>, n: usize) -> egui::Rect {
+    h.get_all_by_label(&format!("Page {n}")).find(|t| t.rect().left() > 1000.0).expect("the Pages panel thumbnail").rect()
+}
+
+/// Whether `r` lies wholly in the part of the Pages panel in view.
+fn in_panel_view(h: &Harness<'static, PdfCraftApp>, r: egui::Rect) -> bool {
+    h.state().views[0].pages_panel.expect("the Pages panel is shown").contains_rect(r)
+}
+
+/// #2781: as in Acrobat, going to a page whose thumbnail is out of sight scrolls the Pages
+/// panel to show it.
+#[test]
+fn going_to_a_far_page_scrolls_its_thumbnail_into_view() {
+    let mut h = pages_panel_harness(&[(200, 300); 30]);
+    assert!(!in_panel_view(&h, thumbnail_rect(&h, 25)), "page 25 starts out of sight");
+    h.state_mut().views[0].go_to_page(24);
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].current, 24);
+    assert!(in_panel_view(&h, thumbnail_rect(&h, 25)), "page 25's thumbnail is shown");
+}
+
+/// #2781: a page whose thumbnail is already in view leaves the panel where it is, rather than
+/// centring the thumbnail on every page change.
+#[test]
+fn going_to_a_page_in_view_leaves_the_pages_panel_still() {
+    // Landscape pages, so several thumbnails share the panel.
+    let mut h = pages_panel_harness(&[(300, 200); 30]);
+    h.state_mut().views[0].go_to_page(14);
+    h.run_steps(4);
+    let clip = h.state().views[0].pages_panel.expect("the Pages panel is shown");
+    // The topmost thumbnail wholly in view, other than the current page's.
+    let (n, before) =
+        (1..=30).map(|n| (n, thumbnail_rect(&h, n))).find(|(n, r)| *n != 15 && in_panel_view(&h, *r)).expect("another thumbnail in view");
+    assert!(
+        (before.center().y - clip.center().y).abs() > 50.0,
+        "page {n} at {before:?} is away from the middle of {clip:?}, where centring would move it"
+    );
+    h.state_mut().views[0].go_to_page(n - 1);
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].current, n - 1);
+    assert_eq!(thumbnail_rect(&h, n), before, "page {n}'s thumbnail stayed put");
+}
+
+/// #2781: while the user drags thumbnails, a page change does not pull the panel away from
+/// where they are being dropped.
+#[test]
+fn a_page_change_while_thumbnails_are_dragged_does_not_scroll_the_pages_panel() {
+    let mut h = pages_panel_harness(&[(200, 300); 30]);
+    let first = thumbnail_rect(&h, 1);
+    let at = first.center();
+    h.hover_at(at);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+    h.run_steps(1);
+    h.hover_at(at + egui::vec2(0.0, 30.0));
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].panel_drag, Some(vec![0]), "page 1 is being dragged");
+    h.state_mut().views[0].go_to_page(24);
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].current, 24);
+    assert_eq!(thumbnail_rect(&h, 1), first, "the panel stays put under the drag");
+}
+
 /// #444, #186: a mouse-wheel notch scrolls as far as the scroll speed preference says;
 /// trackpad (point) scrolling keeps its own speed. The choice is saved.
 #[test]
