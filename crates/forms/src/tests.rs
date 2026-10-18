@@ -2023,6 +2023,29 @@ fn page_shapes_accepts_rectangle_closure_and_paint_variants() {
     }
 }
 
+/// #2942: a cell drawn with a point in the middle of each vertical side (the French 2042 form's
+/// letter cells), or on every side, is the rectangle it looks like. A point that turns back
+/// along a side is not on the way between its neighbours, so such a path is still not a box.
+#[test]
+fn page_shapes_reads_rectangles_with_points_along_their_sides() {
+    for content in [
+        "100 100 m 111.1 100 l 111.1 107.35 l 111.1 114.7 l 100 114.7 l 100 107.35 l h f",
+        "100 100 m 105 100 l 111.1 100 l 111.1 107.35 l 111.1 114.7 l 105 114.7 l 100 114.7 l 100 107.35 l h S",
+        "100 107.35 m 100 100 l 111.1 100 l 111.1 114.7 l 100 114.7 l h f",
+    ] {
+        let shapes = detection_test_shapes(content.as_bytes());
+        assert_eq!(shapes.boxes, [[100.0, 100.0, 111.1, 114.7]], "{content}");
+    }
+    for content in [
+        // Out past the corner and back: a spike, not a side.
+        "100 100 m 130 100 l 111.1 100 l 111.1 114.7 l 100 114.7 l h S",
+        // A sixth point off the sides.
+        "100 100 m 111.1 100 l 115 107 l 111.1 114.7 l 100 114.7 l 100 107.35 l h S",
+    ] {
+        assert!(detection_test_shapes(content.as_bytes()).boxes.is_empty(), "{content}");
+    }
+}
+
 #[test]
 fn page_shapes_rejects_open_diagonal_curved_and_complex_rectangles() {
     for content in [

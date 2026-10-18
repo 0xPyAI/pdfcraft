@@ -40,6 +40,10 @@ pub struct Candidate {
     pub name: String,
 }
 
+/// The most points a subpath may have and still be read as a rectangle: its four corners plus
+/// points along its sides (#2942: a cell drawn with a midpoint on each vertical side).
+const MAX_RECT_POINTS: usize = 16;
+
 /// The rectangles and horizontal segments a page draws (stroked or filled), in user space.
 #[derive(Default)]
 struct DetectionPath {
@@ -65,12 +69,33 @@ impl DetectionPath {
             return None;
         }
         let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6;
-        let mut points = self.points.as_slice();
+        let mut points = self.points.clone();
         let repeated_end = points.len() > 1 && near(points[0], *points.last()?);
         if repeated_end {
-            points = &points[..points.len() - 1];
+            points.pop();
         }
-        if points.len() != 4 || !(self.closed || implicitly_closed || repeated_end) {
+        if !(self.closed || implicitly_closed || repeated_end) {
+            return None;
+        }
+        // A point on a straight side, between its neighbours, doesn't change the shape: drop it,
+        // so a cell drawn with a midpoint on a side is the rectangle it looks like (#2942). A
+        // point that turns back along the side is not between its neighbours and stays, so a
+        // path that doubles back is still not a rectangle.
+        let between = |a: f64, m: f64, b: f64| a.min(b) - 1e-6 <= m && m <= a.max(b) + 1e-6;
+        let mut i = 0;
+        while points.len() > 4 && i < points.len() {
+            let n = points.len();
+            let (Some(&a), Some(&m), Some(&b)) = (points.get((i + n - 1) % n), points.get(i), points.get((i + 1) % n)) else { break };
+            let on_row = (a[1] - m[1]).abs() < 1e-6 && (m[1] - b[1]).abs() < 1e-6 && between(a[0], m[0], b[0]);
+            let on_column = (a[0] - m[0]).abs() < 1e-6 && (m[0] - b[0]).abs() < 1e-6 && between(a[1], m[1], b[1]);
+            if on_row || on_column {
+                points.remove(i);
+                i = 0;
+            } else {
+                i += 1;
+            }
+        }
+        if points.len() != 4 {
             return None;
         }
         let mut horizontal = [false; 4];
@@ -157,7 +182,7 @@ pub fn page_shapes(doc: &Document, page: usize) -> Shapes {
                     let (bx, by) = ctm.apply(x, y);
                     let b = [bx, by];
                     if !path.complex {
-                        if path.points.len() >= 5 {
+                        if path.points.len() > MAX_RECT_POINTS {
                             path.complex = true;
                         } else {
                             if path.points.is_empty() {
