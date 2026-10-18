@@ -1121,6 +1121,12 @@ pub struct Color {
 }
 
 impl Color {
+    /// PdfCraft patch (35): the same colour, fully opaque (see `Pattern::without_opacity`).
+    pub(crate) fn opaque(mut self) -> Self {
+        self.opacity = 1.0;
+        self
+    }
+
     pub(crate) fn new(color_space: ColorSpace, components: ColorComponents, opacity: f32) -> Self {
         Self {
             color_space,

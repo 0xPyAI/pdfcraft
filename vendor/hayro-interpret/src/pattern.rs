@@ -63,6 +63,20 @@ impl<'a> Pattern<'a> {
         }
     }
 
+    /// PdfCraft patch (35): the pattern without the fill or stroke opacity it captured when it was
+    /// set (`scn`). A stencil mask's transparency group applies the opacity in force when the mask
+    /// is drawn, so a pattern paint carrying it too drew the mask at the opacity squared (#2975).
+    pub(crate) fn without_opacity(mut self) -> Self {
+        match &mut self {
+            Self::Shading(p) => p.opacity = 1.0,
+            Self::Tiling(p) => {
+                p.non_stroking_paint = p.non_stroking_paint.clone().opaque();
+                p.stroke_paint = p.stroke_paint.clone().opaque();
+            }
+        }
+        self
+    }
+
     pub(crate) fn set_transfer_function(&mut self, tf: ActiveTransferFunction) {
         if let Self::Shading(p) = self {
             p.transfer_function = Some(tf);

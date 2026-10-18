@@ -5825,38 +5825,50 @@ trailer << /Root 1 0 R >>
     /// #2975: a stencil mask (`/ImageMask true`) is painted in the fill colour at the fill
     /// opacity, once: at `ca 0.5` it is as opaque as a rectangle filled at `ca 0.5` beside it
     /// (it was a quarter as opaque, the opacity applied by both the image's group and its paint).
+    /// The same holds when the fill is a pattern, whose paint keeps the opacity in force when it
+    /// was set with `scn`: an uncoloured tiling pattern and a shading pattern.
     #[test]
     fn stencil_masks_are_drawn_at_the_fill_opacity_once() {
         let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..3].to_vec();
-        for alpha in ["1", "0.5", "0.25"] {
-            let content = "/A gs 0 0 1 rg q 100 0 0 100 20 50 cm /Msk Do Q 160 50 100 100 re f";
-            let pdf = format!(
-                "%PDF-1.7
+        let fills = [("colour", "0 0 1 rg"), ("uncoloured tiling pattern", "/CsP cs 0 0 1 /Tp scn"), ("shading pattern", "/Pattern cs /Sp scn")];
+        for (fill_name, fill) in fills {
+            for alpha in ["1", "0.5", "0.25"] {
+                let content = format!("/A gs {fill} q 100 0 0 100 20 50 cm /Msk Do Q 160 50 100 100 re f");
+                let tile = "0 0 10 10 re f";
+                let pdf = format!(
+                    "%PDF-1.7
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
-3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /ExtGState << /A << /ca {alpha} >> >> /XObject << /Msk 5 0 R >> >> >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /ExtGState << /A << /ca {alpha} >> >> /XObject << /Msk 5 0 R >> /ColorSpace << /CsP [/Pattern /DeviceRGB] >> /Pattern << /Tp 6 0 R /Sp 7 0 R >> >> >> endobj
 4 0 obj << /Length {} >> stream
 {content}
 endstream endobj
 5 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 2 /ImageMask true /Length 2 >> stream
-  
+\0\0
 endstream endobj
+6 0 obj << /Type /Pattern /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10 /Resources << >> /Length {} >> stream
+{tile}
+endstream endobj
+7 0 obj << /Type /Pattern /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 300 0] /Extend [true true] /Function << /FunctionType 2 /Domain [0 1] /C0 [0 0 1] /C1 [0 0 1] /N 1 >> >> >> endobj
 trailer << /Root 1 0 R >>
 %%EOF",
-                content.len()
-            );
-            let p = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default()).render(RenderRequest {
-                page: 0,
-                kind: RequestKind::Pixels,
-                tile: None,
-                scale: 1.0,
-                tag: 0,
-                ..Default::default()
-            });
-            assert!(p.error.is_none(), "ca {alpha}: {:?}", p.error);
-            // Pixel rows run top down: PDF (70, 100) is in the mask, (210, 100) in the rectangle.
-            let (mask, rect) = (px(&p, 70, 100), px(&p, 210, 100));
-            assert!(mask.iter().zip(&rect).all(|(m, r)| m.abs_diff(*r) <= 1), "ca {alpha}: mask {mask:?}, rectangle {rect:?}");
+                    content.len(),
+                    tile.len()
+                );
+                let p = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default()).render(RenderRequest {
+                    page: 0,
+                    kind: RequestKind::Pixels,
+                    tile: None,
+                    scale: 1.0,
+                    tag: 0,
+                    ..Default::default()
+                });
+                assert!(p.error.is_none(), "{fill_name}, ca {alpha}: {:?}", p.error);
+                // Pixel rows run top down: PDF (70, 100) is in the mask, (210, 100) in the rectangle.
+                let (mask, rect) = (px(&p, 70, 100), px(&p, 210, 100));
+                assert!(rect != [255, 255, 255], "{fill_name}, ca {alpha}: the rectangle is painted");
+                assert!(mask.iter().zip(&rect).all(|(m, r)| m.abs_diff(*r) <= 1), "{fill_name}, ca {alpha}: mask {mask:?}, rectangle {rect:?}");
+            }
         }
     }
 

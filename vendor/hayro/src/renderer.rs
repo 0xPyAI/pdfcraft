@@ -1510,8 +1510,11 @@ impl<'a> Device<'a> for Renderer {
                                 );
                                 self.ctx.set_transform(transform);
 
+                                // PdfCraft patch: a stencil mask is painted with the fill
+                                // (non-stroking) paint; `true` drew an uncoloured tiling pattern
+                                // in its stroke colour (black by default) (#2975).
                                 let clip_path =
-                                    self.set_paint(paint, &stencil_rect.to_path(0.1), true);
+                                    self.set_paint(paint, &stencil_rect.to_path(0.1), false);
                                 if let Some(clip_path) = clip_path.as_ref() {
                                     self.push_clip_path_inner(clip_path, FillRule::NonZero);
                                 }
