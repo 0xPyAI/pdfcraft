@@ -949,3 +949,36 @@ fn cmyk_and_ycck_jpegs_export_in_the_colours_the_page_shows() {
         }
     }
 }
+
+/// A 60 x 20 JPEG at `dpi` x 72 dpi, tagged with EXIF `orientation` (6: shown turned 90 degrees
+/// clockwise).
+pub(crate) fn phone_jpeg(orientation: u8, dpi: u16) -> Vec<u8> {
+    use image::codecs::jpeg::{JpegEncoder, PixelDensity, PixelDensityUnit};
+    let mut jpeg = Vec::new();
+    let mut encoder = JpegEncoder::new(&mut jpeg);
+    encoder.set_pixel_density(PixelDensity { density: (dpi, 72), unit: PixelDensityUnit::Inches });
+    encoder.encode_image(&image::RgbImage::from_pixel(60, 20, image::Rgb([20, 20, 20]))).unwrap();
+    let mut exif = b"Exif\0\0II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0".to_vec();
+    exif.extend_from_slice(&[orientation, 0, 0, 0, 0, 0, 0, 0]);
+    let mut out = jpeg[..2].to_vec();
+    out.extend_from_slice(&[0xff, 0xe1]);
+    out.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
+    out.extend_from_slice(&exif);
+    out.extend_from_slice(&jpeg[2..]);
+    out
+}
+
+#[test]
+fn a_jpeg_with_an_exif_orientation_becomes_an_upright_page() {
+    let doc = reopen(&from_images(&[("photo.jpg".into(), phone_jpeg(6, 144)), ("plain.jpg".into(), phone_jpeg(1, 72))]).unwrap());
+    // Stored 60 x 20 px at 144 x 72 dpi; turned it is 20 x 60 px at 72 x 144 dpi: 20 x 30 pt.
+    let m0 = media(&pages(&doc)[0]);
+    assert!((m0[2] - 20.0).abs() < 0.01 && (m0[3] - 30.0).abs() < 0.01, "{m0:?}");
+    let img = image_of(&doc, 0);
+    assert_eq!((img.int(b"Width"), img.int(b"Height")), (Some(20), Some(60)));
+    // "As stored" stays as it is.
+    let m1 = media(&pages(&doc)[1]);
+    assert!((m1[2] - 60.0).abs() < 0.01 && (m1[3] - 20.0).abs() < 0.01, "{m1:?}");
+    let img = image_of(&doc, 1);
+    assert_eq!((img.int(b"Width"), img.int(b"Height")), (Some(60), Some(20)));
+}

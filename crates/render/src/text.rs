@@ -1257,26 +1257,134 @@ fn collide(glyphs: &[&TextGlyph], height: &dyn Fn(usize) -> f32, h: f32, sc: &mu
     dense
 }
 
-/// Reverses each right-to-left span of `idx` (visual → logical order). A space between two right-to-left glyphs
-/// belongs to the span.
-/// Reverse right-to-left runs of `idx` (visual → logical), and the word gaps between their glyphs
-/// with them: `spaces[w]` is a gap left of `idx[w]` (#1062).
+/// Simplified bidi class of a glyph or word gap (UAX #9: strong L/R, numbers, neutrals).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Bidi {
+    L,
+    R,
+    Num,
+    N,
+}
+
+fn bidi_class(text: &str) -> Bidi {
+    if text.chars().any(|c| is_rtl(c) && !c.is_numeric()) {
+        Bidi::R
+    } else if text.chars().any(char::is_numeric) {
+        Bidi::Num
+    } else if text.chars().any(char::is_alphabetic) {
+        Bidi::L
+    } else {
+        Bidi::N
+    }
+}
+
+/// Reorders a line of `idx` from visual to logical order with a simplified bidi level pass (#2667), carrying the
+/// word gaps along: `spaces[w]` is a gap left of `idx[w]` (#1062). The paragraph is right-to-left when it has
+/// more right-to-left than left-to-right glyphs; numbers keep their left-to-right order, and neutrals
+/// (punctuation, gaps) take the direction of their neighbours, or the paragraph's between opposite ones.
 fn reverse_rtl(glyphs: &[&TextGlyph], idx: &mut [usize], spaces: &mut [bool]) {
-    let rtl = |i: usize| glyphs[i].text.chars().any(is_rtl);
+    // Glyphs and word gaps (None) in visual order.
+    let mut items: Vec<(Option<usize>, Bidi)> = Vec::with_capacity(idx.len() * 2);
+    for (w, &i) in idx.iter().enumerate() {
+        if w > 0 && spaces.get(w).copied().unwrap_or(false) {
+            items.push((None, Bidi::N));
+        }
+        items.push((Some(i), bidi_class(&glyphs[i].text)));
+    }
+    let texts: Vec<&str> = items.iter().map(|it| it.0.map_or("", |i| glyphs[i].text.as_str())).collect();
+    let text = |k: usize| texts.get(k).copied().unwrap_or("");
+    let count = |b: Bidi| items.iter().filter(|it| it.1 == b).count();
+    let para = if count(Bidi::R) > count(Bidi::L) { Bidi::R } else { Bidi::L };
+    let n = items.len();
+    // W4: a single separator between two digits belongs to the number.
+    for k in 1..n.saturating_sub(1) {
+        let sep = matches!(text(k), "." | "," | ":" | "/" | "+" | "-" | "\u{066B}" | "\u{066C}");
+        if sep && items[k - 1].1 == Bidi::Num && items[k + 1].1 == Bidi::Num {
+            items[k].1 = Bidi::Num;
+        }
+    }
+    // W5: terminators (percent, currency) next to a number belong to it.
+    let term =
+        |s: &str| !s.is_empty() && s.chars().all(|c| matches!(c, '%' | '‰' | '#' | '$' | '¢'..='¥' | '°' | '\u{066A}' | '\u{20A0}'..='\u{20CF}'));
+    for k in 1..n {
+        if items[k].1 == Bidi::N && items[k - 1].1 == Bidi::Num && term(text(k)) {
+            items[k].1 = Bidi::Num;
+        }
+    }
+    for k in (0..n.saturating_sub(1)).rev() {
+        if items[k].1 == Bidi::N && items[k + 1].1 == Bidi::Num && term(text(k)) {
+            items[k].1 = Bidi::Num;
+        }
+    }
+    // W7: a number after left-to-right text (or at the start of a left-to-right paragraph) is left-to-right.
+    let mut strong = para;
+    for it in &mut items {
+        match it.1 {
+            Bidi::L | Bidi::R => strong = it.1,
+            Bidi::Num if strong == Bidi::L => it.1 = Bidi::L,
+            _ => {}
+        }
+    }
+    // N1/N2: neutrals between same-direction text take it (numbers count as right-to-left), else the paragraph's.
+    let dir = |b: Bidi| if b == Bidi::L { Bidi::L } else { Bidi::R };
     let mut k = 0;
-    while k < idx.len() {
-        if rtl(idx[k]) {
+    while k < n {
+        if items[k].1 != Bidi::N {
+            k += 1;
+            continue;
+        }
+        let mut e = k;
+        while e < n && items[e].1 == Bidi::N {
+            e += 1;
+        }
+        let before = if k == 0 { para } else { dir(items[k - 1].1) };
+        let after = if e == n { para } else { dir(items[e].1) };
+        let resolved = if before == after { before } else { para };
+        for it in &mut items[k..e] {
+            it.1 = resolved;
+        }
+        k = e;
+    }
+    // Levels (I1/I2), then L2: reverse every run at or above each level, highest first.
+    let rtl_para = para == Bidi::R;
+    let levels: Vec<u8> = items
+        .iter()
+        .map(|it| match it.1 {
+            Bidi::R => 1,
+            Bidi::Num => 2,
+            _ if rtl_para => 2,
+            _ => 0,
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..n).collect();
+    for level in (1..=levels.iter().copied().max().unwrap_or(0)).rev() {
+        let mut k = 0;
+        while k < n {
+            if levels[order[k]] < level {
+                k += 1;
+                continue;
+            }
             let mut e = k;
-            while e + 1 < idx.len() && (rtl(idx[e + 1]) || (glyphs[idx[e + 1]].text.trim().is_empty() && e + 2 < idx.len() && rtl(idx[e + 2]))) {
+            while e < n && levels[order[e]] >= level {
                 e += 1;
             }
-            idx[k..=e].reverse();
-            if let Some(gaps) = spaces.get_mut(k + 1..=e) {
-                gaps.reverse();
+            order[k..e].reverse();
+            k = e;
+        }
+    }
+    let mut j = 0;
+    let mut gap = false;
+    for &o in &order {
+        match items[o].0 {
+            None => gap = true,
+            Some(i) => {
+                if let (Some(slot), Some(space)) = (idx.get_mut(j), spaces.get_mut(j)) {
+                    *slot = i;
+                    *space = gap && j > 0;
+                }
+                gap = false;
+                j += 1;
             }
-            k = e + 1;
-        } else {
-            k += 1;
         }
     }
 }
@@ -2090,6 +2198,26 @@ mod tests {
         word(&mut v, "םלוע", 10.0, 10.0, 6.0);
         word(&mut v, "םולש", 40.0, 10.0, 6.0);
         assert_eq!(layout(v).plain_text(), "שלום עולם");
+    }
+
+    /// #2667: a number or punctuation on a right-to-left line must not split it into separately reversed words.
+    #[test]
+    fn rtl_line_with_number_and_punctuation_reads_in_logical_order() {
+        let line = |words: &[&str]| {
+            let mut v = Vec::new();
+            let mut x = 10.0;
+            for w in words {
+                word(&mut v, w, x, 10.0, 6.0);
+                x += w.chars().count() as f32 * 6.0 + 6.0;
+            }
+            layout(v).plain_text()
+        };
+        // Each line as drawn, left to right.
+        assert_eq!(line(&["םילקש", "120", "ריחמ"]), "מחיר 120 שקלים");
+        assert_eq!(line(&[".הקידב", "ךמסמ", "והז", ":תירבע"]), "עברית: זהו מסמך בדיקה.");
+        assert_eq!(line(&["باتك", "12.5", "ددع"]), "عدد 12.5 كتاب");
+        assert_eq!(line(&["םלוע", "םולש"]), "שלום עולם");
+        assert_eq!(line(&["Total", "םולש", "price"]), "Total שלום price");
     }
 
     /// Two lines, "ab cd" and "e fg": words stop at blank glyphs, word gaps and line ends.
