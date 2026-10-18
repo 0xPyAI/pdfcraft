@@ -1516,6 +1516,13 @@ impl DocView {
         }
     }
 
+    /// A zoom typed as a percentage ("150", "150%", " 62.5 % ") as a zoom factor; `None` unless it is a
+    /// finite, positive number. `set_zoom` clamps it to the supported range.
+    pub fn parse_zoom_percent(typed: &str) -> Option<f32> {
+        let percent = typed.trim().trim_end_matches('%').trim_end().parse::<f32>().ok()?;
+        (percent.is_finite() && percent > 0.0).then_some(percent / 100.0)
+    }
+
     /// Standard zoom steps (as in Acrobat's zoom menu).
     pub fn zoom_step(&mut self, up: bool) {
         const STEPS: [f32; 17] = [0.1, 0.25, 0.33, 0.5, 0.66, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0, 32.0];
@@ -5155,6 +5162,16 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn typed_zoom_percentages_parse() {
+        for (typed, zoom) in [("150", 1.5), ("150%", 1.5), (" 62.5 % ", 0.625), ("6400%", 64.0)] {
+            assert_eq!(DocView::parse_zoom_percent(typed), Some(zoom), "{typed}");
+        }
+        for typed in ["", "%", "abc", "0", "-50", "NaN", "inf", "1e40", "150%%x", "%150"] {
+            assert_eq!(DocView::parse_zoom_percent(typed), None, "{typed}");
+        }
+    }
 
     /// A rotated (landscape) page is drawn as wide as the cell allows and centred in the picture
     /// area, as Acrobat draws it, not as a small strip pinned to the top; a portrait page still
