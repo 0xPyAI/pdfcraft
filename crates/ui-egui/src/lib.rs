@@ -1541,6 +1541,15 @@ impl PdfCraftApp {
         }
     }
 
+    /// [`Self::attachment_action`] for the file of the attachment comment at (page, index).
+    pub fn comment_attachment_action(&mut self, doc: DocId, page: usize, index: usize, open: bool) {
+        let source = pdfcraft_render::AttachmentSource::Annotation { page, index };
+        // The menus offer the items only for a listed file, so a miss is a comment gone since.
+        if let Some(i) = self.session.get(doc).and_then(|d| d.info.attachments.iter().position(|a| a.source == source)) {
+            self.attachment_action(doc, i, open);
+        }
+    }
+
     /// Whether the app draws the window's title bar, buttons and resize edges: the desktop leaves
     /// the frame to the app and Use system title bar is off.
     pub fn draws_window_frame(&self) -> bool {
