@@ -952,19 +952,24 @@ fn an_element_inheriting_its_page_loses_its_redacted_text_when_the_parent_tree_l
 /// #3285 review: a structure element written in place, here as an ID tree value, can't be
 /// edited without rewriting what holds it; when it tags a removed annotation, removing hidden
 /// information is refused instead of keeping the annotation reachable in a full rewrite.
+/// Direct callers discard the failed working copy to preserve the original document.
 #[test]
 fn an_element_written_in_place_that_tags_a_removed_annotation_is_refused() {
     let objs: Vec<Vec<u8>> = vec![
         b"<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 5 0 R >>".to_vec(),
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Annots [4 0 R] >>".to_vec(),
         b"<< /Type /Annot /Subtype /Text /Rect [0 0 10 10] /Contents (hushhush note) >>".to_vec(),
         b"<< /Type /StructTreeRoot /K 6 0 R /IDTree << /Names [(note1) << /Type /StructElem /S /Annot /P 6 0 R /K [<< /Type /OBJR /Obj 4 0 R >>] >>] >> >>".to_vec(),
         b"<< /Type /StructElem /S /Document /P 5 0 R >>".to_vec(),
     ];
-    let gone: std::collections::HashSet<ObjRef> = [ObjRef::new(4, 0)].into();
-    let mut doc = pdf(objs);
-    assert!(matches!(crate::tags::drop_object_refs(&mut doc, &gone), Err(RedactError::Tags)));
+    let original = pdf(objs);
+    let before = write_full(&original, &SaveOptions::default()).unwrap();
+    let mut working = original.clone();
+    assert!(matches!(sanitize::remove_hidden(&mut working, &[sanitize::Hidden::Comments]), Err(RedactError::Tags)));
+    assert!(!working.get(ObjRef::new(3, 0)).as_dict().unwrap().contains(b"Annots"), "the failed working copy was partially changed");
+    drop(working);
+    assert_eq!(write_full(&original, &SaveOptions::default()).unwrap(), before, "discarding the working copy preserves the original");
 }
 
 /// Whether a full rewrite of `doc` still holds the redacted word.
@@ -976,6 +981,7 @@ fn bluefin_survives(doc: &Document) -> bool {
 /// #3285 review (the maintainer's probes): an element written in place in the parent tree that
 /// owns the redacted text can't be changed, so applying is refused; the same element as an object
 /// of its own is cleaned, and nothing of the word is left in a full rewrite.
+/// Refusal does not promise rollback: direct callers discard the failed working copy.
 #[test]
 fn an_element_written_in_place_owning_redacted_text_is_refused() {
     let objs = |element: &str| -> Vec<Vec<u8>> {
@@ -994,7 +1000,18 @@ fn an_element_written_in_place_owning_redacted_text_is_refused() {
     };
     let mut doc = pdf(objs("<< /Type /StructElem /S /P /P 6 0 R /Pg 3 0 R /K 0 /ActualText (Codename Bluefin) >>"));
     mark(&mut doc, 0, &[[10.0, 140.0, 290.0, 170.0]], "");
-    assert!(matches!(apply(&mut doc, None), Err(RedactError::Tags)));
+    let before = write_full(&doc, &SaveOptions::default()).unwrap();
+    let mut working = doc.clone();
+    let error = apply(&mut working, None).unwrap_err();
+    assert!(matches!(error, RedactError::Tags));
+    assert_eq!(
+        error.to_string(),
+        "the document's tags can't be cleaned completely (an element written in place, or a structure tree too large or too deep to follow); the operation was refused"
+    );
+    assert!(!content(&working, 0).contains("Bluefin"), "the failed working copy was partially changed");
+    assert!(bluefin_survives(&working), "the failed working copy still holds the word in its tags");
+    drop(working);
+    assert_eq!(write_full(&doc, &SaveOptions::default()).unwrap(), before, "discarding the working copy preserves the original");
     let mut doc = pdf(objs("7 0 R"));
     mark(&mut doc, 0, &[[10.0, 140.0, 290.0, 170.0]], "");
     let r = apply(&mut doc, None).unwrap();
