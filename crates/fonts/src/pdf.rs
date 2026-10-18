@@ -1206,12 +1206,40 @@ fn unicode_map(doc: &Document, font: &Dict, composite: bool) -> Unicode {
             }
         }
     }
-    if let Some(Object::Stream(s)) = font.get(b"ToUnicode").map(|t| doc.resolve(t)).as_deref()
-        && let Ok(data) = s.decoded()
-    {
-        parse_to_unicode(&data, &mut out);
+    match font.get(b"ToUnicode").map(|t| doc.resolve(t)).as_deref() {
+        Some(Object::Stream(s)) => {
+            if let Ok(data) = s.decoded() {
+                parse_to_unicode(&data, &mut out);
+            }
+        }
+        // `/ToUnicode /Identity-H` is not a stream, as ISO 32000-2 §9.10.3 requires, but CAD
+        // exporters (WSCAD among them) write it for composite fonts whose two-byte codes are the
+        // UTF-16 code units. Acrobat, MuPDF and pdf.js read it as code = Unicode, and so does
+        // the renderer's text layer; without it the text could be seen but not edited or found.
+        Some(Object::Name(n)) if composite && matches!(n.as_slice(), b"Identity-H" | b"Identity-V") => {
+            parse_to_unicode(&identity_to_unicode(), &mut out);
+        }
+        _ => {}
     }
     out
+}
+
+/// A ToUnicode CMap mapping each two-byte code to the same UTF-16 code unit, leaving out the
+/// surrogates (which are not characters on their own) and the C0 controls. One `bfrange` per
+/// high byte, so no range crosses a last-byte boundary (§9.10.3).
+fn identity_to_unicode() -> Vec<u8> {
+    let highs: Vec<u32> = (0u32..=0xFF).filter(|h| !(0xD8..=0xDF).contains(h)).collect();
+    let mut cmap = String::from("1 begincodespacerange <0000> <FFFF> endcodespacerange\n");
+    // At most 100 entries per section (§9.7.5.2 limits for CMap files).
+    for chunk in highs.chunks(100) {
+        cmap.push_str(&format!("{} beginbfrange\n", chunk.len()));
+        for h in chunk {
+            let low = if *h == 0 { 0x20 } else { 0 };
+            cmap.push_str(&format!("<{h:02X}{low:02X}> <{h:02X}FF> <{h:02X}{low:02X}>\n"));
+        }
+        cmap.push_str("endbfrange\n");
+    }
+    cmap.into_bytes()
 }
 
 #[cfg(test)]
@@ -1487,6 +1515,37 @@ mod tests {
         let m = Metrics::from_dict(&doc, &f);
         assert_eq!(m.encode("Me er").as_deref(), Some(&[0, 1, 0, 5, 0, 7, 0, 5, 0, 6][..]));
         assert_eq!(m.decode(&[0, 1, 0, 7, 0, 2]), "M á");
+    }
+
+    /// WSCAD writes `/ToUnicode /Identity-H` (a name, not a CMap stream) on composite fonts whose
+    /// codes are UTF-16 code units: the codes read as the same Unicode, as in Acrobat. Controls
+    /// and lone surrogates map to nothing, and a simple font's name is not a ToUnicode map.
+    #[test]
+    fn identity_to_unicode_names_read_codes_as_unicode() {
+        let doc = Document::new_empty();
+        for name in ["Identity-H", "Identity-V"] {
+            let f = font(
+                &mut Document::new_empty(),
+                vec![
+                    ("Subtype", Object::name("Type0")),
+                    ("BaseFont", Object::name("RobotoMono-Regular")),
+                    ("Encoding", Object::name("Identity-H")),
+                    ("DescendantFonts", Object::Array(vec![Object::Dict(Dict::new())])),
+                    ("ToUnicode", Object::name(name)),
+                ],
+            );
+            let m = Metrics::from_dict(&doc, &f);
+            assert_eq!(m.decode(&[0, b'Z', 0, 0xFC, 0, b'r', 0x20, 0xAC, 0x4E, 0x2D]), "Zür€中", "{name}");
+            assert_eq!(m.text_of(0x0001), None);
+            assert_eq!(m.text_of(0xD800), None);
+            assert_eq!(m.text_of(0xFFFD).as_deref(), Some("\u{FFFD}"));
+        }
+        let simple = font(
+            &mut Document::new_empty(),
+            vec![("Subtype", Object::name("TrueType")), ("BaseFont", Object::name("Arial")), ("ToUnicode", Object::name("Identity-H"))],
+        );
+        let m = Metrics::from_dict(&doc, &simple);
+        assert_eq!(m.text_of(0x41).as_deref(), Some("A"), "the encoding still applies");
     }
 
     /// Chrome's subsets leave the glyphs of `/DW` width out of `/W` (#1443): "s" (CID 0x56) is
