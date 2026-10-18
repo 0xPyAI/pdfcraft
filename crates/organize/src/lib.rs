@@ -365,43 +365,60 @@ fn prune_legacy(doc: &Document, dests: &mut Dict, gone: &[ObjRef], dead: &mut Ve
 /// Prune a name tree held in `slot` (a reference, or a dictionary written inline). A reference is
 /// updated in place and yields `None`; an inline dictionary that changed is handed back.
 fn prune_tree_slot(doc: &mut Document, slot: &Object, gone: &[ObjRef], dead: &mut Vec<Vec<u8>>) -> Result<Option<Dict>, OrganizeError> {
-    let mut seen = Vec::new();
-    match slot {
+    let mut stack = Vec::new();
+    let mut left = MAX_DESTINATION_TREE_WORK;
+    let inline = match slot {
         Object::Ref(r) => {
-            prune_tree_ref(doc, *r, gone, dead, &mut seen)?;
-            Ok(None)
+            stack.push(*r);
+            None
         }
         Object::Dict(d) => {
             let mut node = d.clone();
-            Ok(prune_tree_node(doc, &mut node, gone, dead, &mut seen)?.then_some(node))
+            prune_tree_node(doc, &mut node, gone, dead, &mut stack, &mut left)?.then_some(node)
         }
-        _ => Ok(None),
+        _ => None,
+    };
+    // Name trees consist of shallow indirect nodes. Their graph depth must not become
+    // call-stack depth; the shared budget also bounds wide trees and repeated edges.
+    let mut seen = std::collections::HashSet::new();
+    while let Some(r) = stack.pop() {
+        if !seen.insert(r) {
+            continue;
+        }
+        let Some(mut node) = doc.get(r).as_dict().cloned() else { continue };
+        if prune_tree_node(doc, &mut node, gone, dead, &mut stack, &mut left)? {
+            doc.update_dict(r, |d| *d = node)?;
+        }
     }
+    Ok(inline)
 }
 
-fn prune_tree_ref(doc: &mut Document, r: ObjRef, gone: &[ObjRef], dead: &mut Vec<Vec<u8>>, seen: &mut Vec<ObjRef>) -> Result<(), OrganizeError> {
-    if seen.contains(&r) {
-        return Ok(());
-    }
-    seen.push(r);
-    let Some(mut node) = doc.get(r).as_dict().cloned() else { return Ok(()) };
-    if prune_tree_node(doc, &mut node, gone, dead, seen)? {
-        doc.update_dict(r, |d| *d = node)?;
-    }
+/// Count nodes and the entries in their /Names and /Kids arrays, including repeated edges.
+const MAX_DESTINATION_TREE_WORK: usize = 100_000;
+
+fn destination_tree_work(left: &mut usize, count: usize) -> Result<(), OrganizeError> {
+    *left = left
+        .checked_sub(count)
+        .ok_or_else(|| OrganizeError::Invalid(format!("the named destination tree exceeds the {MAX_DESTINATION_TREE_WORK}-entry work limit")))?;
     Ok(())
 }
 
-/// Drop the /Names pairs of one name-tree node that go to a `gone` page, then do the same for its
-/// /Kids. True when `node` itself changed (kids held by reference are written back here).
+/// Drop the /Names pairs going to a `gone` page, and queue /Kids for the iterative walk.
+/// True when `node` itself changed; child nodes are written back by the caller.
 fn prune_tree_node(
-    doc: &mut Document,
+    doc: &Document,
     node: &mut Dict,
     gone: &[ObjRef],
     dead: &mut Vec<Vec<u8>>,
-    seen: &mut Vec<ObjRef>,
+    stack: &mut Vec<ObjRef>,
+    left: &mut usize,
 ) -> Result<bool, OrganizeError> {
+    destination_tree_work(left, 1)?;
     let mut changed = false;
-    if let Some(pairs) = node.get(b"Names").map(|n| doc.resolve(n)).and_then(|n| n.as_array().cloned()) {
+    if let Some(names) = node.get(b"Names").map(|n| doc.resolve(n))
+        && let Some(pairs) = names.as_array()
+    {
+        destination_tree_work(left, pairs.len())?;
         let mut kept = Vec::with_capacity(pairs.len());
         for pair in pairs.chunks(2) {
             match pair {
@@ -418,10 +435,14 @@ fn prune_tree_node(
             changed = true;
         }
     }
-    let kids = node.get(b"Kids").map(|k| doc.resolve(k)).and_then(|k| k.as_array().cloned()).unwrap_or_default();
-    for kid in kids {
-        if let Some(r) = kid.as_ref() {
-            prune_tree_ref(doc, r, gone, dead, seen)?;
+    if let Some(children) = node.get(b"Kids").map(|k| doc.resolve(k))
+        && let Some(kids) = children.as_array()
+    {
+        destination_tree_work(left, kids.len())?;
+        for kid in kids.iter().rev() {
+            if let Some(r) = kid.as_ref() {
+                stack.push(r);
+            }
         }
     }
     Ok(changed)

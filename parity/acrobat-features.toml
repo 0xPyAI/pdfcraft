@@ -2668,8 +2668,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["page.delete"]
 tools = ["page_delete"]
-evidence = ["crates/organize/src/tests.rs::delete_keeps_inherited_attributes_on_survivors", "crates/organize/src/tests.rs::cannot_delete_every_page_or_missing_pages", "crates/ui-egui/tests/editing.rs::delete_is_refused_when_it_would_remove_every_page"]
-notes = ""
+evidence = ["crates/organize/src/tests.rs::delete_keeps_inherited_attributes_on_survivors", "crates/organize/src/tests.rs::cannot_delete_every_page_or_missing_pages", "crates/ui-egui/tests/editing.rs::delete_is_refused_when_it_would_remove_every_page", "crates/automation/tests/automation.rs::page_delete_handles_deep_destination_trees_with_history_and_reopen", "crates/automation/tests/automation.rs::page_delete_destination_budget_preserves_unsaved_work_and_history"]
+notes = "Named-destination pruning is iterative; a shared 100,000-entry work budget refuses excessive trees atomically at the engine boundary. No new destination-tree repair is attempted."
 
 [[feature]]
 id = "organize.move-pages"

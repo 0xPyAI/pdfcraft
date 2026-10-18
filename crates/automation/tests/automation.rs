@@ -779,6 +779,90 @@ fn edit_undo_redo_and_save_round_trip() {
     assert_eq!(after.windows(5).filter(|w| w == b"%%EOF").count(), 2);
 }
 
+/// A shallow-object destination graph: a deep chain, or a wide repeated-child array.
+fn destination_graph_fixture(depth: usize, wide: bool) -> Vec<u8> {
+    use pdfcraft_cos::{Dict, Document, Object, PdfString, SaveOptions};
+    let mut doc = Document::open(std::sync::Arc::new(fixture(3))).unwrap();
+    let pages = pdfcraft_organize::pages(&doc).unwrap();
+    let mut leaf = Dict::new();
+    leaf.set(
+        b"Names".to_vec(),
+        Object::Array(vec![
+            Object::String(PdfString::text("gone")),
+            Object::Array(vec![Object::Ref(pages[0].obj), Object::name("Fit")]),
+            Object::String(PdfString::text("kept")),
+            Object::Array(vec![Object::Ref(pages[2].obj), Object::name("Fit")]),
+        ]),
+    );
+    let mut tree = doc.add(leaf);
+    if wide {
+        let mut node = Dict::new();
+        node.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(tree); 100_000]));
+        tree = doc.add(node);
+    } else {
+        for _ in 0..depth {
+            let mut node = Dict::new();
+            node.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(tree)]));
+            tree = doc.add(node);
+        }
+    }
+    let mut names = Dict::new();
+    names.set(b"Dests".to_vec(), Object::Ref(tree));
+    doc.update_dict(doc.root().unwrap(), |d| d.set(b"Names".to_vec(), Object::Dict(names))).unwrap();
+    pdfcraft_cos::write_incremental(&doc, &SaveOptions::default()).unwrap()
+}
+
+#[test]
+fn page_delete_handles_deep_destination_trees_with_history_and_reopen() {
+    let dir = workdir("deep-destinations");
+    let original = destination_graph_fixture(16_384, false);
+    std::fs::write(dir.join("deep.pdf"), &original).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path":"deep.pdf"}))["doc"].as_u64().unwrap();
+    let render = a.call("page_render", &json!({"doc":doc,"page":2,"dpi":72})).unwrap();
+    ok(&mut a, "page_delete", json!({"doc":doc,"pages":[1]}));
+    assert_eq!(page_text(&mut a, doc), ["Page 2", "Page 3"]);
+    assert_eq!(a.call("page_render", &json!({"doc":doc,"page":1,"dpi":72})).unwrap(), render);
+    ok(&mut a, "edit_undo", json!({"doc":doc}));
+    assert_eq!(page_text(&mut a, doc), ["Page 1", "Page 2", "Page 3"]);
+    ok(&mut a, "edit_redo", json!({"doc":doc}));
+    for full in [false, true] {
+        let path = format!("saved-{full}.pdf");
+        ok(&mut a, "doc_save", json!({"doc":doc,"path":path,"full":full}));
+        let reopened = ok(&mut a, "doc_open", json!({"path":path}))["doc"].as_u64().unwrap();
+        assert_eq!(page_text(&mut a, reopened), ["Page 2", "Page 3"]);
+        assert_eq!(a.call("page_render", &json!({"doc":reopened,"page":1,"dpi":72})).unwrap(), render);
+    }
+    assert_eq!(std::fs::read(dir.join("deep.pdf")).unwrap(), original);
+}
+
+#[test]
+fn page_delete_destination_budget_preserves_unsaved_work_and_history() {
+    let dir = workdir("wide-destinations");
+    let original = destination_graph_fixture(0, true);
+    std::fs::write(dir.join("wide.pdf"), &original).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path":"wide.pdf"}))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_set_info", json!({"doc":doc,"key":"Title","value":"Unsaved work"}));
+    let info = ok(&mut a, "doc_info", json!({"doc":doc}));
+    let before = a.session().get(pdfcraft_engine::DocId(doc)).unwrap();
+    let bytes = before.bytes.clone();
+    let generation = before.edit_generation();
+    let undo = before.can_undo().map(str::to_owned);
+    assert!(
+        matches!(err(&mut a, "page_delete", json!({"doc":doc,"pages":[1]})), ToolError::Failed(message) if message.contains("named destination tree") && message.contains("100000-entry work limit"))
+    );
+    let after = a.session().get(pdfcraft_engine::DocId(doc)).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&after.bytes, &bytes));
+    assert_eq!(after.edit_generation(), generation);
+    assert_eq!(after.can_undo(), undo.as_deref());
+    assert_eq!(ok(&mut a, "doc_info", json!({"doc":doc})), info);
+    assert_eq!(page_text(&mut a, doc), ["Page 1", "Page 2", "Page 3"]);
+    ok(&mut a, "edit_undo", json!({"doc":doc}));
+    assert_eq!(a.session().get(pdfcraft_engine::DocId(doc)).unwrap().can_undo(), None);
+    assert_eq!(std::fs::read(dir.join("wide.pdf")).unwrap(), original);
+}
+
 /// Issue #1329: an in-place save says it was incremental only when it kept the file it was
 /// saving over: protecting or sanitizing rewrites the file, and the result says so.
 #[test]
