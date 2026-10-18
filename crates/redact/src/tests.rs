@@ -79,6 +79,30 @@ fn glyphs_under_a_mark_go_and_the_rest_stays_put() {
     assert!(!content(&doc, 0).contains("1234"));
 }
 
+/// #2130: a font with no /Widths is drawn with its embedded program's advances. Measured with a
+/// guess from its name instead (Courier's 600 units for "Mono"), the end of the line seemed to
+/// lie past a mark that covers all of it on screen, and was kept.
+#[test]
+fn a_whole_line_under_a_mark_goes_even_without_widths() {
+    let text = b"illicit little lilies";
+    let font = "<< /Type /Font /Subtype /TrueType /BaseFont /HouseMono /Encoding /WinAnsiEncoding /FontDescriptor 6 0 R >>";
+    let mut doc = pdf(vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_vec(),
+        stream("", [b"BT /F1 10 Tf 10 100 Td (".as_slice(), text, b") Tj ET"].concat()),
+        font.as_bytes().to_vec(),
+        b"<< /Type /FontDescriptor /FontName /HouseMono /Flags 32 /Ascent 900 /Descent -200 /FontFile2 7 0 R >>".to_vec(),
+        stream(&format!("/Length1 {}", pdfcraft_fonts::INTER_REGULAR.len()), pdfcraft_fonts::INTER_REGULAR),
+    ]);
+    // Inter draws these 21 narrow glyphs in about 60 pt; Courier's guess would need 126.
+    let line = [5.0, 95.0, 90.0, 112.0];
+    mark(&mut doc, 0, &[line], "");
+    let r = apply(&mut doc, None).unwrap();
+    assert_eq!(r.glyphs, text.len(), "every glyph of the line goes");
+    assert_eq!(under(&mut doc, 0, &[[0.0, 0.0, 300.0, 300.0]]), 0, "{}", content(&doc, 0));
+}
+
 #[test]
 fn added_text_parameters_do_not_keep_redacted_text() {
     // An Edit ▸ Add content item: its stream dictionary keeps the source text under /PCAdded.
@@ -488,6 +512,59 @@ fn redacting_an_xfa_field_drops_the_xfa_packet_so_its_value_cannot_survive() {
     assert!(acro.get(b"XFA").is_none(), "/XFA is gone from the saved AcroForm");
     assert!(acro.get(b"PCXfaLayout").is_none(), "the cached layout mark is cleared");
     assert!(cat.get(b"NeedsRendering").is_none(), "/NeedsRendering is cleared");
+}
+
+#[test]
+fn replies_to_a_redacted_comment_go_with_it() {
+    // #2659: a highlight under the mark has a reply placed elsewhere, and that reply a reply of
+    // its own. The replies' /IRT would keep the highlight (its comment and QuadPoints) in the file.
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Annots [5 0 R 6 0 R 7 0 R 8 0 R] >>".to_vec(),
+        stream("", b"BT ET"),
+        b"<< /Type /Annot /Subtype /Highlight /Rect [20 20 60 30] /QuadPoints [20 30 60 30 20 20 60 20] /Contents (HIGHLIGHT-NOTE) >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Text /Rect [250 250 270 270] /IRT 5 0 R /Contents (FIRST-REPLY) >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Text /Rect [250 200 270 220] /IRT 6 0 R /Contents (SECOND-REPLY) >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Text /Rect [250 100 270 120] /Contents (UNRELATED) >>".to_vec(),
+    ];
+    let mut doc = pdf(objs);
+    mark(&mut doc, 0, &[[10.0, 10.0, 70.0, 40.0]], "");
+    let r = apply(&mut doc, None).unwrap();
+    assert_eq!(r.annotations, 3, "the highlight and both replies: {r:?}");
+    let p = pdfcraft_model::pages(&doc).swap_remove(0);
+    assert_eq!(annots_of(&doc, &p.dict).len(), 1, "only the unrelated note stays");
+    // A classic table, so the objects' strings are plain in the file.
+    let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
+    for gone in [&b"HIGHLIGHT-NOTE"[..], b"FIRST-REPLY", b"SECOND-REPLY"] {
+        assert!(!bytes.windows(gone.len()).any(|w| w == gone), "{} survived the save", String::from_utf8_lossy(gone));
+    }
+    assert!(bytes.windows(9).any(|w| w == b"UNRELATED"));
+}
+
+/// The replies listed before the annotations they answer, deepest first, and a pop-up on a
+/// reply: one pass in `/Annots` order would keep them, the repeated passes don't (review of
+/// #2697).
+#[test]
+fn replies_listed_before_their_parent_and_their_pop_ups_go_too() {
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Annots [7 0 R 9 0 R 6 0 R 5 0 R 8 0 R] >>".to_vec(),
+        stream("", b"BT ET"),
+        b"<< /Type /Annot /Subtype /Highlight /Rect [20 20 60 30] /QuadPoints [20 30 60 30 20 20 60 20] /Contents (HIGHLIGHT-NOTE) >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Text /Rect [250 250 270 270] /IRT 5 0 R /Contents (FIRST-REPLY) /Popup 9 0 R >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Text /Rect [250 200 270 220] /IRT 6 0 R /Contents (SECOND-REPLY) >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Text /Rect [250 100 270 120] /Contents (UNRELATED) >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Popup /Rect [200 150 290 190] /Parent 6 0 R >>".to_vec(),
+    ];
+    let mut doc = pdf(objs);
+    mark(&mut doc, 0, &[[10.0, 10.0, 70.0, 40.0]], "");
+    let r = apply(&mut doc, None).unwrap();
+    assert_eq!(r.annotations, 3, "the highlight and both replies: {r:?}");
+    let p = pdfcraft_model::pages(&doc).swap_remove(0);
+    let left = annots_of(&doc, &p.dict);
+    assert_eq!(left, vec![Object::Ref(ObjRef::new(8, 0))], "only the unrelated note stays, the reply's pop-up goes too");
 }
 
 #[test]
