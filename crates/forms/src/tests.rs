@@ -405,6 +405,41 @@ fn reused_standard_fonts_wrap_and_align_with_their_own_widths() {
     assert!((start("initials") - 186.88).abs() < 1e-3, "Times: {}", start("initials"));
 }
 
+/// A standard-14 font whose `/Differences` swap A and W draws `AAAA` with code 87, so it is
+/// measured as four A's (0.667 em), not as the W that code has in WinAnsi. The same remap with
+/// `/Widths` takes the width the font gives code 87, here 0.5 em.
+#[test]
+fn remapped_standard_fonts_are_measured_by_the_glyph_each_code_draws() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [7 0 R 8 0 R] >>".into(),
+        "<< /Fields [7 0 R 8 0 R] /DA (/Dif 10 Tf 0 g) /DR << /Font << /Dif 5 0 R /DifW 6 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding << /BaseEncoding /WinAnsiEncoding /Differences [65 /W 87 /A] >> >>"
+            .into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /FirstChar 87 /LastChar 87 /Widths [500] /Encoding << /BaseEncoding /WinAnsiEncoding /Differences [65 /W 87 /A] >> >>"
+            .into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (std) /Q 2 /Rect [21 500 221 520] /DA (/Dif 10 Tf 0 g) /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (widths) /Q 2 /Rect [21 470 221 490] /DA (/DifW 10 Tf 0 g) /P 3 0 R >>".into(),
+    ];
+    let mut doc = document(&objs);
+    set_value(&mut doc, "std", &FieldValue::Text("AAAA".into())).unwrap();
+    set_value(&mut doc, "widths", &FieldValue::Text("AAAA".into())).unwrap();
+    let doc = reopen(&doc);
+    let all = fields(&doc);
+    assert_eq!(appearance_text(&doc, &field(&all, "std").widgets[0], b"Dif").1, vec![b"WWWW".to_vec()], "A is drawn by code 87");
+    let start = |name: &str| {
+        let w = &field(&all, name).widgets[0];
+        let n = doc.get(w.obj).as_dict().unwrap().get(b"AP").unwrap().as_dict().unwrap().reference(b"N").unwrap();
+        let Object::Stream(s) = &*doc.get(n) else { panic!() };
+        let tm = pdfcraft_content::parse(&s.decoded().unwrap()).ops.into_iter().find(|op| op.is("Tm")).unwrap();
+        tm.operands[4].as_f64().unwrap()
+    };
+    // The text ends at 198 (200 pt box, 2 pt padding): 26.68 pt of A's, or 20 pt by /Widths.
+    assert!((start("std") - 171.32).abs() < 1e-3, "no /Widths: {}", start("std"));
+    assert!((start("widths") - 178.0).abs() < 1e-3, "/Widths: {}", start("widths"));
+}
+
 #[test]
 fn japanese_choices_use_the_unicode_cid_font() {
     // A choice field whose /DA names a non-embedded CID font with a predefined Unicode CMap
