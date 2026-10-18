@@ -1902,6 +1902,28 @@ mod tests {
         assert_eq!(texts(2), ["a", "\u{ad}", "b", "\u{a0}", "c"], "a named glyph keeps its glyph list value");
     }
 
+    /// #3169, #3170: glyph names outside the Adobe Glyph List still read as text. Ligature
+    /// (`f_i`) and suffixed (`hyphen.case`) names go by the glyph list specification's full
+    /// mapping; a name that only numbers the glyph (`c251` small caps, `C39`, `C174`) reads as
+    /// the code in StandardEncoding, where 39 is a right quote and 174 the fi ligature. A
+    /// ZapfDingbats name (`a12`) and a name with no meaning left (`foo`) still read as nothing.
+    #[test]
+    fn glyph_names_outside_the_glyph_list_still_read_as_text() {
+        use lopdf::{Object, dictionary};
+        let name = |n: &str| Object::Name(n.as_bytes().to_vec());
+        let differences = Object::Dictionary(dictionary! {
+            "Type" => "Encoding",
+            "Differences" => vec![
+                Object::Integer(30), name("f_i"), name("f_l"), Object::Integer(2), name("hyphen.case"),
+                Object::Integer(39), name("C39"), Object::Integer(97), name("c251"), Object::Integer(174), name("C174"),
+                Object::Integer(88), name("a12"), name("foo"), name("uni00660069"),
+            ],
+        });
+        let pdf = encoded_pages(&[(differences, &b"BT /F1 20 Tf 1 0 0 1 20 150 Tm (\x1e\x1f\x02'a\xaeXYZ) Tj ET"[..])]);
+        let texts = extract_page(&pdf, 0, &InterpreterSettings::default()).unwrap().glyphs.iter().map(|g| g.text.clone()).collect::<Vec<_>>();
+        assert_eq!(texts, ["fi", "fl", "-", "\u{2019}", "a", "\u{fb01}", "fi"]);
+    }
+
     #[test]
     fn narrow_ligatures_keep_every_letter() {
         // Split evenly, this "ffi" put its two "f"s so close that the second was dropped as a

@@ -2,7 +2,8 @@ use crate::font::blob::{CffFontBlob, Type1FontBlob};
 use crate::font::standard_font::{StandardFont, StandardKind, select_standard_font};
 use crate::font::true_type::{Width, read_encoding, read_widths};
 use crate::font::{
-    Encoding, FallbackFontQuery, glyph_name_to_unicode, normalized_glyph_name, read_to_unicode,
+    Encoding, FallbackFontQuery, glyph_name_to_text, glyph_name_to_unicode, normalized_glyph_name,
+    numbered_glyph_name, read_to_unicode,
 };
 use crate::{CMapResolverFn, CacheKey, FontResolverFn};
 use hayro_cmap::{BfString, CMap};
@@ -117,11 +118,31 @@ impl Type1Font {
         }
 
         let code = char_code as u8;
-        match &self.1 {
-            Kind::Standard(s) => s.char_code_to_unicode(code).map(BfString::Char),
-            Kind::Cff(c) => c.char_code_to_unicode(code).map(BfString::Char),
-            Kind::Type1(t) => t.char_code_to_unicode(code).map(BfString::Char),
+        let found = match &self.1 {
+            Kind::Standard(s) => s.char_code_to_unicode(code),
+            Kind::Cff(c) => c.char_code_to_unicode(code),
+            Kind::Type1(t) => t.char_code_to_unicode(code),
+        };
+        if let Some(c) = found {
+            return Some(BfString::Char(c));
         }
+        // PdfCraft patch (#3169, #3170): a name outside the glyph list still reads by the
+        // glyph list specification's full mapping (`f_i`, `hyphen.case`). A name that only
+        // numbers the glyph (`C39`, `c251`) reads as the code's character in StandardEncoding,
+        // the encoding a Type 1 program is written against: a book set in such fonts extracted
+        // as nothing at all, though every page draws.
+        let name = match &self.1 {
+            Kind::Standard(s) => s.code_to_ps_name(code),
+            Kind::Cff(c) => c.code_to_ps_name(code),
+            Kind::Type1(t) => t.code_to_ps_name(code),
+        }?;
+        glyph_name_to_text(name).or_else(|| {
+            numbered_glyph_name(name)
+                .then(|| Encoding::Standard.map_code(code))
+                .flatten()
+                .and_then(glyph_name_to_unicode)
+                .map(BfString::Char)
+        })
     }
 }
 
