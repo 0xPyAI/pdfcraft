@@ -504,6 +504,9 @@ pub struct CommentView {
     pub props_request: Option<(usize, usize)>,
     /// Make Current Properties Default was asked for: (page, index).
     pub default_request: Option<(usize, usize)>,
+    /// A file attachment comment's file was asked for: (page, index, open it in a new tab
+    /// rather than save it).
+    pub attachment_request: Option<(usize, usize, bool)>,
     /// Replace Text: the struck-out text's quads while the replacement is typed.
     pub replace: Option<Vec<[f64; 8]>>,
     /// Attach file: where the icon goes (page, top-left in user space), for the app to pick a file.
@@ -1595,6 +1598,23 @@ pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView, tool: &mut QuickTool
     }
 }
 
+/// Save attachment… and, for a PDF, Open in a new tab, first in a file attachment comment's
+/// menus as in the Attachments panel: the comment is where the reader finds its file. Reading
+/// the file changes nothing, so a read-only document offers them too.
+pub(crate) fn attachment_items(ui: &mut egui::Ui, view: &mut DocView, info: &DocInfo, a: &Annotation) {
+    let source = pdfcraft_render::AttachmentSource::Annotation { page: a.page, index: a.index };
+    let Some(file) = info.attachments.iter().find(|f| f.source == source) else { return };
+    if ui.button(tl!("Save attachment…")).clicked() {
+        view.comments.attachment_request = Some((a.page, a.index, false));
+        ui.close();
+    }
+    if file.name.to_lowercase().ends_with(".pdf") && ui.button(tl!("Open in a new tab")).clicked() {
+        view.comments.attachment_request = Some((a.page, a.index, true));
+        ui.close();
+    }
+    ui.separator();
+}
+
 /// Items of the canvas context menu for the selected comment (or the page).
 pub(crate) fn context_menu(ui: &mut egui::Ui, view: &mut DocView, info: &DocInfo, prefs: &CommentPrefs, allowed: bool) -> Option<CanvasAction> {
     let mut action = None;
@@ -1602,6 +1622,7 @@ pub(crate) fn context_menu(ui: &mut egui::Ui, view: &mut DocView, info: &DocInfo
     match selected {
         Some(a) => {
             let (page, index) = (a.page, a.index);
+            attachment_items(ui, view, info, a);
             if ui.add_enabled(allowed, egui::Button::new(tl!("Edit text…"))).clicked() {
                 view.comments.composer = Some(Composer {
                     page,

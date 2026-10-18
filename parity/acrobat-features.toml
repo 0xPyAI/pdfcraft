@@ -1070,8 +1070,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/view.rs::the_hand_tool_pans_by_dragging", "crates/ui-egui/tests/viewer.rs::v_h_and_space_pick_the_quick_tools"]
-notes = "drag to pan; Grab/Grabbing cursors; H picks it, V goes back to Select, Space held pans temporarily"
+evidence = ["crates/ui-egui/tests/view.rs::the_hand_tool_pans_by_dragging", "crates/ui-egui/tests/view.rs::the_hand_tool_moves_the_page_with_the_pointer", "crates/ui-egui/tests/viewer.rs::v_h_and_space_pick_the_quick_tools"]
+notes = "drag to pan: the page follows the pointer point for point in the frame it moves, and stops where it is let go (no fling); Grab/Grabbing cursors; H picks it, V goes back to Select, Space held pans temporarily. Checked with kittest pointer events, not yet on a desktop"
 
 [[feature]]
 id = "view.rotate-view"
@@ -2812,8 +2812,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["page.replace"]
 tools = ["page_replace"]
-evidence = ["crates/organize/src/tests.rs::replace_pages_swaps_content_but_keeps_annotations", "crates/ui-egui/tests/editing.rs::replace_pages_dialog_swaps_page_content", "crates/ui-egui/tests/editing.rs::replace_button_replaces_selected_pages_in_organize", "crates/automation/tests/automation.rs::replacing_pages_through_tools"]
-notes = "content, resources and boxes replaced; links, comments, fields and bookmarks kept"
+evidence = ["crates/organize/src/tests.rs::replace_pages_swaps_content_but_keeps_annotations", "crates/ui-egui/tests/editing.rs::replace_pages_dialog_swaps_page_content", "crates/ui-egui/tests/editing.rs::replace_button_replaces_selected_pages_in_organize", "crates/automation/tests/automation.rs::replacing_pages_through_tools", "crates/ui-egui/src/canvas.rs::replacing_a_page_after_layout_never_uploads_an_oversized_texture", "crates/ui-egui/src/canvas.rs::oversized_raster_results_do_not_replace_cached_textures"]
+notes = "Content, resources and boxes replaced; links, comments, fields and bookmarks kept. Page-list edits discard demand laid out against the previous geometry; the next frame plans bounded backdrops and tiles. Raster uploads reject empty images and dimensions beyond the current GPU texture limit before replacing cached textures (#3149). This covers the viewer's page, tile, thumbnail, organize and print-preview result paths; it does not change the renderer's output resolution or add a global GPU memory budget."
 
 [[feature]]
 id = "organize.duplicate-pages"
@@ -2833,11 +2833,11 @@ title = "Reverse page order"
 area = "D"
 tier = "P2"
 milestone = "M4"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "shipped"
+commands = ["page.reverse"]
+tools = ["page_reverse"]
+evidence = ["crates/organize/src/tests.rs::reverse_pages_reorders", "crates/organize/src/tests.rs::cannot_reverse_missing_or_fewer_than_two_pages", "crates/automation/tests/automation.rs::reversing_pages_through_tools", "crates/ui-egui/tests/editing.rs::reverse_pages_reverses_the_selection_or_else_the_whole_document"]
+notes = "Organize Pages ▸ More ▸ Reverse pages, or the command palette: two or more selected pages swap among their own positions, otherwise the whole document reverses. One undo step. Not yet: an entry in the page thumbnails' right-click menu"
 
 [[feature]]
 id = "organize.cut-copy-paste-pages"
@@ -3812,8 +3812,8 @@ milestone = "M5"
 status = "shipped"
 commands = ["comment.attach"]
 tools = ["comment_add"]
-evidence = ["crates/annot/src/tests.rs::files_attach_as_comments", "crates/ui-egui/tests/comments.rs::attaching_a_file_as_a_comment", "crates/automation/tests/automation.rs::drawing_comments_through_tools"]
-notes = "push pin, paperclip, graph or tag icon; the file is embedded and listed in the Attachments panel"
+evidence = ["crates/annot/src/tests.rs::files_attach_as_comments", "crates/ui-egui/tests/comments.rs::attaching_a_file_as_a_comment", "crates/ui-egui/tests/comments.rs::an_attachment_comment_opens_its_file_from_the_page_menu", "crates/ui-egui/tests/comments.rs::an_attachment_comment_opens_its_file_from_the_card_menu", "crates/automation/tests/automation.rs::drawing_comments_through_tools"]
+notes = "push pin, paperclip, graph or tag icon; the file is embedded and listed in the Attachments panel. The comment's menu, on the page and in the Comments panel, saves the file or opens a PDF in a new tab (#2565)"
 
 [[feature]]
 id = "comment.record-audio"
@@ -5088,8 +5088,8 @@ milestone = "M6"
 status = "partial"
 commands = ["form.detect", "form.prepare"]
 tools = ["form_detect_fields"]
-evidence = ["crates/forms/src/tests.rs::detection_finds_blanks_rules_boxes_and_names_them", "crates/engine/src/tests.rs::detecting_fields_on_a_printed_form", "crates/engine/src/tests.rs::detecting_fields_on_a_scanned_form", "crates/forms/src/detect/raster.rs::a_scanned_form_gives_its_rules_boxes_and_check_boxes", "crates/forms/src/detect/raster.rs::noise_and_uneven_paper_do_not_hide_the_lines", "crates/automation/tests/automation.rs::detecting_form_fields_through_tools", "crates/ui-egui/tests/javascript.rs::prepare_a_form_detects_fields_on_a_paper_form", "crates/ui-egui/tests/prepare.rs::deleting_several_selected_fields_and_detecting_fields_from_the_panel"]
-notes = "Underscore runs, rules, empty boxes and small squares (check boxes); runs when Prepare a form starts on a document without fields, and from Prepare a form ▸ Detect form fields at any time (existing fields are skipped). Scanned pages (an image covers at least half the page and the content draws no lines) are rendered and their rules, boxes and check boxes read from the pixels; a box with a small printed label gets a field in its empty part. Tested on synthetic scans only: straight, stored sideways with /Rotate 90 (fields get /MK /R so typing reads upright), noisy, and 1 degree askew (fields stay inside their boxes but lose up to the skew in height). Labels come from the text layer or, when the OCR models are installed, from text recognition (Latin without accents, so German labels with umlauts make poorer names); without either, fields get default names (Text1, Check Box1). Recognition runs synchronously, about a second per scanned page. Not yet: comb boxes, dotted leader lines, tables of cells as such, deskewing, radio groups."
+evidence = ["crates/forms/src/tests.rs::detection_finds_blanks_rules_boxes_and_names_them", "crates/forms/src/tests.rs::page_shapes_reads_rectangles_with_points_along_their_sides", "crates/engine/src/tests.rs::detecting_fields_on_a_printed_form", "crates/forms/src/tests.rs::detection_makes_a_row_of_touching_cells_one_comb_field", "crates/engine/src/tests.rs::detecting_comb_boxes_adds_one_comb_field_per_row", "crates/engine/src/tests.rs::detecting_fields_on_a_scanned_form", "crates/forms/src/detect/raster.rs::a_scanned_form_gives_its_rules_boxes_and_check_boxes", "crates/forms/src/detect/raster.rs::noise_and_uneven_paper_do_not_hide_the_lines", "crates/automation/tests/automation.rs::detecting_form_fields_through_tools", "crates/automation/tests/automation.rs::detecting_comb_boxes_through_tools", "crates/ui-egui/tests/javascript.rs::prepare_a_form_detects_fields_on_a_paper_form", "crates/ui-egui/tests/prepare.rs::deleting_several_selected_fields_and_detecting_fields_from_the_panel"]
+notes = "Underscore runs, rules, empty boxes, small squares (check boxes) and rows of two or more touching cells of one size (one comb text field, character limit = cells; tested on drawn forms only); a box drawn with points along its sides (a midpoint on each vertical side, as the French 2042 form's cells) is read as the rectangle it is (#2942); runs when Prepare a form starts on a document without fields, and from Prepare a form ▸ Detect form fields at any time (existing fields are skipped). Scanned pages (an image covers at least half the page and the content draws no lines) are rendered and their rules, boxes and check boxes read from the pixels; a box with a small printed label gets a field in its empty part. Tested on synthetic scans only: straight, stored sideways with /Rotate 90 (fields get /MK /R so typing reads upright), noisy, and 1 degree askew (fields stay inside their boxes but lose up to the skew in height). Labels come from the text layer or, when the OCR models are installed, from text recognition (Latin without accents, so German labels with umlauts make poorer names); without either, fields get default names (Text1, Check Box1). Recognition runs synchronously, about a second per scanned page. Not yet: dotted leader lines, tables of cells as such, deskewing, radio groups."
 
 [[feature]]
 id = "form.auto-name-fields"
@@ -5728,8 +5728,8 @@ milestone = "M8"
 status = "shipped"
 commands = ["redact.apply"]
 tools = ["redact_apply"]
-evidence = ["crates/redact/src/tests.rs::comments_links_and_fields_under_a_mark_go", "crates/ui-egui/tests/ui_group/redact.rs::marking_applying_and_clearing"]
-notes = "with pop-ups; fields lose all widgets"
+evidence = ["crates/redact/src/tests.rs::comments_links_and_fields_under_a_mark_go", "crates/redact/src/tests.rs::replies_to_a_redacted_comment_go_with_it", "crates/ui-egui/tests/ui_group/redact.rs::marking_applying_and_clearing"]
+notes = "with pop-ups and replies (/IRT, transitively; replies on other pages are not followed); fields lose all widgets"
 
 [[feature]]
 id = "protect.redact-struct-tree"
