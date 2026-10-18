@@ -1,5 +1,7 @@
 # PdfCraft roadmap: milestones and what's next
 
+> **2026-10-18:** M2 / #3116: clipping-only glyphs stay extractable with the image filter; invisible OCR remains excluded. Estimates unchanged.
+
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M6: AcroForm XML text; estimates unchanged)
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M6: preserve XML/XFDF attribute whitespace; refreshed upstream; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M1: raw-deflate fallback preserves decoding-limit errors; refreshed upstream; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)

@@ -52,3 +52,14 @@ black-point normalization is unchanged. `lab_bradford_tests` checks independent
 D50/equal-energy neutral and chromatic oracles, D65 identity, and direct/Indexed
 consistency (including an asymmetric chromatic Range), and zero/overflowing
 cone-response fallback.
+
+## Clipping-only text reporting (#3109 / #3116)
+
+`hayro-interpret/src/interpret/text.rs` reports mode 7 glyphs after installing their
+clip, and `hayro-interpret/src/types.rs` distinguishes `GlyphDrawMode::Clip` from
+invisible OCR text. `hayro/src/renderer.rs` does not paint either mode directly.
+This preserves clipping-only titles when `TextFilter.images` excludes invisible OCR.
+Coverage: `text::tests::clipping_mode_filter_keeps_titles_and_excludes_ocr` (plain
+and ActualText filtered extraction), and
+`text::tests::clipping_mode_text_is_extracted_and_searchable_like_other_rendering_modes`
+(extraction, search, glyph geometry, clip-through pixels and no-paint pixels).

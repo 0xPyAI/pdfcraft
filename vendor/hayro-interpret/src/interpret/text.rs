@@ -126,15 +126,15 @@ pub(crate) fn show_glyph<'a>(
         }
         TextRenderingMode::Clip => {
             clip_glyph(ctx, glyph, glyph_transform);
-            // PdfCraft patch: still call draw_glyph for clip-only text (`7 Tr`), as mode 3 does,
-            // so text extraction, search and search-redaction see text that is filled through its
+            // PdfCraft patch: report clipping text separately from invisible OCR text.
+            // Extraction filters must retain text that is filled through its
             // clipping path without rendering devices drawing it directly.
             device.draw_glyph(
                 glyph,
                 ctx.get().ctm,
                 glyph_transform,
                 &get_paint(ctx, false),
-                &GlyphDrawMode::Invisible,
+                &GlyphDrawMode::Clip,
             );
         }
         TextRenderingMode::FillAndClip => {

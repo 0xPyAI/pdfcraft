@@ -160,6 +160,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 | 8 | 1.0 polish: performance, right-to-left, missing languages, keyboard-only (M14) | 55–95 |
 
 ## Progress log
+- **2026-10-18 (M2, #3116):** Distinguish clipping-only text from invisible OCR so image-filtered extraction retains clipped headings and ActualText. Vendor changes and regression coverage are documented; estimates unchanged.
 - **2026-10-15 (M6, AcroForm XML text):** Plain AcroForm XML imports retain all direct text around comments and processing instructions, including CDATA and character references. Synthetic regressions verify exact values and unknown catalog data after incremental and full save/reopen. Nested-element and XFA interpretation are unchanged. Estimates unchanged.
 - **2026-10-15 (M6, #1917 refresh):** Integrated upstream `99941daa` while retaining the XML/XFDF attribute whitespace correction and all upstream progress. Only independent documentation conflicts required resolution; focused production and test files are unchanged from the previously green CI head. Estimates unchanged.
 - **2026-10-15 (M1, #2267 refresh):** Integrated upstream `99941daa` while retaining the raw-deflate fallback correction and all upstream progress. Only independent documentation conflicts required resolution; focused production and test files are unchanged from the previously green CI head. Estimates unchanged.

@@ -1804,6 +1804,20 @@ mod tests {
         assert!(unfilled_px.rgba.as_chunks::<4>().0.iter().all(|p| p[..3] == [255, 255, 255]));
     }
 
+    #[test]
+    fn clipping_mode_filter_keeps_titles_and_excludes_ocr() {
+        let pdf = marked_pages(&[
+            "q BT /F1 24 Tf 7 Tr 30 200 Td (Clipped heading) Tj ET 0 0 1 rg 0 0 300 300 re f Q BT /F1 12 Tf 3 Tr 30 100 Td (Hidden OCR) Tj ET",
+            "q /Span <</ActualText (Accessible heading)>> BDC BT /F1 24 Tf 7 Tr 30 200 Td (Clipped heading) Tj ET EMC 0 0 1 rg 0 0 300 300 re f Q",
+        ]);
+        assert!(marked_text(&pdf, 0).plain_text().contains("Hidden OCR"));
+        for (page, expected) in [(0, "Clipped heading"), (1, "Accessible heading")] {
+            let text = extract_page_filtered(&pdf, page, &InterpreterSettings::default(), TextFilter { images: true, ..Default::default() }).unwrap();
+            assert_eq!(text.plain_text(), expected);
+            assert!(!text.find("heading").is_empty());
+        }
+    }
+
     /// One page per `(encoding, content)`, in Helvetica (`/F1`).
     fn encoded_pages(pages: &[(lopdf::Object, &[u8])]) -> Pdf {
         use lopdf::{Document, Object, Stream, dictionary};
