@@ -1753,16 +1753,21 @@ impl Automation {
         let mut used = std::collections::HashSet::new();
         for (i, (first, last, bytes)) in parts.iter().enumerate() {
             let safe = |t: &str| t.chars().map(|c| if c.is_alphanumeric() || " -_.,()".contains(c) { c } else { '_' }).collect::<String>();
-            let file = match titles.iter().find(|t| t.0 + 1 == *first) {
-                Some((_, t)) => format!("{stem}-{}.pdf", safe(t)),
-                None => format!("{stem}-part{}.pdf", i + 1),
+            let mut base = match titles.iter().find(|t| t.0 + 1 == *first) {
+                Some((_, t)) => format!("{stem}-{}", safe(t)),
+                None => format!("{stem}-part{}", i + 1),
             };
+            // A file name is at most 255 bytes: keep the base to 200, cut between characters, which leaves room for ".pdf" and a -N suffix.
+            if let Some((end, _)) = base.char_indices().find(|(at, c)| at + c.len_utf8() > 200) {
+                base.truncate(end);
+            }
+            let file = format!("{base}.pdf");
             // Equal titles (or titles that sanitize alike) get -2, -3, ... so no part overwrites another; compared case-insensitively.
-            let mut unique = file.clone();
+            let mut unique = file;
             let mut n = 1;
             while !used.insert(unique.to_lowercase()) {
                 n += 1;
-                unique = format!("{}-{n}.pdf", file.trim_end_matches(".pdf"));
+                unique = format!("{base}-{n}.pdf");
             }
             let path = child(&dir, &unique);
             write_atomic(&path, bytes)?;
@@ -2401,6 +2406,9 @@ fn info(d: &Document) -> Value {
         "pdf_version": i.pdf_version,
         "file_size": i.file_size,
         "title": i.title, "author": i.author, "subject": i.subject, "keywords": i.keywords,
+        // Custom document properties (Document Properties ▸ Custom): /Info entries beyond the
+        // ones the spec names, set and cleared with doc_set_info.
+        "custom": i.custom.iter().map(|(name, value)| json!({ "name": name, "value": value })).collect::<Vec<_>>(),
         "creator": i.creator, "producer": i.producer,
         "tagged": i.tagged,
         "has_javascript": i.has_javascript,
