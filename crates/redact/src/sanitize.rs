@@ -146,6 +146,7 @@ fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Re
     let mut total = 0;
     // The original image and form XObjects the rewrite drops or replaces, on any page.
     let mut doomed = Vec::new();
+    let mut retired_properties = Vec::new();
     let n = pdfcraft_model::pages(doc).len();
     for pi in 0..n {
         let page = pdfcraft_model::pages(doc).swap_remove(pi);
@@ -165,12 +166,16 @@ fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Re
         }
         scope.hidden_layers = off.clone();
         let out = process(doc, &mut scope, &data, &resources, Matrix::IDENTITY);
+        if let Some(error) = out.error {
+            return Err(error.into());
+        }
         let blocks = scope.layer_blocks;
         total += out.residue + blocks + report.glyphs;
         if !write {
             continue;
         }
         doomed.extend_from_slice(&out.doomed);
+        retired_properties.extend(out.retired_properties);
         let mut new_list = list.clone();
         let mut changed = false;
         for (i, new) in out.streams.into_iter().enumerate() {
@@ -184,24 +189,24 @@ fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Re
             changed = true;
         }
         if changed || !out.xobjects.is_empty() || !out.replaced.is_empty() {
+            // Pin inherited resources before replacing them. When no page still inherits the
+            // original holder, retiring it also retires descriptions no longer used anywhere.
+            crate::localize_resources(doc, &[pi])?;
+            let mut cleaned_page = page.dict.clone();
+            cleaned_page.set(b"Contents".to_vec(), Object::Array(new_list.clone()));
+            let (_, page_content) = page_streams(doc, &cleaned_page, pi)?;
             let mut res = resources;
             if !out.xobjects.is_empty() || !out.replaced.is_empty() {
                 let mut xo = res.get(b"XObject").and_then(|x| doc.resolve(x).as_dict().cloned()).unwrap_or_default();
                 // A full save keeps whatever is still referenced: unlink the originals this page no
                 // longer draws so the removed form or image bytes cannot survive in the saved file.
-                let page_content: Vec<Vec<u8>> = new_list
-                    .iter()
-                    .map(|o| match &*doc.resolve(o) {
-                        Object::Stream(s) => s.decoded().unwrap_or_default(),
-                        _ => Vec::new(),
-                    })
-                    .collect();
                 crate::interp::prune(&mut xo, &out.replaced, &page_content);
                 for (n, r) in &out.xobjects {
                     xo.set(n.clone(), Object::Ref(*r));
                 }
                 res.set(b"XObject".to_vec(), Object::Dict(xo));
             }
+            retired_properties.extend(crate::interp::prune_properties(doc, &mut res, &page_content)?);
             doc.update_dict(page.obj, |d| {
                 d.set(b"Contents".to_vec(), Object::Array(new_list));
                 d.set(b"Resources".to_vec(), Object::Dict(res));
@@ -210,7 +215,7 @@ fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Re
     }
     // What a page no longer draws must not stay reachable through an inherited or shared
     // /Resources either.
-    crate::interp::unlink_doomed(doc, &doomed)?;
+    crate::interp::unlink_doomed(doc, &doomed, &retired_properties)?;
     Ok(total)
 }
 
