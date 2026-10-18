@@ -57,6 +57,7 @@ macro_rules! mcp_usage {
 const USAGE: &str = concat!(
     "\
 pdfcraft-cli info   <file.pdf> [--password PW]            document summary as JSON
+                                                          (includes any declared PDF/A or PDF/UA level)
 pdfcraft-cli render <file.pdf> --page N [--dpi 96] --out x.png   (.png, .jpg, .tif or .pam)
 pdfcraft-cli text   <file.pdf> [--page N]                  extracted text (pages separated by form feeds)
 pdfcraft-cli edit   <in.pdf> --out out.pdf [--rotate 1,3:90] [--delete 2,4] [--move 5:1]
@@ -315,6 +316,10 @@ fn info(args: &[String]) -> Result<(), CliError> {
             })
         })
         .flatten();
+    // What the document declares as a standard, read the way the Standards panel reads it, so
+    // `info` and the app agree. A file that declares nothing leaves these null and empty.
+    let declared =
+        pdfcraft_cos::Document::open_with_password(bytes.clone(), password).map(|doc| pdfcraft_preflight::declared(&doc)).unwrap_or_default();
     let json = serde_json::json!({
         "file": path,
         "pdf_version": info.pdf_version,
@@ -324,6 +329,9 @@ fn info(args: &[String]) -> Result<(), CliError> {
         "first_page_pt": info.pages.first().map(|p| [p.width, p.height]),
         "title": info.title, "author": info.author, "producer": info.producer, "creator": info.creator,
         "encrypted": info.encrypted, "tagged": info.tagged, "javascript": info.has_javascript,
+        "pdfa": declared.pdfa.as_ref().map(|(part, conformance)| format!("PDF/A-{part}{}", conformance.to_lowercase())),
+        "pdfua": declared.pdfua,
+        "output_intents": declared.output_intents,
         "xfa": info.xfa.map(|x| match x { pdfcraft_render::Xfa::Static => "static", pdfcraft_render::Xfa::Dynamic => "dynamic" }),
         "xfa_layout": xfa_layout,
         "bookmarks": info.outline.len(), "annotations": info.annotations.len(), "fields": info.fields.len(),
