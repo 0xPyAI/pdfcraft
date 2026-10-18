@@ -844,11 +844,15 @@ fn page_delete_destination_budget_preserves_unsaved_work_and_history() {
     let mut a = auto(&dir);
     let doc = ok(&mut a, "doc_open", json!({"path":"wide.pdf"}))["doc"].as_u64().unwrap();
     ok(&mut a, "doc_set_info", json!({"doc":doc,"key":"Title","value":"Unsaved work"}));
+    ok(&mut a, "doc_set_info", json!({"doc":doc,"key":"Author","value":"Redo probe"}));
+    ok(&mut a, "edit_undo", json!({"doc":doc}));
     let info = ok(&mut a, "doc_info", json!({"doc":doc}));
     let before = a.session().get(pdfcraft_engine::DocId(doc)).unwrap();
     let bytes = before.bytes.clone();
     let generation = before.edit_generation();
     let undo = before.can_undo().map(str::to_owned);
+    let redo = before.can_redo().map(str::to_owned);
+    assert!(redo.is_some(), "the refusal must preserve an existing redo step");
     assert!(
         matches!(err(&mut a, "page_delete", json!({"doc":doc,"pages":[1]})), ToolError::Failed(message) if message.contains("named destination tree") && message.contains("100000-entry work limit"))
     );
@@ -856,8 +860,12 @@ fn page_delete_destination_budget_preserves_unsaved_work_and_history() {
     assert!(std::sync::Arc::ptr_eq(&after.bytes, &bytes));
     assert_eq!(after.edit_generation(), generation);
     assert_eq!(after.can_undo(), undo.as_deref());
+    assert_eq!(after.can_redo(), redo.as_deref());
     assert_eq!(ok(&mut a, "doc_info", json!({"doc":doc})), info);
     assert_eq!(page_text(&mut a, doc), ["Page 1", "Page 2", "Page 3"]);
+    ok(&mut a, "edit_redo", json!({"doc":doc}));
+    assert_eq!(ok(&mut a, "doc_info", json!({"doc":doc}))["author"], "Redo probe");
+    ok(&mut a, "edit_undo", json!({"doc":doc}));
     ok(&mut a, "edit_undo", json!({"doc":doc}));
     assert_eq!(a.session().get(pdfcraft_engine::DocId(doc)).unwrap().can_undo(), None);
     assert_eq!(std::fs::read(dir.join("wide.pdf")).unwrap(), original);
