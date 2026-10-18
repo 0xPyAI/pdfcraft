@@ -293,23 +293,23 @@ fn unfiltered_image_end(data: &[u8], begin: usize, dict: &Dict) -> Option<(usize
     let row = width.checked_mul(components)?.checked_mul(bits)?.div_ceil(8);
     let end_data = begin.checked_add(row.checked_mul(height)?)?;
     let after = data.get(end_data..)?;
-    if !after.first().is_some_and(|b| is_ws(*b)) {
+    let separator = after.iter().position(|b| !is_ws(*b))?;
+    if separator == 0 && data.get(end_data.checked_sub(1)?).is_some_and(|b| is_ws(*b)) {
         return None;
     }
-    let separator = after.iter().position(|b| !is_ws(*b))?;
     let ei = end_data.checked_add(separator)?;
     let end = ei.checked_add(2)?;
     if data.get(ei..end) == Some(b"EI") && data.get(end).is_none_or(|b| is_ws(*b) || is_delim(*b)) { Some((end_data, end)) } else { None }
 }
 
 /// Where inline image data starting at `begin` ends: (end of the data, position after `EI`). The
-/// data ends at whitespace + `EI` + (whitespace, a delimiter or the end).
+/// data ends at whitespace or `>` + `EI` + (whitespace, a delimiter or the end).
 fn end_of_image(data: &[u8], begin: usize) -> Option<(usize, usize)> {
     let mut i = begin;
     while i + 2 <= data.len() {
         if data[i] == b'E'
             && data.get(i + 1) == Some(&b'I')
-            && (i == begin || is_ws(data[i - 1]))
+            && (i == begin || is_ws(data[i - 1]) || data[i - 1] == b'>')
             && data.get(i + 2).is_none_or(|b| is_ws(*b) || is_delim(*b))
         {
             let end_data = if i > begin && is_ws(data[i - 1]) { i - 1 } else { i };

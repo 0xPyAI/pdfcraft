@@ -388,3 +388,28 @@ fn piece_lookup_preserves_exact_boundary_and_empty_piece_mapping() {
     assert_eq!(empty.piece_of(0), 0);
     assert_eq!(empty.piece_of(usize::MAX), 0);
 }
+
+#[test]
+fn inline_image_terminator_without_preceding_whitespace() {
+    let cases: &[(&[u8], &[u8])] = &[
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G /F /AHx ID 2060A0E0>EI Q BT /F1 18 Tf (After) Tj ET", b"2060A0E0>"),
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G /Filter /ASCIIHexDecode ID 2060A0E0>EI Q BT /F1 18 Tf (After) Tj ET", b"2060A0E0>"),
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G ID ab()EI Q BT /F1 18 Tf (After) Tj ET", b"ab()"),
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G ID ab[]EI Q BT /F1 18 Tf (After) Tj ET", b"ab[]"),
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G ID \x20\x60\xa0\xe0EI Q BT /F1 18 Tf (After) Tj ET", b"\x20\x60\xa0\xe0"),
+    ];
+
+    for (src, expected_data) in cases {
+        let p = parse(src);
+        assert_eq!(p.skipped, 0, "stream should have 0 skipped bytes: {}", String::from_utf8_lossy(src));
+        let names: Vec<&[u8]> = p.ops.iter().map(|o| o.op.as_slice()).collect();
+        assert_eq!(
+            names,
+            [&b"BI"[..], b"Q", b"BT", b"Tf", b"Tj", b"ET"],
+            "operators after inline image must be preserved: {}",
+            String::from_utf8_lossy(src)
+        );
+        let (_, img) = p.ops[0].inline.as_ref().unwrap();
+        assert_eq!(img, expected_data, "inline image data must match: {}", String::from_utf8_lossy(src));
+    }
+}
