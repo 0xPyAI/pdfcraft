@@ -4777,3 +4777,32 @@ fn leaving_organize_goes_back_to_the_workspace_panel() {
     h.run_steps(3);
     assert_eq!(h.state().left, LeftPanel::AllTools);
 }
+
+/// The Read mode command (not the mode bar) applies a paragraph still open in the editor, as
+/// putting the Edit text tool down does; left open, it would stay drawn in Read mode with no tool.
+#[test]
+fn read_mode_shortcut_applies_the_open_paragraph() {
+    use pdfcraft_ui_egui::{Mode, QuickTool};
+    let mut h = harness(1, |_| {});
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    // The line "Page 1" sits at (20, 150) on a 200 × 300 page, 24 pt.
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - 158.0) / 300.0 * r.height());
+    h.hover_at(at);
+    h.run_steps(1);
+    h.drag_at(at);
+    h.run_steps(1);
+    h.drop_at(at);
+    h.run_steps(3);
+    assert!(h.state().views[0].line_editor.is_some(), "the line opens for editing");
+    h.state_mut().views[0].line_editor.as_mut().unwrap().text = "Chapter One".into();
+    h.run_steps(1);
+    h.state_mut().run_command("view.read_mode");
+    h.run_steps(3);
+    let s = h.state();
+    assert_eq!(s.mode, Mode::Read);
+    assert_eq!(s.quick_tool, QuickTool::Select);
+    assert!(s.views[0].line_editor.is_none(), "no editor stays open in Read mode");
+    assert_eq!(s.session.get(s.views[0].id).unwrap().text_lines(0)[0].text, "Chapter One", "the edit is applied");
+}

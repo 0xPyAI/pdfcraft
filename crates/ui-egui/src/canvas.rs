@@ -446,6 +446,9 @@ pub struct DocView {
     pub(crate) text_failed: HashSet<usize>,
     pub find: Option<Find>,
     selection: Option<Selection>,
+    /// The selection whose action bar was closed by its Copy button: the bar stays hidden
+    /// until the selection changes, as it does once a markup button consumes the selection.
+    actions_dismissed: Option<Selection>,
     /// The drag in progress started a text selection: the wheel scrolls the page during it
     /// (#721), which egui's scroll area refuses while anything is dragged.
     selection_drag: bool,
@@ -735,6 +738,7 @@ impl DocView {
             text_failed: HashSet::new(),
             find: None,
             selection: None,
+            actions_dismissed: None,
             selection_drag: false,
             clicks: 0,
             last_press_time: 0.0,
@@ -1048,6 +1052,7 @@ impl DocView {
 
     pub(crate) fn clear_selection(&mut self) {
         self.selection = None;
+        self.actions_dismissed = None;
     }
 
     /// Select text on `page` from glyph `from` to glyph `to` (tests and automation).
@@ -2190,11 +2195,20 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_s
     if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::F))) {
         view.open_find();
     }
+    let cmd = |k| KeyboardShortcut::new(Modifiers::COMMAND, k);
+    let pressed = |s: KeyboardShortcut| ctx.input_mut(|i| i.consume_shortcut(&s));
+    // ⌘G / ⇧⌘G step through the matches from the find field too, as in Acrobat and Preview
+    // (#2669): ahead of the text-input check, but only while there is a search to step.
+    if view.find.is_some() {
+        if pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::G)) {
+            view.find_step(false);
+        } else if pressed(cmd(Key::G)) {
+            view.find_step(true);
+        }
+    }
     if ctx.egui_wants_keyboard_input() {
         return;
     }
-    let cmd = |k| KeyboardShortcut::new(Modifiers::COMMAND, k);
-    let pressed = |s: KeyboardShortcut| ctx.input_mut(|i| i.consume_shortcut(&s));
     // Rotation first: egui matches ⌘+ loosely with respect to Shift.
     if pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Plus))
         || pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Equals))
@@ -2234,11 +2248,6 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_s
     if pressed(cmd(Key::Num2)) {
         view.fit = Fit::Width;
         view.goto = Some((view.current, 0.0));
-    }
-    if pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::G)) {
-        view.find_step(false);
-    } else if pressed(cmd(Key::G)) {
-        view.find_step(true);
     }
     if pressed(cmd(Key::OpenBracket)) {
         view.view_history(false);
@@ -2446,9 +2455,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // When not scrolling continuously, only one row is shown at a time: the current page, or the
     // current two-page spread (with the cover rule). These indices drive paging, which pages are
     // drawn, and the content height (#752). Empty for a document with no pages.
-    let row: Vec<usize> = if rects.is_empty() {
-        Vec::new()
-    } else {
+    let shown_row = |view: &DocView| -> Vec<usize> {
+        if rects.is_empty() {
+            return Vec::new();
+        }
         let last = rects.len() - 1;
         let cur = view.current.min(last);
         match view.layout {
@@ -2460,6 +2470,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             }
         }
     };
+    let row = shown_row(view);
     let middle_gesture = view.auto_scroll.blocks_input();
     // Not scrolling: when the whole page or spread fits, the wheel would do nothing, so it turns
     // pages instead; zoomed in far enough to pan, it pans, and at the edge it turns the page on
@@ -2560,6 +2571,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if view.fling.gliding() {
         ui.ctx().request_repaint();
     }
+    // The wheel may have turned the page above: draw the row it turned to. Measured from the old
+    // row, the jump to the new page scrolled both out of view, a blank frame on every turn forward.
+    let row = shown_row(view);
     let visible_pages: Vec<usize> = if view.continuous { (0..rects.len()).collect() } else { row.clone() };
     let (y_shift, content_h) = if view.continuous {
         (0.0, rects.iter().map(|r| r.bottom()).reduce(f32::max).map(|bottom| bottom + MARGIN).unwrap_or(0.0))
@@ -2618,13 +2632,26 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         let r = rects[page.min(rects.len() - 1)];
         let point = pos2(r.left() + fx * r.width(), r.top() - y_shift + fy * r.height());
         scroll = scroll.scroll_offset(vec2((point.x - rel.x).max(0.0), (point.y - rel.y).max(0.0)));
-    } else if edge_turned {
-        // The row above was laid out for the page before the turn: place the new one next frame.
-        ui.ctx().request_repaint();
     } else if let Some((page, frac)) = view.goto.take() {
         let page = page.min(rects.len() - 1);
         let r = rects[page];
-        scroll = scroll.vertical_scroll_offset((r.top() - y_shift - GAP + frac * r.height()).max(0.0));
+        // Clamped here: egui clamps only after drawing, so a page that fits was drawn MARGIN - GAP
+        // too high for a frame and then hopped into place. (`avail` is the viewport, as the
+        // scroll bars float.)
+        let max_y = (content_h - avail.height()).max(0.0);
+        scroll = scroll.vertical_scroll_offset((r.top() - y_shift - GAP + frac * r.height()).max(0.0).min(max_y));
+        // Horizontally too, as Acrobat does (#2665): beside a much wider page the others sit off
+        // to one side. A page already shown whole, or one filling the window's width, keeps the
+        // scroll, so paging through a zoomed-in document stays on the same column. Otherwise a
+        // page that fits is centred, and a wider one scrolled just far enough to fill the window.
+        // The page counts with its side gutters, which keep its edge clear of the floating
+        // quick-action bar as the layout does.
+        let (x, w) = (view.last_scroll.x, avail.width());
+        let (left, right) = (r.left() - SIDE, r.right() + SIDE);
+        let target = if right - left <= w { if left >= x && right <= x + w { x } else { r.center().x - w / 2.0 } } else { x.clamp(left, right - w) };
+        if (target - x).abs() > 0.5 {
+            scroll = scroll.horizontal_scroll_offset(target.clamp(0.0, (content_w - w).max(0.0)));
+        }
     }
     let ppp = ui.ctx().pixels_per_point();
     let scale = view.render_scale(ppp);
@@ -3250,6 +3277,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                         }
                     }
                     if resp.drag_started() && press_here && !over_link {
+                        // A drag replaces the selection without passing through none, so a
+                        // re-drag over text whose bar Copy closed would keep the bar hidden.
+                        view.actions_dismissed = None;
                         view.selection_drag = true;
                         let origin = ui.input(|inp| inp.pointer.press_origin()).unwrap_or(p);
                         let (ox, oy) = xf.screen_to_view(origin);
@@ -3334,6 +3364,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             if tool == QuickTool::Select && !consumed {
                 crate::image_pick::page_input(&resp, &xf, i, info, doc, pointer, view);
             }
+            crate::image_pick::drop_stale(doc, view);
             crate::image_pick::paint(painter, &xf, i, info, view);
             comments::page_after_text(&resp, &pcx, view);
             if tool == QuickTool::Redact && can_modify {
@@ -3666,6 +3697,26 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     view.last_scroll = scroll_offset;
     let pan_held = now_settle < view.pan_hold_until;
     let (mut wanted, visible_now) = out.inner;
+    // Single-page and two-page views draw only the current row, so the next one was first asked
+    // for on the turn and showed blank paper until it rendered. Prefetch the rows either side,
+    // as continuous scrolling does for the pages just off screen.
+    if !view.continuous
+        && let (Some(&first), Some(&last)) = (visible_pages.first(), visible_pages.last())
+    {
+        let n = if view.layout == PageLayout::Single { 1 } else { 2 };
+        let max_side = ui.ctx().input(|inp| inp.max_texture_side) as f32;
+        for i in (last.saturating_add(1)..=last.saturating_add(n)).chain(first.saturating_sub(n)..first) {
+            let Some(p) = info.pages.get(i).filter(|_| !view.errors.contains_key(&i)) else { continue };
+            // As drawn: the whole page at this scale, or the backdrop of a tiled page.
+            let side = p.width.max(p.height).max(1.0);
+            wanted.push(if side * scale > TILE_THRESHOLD.min(max_side) {
+                let bs = BASE_SIDE.min(max_side) / side;
+                (i, bs, scale_tag(bs), None)
+            } else {
+                (i, scale, tag, None)
+            });
+        }
+    }
     let cur = view.current;
     wanted.sort_by_key(|w| (!visible_now.contains(&w.0), w.0.abs_diff(cur), w.3.is_some()));
     // Tiles of far-away pages are useless: free them. Tiles of an earlier zoom stay for a page
@@ -3956,7 +4007,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if copy_selected {
         app.execute("edit.copy");
     }
-    quick_bar(app, avail, ui);
+    // Read mode hides the tools (#2646).
+    if app.mode != crate::Mode::Read {
+        quick_bar(app, avail, ui);
+    }
     if let Some((source, file, destination)) = remote_open {
         app.open_remote_link(source, file, destination);
     }
@@ -3983,7 +4037,13 @@ fn selection_actions(
     if ui.input(|input| input.pointer.is_decidedly_dragging()) {
         return false;
     }
-    let Some(selection) = view.selection else { return false };
+    let Some(selection) = view.selection else {
+        view.actions_dismissed = None;
+        return false;
+    };
+    if view.actions_dismissed == Some(selection) {
+        return false;
+    }
     let Some(text) = view.texts.get(&selection.page) else { return false };
     let Some(xf) = view.page_xform(selection.page) else { return false };
     let Some(last) = selection.rects(text).last().copied() else { return false };
@@ -4020,6 +4080,8 @@ fn selection_actions(
     });
     let Some(action) = chosen else { return false };
     if let SelectionAction::Copy = action {
+        // Copying closes the bar but keeps the words selected, for ⌘C or a second action.
+        view.actions_dismissed = Some(selection);
         return true;
     }
     let Some((page, quads)) = view.selection_quads(info) else { return false };
