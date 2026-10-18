@@ -3481,11 +3481,11 @@ title = "Custom document properties"
 area = "D"
 tier = "P2"
 milestone = "M4"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["doc_info", "doc_set_info"]
+evidence = ["crates/organize/src/tests.rs::custom_document_properties_are_listed_set_removed_and_their_names_checked", "crates/render/src/inspect.rs::custom_document_properties_are_listed_apart_from_the_standard_ones", "crates/automation/tests/automation.rs::custom_document_properties_are_set_listed_and_cleared_through_the_tools"]
+notes = "Through the tools: doc_set_info sets or clears an /Info entry under any name the spec does not use (names checked as Acrobat does: no standard name, no empty name, no spaces or delimiters, at most 127 bytes), and doc_info lists them under custom, apart from the standard entries. Not yet: the Custom tab in Document Properties, and mirroring them into XMP (pdfx:) as Acrobat does"
 
 [[feature]]
 id = "organize.xmp-editor"

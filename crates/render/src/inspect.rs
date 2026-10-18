@@ -56,6 +56,9 @@ pub struct DocInfo {
     pub keywords: Option<String>,
     pub creator: Option<String>,
     pub producer: Option<String>,
+    /// Custom document properties: `/Info` entries with a key the spec does not name and a text
+    /// value, as (name, text), in the dictionary's order (at most 256).
+    pub custom: Vec<(String, String)>,
     pub pdf_version: String,
     pub file_size: usize,
     pub encrypted: bool,
@@ -616,6 +619,23 @@ impl<'a> Inspector<'a> {
             info.keywords = self.text(d, b"Keywords");
             info.creator = self.text(d, b"Creator");
             info.producer = self.text(d, b"Producer");
+            const STANDARD: [&[u8]; 9] =
+                [b"Title", b"Author", b"Subject", b"Keywords", b"Creator", b"Producer", b"CreationDate", b"ModDate", b"Trapped"];
+            // The same rule as the engine's list after an edit (`pdfcraft_organize::custom_info`,
+            // trimmed and without empty values): text strings only, so a name value is not a
+            // custom property, and the cap counts listed entries.
+            info.custom = d
+                .iter()
+                .filter(|(k, _)| !STANDARD.contains(&k.as_slice()))
+                .filter_map(|(k, v)| match self.resolve(v) {
+                    Object::String(bytes, _) => {
+                        let v = text_string(bytes).trim_matches(|c: char| c == '\0' || c.is_whitespace()).to_string();
+                        (!v.is_empty()).then(|| (String::from_utf8_lossy(k).into_owned(), v))
+                    }
+                    _ => None,
+                })
+                .take(256)
+                .collect();
         }
         let Ok(catalog) = self.doc.catalog() else { return };
         info.tagged = catalog
@@ -2299,6 +2319,27 @@ trailer << /Root 1 0 R >>
             (Some(S::Replace), 1.0, Some(0), true, None),
             "{:?}",
             t[3]
+        );
+    }
+
+    const CUSTOM_INFO: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R >> endobj
+4 0 obj << /Title (Report) /Producer (Test) /Project (Apollo) /Revision 7 /Dept (R&D) /Trapped /False /Note <FEFF90E8> >> endobj
+trailer << /Root 1 0 R /Info 4 0 R >>
+%%EOF";
+
+    #[test]
+    fn custom_document_properties_are_listed_apart_from_the_standard_ones() {
+        let info = inspect(Arc::new(CUSTOM_INFO.to_vec()), None).expect("opens");
+        assert_eq!((info.title.as_deref(), info.producer.as_deref()), (Some("Report"), Some("Test")));
+        let mut custom = info.custom.clone();
+        custom.sort();
+        // Revision is a number, not text, so it is not listed; Trapped is a standard entry.
+        assert_eq!(
+            custom,
+            [("Dept".to_string(), "R&D".to_string()), ("Note".to_string(), "部".to_string()), ("Project".to_string(), "Apollo".to_string())]
         );
     }
 
