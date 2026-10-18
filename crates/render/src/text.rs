@@ -1740,6 +1740,70 @@ mod tests {
         }
     }
 
+    /// Issue #3109: text drawn in clipping mode (`7 Tr`) sets the clip for a subsequent fill,
+    /// shading or image without painting the glyphs directly, and must still reach `TextDevice`
+    /// with the same boxes and search ranges as modes 0–6.
+    #[test]
+    fn clipping_mode_text_is_extracted_and_searchable_like_other_rendering_modes() {
+        let fill_through = " 0 0 1 rg 0 0 300 300 re f";
+        let mut pages: Vec<String> =
+            (0..=7).map(|mode| format!("q BT /F1 24 Tf {mode} Tr 72 150 Td () Tj [(Hello) -200 (World)] TJ ET{fill_through} Q")).collect();
+        // Page 8: /ActualText wrapping 7 Tr clip-only text.
+        pages.push(format!("q /Span <</ActualText (Hello World)>> BDC BT /F1 24 Tf 7 Tr 72 150 Td (Glyphs) Tj ET EMC{fill_through} Q"));
+        // Page 9: 0 Tr underpainting followed by 7 Tr at the same position (outline/gradient overlay) deduplicates.
+        pages.push(format!("BT /F1 24 Tf 0 Tr 72 150 Td (Hello World) Tj ET q BT /F1 24 Tf 7 Tr 72 150 Td (Hello World) Tj ET{fill_through} Q"));
+        // Page 10: 90° turned 7 Tr text.
+        pages.push(format!("q BT /F1 24 Tf 7 Tr 0 1 -1 0 150 100 Tm (Hello World) Tj ET{fill_through} Q"));
+        // Page 11: 7 Tr without any fill-through (visually blank, still extractable).
+        pages.push("BT /F1 24 Tf 7 Tr 72 150 Td (Hello World) Tj ET".into());
+
+        let refs: Vec<&str> = pages.iter().map(String::as_str).collect();
+        let pdf = marked_pages(&refs);
+        let control = marked_text(&pdf, 0);
+        assert_eq!(control.plain_text(), "Hello World");
+        let control_rects = control.line_rects(0..5);
+        assert_eq!(control_rects.len(), 1);
+        for mode in 0..=7 {
+            let text = marked_text(&pdf, mode);
+            assert_eq!(text.plain_text(), "Hello World", "mode {mode} Tr");
+            assert_eq!(text.find("hello"), vec![0..5], "mode {mode} Tr");
+            assert_eq!(text.find_opts("Hello", true, true), vec![0..5], "mode {mode} Tr");
+            assert_eq!(
+                text.find_with(|chars| chars.starts_with(&['H', 'e', 'l', 'l', 'o']).then_some(0..5).into_iter().collect()),
+                vec![0..5],
+                "mode {mode} Tr"
+            );
+            assert_eq!(text.line_rects(0..5), control_rects, "mode {mode} Tr");
+            assert_eq!(text.glyphs, control.glyphs, "mode {mode} Tr");
+        }
+        let actual = marked_text(&pdf, 8);
+        assert_eq!(actual.plain_text(), "Hello World");
+        assert_eq!(actual.find("Hello"), vec![0..1]);
+
+        let deduped = marked_text(&pdf, 9);
+        assert_eq!(deduped.plain_text(), "Hello World");
+
+        let turned = marked_text(&pdf, 10);
+        assert_eq!(turned.plain_text(), "Hello World");
+        assert_eq!(turned.find("World"), vec![6..11]);
+
+        let unfilled = marked_text(&pdf, 11);
+        assert_eq!(unfilled.plain_text(), "Hello World");
+
+        // Visual check: page 7 (`7 Tr` + blue fill-through) paints blue only inside the clipped
+        // glyph outlines, whereas page 11 (`7 Tr` alone) paints no ink at all.
+        let mut renderer = crate::PageRenderer::new(std::sync::Arc::new(pdf.data().as_ref().to_vec()), crate::RenderConfig::default());
+        let filled_px = renderer.render(crate::RenderRequest { page: 7, kind: crate::RequestKind::Pixels, scale: 1.0, ..Default::default() });
+        assert!(filled_px.error.is_none());
+        let blue_pixels = filled_px.rgba.as_chunks::<4>().0.iter().filter(|p| p[0] < 32 && p[1] < 32 && p[2] > 200).count();
+        let white_pixels = filled_px.rgba.as_chunks::<4>().0.iter().filter(|p| p[..3] == [255, 255, 255]).count();
+        assert!(blue_pixels > 50 && white_pixels > 80_000, "blue={blue_pixels}, white={white_pixels}");
+
+        let unfilled_px = renderer.render(crate::RenderRequest { page: 11, kind: crate::RequestKind::Pixels, scale: 1.0, ..Default::default() });
+        assert!(unfilled_px.error.is_none());
+        assert!(unfilled_px.rgba.as_chunks::<4>().0.iter().all(|p| p[..3] == [255, 255, 255]));
+    }
+
     /// One page per `(encoding, content)`, in Helvetica (`/F1`).
     fn encoded_pages(pages: &[(lopdf::Object, &[u8])]) -> Pdf {
         use lopdf::{Document, Object, Stream, dictionary};
