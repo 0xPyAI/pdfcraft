@@ -1627,14 +1627,30 @@ impl Reader<'_> {
         Some((number, generation))
     }
 
-    /// Newest backwards-scanned `trailer` whose `/Root` references a scanned object.
+    /// Newest backwards-scanned `trailer` whose `/Root` references a scanned object, one whose
+    /// `/Root` is the catalog first.
     fn find_latest_trailer(&self, xref: &Xref) -> Option<(usize, Dictionary)> {
         let usable = |dict: &Dictionary| {
             dict.get(b"Root")
                 .and_then(Object::as_reference)
                 .is_ok_and(|root| xref.entries.contains_key(&root.0))
         };
-        let mut latest = None;
+        // PdfCraft patch: (#2365) a candidate whose /Root is the catalog (`/Type /Catalog` or
+        // `/Pages`) beats one whose /Root is another dictionary, such as /Info, wherever it is;
+        // the other kind is still taken when nothing better is there (an FDF's /Root).
+        let is_catalog = |dict: &Dictionary| {
+            let Ok(root) = dict.get(b"Root").and_then(Object::as_reference) else {
+                return false;
+            };
+            let Some(XrefEntry::Normal { offset, .. }) = xref.entries.get(&root.0) else {
+                return false;
+            };
+            parser::indirect_object(self.buffer, *offset as usize, None, self, &mut HashSet::new(), None)
+                .ok()
+                .and_then(|(_, object)| object.as_dict().map(|d| d.has_type(b"Catalog") || d.has(b"Pages")).ok())
+                .unwrap_or(false)
+        };
+        let mut latest: Option<(bool, usize, Dictionary)> = None;
         let mut bound = self.buffer.len();
         for _ in 0..MAX_TRAILER_CANDIDATES {
             let Some(pos) = Reader::search_substring(&self.buffer[..bound], b"trailer", 0) else {
@@ -1650,8 +1666,13 @@ impl Reader<'_> {
                 continue;
             };
             if usable(&dict) {
-                latest = Some((pos, dict));
-                break;
+                let catalog = is_catalog(&dict);
+                if latest.is_none() || catalog {
+                    latest = Some((catalog, pos, dict));
+                }
+                if catalog {
+                    break;
+                }
             }
         }
         // PdfCraft patch: (#2365) a file whose only trailer is a cross-reference stream has
@@ -1665,7 +1686,7 @@ impl Reader<'_> {
                 continue;
             };
             let offset = *offset as usize;
-            if latest.as_ref().is_some_and(|(pos, _)| *pos >= offset) {
+            if latest.as_ref().is_some_and(|(catalog, pos, _)| *catalog && *pos >= offset) {
                 continue;
             }
             let Some(head) = self.buffer.get(offset..) else {
@@ -1685,10 +1706,13 @@ impl Reader<'_> {
                 continue;
             };
             if dict.has_type(b"XRef") && usable(&dict) {
-                latest = Some((offset, dict));
+                let rank = (is_catalog(&dict), offset);
+                if latest.as_ref().is_none_or(|(catalog, pos, _)| rank > (*catalog, *pos)) {
+                    latest = Some((rank.0, offset, dict));
+                }
             }
         }
-        latest
+        latest.map(|(_, pos, dict)| (pos, dict))
     }
 
     /// Some generators write `startxref` (or trailer `Prev`) values that are

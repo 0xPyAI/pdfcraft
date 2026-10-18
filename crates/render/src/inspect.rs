@@ -2425,6 +2425,32 @@ trailer << /Root 1 0 R >>
         assert_eq!(info.creator.as_deref(), Some("Me"));
     }
 
+    /// #2365 review: the rebuild prefers a trailer whose /Root is the catalog. A later
+    /// cross-reference stream whose /Root points at the Info dictionary used to replace the
+    /// earlier `trailer`, so Document Properties lost the catalog it should have read.
+    #[test]
+    fn rebuilt_file_prefers_a_trailer_whose_root_is_the_catalog() {
+        let mut bytes = b"%PDF-1.5\n".to_vec();
+        for body in [
+            "<</Type/Catalog/Pages 2 0 R>>",
+            "<</Type/Pages/Kids[3 0 R]/Count 1>>",
+            "<</Type/Page/Parent 2 0 R/MediaBox[0 0 10 10]>>",
+            "<</Title(Kept)/Creator(Me)>>",
+        ] {
+            let n = bytes.iter().filter(|b| **b == b'\n').count();
+            bytes.extend_from_slice(format!("{n} 0 obj{body}endobj\n").as_bytes());
+        }
+        bytes.extend_from_slice(b"trailer\n<</Size 5/Root 1 0 R/Info 4 0 R>>\n");
+        bytes.extend_from_slice(b"5 0 obj<</Type/XRef/Root 4 0 R/Size 6/W[1 2 1]/Length 4>>stream\n\x01\x00\x09\x00\nendstream\nendobj\n");
+        // A wrong startxref, and a second file after %%EOF: every reader rebuilds the table.
+        bytes.extend_from_slice(b"startxref\n999999\n%%EOF\n%PDF-1.3\n");
+        bytes.extend_from_slice(&[b'x'; 1024]);
+
+        let info = inspect(Arc::new(bytes), None).unwrap();
+        assert_eq!(info.pages.len(), 1);
+        assert_eq!(info.title.as_deref(), Some("Kept"));
+    }
+
     #[test]
     fn lazy_structure_matches_the_compatibility_inspector() {
         // Each fixture as lopdf writes it, and with its objects in object streams.
