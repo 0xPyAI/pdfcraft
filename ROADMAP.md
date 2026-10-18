@@ -2,6 +2,8 @@
 
 **Stage: alpha** · next: beta, ~25% (ready for real work 50% → 75%) and ~400–700 h away
 
+> **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M6: CSV tab-containing headers; estimates unchanged)
+> **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M3, #3149: discard render demand after page geometry changes and check the GPU texture limit before upload; estimates unchanged)
 > **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M4, #1919: repeated page indices accumulate rotations; M3, #3149: discard render demand after page geometry changes and check the GPU texture limit before upload; estimates unchanged)
 > **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M8, #1350: named replacement descriptions retired during Sanitize and across shared resources; estimates unchanged)
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M6: AcroForm XML text; estimates unchanged)
@@ -519,6 +521,7 @@ Newest first: the date, what moved, and the new overall estimate.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-15 | minor | M6: CSV export and spreadsheet merging quote tabs, and import distinguishes quoted tabs from TSV delimiters without changing field identities. Estimates unchanged. |
 | 2026-10-18 | minor | M4, PR #1919 review: repeated page indices apply each rotation to the latest page-local value, preserving indirect/inherited angles. Synthetic adjacent/interleaved duplicates retain siblings and page contents through incremental and full saves. Estimates unchanged. |
 | 2026-10-13 | minor | M4: rotation queries and edits resolve indirect page-tree values; inherited, negative and large rotations verified through both saves. Estimates unchanged. |
 | 2026-10-18 | minor | M3, #3149: page replacement cancels render demand collected for the previous geometry; all viewer raster upload paths reject empty or oversized textures before cache eviction. Synthetic regressions reproduce the reported 1880×2350 upload at a 2048 limit, retain cached images and unsaved edits, and resume bounded backdrops and tiles. Estimates unchanged. |
