@@ -148,3 +148,6 @@ sync_github_name = false
 
 [people.MortenHusted]
 sync_github_name = true
+
+[people.Lcoding15]
+real_name = "Livio Oswald"
