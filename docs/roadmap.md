@@ -2,7 +2,7 @@
 
 > **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M1, #2658: reject partial extended-attribute copies after a size change; estimates unchanged)
 > **Last reviewed:** 2026-10-17 - **Last updated:** 2026-10-17 - **Change:** minor (M1: macOS atomic save retains destination xattrs; estimates unchanged)
-
+>
 > **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M3, #3149: discard render demand after page geometry changes and check the GPU texture limit before upload; estimates unchanged)
 > **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M8, #1350: named replacement descriptions retired during Sanitize and across shared resources; estimates unchanged)
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M6: AcroForm XML text; estimates unchanged)
