@@ -1067,6 +1067,7 @@
 	Next page	Próxima página
 	Previous page	Página anterior
 	Current page — type a page number or label (such as iv) and press Enter	Página atual — digite o número da página ou rótulo (como iv) e pressione Enter
+	Zoom — type a percentage and press Enter	Zoom — digite uma porcentagem e pressione Enter
 	Open a PDF ({key})	Abrir um PDF ({key})
 	Dark gray theme	Tema cinza escuro
 	Light theme	Tema claro
@@ -1538,6 +1539,7 @@
 	Couldn't use {name}: {e}	Não foi possível usar {name}: {e}
 	Couldn't extract pages: {e}	Não foi possível extrair páginas: {e}
 	Couldn't write {name}: {e}	Não foi possível gravar {name}: {e}
+	the name is not a plain file name	o nome não é um nome de arquivo simples
 	Wrote 1 file to {dir}	1 arquivo gravado em {dir}
 	Wrote {n} files to {dir}	{n} arquivos gravados em {dir}
 	No pages match those choices	Nenhuma página corresponde a essas opções

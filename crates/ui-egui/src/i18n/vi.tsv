@@ -15,6 +15,7 @@
 	Zoom	Thu phóng
 	Actual size	Kích thước thực
 	Zoom to page level	Thu phóng vừa trang
+	Zoom — type a percentage and press Enter	Thu phóng — nhập tỷ lệ phần trăm rồi nhấn Enter
 	Fit to width	Vừa chiều rộng
 	Display theme	Chủ đề hiển thị
 	Side panels	Bảng bên
@@ -1955,6 +1956,7 @@ comment menu	Edit	Sửa
 	Couldn't use the photo: {e}	Không thể dùng ảnh: {e}
 	Couldn't use {name}: {e}	Không thể dùng {name}: {e}
 	Couldn't write {name}: {e}	Không thể ghi {name}: {e}
+	the name is not a plain file name	tên không phải là tên tệp đơn thuần
 	Couldn't write {path}: {e}	Không thể ghi {path}: {e}
 	Create link	Tạo liên kết
 	Created 1 link	Đã tạo 1 liên kết

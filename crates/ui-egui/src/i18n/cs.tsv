@@ -279,6 +279,7 @@ key	Space	Mezerník
 	Next page	Další stránka
 	Previous page	Předchozí stránka
 	Current page — type a page number or label (such as iv) and press Enter	Aktuální stránka — zadejte číslo nebo označení stránky (třeba iv) a stiskněte Enter
+	Zoom — type a percentage and press Enter	Lupa — zadejte procenta a stiskněte Enter
 	Welcome to PdfCraft	Vítá vás PdfCraft
 	An open-source PDF workbench — local, private, and scriptable.	Open-source dílna pro PDF — lokální, soukromá a skriptovatelná.
 	Join the ArtCraft community	Připojte se ke komunitě ArtCraft
@@ -1755,6 +1756,7 @@ key	Space	Mezerník
 	Couldn't use {name}: {e}	{name} nelze použít: {e}
 	Couldn't extract pages: {e}	Stránky nelze extrahovat: {e}
 	Couldn't write {name}: {e}	{name} nelze zapsat: {e}
+	the name is not a plain file name	název není prostý název souboru
 	Wrote 1 file to {dir}	Zapsán 1 soubor do {dir}
 	Wrote {n} files to {dir}	Zapsáno souborů: {n} (složka {dir})
 	No pages match those choices	Těmto volbám neodpovídají žádné stránky

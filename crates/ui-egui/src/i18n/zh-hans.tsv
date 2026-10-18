@@ -1130,6 +1130,7 @@
 	Next page	下一页
 	Previous page	上一页
 	Current page — type a page number or label (such as iv) and press Enter	当前页 — 输入页码或标签（如 iv）后按 Enter
+	Zoom — type a percentage and press Enter	缩放 — 输入百分比并按 Enter
 	Open a PDF ({key})	打开 PDF ({key})
 	Dark gray theme	深灰色主题
 	Light theme	浅色主题
@@ -1671,6 +1672,7 @@
 	Couldn't use {name}: {e}	无法使用{name}：{e}
 	Couldn't extract pages: {e}	无法提取页面：{e}
 	Couldn't write {name}: {e}	无法写入{name}：{e}
+	the name is not a plain file name	名称不是单纯的文件名
 	Wrote 1 file to {dir}	已将 1 个文件写入{dir}
 	Wrote {n} files to {dir}	已将{n}个文件写入{dir}
 	No pages match those choices	所选条件没有匹配的页面

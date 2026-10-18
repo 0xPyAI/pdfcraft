@@ -156,7 +156,7 @@ pub fn tools() -> Vec<ToolDef> {
             }),
             &["doc"],
         )),
-        t("doc_set_info", "Set document metadata", "Set a document information entry such as Title, Author, Subject or Keywords; an empty value removes it. When the file has XMP metadata, the matching XMP property (dc:title, dc:creator, dc:description, pdf:Keywords, xmp:CreatorTool, pdf:Producer) is changed too, so viewers that read XMP first show the new value. Undoable.")
+        t("doc_set_info", "Set document metadata", "Set a document information entry such as Title, Author, Subject or Keywords, or a custom property under any other name (no spaces, delimiters, / or #; at most 127 bytes; doc_info lists them under custom); an empty value removes it. When the file has XMP metadata, the matching XMP property (dc:title, dc:creator, dc:description, pdf:Keywords, xmp:CreatorTool, pdf:Producer) is changed too, so viewers that read XMP first show the new value. Undoable.")
             .with(schema(json!({ "doc": doc(), "key": { "type": "string" }, "value": { "type": "string" } }), &["doc", "key", "value"])),
         t("page_render", "Render a page", "Render one page to a PNG image (default 96 dpi, at most 600).")
             .ro()
@@ -224,6 +224,9 @@ pub fn tools() -> Vec<ToolDef> {
             json!({ "doc": doc(), "pages": pages("to move"), "to": { "type": "integer", "minimum": 1 } }),
             &["doc", "pages", "to"],
         )),
+        t("page_reverse", "Reverse pages", "Reverse the order of pages among the positions they occupy: the listed pages (at least two), or the whole document when pages is omitted. Undoable.")
+            .cmd("page.reverse")
+            .with(schema(json!({ "doc": doc(), "pages": pages("to reverse (default: all)") }), &["doc"])),
         t("page_insert_blank", "Insert a blank page", "Insert a blank page so it becomes page `at`. Size defaults to the neighbouring page. Undoable.")
             .cmd("page.insert_blank")
             .with(schema(
@@ -1098,7 +1101,7 @@ pub fn tools() -> Vec<ToolDef> {
         t("doc_compare_mark", "Mark differences as comments", "Add the differences from other (older) to doc (newer) as comments in doc: highlights over replaced (blue) and inserted (green) text, notes where text was deleted (red), authored Compare. Undoable.")
             .cmd("doc.compare")
             .with(schema(json!({ "doc": doc(), "other": { "type": "integer" } }), &["doc", "other"])),
-        t("form_detect_fields", "Detect form fields", "Prepare a form ▸ automatic field detection: find the blanks a printed form asks to be filled (underscore runs, lines, empty boxes, small squares for check boxes; on scanned pages read from the pixels) and name each field from its label. With add (default true) the fields are created as one undoable step; otherwise they are only proposed. Returns page (1-based), kind, name and rect (points, origin bottom-left).")
+        t("form_detect_fields", "Detect form fields", "Prepare a form ▸ automatic field detection: find the blanks a printed form asks to be filled (underscore runs, lines, empty boxes, rows of comb boxes, small squares for check boxes; on scanned pages read from the pixels) and name each field from its label. With add (default true) the fields are created as one undoable step; otherwise they are only proposed. Returns page (1-based), kind, name and rect (points, origin bottom-left); a row of comb boxes is one text field with comb set to its number of cells, created with the comb flag and that character limit.")
             .cmd("form.detect")
             .with(schema(json!({ "doc": doc(), "pages": pages("to look at (default: all)"), "add": { "type": "boolean" } }), &["doc"])),
         t("form_actions", "Field actions", "Field Properties ▸ Actions: the field's action for each trigger (mouse_up, mouse_down, mouse_enter, mouse_exit, on_focus, on_blur).")

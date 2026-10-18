@@ -120,6 +120,7 @@
 	Next page	Sonraki sayfa
 	Previous page	Önceki sayfa
 	Current page — type a page number or label (such as iv) and press Enter	Geçerli sayfa — bir sayfa numarası veya etiketi (örneğin iv) yazıp Enter'a basın
+	Zoom — type a percentage and press Enter	Yakınlaştırma — bir yüzde yazıp Enter tuşuna basın
 	Welcome to PdfCraft	PdfCraft'a Hoş Geldiniz
 	An open-source PDF workbench — local, private, and scriptable.	Açık kaynaklı bir PDF çalışma alanı — yerel, gizli ve komut dosyalarıyla yönetilebilir.
 	Join the ArtCraft community	ArtCraft topluluğuna katılın
@@ -1603,6 +1604,7 @@
 	Couldn't use {name}: {e}	{name} kullanılamadı: {e}
 	Couldn't extract pages: {e}	Sayfalar ayıklanamadı: {e}
 	Couldn't write {name}: {e}	{name} yazılamadı: {e}
+	the name is not a plain file name	ad, basit bir dosya adı değil
 	Wrote 1 file to {dir}	1 dosya {dir} konumuna yazıldı
 	Wrote {n} files to {dir}	{n} dosya {dir} konumuna yazıldı
 	No pages match those choices	Bu seçimlerle eşleşen sayfa yok
