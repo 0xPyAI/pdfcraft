@@ -158,8 +158,12 @@ fn phone(s: &[char], i: usize) -> Option<usize> {
     if seps == 0 && !labelled(s, i) || digit(s.get(end)) || run_continues(s, end.checked_sub(1)?, 1, &SEPS) {
         return None;
     }
-    // Only an area code with a trunk 0 takes a slash, so "2024/123456" is no phone number.
+    // Only an area code with a trunk 0 takes a slash, so "2024/123456" is no phone number; and
+    // only one, right after it ("0426/123456", not "0426/12/3456" or "0426 12/3456").
     let slash = run.contains(&'/');
+    if run.iter().filter(|c| **c == '/').count() > 1 || slash && !run.iter().take_while(|c| **c != '/').all(char::is_ascii_digit) {
+        return None;
+    }
     let ok = if plus {
         // E.164: a `+` country code and up to 15 digits in all ("+49 2151 123456").
         !slash && (8..=15).contains(&n)
@@ -472,7 +476,7 @@ mod tests {
             found(
                 Pattern::Phone,
                 "id 0211123456, +4921511234567, hotel 3451234567, prot. 2024/123456, on 01/10/2026, \
-                 tel. 12345, tel 0426/ 123456, +39 0426/123456"
+                 tel. 12345, tel 0426/ 123456, +39 0426/123456, tel 0426/12/3456, tel 0426 12/3456"
             ),
             Vec::<String>::new()
         );
