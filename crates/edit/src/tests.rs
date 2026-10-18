@@ -1922,6 +1922,31 @@ fn repeated_image_edits_change_one_transform_instead_of_nesting() {
 }
 
 #[test]
+fn repeated_group_moves_of_a_cropped_image_change_one_clip_transform() {
+    // The crop is smaller than the image, so a clip left behind would shrink `visible_rect`.
+    let mut doc = image_page_with("q 150 120 100 50 re W n 200 0 0 100 100 100 cm /Im0 Do Q BT /F1 12 Tf 72 700 Td (Caption) Tj ET");
+    let operators = |doc: &Document| pdfcraft_content::parse(&page_content_bytes(doc, 0)).ops.len();
+    let start = images::page_images(&doc, 0).unwrap()[0].clone();
+    let mut first = 0;
+    for i in 0..20 {
+        images::translate_images(&mut doc, 0, &[0], [1.0, -2.0]).unwrap();
+        if i == 0 {
+            first = operators(&doc);
+        }
+    }
+    let moved = |r: [f64; 4]| [r[0] + 20.0, r[1] - 40.0, r[2] + 20.0, r[3] - 40.0];
+    let now = images::page_images(&doc, 0).unwrap()[0].clone();
+    assert!(close(now.rect, moved(start.rect)), "{:?}", now.rect);
+    assert!(close(now.visible_rect.unwrap(), moved(start.visible_rect.unwrap())), "the crop moves with the image: {:?}", now.visible_rect);
+    assert_eq!(operators(&doc), first, "twenty group moves add no more operators than one");
+    assert_eq!(q_depth(&doc), 1);
+    let doc = reopen(&doc);
+    assert!(close(images::page_images(&doc, 0).unwrap()[0].visible_rect.unwrap(), moved(start.visible_rect.unwrap())));
+    let caption: Vec<_> = text::text_lines(&doc, 0).unwrap().into_iter().map(|l| l.text).collect();
+    assert_eq!(caption, ["Caption"]);
+}
+
+#[test]
 fn page_images_move_turn_replace_and_delete() {
     let mut doc = image_page();
     let imgs = images::page_images(&doc, 0).unwrap();
