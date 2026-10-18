@@ -1476,6 +1476,21 @@ mod tests {
     }
 
     #[test]
+    fn a_loaded_font_is_applied_to_the_paragraph_being_edited() {
+        // Loading a font used to only register it on the page: the paragraph kept its source
+        // face until the font was found again in the document-font menu (#2591).
+        let (mut app, ed) = preview_app();
+        app.views[0].line_editor = Some(ed);
+        let inter = include_bytes!("../../../assets/fonts/Inter-Regular.ttf").to_vec();
+        app.use_files(crate::files::FilePurpose::TextFont { page: 0 }, vec![("Inter-Regular.ttf".into(), inter)]);
+        let doc = app.session.get(app.views[0].id).unwrap();
+        let lines = doc.text_lines(0);
+        assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<String>(), "Preview text");
+        assert!(lines.iter().all(|l| l.base_font == "Inter-Regular"), "{:?}", lines.iter().map(|l| &l.base_font).collect::<Vec<_>>());
+        assert!(app.views[0].line_editor.is_some(), "the paragraph stays open for editing");
+    }
+
+    #[test]
     fn text_background_is_cached_without_editing_and_released_on_cancel() {
         let (app, ed) = preview_app();
         let doc = app.session.get(app.views[0].id).unwrap();

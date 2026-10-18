@@ -455,6 +455,32 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
                 }
             }
         }
+        // Replies (`/IRT`, ISO 32000-2 §12.5.6.2) to a removed annotation go too, and replies to
+        // those: a reply placed elsewhere would keep its parent — the comment and the QuadPoints
+        // of the redacted words — in the file through its `/IRT` (#2659). Each pass removes at
+        // least one more annotation of this page or stops, so it ends.
+        let replies: Vec<(ObjRef, ObjRef)> = annots
+            .iter()
+            .filter_map(Object::as_ref)
+            .filter_map(|r| {
+                let obj = doc.get(r);
+                let d = obj.as_dict()?;
+                (d.name(b"Subtype") != Some(b"Widget")).then_some(())?;
+                Some((r, d.get(b"IRT").and_then(Object::as_ref)?))
+            })
+            .collect();
+        loop {
+            let before = removed.len();
+            for (r, parent) in &replies {
+                if !removed.contains(r) && removed.contains(parent) {
+                    removed.push(*r);
+                    report.annotations += 1;
+                }
+            }
+            if removed.len() == before {
+                break;
+            }
+        }
         let kept: Vec<Object> = annots
             .into_iter()
             .filter(|a| {

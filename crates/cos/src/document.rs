@@ -337,6 +337,40 @@ impl PartialEq for SourceIdentity {
 
 impl Eq for SourceIdentity {}
 
+/// What a document reads as: its source ([`SourceIdentity`]), its trailer and every object changed
+/// since it was opened. A clone, or a snapshot that undo restores, has the same state, and every
+/// change makes a different one. Changed objects are compared as allocations, which the state
+/// keeps alive, so a later object can't take an address one of them had.
+#[derive(Clone)]
+pub struct ReadState {
+    source: SourceIdentity,
+    trailer: Dict,
+    overlay: BTreeMap<u32, Slot>,
+}
+
+impl ReadState {
+    /// Whether `doc` reads as this state.
+    pub fn matches(&self, doc: &Document) -> bool {
+        self.source == doc.source_identity()
+            && self.trailer == doc.trailer
+            && self.overlay.len() == doc.overlay.len()
+            && self.overlay.iter().zip(&doc.overlay).all(|((a, x), (b, y))| {
+                a == b
+                    && match (x, y) {
+                        (Slot::Set(g, o), Slot::Set(h, p)) => g == h && Arc::ptr_eq(o, p),
+                        (Slot::Freed(g), Slot::Freed(h)) => g == h,
+                        _ => false,
+                    }
+            })
+    }
+}
+
+impl std::fmt::Debug for ReadState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReadState").field("changed_objects", &self.overlay.len()).finish_non_exhaustive()
+    }
+}
+
 #[derive(Clone)]
 pub struct Document {
     data: Arc<Vec<u8>>,
@@ -801,6 +835,12 @@ impl Document {
         SourceIdentity(Arc::downgrade(&self.source_identity))
     }
 
+    /// What the document reads as now (see [`ReadState`]): unlike [`Self::source_identity`], it
+    /// changes with every edit, so a value derived from the document can be cached against it.
+    pub fn read_state(&self) -> ReadState {
+        ReadState { source: self.source_identity(), trailer: self.trailer.clone(), overlay: self.overlay.clone() }
+    }
+
     pub fn version(&self) -> &str {
         &self.version
     }
@@ -1113,7 +1153,19 @@ impl Document {
         if let Some(s) = self.objstms.lock().map_err(|_| CosError::Poisoned)?.get(&num) {
             return Ok(s.clone());
         }
-        let Object::Stream(s) = &*self.try_get(num)? else { return Err(CosError::MissingObject(num)) };
+        // A file entry that cannot place the stream (one that says it is itself compressed
+        // inside another stream, as in #2367, or points nowhere) is tried by the stream's own
+        // header, as a plain object with a wrong offset is. An edited or freed stream, in the
+        // overlay or in a saved revision's table, is what that says it is: the file's copy
+        // must not come back.
+        let loaded = match self.try_get(num) {
+            Ok(o) if matches!(*o, Object::Stream(_)) => o,
+            _ if self.overlay.contains_key(&num) || matches!(self.xref_entry(num), Some(XrefEntry::Free { .. })) => {
+                return Err(CosError::MissingObject(num));
+            }
+            _ => Arc::new(self.scan_for(num).map(|(id, o)| self.decrypted(id, o)).ok_or(CosError::MissingObject(num))?),
+        };
+        let Object::Stream(s) = &*loaded else { return Err(CosError::MissingObject(num)) };
         let n = s.dict.int(b"N").unwrap_or(0).clamp(0, 1_000_000) as usize;
         let first = s.dict.int(b"First").unwrap_or(0).max(0) as usize;
         let data = s.decoded_within(self.stream_limit)?;
@@ -1935,6 +1987,28 @@ const MAX_XREF_OBJECTS: usize = 8_388_607;
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_read_state_matches_a_clone_and_no_changed_document() {
+        let mut doc = Document::new_empty();
+        let a = doc.add(Object::Int(1));
+        let state = doc.read_state();
+        let snapshot = doc.clone();
+        assert!(state.matches(&doc) && state.matches(&snapshot));
+        // The same value set again is still a change: another allocation.
+        doc.set(a, Object::Int(1));
+        assert!(!state.matches(&doc) && state.matches(&snapshot));
+        let edited = doc.read_state();
+        doc.free(a);
+        assert!(!edited.matches(&doc));
+        let mut trailer_changed = snapshot.clone();
+        trailer_changed.trailer_mut().set(b"Info".to_vec(), Object::Null);
+        assert!(!state.matches(&trailer_changed));
+        // Another document's state never matches, even with the same changes.
+        let mut other = Document::new_empty();
+        other.add(Object::Int(1));
+        assert!(!other.read_state().matches(&snapshot));
+    }
+
     /// Build a classic-xref file from object bodies (object i+1 = bodies[i]).
     pub(crate) fn build(bodies: &[&str], trailer: &str) -> Vec<u8> {
         let mut out = b"%PDF-1.7\n".to_vec();
@@ -2533,6 +2607,93 @@ mod tests {
         // The first revision opens on its own, without the update.
         let old = Document::open(Arc::new(bytes[..ends[0]].to_vec())).unwrap();
         assert!(old.get(ObjRef::new(1, 0)).as_dict().unwrap().get(b"Lang").is_none());
+    }
+
+    /// qpdf's `xref-compressed-in-compressed.pdf` in miniature: object 3 is an object stream
+    /// holding object 4, and the cross-reference stream says object 3 itself lives in stream 99.
+    fn compressed_in_compressed_fixture() -> Document {
+        let mut out = b"%PDF-1.5\n".to_vec();
+        let at = |out: &mut Vec<u8>, num: u32, body: &str| {
+            let off = out.len();
+            out.extend_from_slice(format!("{num} 0 obj\n{body}\nendobj\n").as_bytes());
+            off as u16
+        };
+        let o1 = at(&mut out, 1, "<< /Type /Catalog /Pages 2 0 R /Outlines 4 0 R >>");
+        let o2 = at(&mut out, 2, "<< /Type /Pages /Kids [] /Count 0 >>");
+        let inner = "<< /Type /Outlines /Count 0 >>";
+        at(&mut out, 3, &format!("<< /Type /ObjStm /N 1 /First 4 /Length {} >>\nstream\n4 0 {inner}\nendstream", 4 + inner.len()));
+        // /W [1 2 1]: object 3 is said to live in stream 99 (which does not exist), 4 in stream 3.
+        let rows: Vec<[u8; 4]> = vec![
+            [0, 0, 0, 255],
+            [1, 0, o1 as u8, 0],
+            [1, 0, o2 as u8, 0],
+            [2, 0, 99, 0],
+            [2, 0, 3, 0],
+            [1, (out.len() >> 8) as u8, out.len() as u8, 0],
+        ];
+        let rows: Vec<u8> = rows.concat();
+        let xref = out.len();
+        out.extend_from_slice(
+            format!("5 0 obj\n<< /Type /XRef /W [1 2 1] /Index [0 6] /Size 6 /Root 1 0 R /Length {} >>\nstream\n", rows.len()).as_bytes(),
+        );
+        out.extend_from_slice(&rows);
+        out.extend_from_slice(format!("\nendstream\nendobj\nstartxref\n{xref}\n%%EOF\n").as_bytes());
+        Document::open(Arc::new(out)).unwrap()
+    }
+
+    /// An object stream whose own cross-reference entry says it is compressed inside another
+    /// stream (which the format forbids, and which does not exist here: qpdf's
+    /// `xref-compressed-in-compressed.pdf`, #2367) could not be loaded, so every object in it
+    /// read as null and a full save wrote `/Outlines null`. The stream is now found by its own
+    /// header, as a plain object with a wrong offset is.
+    #[test]
+    fn an_object_stream_marked_as_compressed_is_found_by_its_header() {
+        let doc = compressed_in_compressed_fixture();
+        assert_eq!(doc.revisions().len(), 1, "the chain itself reads: {:?}", doc.repair_log());
+        let outlines = doc.get(ObjRef::new(4, 0));
+        assert_eq!(outlines.as_dict().and_then(|d| d.name(b"Type")), Some(&b"Outlines"[..]), "{outlines:?}");
+        let saved = crate::write_full(&doc, &crate::SaveOptions::default()).unwrap();
+        let back = Document::open(Arc::new(saved)).unwrap();
+        let catalog = back.get(back.root().unwrap());
+        let outlines = back.resolve(catalog.as_dict().unwrap().get(b"Outlines").unwrap());
+        assert_eq!(outlines.as_dict().and_then(|d| d.name(b"Type")), Some(&b"Outlines"[..]), "the full save keeps it: {outlines:?}");
+    }
+
+    /// The header fallback is for file entries only: once the stream is freed (or replaced) in
+    /// the overlay, its objects must not come back from the file's copy of it.
+    #[test]
+    fn a_freed_object_stream_is_not_found_by_its_header() {
+        let doc = compressed_in_compressed_fixture();
+        assert!(doc.get(ObjRef::new(4, 0)).as_dict().is_some());
+        let mut edited = doc.clone();
+        edited.free(ObjRef::new(3, 0));
+        let fresh = edited.object_reader().document;
+        assert!(matches!(*fresh.get(ObjRef::new(4, 0)), Object::Null), "{:?}", fresh.get(ObjRef::new(4, 0)));
+        let mut replaced = doc.clone();
+        replaced.set(ObjRef::new(3, 0), Object::Int(0));
+        let fresh = replaced.object_reader().document;
+        assert!(matches!(*fresh.get(ObjRef::new(4, 0)), Object::Null), "{:?}", fresh.get(ObjRef::new(4, 0)));
+    }
+
+    /// The same once the free is saved: the revision's table says the stream is free, and
+    /// neither reading the file back nor rewriting it in full brings its objects back.
+    #[test]
+    fn a_container_freed_in_a_saved_revision_is_not_found_by_its_header() {
+        let mut edited = compressed_in_compressed_fixture();
+        edited.free(ObjRef::new(3, 0));
+        let incremental = crate::write_incremental(&edited, &crate::SaveOptions::default()).unwrap();
+        let reopened = Document::open(Arc::new(incremental)).unwrap();
+        assert_eq!(reopened.revisions().len(), 2);
+        assert!(matches!(reopened.xref_entry(3), Some(XrefEntry::Free { .. })));
+        assert!(matches!(*reopened.get(ObjRef::new(4, 0)), Object::Null), "{:?}", reopened.get(ObjRef::new(4, 0)));
+        for object_streams in [true, false] {
+            let opts = crate::SaveOptions { object_streams, ..Default::default() };
+            let full = crate::write_full(&reopened, &opts).unwrap();
+            let back = Document::open(Arc::new(full)).unwrap();
+            let catalog = back.get(back.root().unwrap());
+            let outlines = catalog.as_dict().unwrap().get(b"Outlines").map(|o| back.resolve(o));
+            assert!(outlines.as_ref().is_none_or(|o| matches!(**o, Object::Null)), "the full save keeps it out: {outlines:?}");
+        }
     }
 
     #[test]
