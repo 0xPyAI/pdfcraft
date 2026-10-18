@@ -831,6 +831,11 @@ impl Document {
         self.editor.as_ref().and_then(|e| pdfcraft_organize::info(&e.cos, key))
     }
 
+    /// The custom document properties as they are now (name, text), Document Properties ▸ Custom.
+    pub fn custom_info(&self) -> Vec<(String, String)> {
+        self.editor.as_ref().map(|e| pdfcraft_organize::custom_info(&e.cos)).unwrap_or_default()
+    }
+
     /// The name shown on the tab and window: the document title when the document asks for it
     /// (Initial View ▸ Show: Document Title) and has a real one, else the file name.
     pub fn display_name(&self) -> String {
@@ -2402,7 +2407,10 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
             pdfcraft_annot::erase_ink(doc, *page, *index, path, *radius, &cx.meta())?;
         }
         Edit::ReplaceText { page, quads, text, author, strike, caret } => {
-            pdfcraft_annot::add_text_replacement(doc, *page, quads, text, author, strike, caret, &cx.meta())?;
+            // One `/NM` each: the caret replies to the strikeout, and XFDF names that reply by
+            // the strikeout's `/NM` (#2666).
+            let (strike_meta, caret_meta) = (cx.meta(), cx.meta());
+            pdfcraft_annot::add_text_replacement(doc, *page, quads, text, author, strike, caret, &strike_meta, &caret_meta)?;
         }
         Edit::MarkAnnotation { page, index, marked, author } => {
             pdfcraft_annot::set_marked(doc, *page, *index, *marked, author, &cx.meta())?;
@@ -3902,6 +3910,7 @@ impl Session {
             doc.info.keywords = info("Keywords");
             doc.info.creator = info("Creator");
             doc.info.producer = info("Producer");
+            doc.info.custom = pdfcraft_organize::custom_info(&editor.cos);
             doc.info.file_size = bytes.len();
             if !doc.signatures.is_empty() {
                 let signatures = signatures_of(&editor.cos, &bytes, &doc.trust, &doc.sig_cache);
@@ -4078,11 +4087,16 @@ impl Session {
 
     /// The bytes to write for Save: an incremental update of the file as opened/last saved,
     /// with `/ModDate` stamped. Call `mark_saved` after writing them successfully.
+    ///
+    /// A file whose cross-reference data had to be rebuilt is written in full even when nothing
+    /// was edited: its bytes as opened are the damaged file, and this save is how the repair the
+    /// user was told about reaches the disk (#1937). Not a signed one: a full rewrite would
+    /// break its signatures, so with no edits it keeps its bytes, damage and all.
     pub fn save_bytes(&self, id: DocId) -> Result<Arc<Vec<u8>>, EditError> {
         let doc = self.get(id).ok_or(EditError::NoDocument)?;
         let Some(editor) = doc.editor.as_ref() else { return Ok(doc.bytes.clone()) };
         let on_saved = Arc::ptr_eq(editor.cos.bytes(), &editor.saved);
-        if !editor.cos.is_modified() && on_saved {
+        if !editor.cos.is_modified() && on_saved && (!editor.cos.reconstructed() || doc.is_signed()) {
             return Ok(editor.saved.clone());
         }
         let opts = SaveOptions { mod_date: self.now().map(pdfcraft_cos::pdf_date), ..SaveOptions::default() };
