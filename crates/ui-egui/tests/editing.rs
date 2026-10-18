@@ -521,6 +521,27 @@ fn save_writes_an_incremental_update_and_clears_dirty() {
 }
 
 #[test]
+fn save_as_to_a_new_file_drops_earlier_revisions() {
+    // #2165: Save As appended a revision, so a deleted page stayed in the new file's first one.
+    let out = temp_path("save-as-clean.pdf");
+    let mut h = organize(3);
+    h.get_by_label("Page 2").hover();
+    h.run_steps(2);
+    h.get_by_label("Delete page 2").click();
+    h.run_steps(3);
+    h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    assert!(h.state_mut().save_active(pdfcraft_ui_egui::SaveTarget::As));
+    let saved = std::fs::read(&out).expect("file written");
+    let count = |needle: &[u8]| saved.windows(needle.len()).filter(|w| *w == needle).count();
+    assert_eq!(count(b"%%EOF"), 1, "one revision only");
+    assert_eq!((count(b"(Page 1)"), count(b"(Page 2)")), (1, 0), "the deleted page's content is gone");
+    assert!(!dirty(&h));
+    assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().bytes.as_slice(), saved.as_slice());
+    assert_eq!(page_texts(h.state()), ["Page 1", "Page 3"]);
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
 fn closing_a_dirty_tab_asks_and_cancel_keeps_it() {
     let mut h = organize(2);
     h.get_by_label("Rotate clockwise").click();
