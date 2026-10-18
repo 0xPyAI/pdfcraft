@@ -6788,7 +6788,7 @@ trailer << /Root 1 0 R >>
         // Red at 25% over white is about (255, 191, 191); opaque red would be (255, 0, 0).
         for (what, x, y) in [("the stroke under /CA 0.25", 50, 25), ("the fill under /ca 0.25", 50, 75)] {
             let c = px(x, y);
-            assert!(c[0] >= 250 &&(185..=197).contains(&c[1]) && (185..=197).contains(&c[2]), "{what}: {c:?}");
+            assert!(c[0] >= 250 && (185..=197).contains(&c[1]) && (185..=197).contains(&c[2]), "{what}: {c:?}");
         }
     }
 
