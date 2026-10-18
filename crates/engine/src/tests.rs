@@ -3940,10 +3940,11 @@ fn dynamic_xfa_forms_open_with_the_values_and_rows_of_their_data() {
 /// and write them as a revision, so even a save with no change replaced the pages.
 #[test]
 fn an_xfa_form_without_fields_that_forbids_dynamic_rendering_keeps_its_pages() {
-    let config = r#"<config xmlns="http://www.xfa.org/schema/xci/3.0/"><acrobat><acrobat7><dynamicRender>forbidden</dynamicRender></acrobat7></acrobat></config>"#;
+    // The fixture's own config packet gains `acrobat/acrobat7/dynamicRender`.
     let template = pdfcraft_xfa::fixtures::template(1);
-    let with_config = template.replacen("<template ", &format!("{config}\n<template "), 1);
-    assert_ne!(with_config, template, "the config packet went in");
+    let forbidden = "<acrobat><acrobat7><dynamicRender>forbidden</dynamicRender></acrobat7></acrobat><present>";
+    let with_config = template.replacen("<present>", forbidden, 1);
+    assert_ne!(with_config, template, "the fixture has a config packet");
     // The fixture shell without /NeedsRendering (blanked in place, so the offsets stay right).
     let shell = |xdp: &str| {
         let bytes = pdfcraft_xfa::fixtures::shell(xdp);

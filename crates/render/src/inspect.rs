@@ -756,7 +756,7 @@ impl<'a> Inspector<'a> {
         } else {
             stream.content.get(..stream.content.len().min(MAX_XFA_CONFIG_BYTES))?.to_vec()
         };
-        xml_element_text(&bytes, b"dynamicRender")
+        xml_path_text(&xfa_packet_text(&bytes), &["config", "acrobat", "acrobat7", "dynamicRender"])
     }
 
     fn resolve(&self, o: &'a Object) -> &'a Object {
@@ -1644,31 +1644,104 @@ pub fn attachment_data(bytes: &[u8], password: Option<&str>, att: &Attachment) -
     catch_unwind(AssertUnwindSafe(run)).unwrap_or_else(|p| Err(format!("reading the attachment crashed: {}", crate::raster::panic_message(&p))))
 }
 
-/// The trimmed text of the first `<name>` element in `xml` (any namespace prefix), if it is plain
-/// text. A byte scan, not an XML parser: enough for one known element in an XFA packet, whose
-/// tags Designer writes with a line break before each `>`.
-fn xml_element_text(xml: &[u8], name: &[u8]) -> Option<String> {
-    let mut from = 0;
-    while let Some(lt) = xml.get(from..)?.iter().position(|&b| b == b'<').map(|i| i + from) {
-        from = lt + 1;
-        let tag = xml.get(from..)?;
-        // Skip a namespace prefix (`xfa:name`), then require the name followed by `>` or a space
-        // (a self-closing `<name/>` holds no text).
-        let local = tag
-            .iter()
-            .position(|&b| b == b':' || b == b'>' || b == b'/' || b.is_ascii_whitespace())
-            .map_or(tag, |i| if tag.get(i) == Some(&b':') { tag.get(i + 1..).unwrap_or_default() } else { tag });
-        let Some(after) = local.strip_prefix(name) else { continue };
-        if !matches!(after.first(), Some(b) if *b == b'>' || b.is_ascii_whitespace()) {
+/// An XFA packet's bytes as text: UTF-16 (little- or big-endian, told by a byte order mark or by
+/// how `<` is written) or UTF-8, as `pdfcraft_xfa::packets::decode` reads them. Lossy: only one
+/// element is looked for.
+fn xfa_packet_text(bytes: &[u8]) -> String {
+    let utf16 = |b: &[u8], from: fn([u8; 2]) -> u16| {
+        let units = b.as_chunks::<2>().0.iter().map(|c| from(*c));
+        char::decode_utf16(units).map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER)).collect::<String>()
+    };
+    match bytes {
+        [0xFF, 0xFE, rest @ ..] => utf16(rest, u16::from_le_bytes),
+        [0xFE, 0xFF, rest @ ..] => utf16(rest, u16::from_be_bytes),
+        [b'<', 0, ..] => utf16(bytes, u16::from_le_bytes),
+        [0, b'<', ..] => utf16(bytes, u16::from_be_bytes),
+        [0xEF, 0xBB, 0xBF, rest @ ..] => String::from_utf8_lossy(rest).into_owned(),
+        _ => String::from_utf8_lossy(bytes).into_owned(),
+    }
+}
+
+/// One markup tag found by [`next_tag`]: where it starts (`<`) and ends (after `>`), whether it
+/// closes (`</x>`) or closes itself (`<x/>`), and its name without a namespace prefix.
+struct Tag<'a> {
+    start: usize,
+    end: usize,
+    close: bool,
+    empty: bool,
+    local: &'a str,
+}
+
+/// The next element tag in `xml` at or after `from`, skipping comments, CDATA sections,
+/// processing instructions and declarations. A byte scan, not an XML parser: enough to find one
+/// known element in an XFA packet, whose tags Designer writes with a line break before each `>`.
+fn next_tag(xml: &str, mut from: usize) -> Option<Tag<'_>> {
+    loop {
+        let lt = from + xml.get(from..)?.find('<')?;
+        let rest = xml.get(lt..)?;
+        let skip_to = |end: &str| rest.find(end).map(|i| lt + i + end.len());
+        if rest.starts_with("<!--") {
+            from = skip_to("-->")?;
             continue;
         }
-        let close = after.iter().position(|&b| b == b'>')?;
-        let body = after.get(close + 1..)?;
-        let end = body.iter().position(|&b| b == b'<')?;
-        let text = std::str::from_utf8(body.get(..end)?).ok()?.trim();
-        return (!text.is_empty()).then(|| text.to_owned());
+        if rest.starts_with("<![CDATA[") {
+            from = skip_to("]]>")?;
+            continue;
+        }
+        if rest.starts_with("<?") || rest.starts_with("<!") {
+            from = skip_to(">")?;
+            continue;
+        }
+        let gt = lt + rest.find('>')?;
+        let inner = xml.get(lt + 1..gt)?;
+        let (close, inner) = match inner.strip_prefix('/') {
+            Some(i) => (true, i),
+            None => (false, inner),
+        };
+        let empty = !close && inner.ends_with('/');
+        let name = inner.split(|c: char| c.is_whitespace() || c == '/').next().unwrap_or_default();
+        let local = name.rsplit(':').next().unwrap_or(name);
+        return Some(Tag { start: lt, end: gt + 1, close, empty, local });
     }
-    None
+}
+
+/// What `<name>…</name>` holds: the content of the first element called `name` (any prefix) in
+/// `xml`. `None` when there is none, it closes itself, or it is never closed.
+fn xml_element_body<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
+    let mut at = 0;
+    let open = loop {
+        let tag = next_tag(xml, at)?;
+        at = tag.end;
+        if !tag.close && tag.local == name {
+            if tag.empty {
+                return None;
+            }
+            break tag.end;
+        }
+    };
+    let mut depth = 0_usize;
+    loop {
+        let tag = next_tag(xml, at)?;
+        at = tag.end;
+        if tag.local == name {
+            if tag.close {
+                if depth == 0 {
+                    return xml.get(open..tag.start);
+                }
+                depth -= 1;
+            } else if !tag.empty {
+                depth = depth.saturating_add(1);
+            }
+        }
+    }
+}
+
+/// The trimmed text at `path` (element names from the outside in, any prefix) in `xml`, if it is
+/// plain text: `config/acrobat/acrobat7/dynamicRender` in an XFA configuration packet.
+fn xml_path_text(xml: &str, path: &[&str]) -> Option<String> {
+    let body = path.iter().try_fold(xml, |within, name| xml_element_body(within, name))?;
+    let text = body.trim();
+    (!text.is_empty() && !text.contains('<')).then(|| text.to_owned())
 }
 
 #[cfg(test)]
@@ -2674,21 +2747,55 @@ trailer << /Root 1 0 R >>
     }
 
     #[test]
-    fn xml_element_text_reads_one_element_as_designer_writes_it() {
-        let text = |xml: &str| xml_element_text(xml.as_bytes(), b"dynamicRender");
-        assert_eq!(text("<acrobat7><dynamicRender\n>forbidden</dynamicRender\n></acrobat7>").as_deref(), Some("forbidden"));
-        assert_eq!(text("<a><xfa:dynamicRender> required </xfa:dynamicRender></a>").as_deref(), Some("required"));
-        // A longer name, a self-closing or empty element, and no element at all give nothing.
-        assert_eq!(text("<dynamicRenderX>forbidden</dynamicRenderX>"), None);
-        assert_eq!(text("<dynamicRender/>"), None);
-        assert_eq!(text("<dynamicRender></dynamicRender>"), None);
-        assert_eq!(text("<config><present/></config>"), None);
+    fn xfa_dynamic_render_is_read_from_config_acrobat7_only() {
+        const PATH: &[&str] = &["config", "acrobat", "acrobat7", "dynamicRender"];
+        let text = |xml: &str| xml_path_text(xml, PATH);
+        let config =
+            |inner: &str| format!("<config xmlns=\"http://www.xfa.org/schema/xci/3.0/\"><acrobat><acrobat7>{inner}</acrobat7></acrobat></config>");
+        // Designer's style: a line break before each `>`.
+        assert_eq!(
+            text("<config\n><acrobat\n><acrobat7\n><dynamicRender\n>forbidden</dynamicRender\n></acrobat7\n></acrobat\n></config\n>").as_deref(),
+            Some("forbidden")
+        );
+        assert_eq!(text(&config("<xci:dynamicRender> required </xci:dynamicRender>")).as_deref(), Some("required"));
+        // Commented out, in CDATA, or a longer name: not the element.
+        assert_eq!(text(&config("<!-- a > b <dynamicRender>forbidden</dynamicRender> -->")), None);
+        assert_eq!(text(&config("<![CDATA[ a > b <dynamicRender>forbidden</dynamicRender> ]]>")), None);
+        assert_eq!(text(&config("<dynamicRenderX>forbidden</dynamicRenderX>")), None);
+        // Self-closing, empty, or holding markup: no value.
+        assert_eq!(text(&config("<dynamicRender/>")), None);
+        assert_eq!(text(&config("<dynamicRender></dynamicRender>")), None);
+        assert_eq!(text(&config("<dynamicRender><b>forbidden</b></dynamicRender>")), None);
+        // The same name anywhere but config/acrobat/acrobat7 (form data, another config branch).
+        let xdp = "<xdp:xdp><xfa:datasets><xfa:data><dynamicRender>forbidden</dynamicRender></xfa:data></xfa:datasets><config><present><dynamicRender>forbidden</dynamicRender></present></config></xdp:xdp>";
+        assert_eq!(text(xdp), None);
+        // A whole XDP with the config after the template.
+        let xdp = format!("<xdp:xdp><template><subform/></template>{}</xdp:xdp>", config("<dynamicRender>forbidden</dynamicRender>"));
+        assert_eq!(text(&xdp).as_deref(), Some("forbidden"));
         // Cut short anywhere: no panic, nothing read.
-        let whole = "<dynamicRender>forbidden</dynamicRender>";
+        let whole = config("<!-- x --><dynamicRender>forbidden</dynamicRender>");
         for end in 0..whole.len() {
-            let _ = text(&whole[..end]);
+            assert_eq!(text(&whole[..end]), None, "cut at {end}");
         }
-        assert_eq!(text("<dynamicRender>forbidden"), None);
+        assert_eq!(text(&whole).as_deref(), Some("forbidden"));
+    }
+
+    #[test]
+    fn xfa_config_packets_are_read_in_utf16_too() {
+        let xml = "<config><acrobat><acrobat7><dynamicRender>forbidden</dynamicRender></acrobat7></acrobat></config>";
+        let le: Vec<u8> = xml.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let be: Vec<u8> = xml.encode_utf16().flat_map(u16::to_be_bytes).collect();
+        for bytes in [
+            le.clone(),
+            be.clone(),
+            [&[0xFF, 0xFE][..], &le].concat(),
+            [&[0xFE, 0xFF][..], &be].concat(),
+            [&[0xEF, 0xBB, 0xBF][..], xml.as_bytes()].concat(),
+        ] {
+            assert_eq!(xfa_packet_text(&bytes), xml);
+        }
+        // An odd byte or a broken surrogate doesn't stop the scan.
+        assert!(xfa_packet_text(&[0xFF, 0xFE, b'<', 0, 0x00, 0xD8, b'x']).starts_with('<'));
     }
 
     /// #3180: an XFA form with no fields was always taken to be dynamic, so its pages were
