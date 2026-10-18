@@ -4,6 +4,9 @@ use std::collections::HashSet;
 
 pub(crate) struct OcgState {
     inactive_ocgs: HashSet<ObjectIdentifier>,
+    /// PdfCraft patch (40): every group the document lists in `/OCProperties /OCGs`, so a
+    /// visibility expression naming anything else is known to be malformed.
+    known_ocgs: HashSet<ObjectIdentifier>,
     visibility_stack: Vec<bool>,
 }
 
@@ -11,6 +14,7 @@ impl OcgState {
     fn dummy() -> Self {
         Self {
             inactive_ocgs: HashSet::default(),
+            known_ocgs: HashSet::default(),
             visibility_stack: vec![],
         }
     }
@@ -25,6 +29,15 @@ impl OcgState {
         };
 
         let mut inactive = HashSet::new();
+        let known: HashSet<ObjectIdentifier> = oc_properties
+            .get::<Array<'_>>(OCGS)
+            .map(|ocgs| {
+                ocgs.raw_iter()
+                    .filter_map(|item| item.as_obj_ref())
+                    .map(Into::into)
+                    .collect()
+            })
+            .unwrap_or_default();
 
         let base_state = config
             .get::<Name<'_>>(BASE_STATE)
@@ -61,6 +74,7 @@ impl OcgState {
 
         Self {
             inactive_ocgs: inactive,
+            known_ocgs: known,
             visibility_stack: Vec::new(),
         }
     }
@@ -115,8 +129,9 @@ impl OcgState {
     /// PdfCraft patch (40): evaluate a visibility expression (`/VE`, PDF 1.6): `[/And e…]`,
     /// `[/Or e…]` or `[/Not e]`, each `e` an optional content group (by reference) or a nested
     /// expression. `None` for a malformed expression: an unknown operator, a `/Not` without
-    /// exactly one operand, an `/And` or `/Or` without any, an operand that is neither, or
-    /// nesting deeper than `MAX_VISIBILITY_EXPRESSION_DEPTH`.
+    /// exactly one operand, an `/And` or `/Or` without any, an operand that is neither (a
+    /// reference to an object the document doesn't list as a group is neither), or nesting
+    /// deeper than `MAX_VISIBILITY_EXPRESSION_DEPTH`.
     fn visibility_expression(&self, expr: &Array<'_>, depth: usize) -> Option<bool> {
         if depth > MAX_VISIBILITY_EXPRESSION_DEPTH {
             return None;
@@ -129,7 +144,13 @@ impl OcgState {
         let (mut count, mut all, mut any) = (0usize, true, false);
         for item in items {
             let value = match item {
-                MaybeRef::Ref(r) => !self.inactive_ocgs.contains(&r.into()),
+                MaybeRef::Ref(r) => {
+                    let id: ObjectIdentifier = r.into();
+                    if !self.known_ocgs.contains(&id) {
+                        return None;
+                    }
+                    !self.inactive_ocgs.contains(&id)
+                }
                 MaybeRef::NotRef(Object::Array(nested)) => self.visibility_expression(&nested, depth + 1)?,
                 _ => return None,
             };

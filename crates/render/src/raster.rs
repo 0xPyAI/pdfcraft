@@ -3357,7 +3357,9 @@ trailer << /Root 1 0 R >>
         let both = "<< /Type /OCMD /OCGs [5 0 R] /P /AllOn /VE [/Not 5 0 R] >>";
         assert!(render(both, &[5]), "the expression, not /P, decides");
         // A malformed expression falls back to /OCGs and /P.
-        for bad in ["[/Xor 5 0 R]", "[/Not 5 0 R 6 0 R]", "[/And]", "[5 0 R]", "[/And (5)]"] {
+        // So is one naming an object that isn't a listed group: a missing one, or the page
+        // (review on #2987).
+        for bad in ["[/Xor 5 0 R]", "[/Not 5 0 R 6 0 R]", "[/And]", "[5 0 R]", "[/And (5)]", "[/Or 8 0 R]", "[/Or 3 0 R]"] {
             let ocmd = format!("<< /Type /OCMD /OCGs [5 0 R] /VE {bad} >>");
             assert!(render(&ocmd, &[]), "{bad}: /OCGs on");
             assert!(!render(&ocmd, &[5]), "{bad}: /OCGs off");
