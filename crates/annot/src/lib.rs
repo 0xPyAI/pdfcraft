@@ -1355,8 +1355,22 @@ fn apply_appearance(doc: &mut Document, r: ObjRef, d: &Dict, stream: Stream) -> 
     apd.remove(b"D");
     apd.remove(b"R");
     apd.set(b"N".to_vec(), Object::Ref(ap));
+    // A note icon has a fixed size (`NOTE_SIZE`); viewers draw it at the upper-left corner of `/Rect`.
+    // The appearance's box is mapped onto `/Rect`, so any other `/Rect` (a large one, or one with
+    // no width, as LaTeX `pdfcomment` writes) would stretch the icon or shrink it to nothing.
+    let icon_rect = matches!(d.name(b"Subtype"), Some(b"Text" | b"FileAttachment"))
+        .then(|| d.get(b"Rect")?.as_array()?.iter().map(|o| o.as_f64()).collect::<Option<Vec<f64>>>())
+        .flatten()
+        .filter(|q| q.len() == 4 && finite(q))
+        .map(|q| {
+            let (x, top) = (q[0].min(q[2]), q[1].max(q[3]));
+            [x, top - NOTE_SIZE, x + NOTE_SIZE, top]
+        });
     doc.update_dict(r, |d| {
         d.set(b"AP".to_vec(), Object::Dict(apd));
+        if let Some(rect) = icon_rect {
+            d.set(b"Rect".to_vec(), num_array(&rect));
+        }
         d.remove(b"AS");
         pdfcraft_fonts::set_undrawn_mark(d, missing);
     })?;

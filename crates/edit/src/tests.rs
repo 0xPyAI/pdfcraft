@@ -284,6 +284,27 @@ fn flattening_keeps_a_note_whose_appearance_is_missing() {
     assert!(flat.contains("q 1 0 0 1 10 10 cm /PCFl0 Do Q"), "{flat}");
 }
 
+/// #3175: a note without an appearance is drawn as a fixed-size icon at the upper-left corner of
+/// its `/Rect`. A rectangle with no width (LaTeX `pdfcomment`) used to scale the icon to nothing
+/// while flattening still counted it as drawn and deleted the note.
+#[test]
+fn flattening_a_note_with_a_zero_width_rect_draws_a_fixed_size_icon() {
+    let page = stream("", " ");
+    let mut doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 4 0 R /Annots [5 0 R 6 0 R] >>",
+        &page,
+        "<< /Type /Annot /Subtype /Text /Rect [50 60 50 72] /Contents (Zero width) /Name /Comment /F 4 >>",
+        "<< /Type /Annot /Subtype /Text /Rect [10 20 150 120] /Contents (Large) /F 4 >>",
+    ]);
+    assert_eq!(flatten(&mut doc, &[0], true, false).unwrap(), 2, "both icons are drawn");
+    let doc = reopen(&doc);
+    let flat = streams(&doc, 0).pop().unwrap();
+    assert!(flat.contains("q 1 0 0 1 50 52 cm /PCFl0 Do Q"), "{flat}");
+    assert!(flat.contains("q 1 0 0 1 10 100 cm /PCFl1 Do Q"), "{flat}");
+}
+
 /// #1470: a form field whose widget is on no page (left behind by page extraction or combining)
 /// has nothing to draw, but flattening every form field still takes it out of `/AcroForm /Fields`,
 /// or other software keeps treating the flattened file as a form. A hidden widget on a page is
