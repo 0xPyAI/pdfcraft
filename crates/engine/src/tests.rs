@@ -1987,6 +1987,59 @@ fn oversized_redaction_overlay_preserves_the_document_and_undo() {
     assert_eq!(page_texts(&s, id), ["Page 1"]);
 }
 
+/// #3046: a layer hidden in the Layers panel stays off on paper, as it is on screen; with the
+/// layers untouched, the document's own configuration prints.
+#[test]
+fn printing_keeps_hidden_layers_hidden() {
+    let content = b"/OC /A BDC 1 0 0 rg 10 10 80 80 re f EMC /OC /B BDC 0 1 0 rg 110 10 80 80 re f EMC";
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R 6 0 R] /D << /Order [5 0 R 6 0 R] >> >> >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R /Resources << /Properties << /A 5 0 R /B 6 0 R >> >> >>".to_vec(),
+        [format!("<< /Length {} >>\nstream\n", content.len()).as_bytes(), content, b"\nendstream"].concat(),
+        b"<< /Type /OCG /Name (Layer A) >>".to_vec(),
+        b"<< /Type /OCG /Name (Layer B) >>".to_vec(),
+    ];
+    let mut pdf = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        pdf.extend_from_slice(o);
+        pdf.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        pdf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+
+    // Red and green pixels on the first printed sheet.
+    let printed = |s: &Session, id: DocId| {
+        let bytes = s.print_pdf(id, &print::Settings { pages: vec![0], ..Default::default() }).unwrap();
+        let mut out = Session::new();
+        let printed = out.open("print.pdf", None, Arc::new(bytes), None).unwrap();
+        let page = render_page(&out, printed);
+        let px = page.rgba.as_chunks::<4>().0;
+        let red = px.iter().filter(|p| p[0] > 200 && p[1] < 60 && p[2] < 60).count();
+        let green = px.iter().filter(|p| p[1] > 200 && p[0] < 60 && p[2] < 60).count();
+        (red, green)
+    };
+    let mut s = Session::new();
+    let id = s.open("layers.pdf", None, Arc::new(pdf), None).unwrap();
+    let (red, green) = printed(&s, id);
+    assert!(red > 100 && green > 100, "untouched layers both print: {red} red, {green} green");
+    let a = s.get(id).unwrap().info.layers.iter().position(|l| l.name == "Layer A").unwrap();
+    assert!(s.set_layer_visible(id, a, false));
+    let (red, green) = printed(&s, id);
+    assert_eq!(red, 0, "Layer A was hidden, so it doesn't print");
+    assert!(green > 100, "Layer B still prints: {green} green");
+    assert!(s.set_layer_visible(id, a, true));
+    let (red, _) = printed(&s, id);
+    assert!(red > 100, "shown again, Layer A prints again: {red} red");
+}
+
 #[test]
 fn printing_lays_out_sheets_that_render() {
     let (s, id) = session_with(5);
@@ -3636,6 +3689,34 @@ fn detecting_fields_on_a_scanned_form() {
         }
         assert!(s.detect_fields(id, &[]).is_empty(), "{scan:?}: nothing left to detect");
     }
+}
+
+#[test]
+fn detecting_comb_boxes_adds_one_comb_field_per_row() {
+    // The rows from #1887: five 18 x 22 cells and ten 16 x 20 cells, each a stroked `re`.
+    let mut body = String::from("BT /F1 10 Tf 40 205 Td (Postcode A) Tj ET BT /F1 10 Tf 40 105 Td (Postcode B) Tj ET\n");
+    for i in 0..5 {
+        body.push_str(&format!("{} 200 18 22 re S\n", 120 + i * 18));
+    }
+    for i in 0..10 {
+        body.push_str(&format!("{} 100 16 20 re S\n", 120 + i * 16));
+    }
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("comb.pdf", None, Arc::new(one_line_page("/Font << /F1 4 0 R >>", &body)), None).unwrap();
+    let found: Vec<(String, pdfcraft_forms::detect::Kind)> = s.detect_fields(id, &[]).into_iter().map(|(_, c)| (c.name, c.kind)).collect();
+    assert_eq!(
+        found,
+        [
+            ("Postcode A".to_string(), pdfcraft_forms::detect::Kind::Comb { cells: 5 }),
+            ("Postcode B".to_string(), pdfcraft_forms::detect::Kind::Comb { cells: 10 })
+        ]
+    );
+    s.auto_detect_fields(id, &[]).unwrap();
+    let d = s.get(id).unwrap();
+    let combs: Vec<(&str, FormFieldKind, bool, Option<usize>)> =
+        d.form.iter().map(|f| (f.name.as_str(), f.kind, f.has(pdfcraft_forms::flags::COMB), f.max_len)).collect();
+    assert_eq!(combs, [("Postcode A", FormFieldKind::Text, true, Some(5)), ("Postcode B", FormFieldKind::Text, true, Some(10))]);
+    assert_eq!(d.can_undo(), Some("Detect form fields"));
 }
 
 #[test]
@@ -5800,4 +5881,89 @@ fn cropping_an_existing_image_clips_it_and_moves_with_it() {
     assert!(v.iter().zip(shown.iter()).all(|(a, b)| (a - b).abs() < 0.01), "{v:?} vs {shown:?}");
     // No area, or a box off the image, is refused.
     assert!(s.apply(id, Edit::EditPageImage { page: 0, index: 0, change: ImageEdit::Crop([10.0, 10.0, 10.0, 50.0]) }).is_err());
+}
+
+/// A 60 x 20 JPEG at 144 x 72 dpi, tagged with EXIF Orientation 6 (shown turned 90 degrees clockwise).
+fn phone_jpeg() -> Vec<u8> {
+    use image::codecs::jpeg::{JpegEncoder, PixelDensity, PixelDensityUnit};
+    let mut jpeg = Vec::new();
+    let mut encoder = JpegEncoder::new(&mut jpeg);
+    encoder.set_pixel_density(PixelDensity { density: (144, 72), unit: PixelDensityUnit::Inches });
+    encoder.encode_image(&image::RgbImage::from_pixel(60, 20, image::Rgb([20, 20, 20]))).unwrap();
+    let mut exif = b"Exif\0\0II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0".to_vec();
+    exif.extend_from_slice(&[6, 0, 0, 0, 0, 0, 0, 0]);
+    let mut out = jpeg[..2].to_vec();
+    out.extend_from_slice(&[0xff, 0xe1]);
+    out.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
+    out.extend_from_slice(&exif);
+    out.extend_from_slice(&jpeg[2..]);
+    out
+}
+
+#[test]
+fn a_phone_photo_used_as_a_custom_stamp_is_embedded_upright() {
+    let mut session = Session::new();
+    let blank = session.create_blank(300.0, 400.0, 1).unwrap();
+    let id = session.open_new("form.pdf", blank).unwrap();
+    // A click places the stamp at its natural size: 30 x 20 pt as stored, 20 x 30 pt upright.
+    // Named "Signature" so `signature_image` finds its picture.
+    let file = MarkFile { name: "photo.jpg".into(), bytes: Arc::new(phone_jpeg()), page: 0 };
+    let stamp = Edit::AddCustomStamp { page: 0, rect: [100.0, 100.0, 100.0, 100.0], name: "Signature".into(), file, author: "Ada".into() };
+    session.apply(id, stamp).unwrap();
+    let cos = &session.get(id).unwrap().editor.as_ref().unwrap().cos;
+    let picture = pdfcraft_annot::signature_image(cos, 0, 0).unwrap().unwrap();
+    let obj = cos.get(picture);
+    let pdfcraft_cos::Object::Stream(s) = &*obj else { panic!() };
+    assert_eq!((s.dict.int(b"Width"), s.dict.int(b"Height")), (Some(20), Some(60)));
+    let rect = pdfcraft_annot::summaries(cos)[0].rect;
+    assert!(((rect[2] - rect[0]) - 20.0).abs() < 0.01 && ((rect[3] - rect[1]) - 30.0).abs() < 0.01, "{rect:?}");
+}
+
+/// Opening a paragraph and applying its edit read the page's text blocks; after an edit they are
+/// still read once per document state, and undo and redo never get another state's blocks.
+#[test]
+fn text_blocks_stay_cached_after_an_edit_and_follow_undo_and_redo() {
+    let (mut session, id) = session_with(1);
+    let blocks = |s: &Session| s.get(id).unwrap().editor.as_ref().unwrap().text_blocks(0).unwrap();
+    let before = blocks(&session);
+    assert_eq!(before[0].editor_text, "Page 1");
+    let edit = Edit::EditTextBlock { page: 0, block: 0, text: "Edited".into(), style: pdfcraft_edit::BlockStyle::default() };
+    session.apply(id, edit).unwrap();
+    let edited = blocks(&session);
+    assert_eq!(edited[0].editor_text, "Edited");
+    assert!(Arc::ptr_eq(&edited, &blocks(&session)), "the edited page is grouped once");
+    session.undo(id).unwrap();
+    assert_eq!(blocks(&session)[0].editor_text, "Page 1");
+    session.redo(id).unwrap();
+    let redone = blocks(&session);
+    assert_eq!(redone[0].editor_text, "Edited");
+    assert!(Arc::ptr_eq(&redone, &blocks(&session)));
+}
+
+/// A new document, or one restored from recovery, has never been written where it belongs: undo
+/// back to the bytes it was opened from must not make it clean, or closing it would discard the
+/// whole document without asking. Saving makes it clean; Revert of a saved one too.
+#[test]
+fn undo_never_makes_an_unsaved_document_clean() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let new = s.open_new("Combined.pdf", Arc::new(fixture(2))).unwrap();
+    s.apply(new, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    s.undo(new).unwrap();
+    assert!(s.get(new).unwrap().dirty, "a new document is unsaved until it is saved");
+    assert_eq!(s.autosave_snapshots().len(), 1, "and still needs recovery");
+    s.revert(new).unwrap();
+    assert!(s.get(new).unwrap().dirty, "Revert goes back to the created bytes, which aren't saved anywhere");
+
+    let recovered = s.open("Report.pdf", None, Arc::new(fixture(2)), None).unwrap();
+    s.mark_recovered(recovered, Some("Report.pdf".into()));
+    s.apply(recovered, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    s.undo(recovered).unwrap();
+    assert!(s.get(recovered).unwrap().dirty, "the recovered work was never saved");
+
+    let saved = s.save_bytes(new).unwrap();
+    s.mark_saved(new, saved, Some("Combined.pdf".into())).unwrap();
+    assert!(!s.get(new).unwrap().dirty);
+    s.apply(new, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    s.undo(new).unwrap();
+    assert!(!s.get(new).unwrap().dirty, "once saved, undo back to the saved state is clean");
 }
