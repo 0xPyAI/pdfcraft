@@ -3,7 +3,7 @@
 mod support;
 
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT, Queryable};
+use egui_kittest::kittest::{By, NodeT, Queryable};
 use pdfcraft_ui_egui::PdfCraftApp;
 
 /// A tiny PDF with two pages, two bookmarks and one sticky note.
@@ -1403,4 +1403,39 @@ fn the_edit_tab_turns_on_edit_text_and_images() {
     h.get_by_label("Convert").click();
     h.run_steps(3);
     assert_eq!(h.state().quick_tool, QuickTool::Hand);
+}
+
+/// #3282: in a short window the rail's panel buttons scroll above the page navigation instead of
+/// being drawn under the page number field.
+#[test]
+fn short_window_rail_buttons_scroll_clear_of_page_navigation() {
+    let (width, height) = (1000.0, 560.0);
+    let mut h = Harness::builder().with_size(egui::vec2(width, height)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("short.pdf", None, FIXTURE.to_vec()).unwrap();
+        app
+    });
+    settle(&mut h);
+    let rail = |h: &Harness<'static, PdfCraftApp>, label: &str| {
+        h.query_all_by_label(label).map(|n| n.rect()).find(|r| r.left() >= width - 48.0).unwrap_or_else(|| panic!("{label} in the rail"))
+    };
+    let page = h.get(By::new().role(egui::accesskit::Role::TextInput).value("1")).rect();
+    assert!(page.left() >= width - 48.0 && page.bottom() <= height, "page field {page:?} in the rail");
+    assert!(rail(&h, "Comments").bottom() <= page.top(), "the first button sits above the page field");
+    assert!(rail(&h, "Tags").top() >= page.top(), "the window is short enough that the buttons must scroll");
+    let over = rail(&h, "Comments").center();
+    h.event(egui::Event::PointerMoved(over));
+    for _ in 0..8 {
+        h.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -200.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(4);
+    }
+    let tags = rail(&h, "Tags");
+    assert!(tags.bottom() <= page.top(), "Tags {tags:?} scrolls into view above the page field {page:?}");
+    assert_eq!(h.get(By::new().role(egui::accesskit::Role::TextInput).value("1")).rect(), page, "navigation stays put");
 }
