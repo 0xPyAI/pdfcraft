@@ -3436,6 +3436,55 @@ fn latin_ligature_actual_text_stays_on_its_line() {
     }
 }
 
+/// #3110: `/ActualText` may come from a named property list (`/Span /MC0 BDC`) looked up in the
+/// page's or the form's `/Properties`, as well as from an inline one.
+#[test]
+fn actual_text_from_named_property_list() {
+    let properties = "/Properties << /MC0 << /ActualText (Hello World) >> /MC1 << /Lang (en) >> >>";
+    let page_with = |content: &str| {
+        build(&[
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            &format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> {properties} >> /Contents 4 0 R >>"),
+            &stream("", content),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        ])
+    };
+    for (content, expected) in [
+        ("/Span /MC0 BDC BT /F1 24 Tf 72 700 Td (Glyphs) Tj ET EMC", "Hello World"),
+        ("/Span <</ActualText (Hello World)>> BDC BT /F1 24 Tf 72 700 Td (Glyphs) Tj ET EMC", "Hello World"),
+        ("/Span /MC1 BDC BT /F1 24 Tf 72 700 Td (Glyphs) Tj ET EMC", "Glyphs"),
+        ("/Span /Missing BDC BT /F1 24 Tf 72 700 Td (Glyphs) Tj ET EMC", "Glyphs"),
+    ] {
+        let doc = page_with(content);
+        for doc in [&doc, &reopen(&doc)] {
+            let lines = text::text_lines(doc, 0).unwrap();
+            assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), [expected], "{content}");
+            assert_eq!(text::text_blocks(doc, 0).unwrap()[0].editor_text, expected, "{content}");
+            let reading: Vec<String> = text::reading_blocks(doc, 0).unwrap().into_iter().map(|b| b.text).collect();
+            assert_eq!(reading, [expected], "{content}");
+        }
+    }
+
+    // A form's named list is looked up in the form's own /Properties, not the page's.
+    let fm = stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /Properties << /MC0 << /ActualText (Form text) >> >> >>",
+        "/Span /MC0 BDC BT /F1 24 Tf 72 600 Td (Glyphs) Tj ET EMC",
+    );
+    let doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        &format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /XObject << /Fm1 6 0 R >> {properties} >> /Contents 4 0 R >>"
+        ),
+        &stream("", "/Fm1 Do"),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        &fm,
+    ]);
+    let reading: Vec<String> = text::reading_blocks(&doc, 0).unwrap().into_iter().map(|b| b.text).collect();
+    assert_eq!(reading, ["Form text"]);
+}
+
 #[test]
 fn actual_text_and_visual_rtl_glyphs_keep_their_own_reading_order() {
     let hex: String = "שלום".encode_utf16().map(|u| format!("{u:04X}")).collect();
