@@ -316,15 +316,15 @@ struct Editor {
     text_blocks: TextBlocksCache,
 }
 
-/// One page's text blocks ([`pdfcraft_edit::text_blocks`]) and the unmodified document state they
-/// were read from. Opening a paragraph and applying its edit both need them, and grouping a long
-/// page is not cheap. Only an unmodified document is cached: its identity changes on every edit,
-/// undo and save (each reopens the working file), so a stale entry never matches.
+/// One page's text blocks ([`pdfcraft_edit::text_blocks`]) and the document state they were read
+/// from. Opening a paragraph and applying its edit both need them, and grouping a long page is not
+/// cheap. The state ([`pdfcraft_cos::ReadState`]) changes with every edit and save and returns
+/// with undo, so a stale entry never matches, also after the document has been edited.
 #[derive(Default)]
 struct TextBlocksCache(std::sync::Mutex<Option<CachedTextBlocks>>);
 
 /// The document state, the page (0-based) and its text blocks.
-type CachedTextBlocks = (pdfcraft_cos::SourceIdentity, usize, Arc<Vec<pdfcraft_edit::TextBlock>>);
+type CachedTextBlocks = (pdfcraft_cos::ReadState, usize, Arc<Vec<pdfcraft_edit::TextBlock>>);
 
 impl Clone for TextBlocksCache {
     fn clone(&self) -> Self {
@@ -336,20 +336,16 @@ impl Clone for TextBlocksCache {
 impl Editor {
     /// The text blocks on `page` (0-based), from the cache when the document hasn't changed.
     fn text_blocks(&self, page: usize) -> Result<Arc<Vec<pdfcraft_edit::TextBlock>>, EditError> {
-        let source = (!self.cos.is_modified()).then(|| self.cos.source_identity());
-        if let Some(source) = &source
-            && let Ok(cache) = self.text_blocks.0.lock()
-            && let Some((s, p, blocks)) = cache.as_ref()
-            && s == source
+        if let Ok(cache) = self.text_blocks.0.lock()
+            && let Some((state, p, blocks)) = cache.as_ref()
             && *p == page
+            && state.matches(&self.cos)
         {
             return Ok(blocks.clone());
         }
         let blocks = Arc::new(pdfcraft_edit::text_blocks(&self.cos, page)?);
-        if let Some(source) = source
-            && let Ok(mut cache) = self.text_blocks.0.lock()
-        {
-            *cache = Some((source, page, blocks.clone()));
+        if let Ok(mut cache) = self.text_blocks.0.lock() {
+            *cache = Some((self.cos.read_state(), page, blocks.clone()));
         }
         Ok(blocks)
     }

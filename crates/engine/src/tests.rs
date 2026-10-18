@@ -5890,3 +5890,24 @@ fn a_phone_photo_used_as_a_custom_stamp_is_embedded_upright() {
     let rect = pdfcraft_annot::summaries(cos)[0].rect;
     assert!(((rect[2] - rect[0]) - 20.0).abs() < 0.01 && ((rect[3] - rect[1]) - 30.0).abs() < 0.01, "{rect:?}");
 }
+
+/// Opening a paragraph and applying its edit read the page's text blocks; after an edit they are
+/// still read once per document state, and undo and redo never get another state's blocks.
+#[test]
+fn text_blocks_stay_cached_after_an_edit_and_follow_undo_and_redo() {
+    let (mut session, id) = session_with(1);
+    let blocks = |s: &Session| s.get(id).unwrap().editor.as_ref().unwrap().text_blocks(0).unwrap();
+    let before = blocks(&session);
+    assert_eq!(before[0].editor_text, "Page 1");
+    let edit = Edit::EditTextBlock { page: 0, block: 0, text: "Edited".into(), style: pdfcraft_edit::BlockStyle::default() };
+    session.apply(id, edit).unwrap();
+    let edited = blocks(&session);
+    assert_eq!(edited[0].editor_text, "Edited");
+    assert!(Arc::ptr_eq(&edited, &blocks(&session)), "the edited page is grouped once");
+    session.undo(id).unwrap();
+    assert_eq!(blocks(&session)[0].editor_text, "Page 1");
+    session.redo(id).unwrap();
+    let redone = blocks(&session);
+    assert_eq!(redone[0].editor_text, "Edited");
+    assert!(Arc::ptr_eq(&redone, &blocks(&session)));
+}

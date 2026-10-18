@@ -337,6 +337,40 @@ impl PartialEq for SourceIdentity {
 
 impl Eq for SourceIdentity {}
 
+/// What a document reads as: its source ([`SourceIdentity`]), its trailer and every object changed
+/// since it was opened. A clone, or a snapshot that undo restores, has the same state, and every
+/// change makes a different one. Changed objects are compared as allocations, which the state
+/// keeps alive, so a later object can't take an address one of them had.
+#[derive(Clone)]
+pub struct ReadState {
+    source: SourceIdentity,
+    trailer: Dict,
+    overlay: BTreeMap<u32, Slot>,
+}
+
+impl ReadState {
+    /// Whether `doc` reads as this state.
+    pub fn matches(&self, doc: &Document) -> bool {
+        self.source == doc.source_identity()
+            && self.trailer == doc.trailer
+            && self.overlay.len() == doc.overlay.len()
+            && self.overlay.iter().zip(&doc.overlay).all(|((a, x), (b, y))| {
+                a == b
+                    && match (x, y) {
+                        (Slot::Set(g, o), Slot::Set(h, p)) => g == h && Arc::ptr_eq(o, p),
+                        (Slot::Freed(g), Slot::Freed(h)) => g == h,
+                        _ => false,
+                    }
+            })
+    }
+}
+
+impl std::fmt::Debug for ReadState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReadState").field("changed_objects", &self.overlay.len()).finish_non_exhaustive()
+    }
+}
+
 #[derive(Clone)]
 pub struct Document {
     data: Arc<Vec<u8>>,
@@ -799,6 +833,12 @@ impl Document {
     /// clones preserve it; reopening (including after any save) produces a new identity.
     pub fn source_identity(&self) -> SourceIdentity {
         SourceIdentity(Arc::downgrade(&self.source_identity))
+    }
+
+    /// What the document reads as now (see [`ReadState`]): unlike [`Self::source_identity`], it
+    /// changes with every edit, so a value derived from the document can be cached against it.
+    pub fn read_state(&self) -> ReadState {
+        ReadState { source: self.source_identity(), trailer: self.trailer.clone(), overlay: self.overlay.clone() }
     }
 
     pub fn version(&self) -> &str {
@@ -1934,6 +1974,28 @@ const MAX_XREF_OBJECTS: usize = 8_388_607;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_read_state_matches_a_clone_and_no_changed_document() {
+        let mut doc = Document::new_empty();
+        let a = doc.add(Object::Int(1));
+        let state = doc.read_state();
+        let snapshot = doc.clone();
+        assert!(state.matches(&doc) && state.matches(&snapshot));
+        // The same value set again is still a change: another allocation.
+        doc.set(a, Object::Int(1));
+        assert!(!state.matches(&doc) && state.matches(&snapshot));
+        let edited = doc.read_state();
+        doc.free(a);
+        assert!(!edited.matches(&doc));
+        let mut trailer_changed = snapshot.clone();
+        trailer_changed.trailer_mut().set(b"Info".to_vec(), Object::Null);
+        assert!(!state.matches(&trailer_changed));
+        // Another document's state never matches, even with the same changes.
+        let mut other = Document::new_empty();
+        other.add(Object::Int(1));
+        assert!(!other.read_state().matches(&snapshot));
+    }
 
     /// Build a classic-xref file from object bodies (object i+1 = bodies[i]).
     pub(crate) fn build(bodies: &[&str], trailer: &str) -> Vec<u8> {
