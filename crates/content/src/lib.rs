@@ -219,17 +219,32 @@ fn inline_image(data: &[u8], pos: usize) -> Result<(Dict, Vec<u8>, usize), usize
                 return Ok((dict, Vec::new(), data.len()));
             }
             // Without an `EI` after it, the image runs to the end of the stream.
-            return Err(end_of_image(data, at).map_or(data.len(), |(_, end)| end));
+            return Err(end_of_image(data, at, false).map_or(data.len(), |(_, end)| end));
         };
         dict.set(k, v);
     }
     // One whitespace byte separates ID from the data.
     let begin = (lx.pos + 1).min(data.len());
-    let end = unfiltered_image_end(data, begin, &dict).or_else(|| end_of_image(data, begin));
+    let end = unfiltered_image_end(data, begin, &dict).or_else(|| end_of_image(data, begin, is_ascii_hex_filter(&dict)));
     Ok(match end {
         Some((end_data, end)) => (dict, data[begin..end_data].to_vec(), end),
         None => (dict, data[begin..].to_vec(), data.len()),
     })
+}
+
+fn is_ascii_hex_filter(dict: &Dict) -> bool {
+    for key in [b"Filter".as_slice(), b"F"] {
+        if let Some(filter) = dict.get(key) {
+            match filter {
+                Object::Name(name) => return matches!(name.as_slice(), b"ASCIIHexDecode" | b"AHx"),
+                Object::Array(filters) => {
+                    return matches!(filters.first().and_then(Object::as_name), Some(b"ASCIIHexDecode" | b"AHx"));
+                }
+                _ => return false,
+            }
+        }
+    }
+    false
 }
 
 /// An unfiltered image's samples determine its length, including byte padding per row.
@@ -303,13 +318,13 @@ fn unfiltered_image_end(data: &[u8], begin: usize, dict: &Dict) -> Option<(usize
 }
 
 /// Where inline image data starting at `begin` ends: (end of the data, position after `EI`). The
-/// data ends at whitespace or `>` + `EI` + (whitespace, a delimiter or the end).
-fn end_of_image(data: &[u8], begin: usize) -> Option<(usize, usize)> {
+/// data ends at whitespace (or `>` for ASCIIHex) + `EI` + (whitespace, a delimiter or the end).
+fn end_of_image(data: &[u8], begin: usize, allow_gt_ei: bool) -> Option<(usize, usize)> {
     let mut i = begin;
     while i + 2 <= data.len() {
         if data[i] == b'E'
             && data.get(i + 1) == Some(&b'I')
-            && (i == begin || is_ws(data[i - 1]) || data[i - 1] == b'>')
+            && (i == begin || is_ws(data[i - 1]) || (allow_gt_ei && data[i - 1] == b'>'))
             && data.get(i + 2).is_none_or(|b| is_ws(*b) || is_delim(*b))
         {
             let end_data = if i > begin && is_ws(data[i - 1]) { i - 1 } else { i };

@@ -413,3 +413,14 @@ fn inline_image_terminator_without_preceding_whitespace() {
         assert_eq!(img, expected_data, "inline image data must match: {}", String::from_utf8_lossy(src));
     }
 }
+
+#[test]
+fn ascii85_inline_image_does_not_terminate_at_gt_ei_inside_payload() {
+    let src = b"BI /W 4 /H 1 /BPC 8 /CS /G /F /A85 ID !!!!>EI !!~>\nEI Q BT /F1 18 Tf (After) Tj ET";
+    let p = parse(src);
+    assert_eq!(p.skipped, 0);
+    let names: Vec<&[u8]> = p.ops.iter().map(|o| o.op.as_slice()).collect();
+    assert_eq!(names, [&b"BI"[..], b"Q", b"BT", b"Tf", b"Tj", b"ET"]);
+    let (_, img) = p.ops[0].inline.as_ref().unwrap();
+    assert_eq!(img, b"!!!!>EI !!~>");
+}
