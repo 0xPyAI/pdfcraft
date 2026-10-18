@@ -698,6 +698,12 @@ impl<'a> Inspector<'a> {
             }
             info.has_javascript |= names.get(b"JavaScript").is_ok();
         }
+        if let Ok(action) = catalog.get(b"OpenAction")
+            && let Some(dict) = self.dict(action)
+            && dict.get(b"S").ok().and_then(|o| self.resolve(o).as_name().ok()) == Some(&b"JavaScript"[..])
+        {
+            info.has_javascript = true;
+        }
     }
 
     // ── object helpers ──────────────────────────────────────────────────────────────────────
@@ -3021,5 +3027,51 @@ trailer << /Size 7 /Root 1 0 R >>
         let f = font(&info.fonts, "SomeHouseSans");
         assert!(f.embedded && f.subset, "{f:?}");
         assert_eq!((f.substitute.as_deref(), f.substitution.as_deref()), (None, None), "the document's own glyphs are shown");
+    }
+}
+
+#[cfg(test)]
+mod open_action_javascript_tests {
+    use std::sync::Arc;
+
+    use super::inspect;
+
+    /// One-page PDF whose catalog points its /OpenAction at object 4 (written by the caller).
+    fn pdf_with_open_action(action: &[u8]) -> Vec<u8> {
+        let objs: Vec<&[u8]> = vec![
+            b"<< /Type /Catalog /Pages 2 0 R /OpenAction 4 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+            action,
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, o) in objs.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+            out.extend_from_slice(o);
+            out.extend_from_slice(b"\nendobj\n");
+        }
+        let xref = out.len();
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+        for o in offsets {
+            out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+        out
+    }
+
+    #[test]
+    fn open_action_javascript_sets_has_javascript() {
+        let bytes = pdf_with_open_action(b"<< /S /JavaScript /JS (app.alert('hi')) >>");
+        let info = inspect(Arc::new(bytes), None).expect("inspects");
+        assert!(info.has_javascript, "an /OpenAction /JavaScript is JavaScript");
+    }
+
+    #[test]
+    fn open_action_goto_does_not_set_has_javascript() {
+        let bytes = pdf_with_open_action(b"<< /S /GoTo /D [3 0 R /Fit] >>");
+        let info = inspect(Arc::new(bytes), None).expect("inspects");
+        assert!(!info.has_javascript, "a /GoTo /OpenAction is not JavaScript");
     }
 }

@@ -1244,6 +1244,22 @@ fn the_permissions_password_unlocks_an_open_document() {
 }
 
 #[test]
+fn remove_security_from_a_file_with_its_encrypt_dictionary_in_the_trailer() {
+    // MuPDF writes /Encrypt inline in the trailer rather than as an object (#2661).
+    let mut doc = pdfcraft_cos::Document::open_with_password(protected("user", "owner", -1), Some("owner")).unwrap();
+    let r = doc.trailer().reference(b"Encrypt").unwrap();
+    let dict = doc.get(r).as_dict().cloned().unwrap();
+    doc.trailer_mut().set(b"Encrypt".to_vec(), pdfcraft_cos::Object::Dict(dict));
+    let bytes = Arc::new(pdfcraft_cos::write_full(&doc, &Default::default()).unwrap());
+    let mut s = Session::new();
+    let id = s.open("m.pdf", None, bytes, Some("owner")).unwrap();
+    s.apply(id, Edit::RemoveProtection).unwrap();
+    assert!(!s.get(id).unwrap().info.encrypted);
+    let plain = s.save_bytes(id).unwrap();
+    assert!(pdfcraft_cos::Document::open(plain).unwrap().security().is_none(), "security removed");
+}
+
+#[test]
 fn unlocking_needs_the_permissions_password_not_the_open_password() {
     let mut s = Session::new();
     let id = s.open("r.pdf", None, protected("open", "perms", 0b0100), Some("open")).unwrap();

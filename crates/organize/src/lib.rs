@@ -113,11 +113,15 @@ pub fn pages(doc: &Document) -> Result<Vec<PageRef>, OrganizeError> {
 pub fn page_rotation(doc: &Document, index: usize) -> Result<i64, OrganizeError> {
     let pages = walk(doc)?;
     let (_, attrs) = pages.get(index).ok_or(OrganizeError::NoSuchPage(index))?;
-    Ok(attrs.int(b"Rotate").unwrap_or(0).rem_euclid(360))
+    Ok(resolved_rotation(doc, attrs).rem_euclid(360))
 }
 
 pub fn page_count(doc: &Document) -> Result<usize, OrganizeError> {
     Ok(walk(doc)?.len())
+}
+
+fn resolved_rotation(doc: &Document, attrs: &Dict) -> i64 {
+    attrs.get(b"Rotate").and_then(|value| doc.resolve(value).as_int()).unwrap_or(0)
 }
 
 /// Rebuild the page tree as one flat node with `order` as its kids (attributes pushed down).
@@ -201,7 +205,10 @@ pub fn rotate_pages(doc: &mut Document, indices: &[usize], degrees: i64) -> Resu
     let delta = degrees.rem_euclid(360);
     for &i in indices {
         let (page, inherited) = &all[i];
-        let current = doc.get(*page).as_dict().and_then(|d| d.int(b"Rotate")).or_else(|| inherited.int(b"Rotate")).unwrap_or(0);
+        // Repeated indices must see earlier edits instead of the page walk's snapshot.
+        let current_page = doc.get(*page);
+        let current_attrs = current_page.as_dict().filter(|attrs| attrs.get(b"Rotate").is_some()).unwrap_or(inherited);
+        let current = resolved_rotation(doc, current_attrs);
         let new = (current.rem_euclid(360) + delta).rem_euclid(360);
         doc.update_dict(*page, |d| d.set(b"Rotate".to_vec(), Object::Int(new)))?;
     }

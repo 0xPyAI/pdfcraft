@@ -2407,7 +2407,10 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
             pdfcraft_annot::erase_ink(doc, *page, *index, path, *radius, &cx.meta())?;
         }
         Edit::ReplaceText { page, quads, text, author, strike, caret } => {
-            pdfcraft_annot::add_text_replacement(doc, *page, quads, text, author, strike, caret, &cx.meta())?;
+            // One `/NM` each: the caret replies to the strikeout, and XFDF names that reply by
+            // the strikeout's `/NM` (#2666).
+            let (strike_meta, caret_meta) = (cx.meta(), cx.meta());
+            pdfcraft_annot::add_text_replacement(doc, *page, quads, text, author, strike, caret, &strike_meta, &caret_meta)?;
         }
         Edit::MarkAnnotation { page, index, marked, author } => {
             pdfcraft_annot::set_marked(doc, *page, *index, *marked, author, &cx.meta())?;

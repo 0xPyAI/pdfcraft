@@ -3932,6 +3932,35 @@ fn bookmark_split_with_equal_titles_keeps_every_part() {
 }
 
 #[test]
+fn bookmark_split_with_long_titles_shortens_the_file_names() {
+    let dir = workdir("organize_long_titles");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    // Two equal titles far over the 255-byte name limit, then a multibyte one (3 bytes a character).
+    let long = format!("Chapter {}", "x".repeat(300));
+    ok(&mut a, "bookmark_add", json!({ "doc": doc, "title": long, "page": 1 }));
+    ok(&mut a, "bookmark_add", json!({ "doc": doc, "title": long, "page": 2 }));
+    ok(&mut a, "bookmark_add", json!({ "doc": doc, "title": "章".repeat(100), "page": 3 }));
+    let s = ok(&mut a, "doc_split", json!({ "doc": doc, "bookmarks": true, "out_dir": "parts" }));
+    let files: Vec<String> = s["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| std::path::Path::new(f["path"].as_str().unwrap()).file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(files.len(), 3, "{files:?}");
+    let distinct: std::collections::HashSet<_> = files.iter().map(|f| f.to_lowercase()).collect();
+    assert_eq!(distinct.len(), 3, "{files:?}");
+    for f in &files {
+        assert!(f.len() <= 255, "{f} is {} bytes", f.len());
+        assert!(f.ends_with(".pdf"), "{f}");
+        assert!(dir.join("parts").join(f).exists(), "{f} missing");
+    }
+    assert!(files[0].starts_with("a-Chapter x"), "{files:?}");
+    assert!(files[2].starts_with("a-章"), "{files:?}");
+}
+
+#[test]
 fn organizing_with_filters_bookmark_splits_and_extract_options() {
     let dir = workdir("organize2");
     let mut a = auto(&dir);
