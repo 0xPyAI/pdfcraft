@@ -1,5 +1,7 @@
 # PdfCraft roadmap
 
+> **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M7: the Edit text caret is as tall as the row it is on; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M14/#2383 GPU-limit candidate; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-17 · **Last updated:** 2026-10-17 · **Change:** minor (M7 #2592: styled paragraph fallback batches by actual face; estimates unchanged)
 
 **Stage: alpha** · next: beta, ~25% (ready for real work 50% → 75%) and ~400–700 h away
@@ -164,6 +166,12 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 | 8 | 1.0 polish: performance, right-to-left, missing languages, keyboard-only (M14) | 55–95 |
 
 ## Progress log
+
+- **2026-10-15 (M7, Edit text caret):** In a text region that mixes sizes (a 24 pt title over 12 pt lines), the inline editor's caret on a small row was as tall as the region's first size and reached into the row below: egui draws the caret at least one row of the text field's font tall, and that font had the paragraph's first size. The field's font is now half the region's smallest size, so each row's own height decides. Kittest regression; checked in the app on a real document. Estimates unchanged.
+- **2026-10-16 (M3, #2781):** The Pages panel follows the current page, as Acrobat's page thumbnails do: going to a page whose thumbnail is out of sight (scrolling, Page Down, Go to page, a bookmark) scrolls the panel just enough to show it. A thumbnail already in view, or clicked, leaves the panel where it is, and a page change while the user scrolls the panel or drags thumbnails does not move it. Estimates unchanged.
+- **2026-10-16 (M12, #1645):** CLI info, text and render use the engine's dynamic XFA layout rather than placeholder pages. Synthetic two-page and encrypted-form regressions cover counts, text, pixels, copy permissions and unchanged input bytes. Estimates unchanged.
+- **2026-10-15 (M14, #2383 candidate):** Device-limit requests now clamp unsupported maxima and minimum alignments before enabling the adapter's full 2D texture extent. This addresses the reported V3D request of 16 shader variables on an adapter supporting 15. Synthetic regressions fail before the clamp and pass afterward, along with the existing HiDPI case and Windows GPU-required application tests. Raspberry Pi startup remains unverified; milestone and overall estimates are unchanged.
+- **2026-10-13 (M3, typed zoom):** The right rail's zoom percentage is an editable field: type 150, 150% or 62.5 % and press Enter, Escape discards, and nonsense keeps the current zoom. The control channel's zoom option shares its parser, which now refuses zero, negative and non-finite values.
 
 - **2026-10-17 (M7, #3000 review):** Added mutation-checked regressions for the styled fallback budget (64 distinct glyphs accepted, 65 refused before any objects are added when the internal batch size is one) and the same character in regular/bold resources sharing a BaseFont but differing in descriptor weight. Ignoring either guard/key component makes its test fail. The internal budget scales with batch size; production stays at 15,360 glyphs. Estimates unchanged.
 - **2026-10-17 (M7, #2592):** Styled paragraph edits share Type 3 fallback fonts by actual face, up to 240 glyphs each, instead of writing one font per new character. Consecutive equal-font/style glyphs form one run; Latin source fonts, Japanese serif/sans and weight choices, alignment, save/reopen and undo/redo have regressions. A 300-glyph replacement spans two fonts; unsupported glyphs are refused before fallback objects are added. The styled paragraph has a 15,360-distinct-fallback-glyph budget. No wider glyph coverage, mixed contextual shaping, single-style change or stale-font cleanup is claimed. Estimates unchanged.
@@ -511,8 +519,11 @@ Newest first: the date, what moved, and the new overall estimate.
 
 ## Revision history
 
+**2026-10-15 · minor:** M14/#2383 candidate: GPU device requests clamp unsupported limits while retaining the adapter texture extent. Synthetic V3D/downlevel regressions and Windows GPU-required tests pass; Raspberry Pi hardware remains unverified. Estimates unchanged.
+
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-15 | minor | M7: the Edit text caret is as tall as the row it is on in a region with several sizes; estimates unchanged. |
 | 2026-10-18 | minor | M3, #3149: page replacement cancels render demand collected for the previous geometry; all viewer raster upload paths reject empty or oversized textures before cache eviction. Synthetic regressions reproduce the reported 1880×2350 upload at a 2048 limit, retain cached images and unsaved edits, and resume bounded backdrops and tiles. Estimates unchanged. |
 | 2026-10-15 | minor | M6: Plain AcroForm XML imports retain all direct text around comments and processing instructions, including CDATA and character references. Estimates unchanged. |
 | 2026-10-13 | minor | M6: XML/XFDF attribute whitespace survives form and comment export/import; estimates unchanged |

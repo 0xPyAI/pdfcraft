@@ -554,6 +554,9 @@ pub struct DocView {
     pub pages_panel: Option<Rect>,
     /// The Pages-panel gap under the pointer (where dropped files go), when it can take pages.
     pub panel_gap: Option<usize>,
+    /// The current page the Pages panel last followed: it scrolls to the current page's
+    /// thumbnail only when the page changes.
+    pub(crate) panel_followed: Option<usize>,
     /// How large the page grid draws its pages (1.0 = the usual thumbnails).
     grid_zoom: f32,
     /// A zoom asked for this frame (toolbar, pinch, keys); the grid applies it once it has laid
@@ -770,6 +773,7 @@ impl DocView {
             grid_gap: None,
             pages_panel: None,
             panel_gap: None,
+            panel_followed: None,
             grid_zoom: 1.0,
             grid_zoom_request: None,
             grid_anchor: None,
@@ -1510,6 +1514,13 @@ impl DocView {
             // Nothing on screen yet (e.g. a launch option): align the current page instead.
             None => self.goto = Some((self.current, 0.0)),
         }
+    }
+
+    /// A zoom typed as a percentage ("150", "150%", " 62.5 % ") as a zoom factor; `None` unless it is a
+    /// finite, positive number. `set_zoom` clamps it to the supported range.
+    pub fn parse_zoom_percent(typed: &str) -> Option<f32> {
+        let percent = typed.trim().trim_end_matches('%').trim_end().parse::<f32>().ok()?;
+        (percent.is_finite() && percent > 0.0).then_some(percent / 100.0)
     }
 
     /// Standard zoom steps (as in Acrobat's zoom menu).
@@ -5151,6 +5162,16 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn typed_zoom_percentages_parse() {
+        for (typed, zoom) in [("150", 1.5), ("150%", 1.5), (" 62.5 % ", 0.625), ("6400%", 64.0)] {
+            assert_eq!(DocView::parse_zoom_percent(typed), Some(zoom), "{typed}");
+        }
+        for typed in ["", "%", "abc", "0", "-50", "NaN", "inf", "1e40", "150%%x", "%150"] {
+            assert_eq!(DocView::parse_zoom_percent(typed), None, "{typed}");
+        }
+    }
 
     /// A rotated (landscape) page is drawn as wide as the cell allows and centred in the picture
     /// area, as Acrobat draws it, not as a small strip pinned to the top; a portrait page still
