@@ -1541,6 +1541,15 @@ impl PdfCraftApp {
         }
     }
 
+    /// [`Self::attachment_action`] for the file of the attachment comment at (page, index).
+    pub fn comment_attachment_action(&mut self, doc: DocId, page: usize, index: usize, open: bool) {
+        let source = pdfcraft_render::AttachmentSource::Annotation { page, index };
+        // The menus offer the items only for a listed file, so a miss is a comment gone since.
+        if let Some(i) = self.session.get(doc).and_then(|d| d.info.attachments.iter().position(|a| a.source == source)) {
+            self.attachment_action(doc, i, open);
+        }
+    }
+
     /// Whether the app draws the window's title bar, buttons and resize edges: the desktop leaves
     /// the frame to the app and Use system title bar is off.
     pub fn draws_window_frame(&self) -> bool {
@@ -2556,7 +2565,7 @@ impl PdfCraftApp {
                 self.palette_query = value.to_string();
             }
             ("page", Some(v)) => v.go_to_page(value.parse::<usize>().map_err(|e| e.to_string())?.saturating_sub(1)),
-            ("zoom", Some(v)) => v.set_zoom(value.trim_end_matches('%').parse::<f32>().map_err(|e| e.to_string())? / 100.0),
+            ("zoom", Some(v)) => v.set_zoom(DocView::parse_zoom_percent(value).ok_or("zoom must be a percentage above 0")?),
             ("layout", Some(v)) => {
                 let (layout, continuous) = canvas::parse_display_token(value).ok_or("layout must be single, continuous, two-up or two-page")?;
                 v.set_display(layout, continuous);

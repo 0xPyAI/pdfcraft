@@ -2083,6 +2083,21 @@ fn orphan_form_fields_through_tools() {
 }
 
 #[test]
+fn reversing_pages_through_tools() {
+    let dir = workdir("reverse");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_reverse", json!({ "doc": doc }));
+    assert_eq!(page_text(&mut a, doc), ["Page 3", "Page 2", "Page 1"], "no pages reverses the whole document");
+    ok(&mut a, "page_reverse", json!({ "doc": doc, "pages": [1, 2] }));
+    assert_eq!(page_text(&mut a, doc), ["Page 2", "Page 3", "Page 1"], "only the listed pages swap");
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert_eq!(page_text(&mut a, doc), ["Page 3", "Page 2", "Page 1"]);
+    assert!(matches!(a.call("page_reverse", &json!({ "doc": doc, "pages": [4] })), Err(ToolError::InvalidArgs(_))));
+    assert!(matches!(a.call("page_reverse", &json!({ "doc": doc, "pages": [2] })), Err(ToolError::Failed(_))), "one page has nothing to reverse");
+}
+
+#[test]
 fn duplicating_and_cropping_through_tools() {
     let dir = workdir("boxes");
     let mut a = auto(&dir);
@@ -3582,6 +3597,24 @@ fn adding_content_through_tools() {
     assert!(matches!(a.call("content_delete", &json!({ "doc": doc, "page": 1, "index": 5 })), Err(ToolError::Failed(_))));
 }
 
+/// An out-of-range `index` (including `i64::MIN`, which overflowed `index - 1`) is a readable
+/// failure for `content_update` and `content_delete`, not a panic.
+#[test]
+fn content_index_out_of_range_is_an_error_not_a_panic() {
+    let dir = workdir("content-index-range");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_add_text", json!({ "doc": doc, "page": 1, "text": "hi", "at": [10, 10] }));
+    for index in [i64::MIN, i64::MIN + 1, -1, 0, i64::MAX] {
+        for tool in ["content_delete", "content_update"] {
+            let args = json!({ "doc": doc, "page": 1, "index": index, "text": "x" });
+            let args = if tool == "content_delete" { json!({ "doc": doc, "page": 1, "index": index }) } else { args };
+            assert!(matches!(a.call(tool, &args), Err(ToolError::Failed(_))), "{tool} index {index}");
+        }
+    }
+    assert_eq!(ok(&mut a, "content_list", json!({ "doc": doc }))["count"], 1);
+}
+
 /// Text styling on an added image is refused (#1331), as image transforms are on text, and the
 /// refusal leaves the content, the dirty flag and the undo and redo steps as they were.
 #[test]
@@ -4957,6 +4990,41 @@ fn detecting_form_fields_through_tools() {
     ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "City": "Lisbon" } }));
     let f = ok(&mut a, "form_fields", json!({ "doc": doc }));
     assert_eq!(f["fields"][1]["value"], "Lisbon", "{f}");
+}
+
+#[test]
+fn detecting_comb_boxes_through_tools() {
+    let mut body = String::from("BT /F1 10 Tf 40 105 Td (Postcode) Tj ET\n");
+    for i in 0..5 {
+        body.push_str(&format!("{} 100 16 20 re S\n", 120 + i * 16));
+    }
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 400 300] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_string(),
+        format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string(),
+    ];
+    let mut pdf = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        pdf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    let dir = workdir("detect-comb");
+    std::fs::write(dir.join("comb.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "comb.pdf" }))["doc"].as_u64().unwrap();
+    let r = ok(&mut a, "form_detect_fields", json!({ "doc": doc }));
+    assert_eq!(r["fields"], json!([{ "page": 1, "kind": "text", "comb": 5, "name": "Postcode", "rect": [120.0, 100.0, 200.0, 120.0] }]), "{r}");
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "Postcode": "75001" } }));
+    assert_eq!(ok(&mut a, "form_fields", json!({ "doc": doc }))["fields"][0]["value"], "75001");
 }
 
 #[test]
