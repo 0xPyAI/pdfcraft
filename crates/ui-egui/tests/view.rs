@@ -618,6 +618,35 @@ fn default_zoom_is_used_for_new_documents() {
 }
 
 #[test]
+fn the_rail_zoom_field_sets_a_typed_zoom() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::Queryable;
+    use pdfcraft_ui_egui::canvas::Fit;
+    let mut h = harness(&[]);
+    let type_zoom = |h: &mut Harness<'static, PdfCraftApp>, typed: &str, key: Key| {
+        h.get_by_role_and_label(Role::TextInput, "Zoom").click();
+        h.run_steps(2);
+        h.get_by_role_and_label(Role::TextInput, "Zoom").type_text(typed);
+        h.run_steps(1);
+        h.key_press(key);
+        h.run_steps(3);
+    };
+    type_zoom(&mut h, "150", Key::Enter);
+    assert_eq!((h.state().views[0].fit, h.state().views[0].zoom), (Fit::None, 1.5));
+    type_zoom(&mut h, "62.5 %", Key::Enter);
+    assert_eq!(h.state().views[0].zoom, 0.625);
+    for (typed, key) in [("abc", Key::Enter), ("0", Key::Enter), ("300", Key::Escape)] {
+        type_zoom(&mut h, typed, key);
+        assert_eq!(h.state().views[0].zoom, 0.625, "{typed}");
+    }
+    type_zoom(&mut h, "9000", Key::Enter);
+    assert_eq!(h.state().views[0].zoom, 64.0);
+    h.state_mut().views[0].set_zoom(2.0);
+    h.run_steps(2);
+    assert_eq!(h.get_by_role_and_label(Role::TextInput, "Zoom").value().as_deref(), Some("200%"));
+}
+
+#[test]
 fn preferences_set_the_default_zoom() {
     use egui_kittest::kittest::Queryable;
     let mut h = harness(&[]);
