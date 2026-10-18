@@ -1,6 +1,6 @@
 //! Prepare a form ▸ automatic field detection: find where a printed form expects answers —
-//! underscore runs, rules (horizontal lines), empty boxes and small squares — and name each new
-//! field from the label next to it (Acrobat's auto-naming).
+//! underscore runs, rules (horizontal lines), empty boxes, rows of comb cells and small squares —
+//! and name each new field from the label next to it (Acrobat's auto-naming).
 //!
 //! [`detect`] is a pure function over the page's words and drawn shapes; [`page_shapes`] reads
 //! the shapes from a page's content, [`raster::shapes`] from a picture of the page (a scan).
@@ -30,6 +30,11 @@ pub struct Shapes {
 pub enum Kind {
     Text,
     CheckBox,
+    /// A row of touching cells, one character each: a text field with the comb flag and
+    /// `cells` as its character limit.
+    Comb {
+        cells: usize,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -309,6 +314,42 @@ fn label_for(words: &[Word], rect: [f64; 4], right_of: bool) -> String {
     clean(&on.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" "))
 }
 
+/// Rows of two or more touching cells of one size, as (the row's rect, cell count). Two is
+/// enough: dates split into day and month groups of two cells. Cells are square or taller
+/// than wide; an empty table of wider cells is not a comb.
+fn combs(boxes: &[[f64; 4]]) -> Vec<([f64; 4], usize)> {
+    let cells: Vec<[f64; 4]> = boxes
+        .iter()
+        .copied()
+        .filter(|r| {
+            let (w, h) = (r[2] - r[0], r[3] - r[1]);
+            (5.0..=30.0).contains(&w) && (8.0..=40.0).contains(&h) && w <= h * 1.2
+        })
+        .collect();
+    // `b` comes right after `a` in a row: same size, its left edge on a's right edge.
+    let follows = |a: &[f64; 4], b: &[f64; 4]| {
+        (b[0] - a[2]).abs() <= 1.0 && (b[1] - a[1]).abs() <= 0.5 && (b[3] - a[3]).abs() <= 0.5 && ((b[2] - b[0]) - (a[2] - a[0])).abs() <= 0.5
+    };
+    let mut out = Vec::new();
+    for first in &cells {
+        if cells.iter().any(|a| follows(a, first)) {
+            continue;
+        }
+        let (mut last, mut n) = (first, 1usize);
+        // Each step moves at least 4 pt right, so this ends; the bound is for safety.
+        while let Some(b) = cells.iter().find(|b| follows(last, b))
+            && n < cells.len()
+        {
+            last = b;
+            n += 1;
+        }
+        if n >= 2 {
+            out.push(([first[0], first[1], last[2], first[3]], n));
+        }
+    }
+    out
+}
+
 /// Propose fields for a page. `existing` are the page's widget rectangles (no candidate
 /// overlaps them); names are unique against `taken`.
 pub fn detect(words: &[Word], shapes: &Shapes, existing: &[[f64; 4]], taken: &[String]) -> Vec<Candidate> {
@@ -328,6 +369,15 @@ pub fn detect(words: &[Word], shapes: &Shapes, existing: &[[f64; 4]], taken: &[S
         let rect = [b.rect[0], b.rect[1], b.rect[2], b.rect[1] + (h * 1.4).clamp(12.0, 22.0)];
         let l = label_for(&labels, rect, false);
         push(Kind::Text, rect, l, &mut out);
+    }
+    // Comb boxes (postcodes, dates, IBANs): one text field per row of cells, found before
+    // check boxes so the cells don't each become one.
+    for (rect, cells) in combs(&shapes.boxes) {
+        if labels.iter().any(|x| overlaps(x.rect, rect)) {
+            continue;
+        }
+        let l = label_for(&labels, rect, false);
+        push(Kind::Comb { cells }, rect, l, &mut out);
     }
     // Small squares: check boxes, labelled by the text to their right.
     for r in &shapes.boxes {
@@ -381,7 +431,7 @@ pub fn detect(words: &[Word], shapes: &Shapes, existing: &[[f64; 4]], taken: &[S
     for c in &mut out {
         let base = if c.name.is_empty() {
             match c.kind {
-                Kind::Text => "Text".to_string(),
+                Kind::Text | Kind::Comb { .. } => "Text".to_string(),
                 Kind::CheckBox => "Check Box".to_string(),
             }
         } else {
