@@ -130,9 +130,10 @@ pub(crate) fn clean_within(
     };
     // Indirect elements with the page they inherit. Elements are reached from the root's /K, and
     // also from the parent tree and the ID tree: one listed only there still owns marked content
-    // (#3302).
+    // (#3302). The stack pops /K first, so an element reached through /K gets the page it inherits
+    // from its ancestors before a tree reaches it without one.
     let mut todo: Vec<(Object, Option<ObjRef>)> =
-        [&b"K"[..], b"ParentTree", b"IDTree"].iter().filter_map(|key| root.get(key).cloned()).map(|k| (k, None)).collect();
+        [&b"IDTree"[..], b"ParentTree", b"K"].iter().filter_map(|key| root.get(key).cloned()).map(|k| (k, None)).collect();
     let mut seen = HashSet::new();
     let mut hits: Vec<(ObjRef, Dict, Option<ObjRef>, bool)> = Vec::new();
     while let Some((k, pg)) = todo.pop() {
@@ -145,7 +146,13 @@ pub(crate) fn clean_within(
                     continue;
                 }
                 if seen.len() > limit {
-                    return clear_every_element(doc);
+                    let n = clear_every_element(doc)?;
+                    if stream.is_some() {
+                        // Marked-content references the walk didn't reach still name the
+                        // original stream through /Stm, which a full save would then keep.
+                        drop_tree(doc)?;
+                    }
+                    return Ok(n);
                 }
                 let object = doc.get(r);
                 if let Object::Array(a) = &*object {
@@ -158,7 +165,7 @@ pub(crate) fn clean_within(
                     todo.extend(tree_node_entries(&d).into_iter().map(|x| (x, pg)));
                     continue;
                 }
-                let pg = d.get(b"Pg").and_then(Object::as_ref).or(pg);
+                let pg = d.get(b"Pg").and_then(Object::as_ref).or(pg).or_else(|| inherited_page(doc, &d));
                 let kids: Vec<Object> = match d.get(b"K").map(|k| doc.resolve(k)) {
                     Some(o) => match &*o {
                         Object::Array(a) => a.clone(),
@@ -251,6 +258,33 @@ fn clear_every_element(doc: &mut Document) -> Result<usize, pdfcraft_cos::CosErr
     Ok(elements.len())
 }
 
+/// The page an element inherits (§14.7.4.4): the nearest `/Pg` among its ancestors, following
+/// `/P` at most [`MAX_PARENTS`] steps.
+fn inherited_page(doc: &Document, d: &Dict) -> Option<ObjRef> {
+    let mut parent = d.get(b"P").and_then(Object::as_ref);
+    for _ in 0..MAX_PARENTS {
+        let p = doc.get(parent?);
+        let p = p.as_dict()?;
+        if let Some(pg) = p.get(b"Pg").and_then(Object::as_ref) {
+            return Some(pg);
+        }
+        parent = p.get(b"P").and_then(Object::as_ref);
+    }
+    None
+}
+
+/// The most ancestors [`inherited_page`] looks through; deeper trees, and cycles, go unanswered.
+const MAX_PARENTS: usize = 256;
+
+/// Remove the structure tree, with `/MarkInfo`, which would claim tags there no longer are.
+fn drop_tree(doc: &mut Document) -> Result<(), pdfcraft_cos::CosError> {
+    let Some(catalog) = doc.root() else { return Ok(()) };
+    doc.update_dict(catalog, |c| {
+        c.remove(b"StructTreeRoot");
+        c.remove(b"MarkInfo");
+    })
+}
+
 /// Whether `o` is an object reference (`/Type /OBJR`, direct or indirect) to one of `gone`.
 fn refers_to(doc: &Document, o: &Object, gone: &HashSet<ObjRef>) -> bool {
     doc.resolve(o)
@@ -269,9 +303,10 @@ fn tree_node_entries(d: &Dict) -> Vec<Object> {
 /// reference keeps the annotation, its URL or text included, in a full rewrite after the page
 /// no longer lists it. Returns how many references were dropped.
 ///
-/// Only elements that are objects of their own are edited: a structure element written in place
-/// (a direct dictionary in a `/K` array or a tree) keeps its references, since changing it means
-/// rewriting the object that holds it. Producers rarely write elements that way.
+/// Only elements that are objects of their own are edited: changing a structure element written in
+/// place (a direct dictionary in a `/K` array or a tree) means rewriting the object that holds it,
+/// so when one of those refers to a removed annotation the whole tree goes instead (fail-closed).
+/// Producers rarely write elements that way.
 pub(crate) fn drop_object_refs(doc: &mut Document, gone: &HashSet<ObjRef>) -> Result<usize, pdfcraft_cos::CosError> {
     drop_object_refs_within(doc, gone, MAX_STRUCT_REFS)
 }
@@ -302,6 +337,22 @@ pub(crate) fn drop_object_refs_within(doc: &mut Document, gone: &HashSet<ObjRef>
     while let Some(k) = todo.pop() {
         match k {
             Object::Array(a) => todo.extend(a),
+            // A structure element written in place: its kids, and if it tags a removed
+            // annotation, the whole tree (see above).
+            Object::Dict(d) if d.contains(b"S") => {
+                let kids: Vec<Object> = match d.get(b"K").map(|k| doc.resolve(k)) {
+                    Some(o) => match &*o {
+                        Object::Array(a) => a.clone(),
+                        _ => d.get(b"K").cloned().into_iter().collect(),
+                    },
+                    None => Vec::new(),
+                };
+                if kids.iter().any(|x| refers_to(doc, x, gone)) {
+                    drop_tree(doc)?;
+                    return Ok(0);
+                }
+                todo.extend(kids);
+            }
             // A number or name tree node written in place (§7.9.6, §7.9.7): its values and kids.
             Object::Dict(d) => todo.extend(tree_node_entries(&d)),
             Object::Ref(r) => {
@@ -309,11 +360,7 @@ pub(crate) fn drop_object_refs_within(doc: &mut Document, gone: &HashSet<ObjRef>
                     continue;
                 }
                 if seen.len() > limit {
-                    let Some(catalog) = doc.root() else { return Ok(0) };
-                    doc.update_dict(catalog, |c| {
-                        c.remove(b"StructTreeRoot");
-                        c.remove(b"MarkInfo");
-                    })?;
+                    drop_tree(doc)?;
                     return Ok(0);
                 }
                 let object = doc.get(r);

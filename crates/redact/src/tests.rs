@@ -930,6 +930,81 @@ fn elements_listed_only_in_the_parent_tree_or_the_id_tree_lose_their_references(
     }
 }
 
+/// #3285 review: an element without its own /Pg takes its ancestor's page, also when the parent
+/// tree lists it. One under /K must not be reached first through the parent tree without that
+/// page, and one only the parent tree lists finds it through /P.
+#[test]
+fn an_element_inheriting_its_page_loses_its_redacted_text_when_the_parent_tree_lists_it() {
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 5 0 R /MarkInfo << /Marked true >> >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /StructParents 0 /Resources << /Font << /F1 9 0 R >> >> >>".to_vec(),
+        stream("", b"/P <</MCID 0>> BDC BT /F1 14 Tf 20 150 Td (Codename Bluefin) Tj ET EMC /P <</MCID 1>> BDC BT /F1 14 Tf 20 100 Td (Codename Bluefin) Tj ET EMC"),
+        // The document element 6 carries the page; 7 sits under it, 8 only points at it.
+        b"<< /Type /StructTreeRoot /K 6 0 R /ParentTree << /Nums [0 [7 0 R 8 0 R]] >> /ParentTreeNextKey 1 >>".to_vec(),
+        b"<< /Type /StructElem /S /Document /P 5 0 R /Pg 3 0 R /K [7 0 R] >>".to_vec(),
+        b"<< /Type /StructElem /S /P /P 6 0 R /K 0 /ActualText (Codename Bluefin) >>".to_vec(),
+        b"<< /Type /StructElem /S /P /P 6 0 R /K 1 /Alt (Codename Bluefin) >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+    ];
+    let mut doc = pdf(objs);
+    mark(&mut doc, 0, &[[10.0, 90.0, 290.0, 170.0]], "");
+    let r = apply(&mut doc, None).unwrap();
+    assert!(r.glyphs > 0, "{r:?}");
+    for n in [7, 8] {
+        let element = doc.get(ObjRef::new(n, 0)).as_dict().cloned().unwrap();
+        assert!(!element.contains(b"ActualText") && !element.contains(b"Alt"), "{n}: {element:?}");
+    }
+}
+
+/// #3285 review: when the tag walk is cut short while redaction replaced a form's stream, the
+/// marked-content references it never reached still name the original stream through /Stm, so
+/// the tree goes, as it does for removed annotations. Without a replaced stream it stays.
+#[test]
+fn a_tag_walk_cut_short_over_a_replaced_stream_removes_the_tree() {
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 5 0 R /MarkInfo << /Marked true >> >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /StructParents 0 >>".to_vec(),
+        stream("/Type /XObject /Subtype /Form /BBox [0 0 10 10]", b"/P <</MCID 0>> BDC EMC"),
+        b"<< /Type /StructTreeRoot /K 6 0 R >>".to_vec(),
+        b"<< /Type /StructElem /S /Document /P 5 0 R /K [7 0 R] >>".to_vec(),
+        b"<< /Type /StructElem /S /P /P 6 0 R /Pg 3 0 R /K << /Type /MCR /MCID 0 /Stm 4 0 R >> >>".to_vec(),
+        stream("/Type /XObject /Subtype /Form /BBox [0 0 10 10]", b""),
+    ];
+    let page = ObjRef::new(3, 0);
+    let streams = Some((ObjRef::new(4, 0), ObjRef::new(8, 0)));
+    let has_tree = |doc: &Document| doc.get(doc.root().unwrap()).as_dict().is_some_and(|c| c.contains(b"StructTreeRoot") && c.contains(b"MarkInfo"));
+    let mut doc = pdf(objs.clone());
+    crate::tags::clean_within(&mut doc, page, None, &[0].into(), &Default::default(), 1).unwrap();
+    assert!(has_tree(&doc), "without a replaced stream the tree stays");
+    let mut doc = pdf(objs);
+    crate::tags::clean_within(&mut doc, page, streams, &Default::default(), &Default::default(), 1).unwrap();
+    assert!(!has_tree(&doc), "a cut-short walk over a replaced stream drops the tree");
+}
+
+/// #3285 review: a structure element written in place, here as an ID tree value, can't be
+/// edited without rewriting what holds it; when it tags a removed annotation the tree goes
+/// instead of keeping the annotation reachable in a full rewrite.
+#[test]
+fn an_element_written_in_place_that_tags_a_removed_annotation_removes_the_tree() {
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 5 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Text /Rect [0 0 10 10] /Contents (hushhush note) >>".to_vec(),
+        b"<< /Type /StructTreeRoot /K 6 0 R /IDTree << /Names [(note1) << /Type /StructElem /S /Annot /P 6 0 R /K [<< /Type /OBJR /Obj 4 0 R >>] >>] >> >>".to_vec(),
+        b"<< /Type /StructElem /S /Document /P 5 0 R >>".to_vec(),
+    ];
+    let gone: std::collections::HashSet<ObjRef> = [ObjRef::new(4, 0)].into();
+    let mut doc = pdf(objs);
+    crate::tags::drop_object_refs(&mut doc, &gone).unwrap();
+    let catalog = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    assert!(!catalog.contains(b"StructTreeRoot") && !catalog.contains(b"MarkInfo"), "{catalog:?}");
+    let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
+    assert!(!bytes.windows(8).any(|w| w == b"hushhush"), "the removed comment can't be reached any more");
+}
+
 /// Issue #1325: removing comments keeps the annotations that are not comments: the multimedia
 /// and print-production ones (Watermark, PrinterMark, TrapNet, Screen, Movie, RichMedia, 3D).
 #[test]
