@@ -1262,8 +1262,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/ui.rs::theme_and_view_options_apply"]
-notes = ""
+evidence = ["crates/ui-egui/tests/ui.rs::theme_and_view_options_apply", "crates/ui-egui/tests/viewer.rs::going_to_a_far_page_scrolls_its_thumbnail_into_view", "crates/ui-egui/tests/viewer.rs::going_to_a_page_in_view_leaves_the_pages_panel_still", "crates/ui-egui/tests/viewer.rs::a_page_change_while_thumbnails_are_dragged_does_not_scroll_the_pages_panel"]
+notes = "The panel follows the current page (#2781): a page whose thumbnail is out of sight scrolls it into view, as little as it takes; a thumbnail already in view, or clicked, leaves the panel still, and a page change while the user scrolls the panel or drags thumbnails does not move it."
 
 [[feature]]
 id = "view.thumbnail-context-ops"

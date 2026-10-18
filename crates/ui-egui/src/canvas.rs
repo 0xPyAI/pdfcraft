@@ -554,6 +554,9 @@ pub struct DocView {
     pub pages_panel: Option<Rect>,
     /// The Pages-panel gap under the pointer (where dropped files go), when it can take pages.
     pub panel_gap: Option<usize>,
+    /// The current page the Pages panel last followed: it scrolls to the current page's
+    /// thumbnail only when the page changes.
+    pub(crate) panel_followed: Option<usize>,
     /// How large the page grid draws its pages (1.0 = the usual thumbnails).
     grid_zoom: f32,
     /// A zoom asked for this frame (toolbar, pinch, keys); the grid applies it once it has laid
@@ -770,6 +773,7 @@ impl DocView {
             grid_gap: None,
             pages_panel: None,
             panel_gap: None,
+            panel_followed: None,
             grid_zoom: 1.0,
             grid_zoom_request: None,
             grid_anchor: None,
