@@ -6059,7 +6059,7 @@ endstream endobj
 5 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency {group} >> /Resources << /ExtGState << /A << /ca 0.5 >> >> /XObject << /In 6 0 R /Msk 7 0 R /Neu 8 0 R /Img 9 0 R /Sm 10 0 R /Nimg 12 0 R /Deep 13 0 R >> >> /Length {} >> stream
 {form}
 endstream endobj
-6 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /A << /ca 0.5 >> >> >> /Length 30 >> stream
+6 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /A << /ca 0.5 >> >> >> /Length 34 >> stream
 /A gs 0 0 1 rg 100 50 150 120 re f
 endstream endobj
 7 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 2 /ImageMask true /Filter /ASCIIHexDecode /Length 5 >> stream
