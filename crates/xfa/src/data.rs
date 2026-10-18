@@ -938,7 +938,9 @@ fn merge_values(src: &str, data: roxmltree::Node, wants: &[Want], edits: &mut Ve
             let current: String = node.children().filter(|c| c.is_text()).filter_map(|c| c.text()).collect();
             if node.children().any(|c| c.is_element()) {
                 let all: String = node.descendants().filter(|c| c.is_text()).filter_map(|c| c.text()).collect();
-                if all.trim() != w.text.trim() {
+                // Ignore existing XML indentation, but not whitespace in the accepted value.
+                // A skipped mismatch must warn: relayout would otherwise use stale data.
+                if all.trim() != w.text {
                     skipped(warnings, STRUCTURED, &w.som);
                 }
                 continue;

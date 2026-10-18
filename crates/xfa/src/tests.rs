@@ -578,6 +578,23 @@ fn writing_values_keeps_the_data_no_field_binds_to() {
 }
 
 #[test]
+fn structured_data_whitespace_changes_are_reported_without_flattening() {
+    let data = "<form1><page1><name>\n<p>Short</p>\n</name><agree/></page1></form1>";
+    for value in ["Short", "Short\n", "\nShort", " Short ", "\tShort\t"] {
+        let mut doc = Document::open(Arc::new(static_shell(data))).unwrap();
+        let before = xfa_bytes(&doc);
+        let result = write_datasets(&mut doc, &static_fields(value, false)).unwrap();
+        assert!(!result.written, "{value:?}: {result:?}");
+        assert_eq!(xfa_bytes(&doc), before, "structured XML must stay intact");
+        if value == "Short" {
+            assert!(result.warnings.is_empty(), "existing XML indentation is not a field edit: {result:?}");
+        } else {
+            assert!(result.warnings.iter().any(|w| w.contains("structured content")), "{value:?}: {result:?}");
+        }
+    }
+}
+
+#[test]
 fn utf16_packets_are_read_and_written_back_as_utf16() {
     let mut doc = Document::open(Arc::new(static_shell("<form1><page1><name>Zoë 日本</name><other>ünbound</other></page1></form1>"))).unwrap();
     let text = String::from_utf8(xfa_bytes(&doc)).unwrap();

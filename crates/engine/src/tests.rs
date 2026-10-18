@@ -4493,6 +4493,31 @@ fn xfa_text_that_cannot_sync_to_structured_data_is_not_replaced_by_a_relayout() 
 }
 
 #[test]
+fn xfa_structured_data_whitespace_edits_survive_without_stale_relayout() {
+    let template = pdfcraft_xfa::fixtures::growable_text_template(false)
+        .replace("<ACTIVIDADES>Short</ACTIVIDADES>", "<ACTIVIDADES><nested>Short</nested></ACTIVIDADES>");
+    for text in ["Short\n", "\nShort", " Short ", "\tShort\t"] {
+        let mut s = Session::new();
+        let id = s.open("structured.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&template)), None).unwrap();
+        let field = |s: &Session| s.get(id).unwrap().form.iter().find(|f| f.name == "ACTIVIDADES").unwrap().clone();
+        let before = field(&s);
+        s.apply(id, Edit::SetFieldValue { name: "ACTIVIDADES".into(), value: FieldValue::Text(text.into()) }).unwrap();
+        assert_eq!(field(&s).value, vec![text], "the accepted whitespace must not be replaced from stale datasets");
+        assert_eq!(field(&s).obj, before.obj, "a skipped data write must not rebuild the widgets");
+        let doc = s.get(id).unwrap();
+        assert!(doc.dirty);
+        assert!(doc.xfa_warnings.iter().any(|w| w.contains("structured content")), "{:?}", doc.xfa_warnings);
+        let cos = pdfcraft_cos::Document::open(doc.bytes.clone()).unwrap();
+        let xdp = pdfcraft_xfa::read_packets(&cos).unwrap().unwrap().xdp;
+        assert!(xdp.contains("<ACTIVIDADES><nested>Short</nested></ACTIVIDADES>"));
+        s.undo(id).unwrap();
+        assert_eq!(field(&s).value, before.value);
+        s.redo(id).unwrap();
+        assert_eq!(field(&s).value, vec![text]);
+    }
+}
+
+#[test]
 fn xfa_scripts_initialize_calculate_validate_toggle_and_add_rows() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));
     let mut s = Session::new().with_clock(|| 1_700_000_000);
