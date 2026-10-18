@@ -5854,3 +5854,39 @@ fn cropping_an_existing_image_clips_it_and_moves_with_it() {
     // No area, or a box off the image, is refused.
     assert!(s.apply(id, Edit::EditPageImage { page: 0, index: 0, change: ImageEdit::Crop([10.0, 10.0, 10.0, 50.0]) }).is_err());
 }
+
+/// A 60 x 20 JPEG at 144 x 72 dpi, tagged with EXIF Orientation 6 (shown turned 90 degrees clockwise).
+fn phone_jpeg() -> Vec<u8> {
+    use image::codecs::jpeg::{JpegEncoder, PixelDensity, PixelDensityUnit};
+    let mut jpeg = Vec::new();
+    let mut encoder = JpegEncoder::new(&mut jpeg);
+    encoder.set_pixel_density(PixelDensity { density: (144, 72), unit: PixelDensityUnit::Inches });
+    encoder.encode_image(&image::RgbImage::from_pixel(60, 20, image::Rgb([20, 20, 20]))).unwrap();
+    let mut exif = b"Exif\0\0II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0".to_vec();
+    exif.extend_from_slice(&[6, 0, 0, 0, 0, 0, 0, 0]);
+    let mut out = jpeg[..2].to_vec();
+    out.extend_from_slice(&[0xff, 0xe1]);
+    out.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
+    out.extend_from_slice(&exif);
+    out.extend_from_slice(&jpeg[2..]);
+    out
+}
+
+#[test]
+fn a_phone_photo_used_as_a_custom_stamp_is_embedded_upright() {
+    let mut session = Session::new();
+    let blank = session.create_blank(300.0, 400.0, 1).unwrap();
+    let id = session.open_new("form.pdf", blank).unwrap();
+    // A click places the stamp at its natural size: 30 x 20 pt as stored, 20 x 30 pt upright.
+    // Named "Signature" so `signature_image` finds its picture.
+    let file = MarkFile { name: "photo.jpg".into(), bytes: Arc::new(phone_jpeg()), page: 0 };
+    let stamp = Edit::AddCustomStamp { page: 0, rect: [100.0, 100.0, 100.0, 100.0], name: "Signature".into(), file, author: "Ada".into() };
+    session.apply(id, stamp).unwrap();
+    let cos = &session.get(id).unwrap().editor.as_ref().unwrap().cos;
+    let picture = pdfcraft_annot::signature_image(cos, 0, 0).unwrap().unwrap();
+    let obj = cos.get(picture);
+    let pdfcraft_cos::Object::Stream(s) = &*obj else { panic!() };
+    assert_eq!((s.dict.int(b"Width"), s.dict.int(b"Height")), (Some(20), Some(60)));
+    let rect = pdfcraft_annot::summaries(cos)[0].rect;
+    assert!(((rect[2] - rect[0]) - 20.0).abs() < 0.01 && ((rect[3] - rect[1]) - 30.0).abs() < 0.01, "{rect:?}");
+}
