@@ -3928,6 +3928,74 @@ fn private_image_crop_with_intervening_state_resizes_across_streams() {
     }
 }
 
+/// [`image_page`] with `pieces` as its `/Contents` array and a Form /Fm0 drawing 72,500–172,600.
+fn split_image_page(pieces: &[&[u8]]) -> Document {
+    let mut doc = image_page();
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    let mut form = Dict::new();
+    form.set(b"Type".to_vec(), Object::name("XObject"));
+    form.set(b"Subtype".to_vec(), Object::name("Form"));
+    form.set(b"BBox".to_vec(), Object::Array([72, 500, 172, 600].map(Object::Int).to_vec()));
+    let form = doc.add(Object::Stream(Stream::flate(form, b"0.5 g 72 500 100 100 re f")));
+    let image = doc.get(pdfcraft_model::pages(&doc)[0].obj);
+    let mut res = image.as_dict().and_then(|d| d.get(b"Resources")).and_then(|r| r.as_dict().cloned()).unwrap();
+    let mut xo = res.get(b"XObject").and_then(|x| x.as_dict().cloned()).unwrap();
+    xo.set(b"Fm0".to_vec(), Object::Ref(form));
+    res.set(b"XObject".to_vec(), Object::Dict(xo));
+    let refs = pieces.iter().map(|b| Object::Ref(doc.add(Object::Stream(Stream::flate(Dict::new(), b))))).collect();
+    doc.update_dict(page, |d| {
+        d.set(b"Contents".to_vec(), Object::Array(refs));
+        d.set(b"Resources".to_vec(), Object::Dict(res));
+    })
+    .unwrap();
+    doc
+}
+
+#[test]
+fn an_image_whose_operator_starts_the_next_stream_can_be_selected_moved_and_deleted() {
+    // #3113: an operator's operands end one piece and its keyword starts the next.
+    let square = [72.0, 500.0, 172.0, 600.0];
+    let cases: [(&[&[u8]], bool); 4] = [
+        (&[b"q 100 0 0 100 72 500 cm /Im0", b"Do Q"], false),
+        (&[b"q 100 0 0 100 72 500", b"cm /Im0 Do Q"], false),
+        (&[b"q /Fm0", b"Do Q"], true),
+        (&[b"q 100 0 0 100 72 500 cm /Im0 Do Q"], false),
+    ];
+    for (pieces, is_form) in cases {
+        let doc = split_image_page(pieces);
+        let label: Vec<_> = pieces.iter().map(|p| String::from_utf8_lossy(p)).collect();
+        let images = images::page_images(&doc, 0).unwrap();
+        assert_eq!(images.len(), 1, "{label:?}");
+        assert!(close(images[0].rect, square), "{label:?}: {:?}", images[0].rect);
+        assert_eq!(images[0].is_form, is_form);
+        assert!(images[0].contains([122.0, 550.0]), "{label:?}");
+        if !is_form {
+            let read = images::reading_images(&doc, 0).unwrap();
+            assert!(read.len() == 1 && close(read[0].rect, square), "{label:?}: {read:?}");
+        }
+
+        let mut deleted = doc.clone();
+        images::change_image(&mut deleted, 0, 0, &images::ImageChange::Delete).unwrap();
+        let deleted = reopen(&deleted);
+        assert!(images::page_images(&deleted, 0).unwrap().is_empty(), "{label:?}");
+        let (joined, ops) = joined_ops(&deleted);
+        assert!(!ops.iter().any(|o| o.is("Do")), "{joined}");
+
+        let target = [300.0, 500.0, 400.0, 600.0];
+        let mut moved = doc.clone();
+        images::change_image(&mut moved, 0, 0, &images::ImageChange::Transform(images::rect_to_rect(square, target))).unwrap();
+        let moved = reopen(&moved);
+        let after = images::page_images(&moved, 0).unwrap();
+        assert!(after.len() == 1 && close(after[0].rect, target), "{label:?}: {after:?} {:?}", joined_ops(&moved).0);
+
+        let mut shifted = doc.clone();
+        images::translate_images(&mut shifted, 0, &[0], [228.0, 0.0]).unwrap();
+        let shifted = reopen(&shifted);
+        let after = images::page_images(&shifted, 0).unwrap();
+        assert!(after.len() == 1 && close(after[0].rect, target), "{label:?}: {after:?} {:?}", joined_ops(&shifted).0);
+    }
+}
+
 #[test]
 fn curved_image_clips_have_analytic_bounds_and_holes_do_not_capture_points() {
     let mut doc = image_page();
