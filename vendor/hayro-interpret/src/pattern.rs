@@ -62,7 +62,7 @@ impl<'a> Pattern<'a> {
         }
     }
 
-    /// Set the alpha of the graphics state in effect when the pattern is painted. The `gs` operator
+    /// PdfCraft patch: set the alpha of the graphics state in effect when the pattern is painted. The `gs` operator
     /// can come after `scn`/`SCN`, so the alpha must not be captured when the pattern is selected.
     pub(crate) fn set_alpha(&mut self, alpha: f32) {
         if let Self::Shading(p) = self {
