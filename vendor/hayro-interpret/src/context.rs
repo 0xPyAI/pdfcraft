@@ -451,11 +451,25 @@ pub(crate) fn path_as_rect(path: &BezPath) -> Option<Rect> {
     let (min_x, min_y, max_x, max_y) = (bbox.min_x(), bbox.min_y(), bbox.max_x(), bbox.max_y());
     let mut corners = [false; 4];
 
+    // PdfCraft patch: a point that is not a corner means this is not a rectangle. The length
+    // check above admits one MoveTo and four LineTo as well as the intended one MoveTo, three
+    // LineTo and one ClosePath, and covering the four corners says nothing about the points
+    // between them, so a five-point polyline whose ends reach every corner of its own bounding
+    // box was painted as that box (and a clip of that shape was discarded).
+    let mut off_corner = false;
+
     let mut check_point = |p: Point| {
-        corners[0] |= p.x.is_nearly_equal(min_x) && p.y.is_nearly_equal(min_y);
-        corners[1] |= p.x.is_nearly_equal(min_x) && p.y.is_nearly_equal(max_y);
-        corners[2] |= p.x.is_nearly_equal(max_x) && p.y.is_nearly_equal(min_y);
-        corners[3] |= p.x.is_nearly_equal(max_x) && p.y.is_nearly_equal(max_y);
+        let hits = [
+            p.x.is_nearly_equal(min_x) && p.y.is_nearly_equal(min_y),
+            p.x.is_nearly_equal(min_x) && p.y.is_nearly_equal(max_y),
+            p.x.is_nearly_equal(max_x) && p.y.is_nearly_equal(min_y),
+            p.x.is_nearly_equal(max_x) && p.y.is_nearly_equal(max_y),
+        ];
+        off_corner |= !hits.iter().any(|hit| *hit);
+
+        for (corner, hit) in corners.iter_mut().zip(hits) {
+            *corner |= hit;
+        }
     };
 
     for (idx, el) in path.elements().iter().enumerate() {
@@ -474,7 +488,7 @@ pub(crate) fn path_as_rect(path: &BezPath) -> Option<Rect> {
         }
     }
 
-    if corners[0] && corners[1] && corners[2] && corners[3] {
+    if !off_corner && corners[0] && corners[1] && corners[2] && corners[3] {
         Some(bbox)
     } else {
         None

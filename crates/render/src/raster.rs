@@ -4298,6 +4298,54 @@ trailer << /Root 1 0 R >>
         assert!(grey[0] == grey[1] && grey[1] == grey[2] && grey[0] < 255, "the image covers the page: {grey:?}");
     }
 
+    /// A five-point open polyline is not a rectangle. `path_as_rect` took any five-element path
+    /// whose points covered the four corners of its bounding box for that box, and a `MoveTo` with
+    /// four `LineTo` is five elements, so an open zigzag stroked with `S` was painted as its
+    /// bounding rectangle: the peak between its ends vanished and the open side came out closed.
+    #[test]
+    fn a_five_point_polyline_is_not_painted_as_its_bounding_box() {
+        // The ends and the points beside them sit on the four corners of the bounding box; the
+        // peak at (20, 20) lies between them and is on no corner.
+        let content = b"0 0 0 RG 2 w 30 30 m 30 10 l 20 20 l 10 10 l 10 30 l S".to_vec();
+        let pdf = one_page_pdf(&content, "");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+            let _ = tx.send(r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, preview: false }));
+        });
+        let page = rx.recv_timeout(std::time::Duration::from_secs(60)).expect("the polyline must render");
+        assert!(page.error.is_none(), "{:?}", page.error);
+        // Device y counts down the 40 pt page, so the two ends at y = 30 are on row 10.
+        let dark = |x: u32, y: u32| {
+            let offset = ((y * page.width + x) * 4) as usize;
+            page.rgba[offset] < 128
+        };
+        assert!((17..=23).any(|x| (17..=23).any(|y| dark(x, y))), "the peak between the ends draws");
+        assert!(!(14..=26).any(|x| dark(x, 10)), "the side the path leaves open stays open");
+    }
+
+    /// A rectangle still takes the rectangle route, written either way: `m l l l` and closed, or
+    /// `m l l l l` back to its first corner.
+    #[test]
+    fn a_rectangle_is_still_painted_as_a_rectangle() {
+        for content in [&b"0 0 0 rg 10 10 m 30 10 l 30 30 l 10 30 l f"[..], &b"0 0 0 rg 10 10 m 30 10 l 30 30 l 10 30 l 10 10 l f"[..]] {
+            let pdf = one_page_pdf(content, "");
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+                let _ = tx.send(r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, preview: false }));
+            });
+            let page = rx.recv_timeout(std::time::Duration::from_secs(60)).expect("the rectangle must render");
+            assert!(page.error.is_none(), "{:?}", page.error);
+            let pixel = |x: u32, y: u32| {
+                let offset = ((y * page.width + x) * 4) as usize;
+                page.rgba[offset]
+            };
+            assert!(pixel(20, 20) < 128, "the rectangle is filled");
+            assert_eq!(pixel(5, 5), 255, "and nothing outside it is");
+        }
+    }
+
     /// A one-page PDF whose content is the stream `stream`, with the entries `dict` in its
     /// dictionary.
     fn one_page_pdf(stream: &[u8], dict: &str) -> Vec<u8> {
