@@ -46,7 +46,11 @@ pub enum OptimizeError {
     Cancelled,
 }
 
-/// The PDF version an optimized copy is made compatible with (Acrobat: Make compatible with).
+/// The target header version and object-stream policy for an optimized copy.
+///
+/// Partial compatibility only: encryption requirements are checked, but content newer than
+/// the target is neither detected nor converted. A lower header does not guarantee that
+/// older readers can read the document.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Compatibility {
     /// Keep the document's version (upgraded to 1.5 when object streams are written).
@@ -270,6 +274,7 @@ pub fn optimize(doc: &mut Document, settings: &Settings) -> Result<Report, Optim
 /// during a long one). Returning `false` stops with [`OptimizeError::Cancelled`]; `doc` is then
 /// partly optimized and should be dropped.
 pub fn optimize_with_progress(doc: &mut Document, settings: &Settings, progress: &mut dyn FnMut(Stage) -> bool) -> Result<Report, OptimizeError> {
+    // Lexical ordering is valid for these fixed versions with single-digit components.
     if let Some(chosen) = settings.compatibility.version()
         && let Some(required) = required_encryption_version(doc)
         && chosen < required

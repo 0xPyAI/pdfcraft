@@ -36,3 +36,12 @@ then this, then merges identical objects and writes a full, compressed save
 (`pdfcraft_engine::optimizer::OptimizeJob`, which the UI runs on a worker thread with a
 progress bar). JPEG decoding and
 encoding and resampling come from the `image` crate.
+
+## Target PDF version: partial compatibility
+
+The target selects the header version, clears the catalog `/Version`, controls object
+streams (disabled for PDF 1.4), and checks encryption requirements. It does **not**
+detect or convert content newer than the target: optional content, JPEG 2000 images,
+16-bit images, OpenType fonts and PDF 2.0 features can remain. A PDF 1.4 header
+therefore does not guarantee compatibility with PDF 1.4 readers or validators.
+`optimize.compatibility-level` remains partial until content compatibility is checked.
