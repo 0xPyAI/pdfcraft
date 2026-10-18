@@ -44,6 +44,8 @@ delete_field(&mut doc, "email")?;
   flattening refuses to make that `?` permanent.
 - Check boxes and radio buttons switch `/V` and each widget's `/AS`. Widgets with no appearances
   get PdfCraft's own (a drawn check mark or dot; no symbol font needed).
+- Imported `/MaxLen 0` is treated as unlimited (also clearing an inherited limit), while the
+  original entry is preserved. Positive limits still apply.
 - Values are validated (options, `MaxLen`, single vs multi-select, NoToggleToOff, read-only) and a
   failed call changes nothing.
 - `FieldProps::appearance` applies a `LookPatch` independently to each widget. `None` keeps

@@ -754,7 +754,10 @@ fn walk(
         inh.q = Some(q);
     }
     if let Some(m) = d.get(b"MaxLen").and_then(|o| doc.resolve(o).as_int()) {
-        inh.max_len = usize::try_from(m).ok();
+        // Compatibility: some writers emit zero for an unlimited text field. Keep /MaxLen
+        // untouched in the object graph, but expose only positive limits to both UI and API.
+        // An explicit zero also clears an inherited limit rather than inheriting it again.
+        inh.max_len = usize::try_from(m).ok().filter(|limit| *limit > 0);
     }
     let kids: Vec<ObjRef> =
         d.get(b"Kids").map(|k| doc.resolve(k)).and_then(|k| k.as_array().cloned()).unwrap_or_default().iter().filter_map(|k| k.as_ref()).collect();

@@ -4416,8 +4416,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.fields"]
 tools = ["form_fill", "form_fields"]
-evidence = ["crates/ui-egui/tests/forms.rs::typing_into_a_text_field_and_tabbing_on", "crates/ui-egui/tests/forms.rs::auto_size_fields_shrink_and_wrap_typed_text_to_fit_their_box", "crates/forms/src/tests.rs::text_fields_get_new_appearances", "crates/engine/src/tests.rs::filling_a_form_shows_saves_and_undoes", "crates/automation/tests/automation.rs::orphan_form_fields_through_tools", "crates/forms/src/tests.rs::fields_sharing_a_name_take_the_same_value"]
-notes = "in-place editor; Enter or clicking away commits, Escape cancels; auto-size (0 Tf) fields shrink, and multiline ones wrap, the text being typed to fit the box, on screen as on the page (the screen measures in the interface font, so its size can be a little smaller than the page's Helvetica fit); fixed sizes are kept and clip, as in Acrobat; no format/keystroke JavaScript yet (M6.4)"
+evidence = ["crates/ui-egui/tests/forms.rs::typing_into_a_text_field_and_tabbing_on", "crates/ui-egui/tests/forms.rs::auto_size_fields_shrink_and_wrap_typed_text_to_fit_their_box", "crates/forms/src/tests.rs::text_fields_get_new_appearances", "crates/engine/src/tests.rs::filling_a_form_shows_saves_and_undoes", "crates/automation/tests/automation.rs::orphan_form_fields_through_tools", "crates/forms/src/tests.rs::fields_sharing_a_name_take_the_same_value", "crates/forms/src/tests.rs::zero_max_len_is_unlimited_and_overrides_inherited_limit"]
+notes = "in-place editor; Enter or clicking away commits, Escape cancels; auto-size (0 Tf) fields shrink, and multiline ones wrap, the text being typed to fit the box, on screen as on the page (the screen measures in the interface font, so its size can be a little smaller than the page's Helvetica fit); fixed sizes are kept and clip, as in Acrobat; no format/keystroke JavaScript yet (M6.4); imported MaxLen 0 permits text input and overrides inherited limits; positive limits remain enforced."
 
 [[feature]]
 id = "form.fill-checkbox-radio"
