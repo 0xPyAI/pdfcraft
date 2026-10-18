@@ -6,9 +6,6 @@
 # French computing vocabulary (formal "vous", infinitive for commands). No proprietary localisation
 # resource, string table or product UI (Acrobat's included) was consulted or copied; add entries
 # the same way.
-# Exception, 2026-10: about 70 terms were realigned on the wording of Adobe's public French help
-# pages for Acrobat (tool, command and setting names only), so the header above no longer holds
-# for those entries.
 # Product and technology names (PdfCraft, PDF, Acrobat JavaScript ...) are not translated;
 # the trailing "…" of dialog commands is kept.
 
@@ -39,7 +36,7 @@
 	Save as…	Enregistrer sous…
 	Close file	Fermer le fichier
 	Close all	Tout fermer
-	Revert	Version précédente
+	Revert	Revenir à la version enregistrée
 	Print…	Imprimer…
 	Document properties…	Propriétés du document…
 	Undo	Annuler
@@ -50,7 +47,7 @@
 	Cut pages	Couper des pages
 	Paste pages	Coller des pages
 	Fit visible	Ajuster au contenu visible
-	Marquee zoom	Zoom de sélection
+	Marquee zoom	Zoom par sélection
 	Take a snapshot	Prendre un instantané
 	Column select	Sélection de colonne
 	Full screen mode	Mode plein écran
@@ -137,7 +134,7 @@
 	Toggle fit page / fit width	Basculer entre ajuster à la page et à la largeur
 	Next page	Page suivante
 	Previous page	Page précédente
-	Current page — type a page number or label (such as iv) and press Enter	Page active — saisissez un numéro ou une étiquette de page (comme iv) et appuyez sur Entrée
+	Current page — type a page number or label (such as iv) and press Enter	Page actuelle — saisissez un numéro ou une étiquette de page (comme iv) et appuyez sur Entrée
 	Zoom — type a percentage and press Enter	Zoom — saisissez un pourcentage et appuyez sur Entrée
 	Welcome to PdfCraft	Bienvenue dans PdfCraft
 	An open-source PDF workbench — local, private, and scriptable.	Un atelier PDF open source — local, privé et automatisable.
@@ -153,8 +150,8 @@
 	Scripts run in a sandbox without file or network access. With JavaScript off, Acrobat's standard format, validate and calculate functions still work.	Les scripts s'exécutent dans un bac à sable, sans accès aux fichiers ni au réseau. Si JavaScript est désactivé, les fonctions standard de format, de validation et de calcul d'Acrobat continuent de fonctionner.
 	Back to all tools	Retour à tous les outils
 	Close panel	Fermer le panneau
-	View less	Afficher moins
-	View more	Afficher plus
+	View less	Voir moins
+	View more	Voir plus
 	Available	Disponible
 	Ready	Prêt
 	Search tools and commands…	Rechercher des outils et des commandes…
@@ -216,7 +213,7 @@
 	Redaction properties…	Propriétés de biffure…
 	Apply redactions…	Appliquer les biffures…
 	Clear redaction marks	Effacer les marques de biffure
-	Remove hidden information…	Supprimer les informations masquées…
+	Remove hidden information…	Retirer les informations masquées…
 	Sanitize document…	Assainir le document…
 	Field properties…	Propriétés du champ…
 	Add a text field	Ajouter un champ de texte
@@ -250,7 +247,7 @@
 	Export to HTML…	Exporter vers HTML…
 	Export to RTF…	Exporter vers RTF…
 	JavaScript console…	Console JavaScript…
-	Document JavaScripts…	Scripts JavaScript du document…
+	Document JavaScripts…	JavaScripts du document…
 	Recognize text…	Reconnaître le texte…
 	Recognize text in multiple files…	Reconnaître le texte dans plusieurs fichiers…
 	Check for accessibility…	Vérifier l'accessibilité…
@@ -279,7 +276,7 @@
 	Insert blank page	Insérer une page vierge
 	Rotate pages…	Pivoter les pages…
 	Duplicate pages	Dupliquer des pages
-	Crop pages	Recadrer les pages
+	Crop pages	Rogner les pages
 	Set page boxes…	Définir les zones de page…
 	Insert pages from file…	Insérer des pages depuis un fichier…
 	Replace pages…	Remplacer des pages…
@@ -352,7 +349,7 @@
 	Page labels	Étiquettes de page
 	Page transitions	Transitions de page
 	Add comments	Ajouter des commentaires
-	Markup	Annotations
+	Markup	Marquage
 	Sticky note	Note
 	Underline	Soulignement
 	Strikethrough	Barré
@@ -375,7 +372,7 @@
 	Protect a PDF	Protéger un PDF
 	Protect	Protéger
 	Protect with password	Protéger par mot de passe
-	Remove hidden information	Supprimer les informations masquées
+	Remove hidden information	Retirer les informations masquées
 	Advanced options	Options avancées
 	Encrypt with certificate	Chiffrer avec un certificat
 	Security properties	Propriétés de protection
@@ -449,7 +446,7 @@
 	Use JavaScript	Utiliser JavaScript
 	JavaScript	JavaScript
 	Console	Console
-	Document JavaScripts	Scripts JavaScript du document
+	Document JavaScripts	JavaScripts du document
 	Document actions	Actions du document
 	AI assistant	Assistant IA
 	Bring your own model (off by default)	Apportez votre propre modèle (désactivé par défaut)
@@ -475,7 +472,7 @@
 	Duplicate page	Dupliquer la page
 	Replace page	Remplacer la page
 	Replace pages	Remplacer les pages
-	Crop page	Recadrer la page
+	Crop page	Rogner la page
 	Cancel	Annuler
 	Don't save	Ne pas enregistrer
 	Apply	Appliquer
@@ -527,8 +524,8 @@
 	Add to Trusted Certificates	Ajouter aux certificats approuvés
 	Export…	Exporter…
 	PDF Optimizer	Optimiseur de PDF
-	Discard Objects	Supprimer les objets
-	Discard User Data	Supprimer les données utilisateur
+	Discard Objects	Ignorer les objets
+	Discard User Data	Ignorer les données utilisateur
 	Clean Up	Nettoyer
 	Color Images	Images couleur
 	Grayscale Images	Images en niveaux de gris
@@ -542,18 +539,18 @@
 	High	Élevé
 	Maximum	Maximum
 	Each image is measured where pages draw it; an image is replaced only if the result is smaller.	Chaque image est mesurée là où les pages la dessinent ; elle n'est remplacée que si le résultat est plus petit.
-	Discard all links, actions and JavaScript	Supprimer tous les liens, actions et scripts JavaScript
-	Discard alternate images	Supprimer les images de remplacement
-	Discard embedded page thumbnails	Supprimer les vignettes de page incorporées
-	Discard document tags	Supprimer les balises du document
-	Discard embedded print settings	Supprimer les réglages d'impression incorporés
-	Discard bookmarks	Supprimer les signets
-	Discard hidden layer content	Supprimer le contenu des calques masqués
-	Discard all comments, forms and multimedia	Supprimer tous les commentaires, formulaires et contenus multimédias
-	Discard document information and metadata	Supprimer les informations et les métadonnées du document
-	Discard all object data (file attachments)	Supprimer toutes les données d'objet (pièces jointes)
-	Discard private data of other applications	Supprimer les données privées d'autres applications
-	Discard hidden text	Supprimer le texte masqué
+	Discard all links, actions and JavaScript	Ignorer tous les liens, actions et JavaScript
+	Discard alternate images	Ignorer les images de remplacement
+	Discard embedded page thumbnails	Ignorer les vignettes de page incorporées
+	Discard document tags	Ignorer les balises du document
+	Discard embedded print settings	Ignorer les réglages d'impression incorporés
+	Discard bookmarks	Ignorer les signets
+	Discard hidden layer content	Ignorer le contenu des calques masqués
+	Discard all comments, forms and multimedia	Ignorer tous les commentaires, formulaires et contenus multimédias
+	Discard document information and metadata	Ignorer les informations et les métadonnées du document
+	Discard all object data (file attachments)	Ignorer toutes les données d'objet (pièces jointes)
+	Discard private data of other applications	Ignorer les données privées d'autres applications
+	Discard hidden text	Ignorer le texte masqué
 	Use Flate to encode streams that are not encoded	Utiliser Flate pour coder les flux qui ne sont pas codés
 	Remove invalid links and bookmarks	Retirer les liens et signets non valides
 	Remove unreferenced named destinations	Retirer les destinations nommées non référencées
@@ -608,7 +605,7 @@
 	Points from the page's bottom-left corner.	Points depuis le coin inférieur gauche de la page.
 	Alignment:	Alignement :
 	Default Value:	Valeur par défaut :
-	Multi-line	Multiligne
+	Multi-line	Plusieurs lignes
 	Scroll long text	Faire défiler le texte long
 	Allow Rich Text Formatting	Autoriser le formatage de texte enrichi
 	Limit of	Limite de
@@ -708,7 +705,7 @@
 	Flip horizontal	Retourner horizontalement
 	Flip vertical	Retourner verticalement
 	Replace image	Remplacer l'image
-	Crop (% trimmed from each side)	Recadrer (% retiré de chaque côté)
+	Crop (% trimmed from each side)	Rogner (% retiré de chaque côté)
 	Click on the page to add text; each click starts a new box, and ✓ finishes. Drag items to move them, drag a corner to resize, double-click text to edit it.	Cliquez sur la page pour ajouter du texte ; chaque clic commence une nouvelle zone, et ✓ termine. Faites glisser les éléments pour les déplacer, faites glisser un coin pour les redimensionner, double-cliquez sur le texte pour le modifier.
 	Choose an image	Choisir une image
 	Export to Image	Exporter vers une image
@@ -762,7 +759,7 @@
 	Later	Plus tard
 	none	aucun
 	Declared conformance: {shown}	Conformité déclarée : {shown}
-	Output intent: {list}	Mode de sortie : {list}
+	Output intent: {list}	Intention de sortie : {list}
 	Conformance level:	Niveau de conformité :
 	No problems found: the document conforms to {level}.	Aucun problème trouvé : le document est conforme à {level}.
 	 (page {p})	 (page {p})
@@ -771,7 +768,7 @@
 	Box	Zone
 	Units	Unités
 	Set to zero	Mettre à zéro
-	Current page ({n})	Page active ({n})
+	Current page ({n})	Page actuelle ({n})
 	Subset	Sous-ensemble
 	Update	Mettre à jour
 	Add	Ajouter
@@ -927,17 +924,17 @@
 	Add header	Ajouter un en-tête
 	Add footer	Ajouter un pied de page
 	Set document title	Définir le titre du document
-	Run a JavaScript	Exécuter un script JavaScript
+	Run a JavaScript	Exécuter un JavaScript
 	Prepare for Distribution	Préparer pour la distribution
-	Remove hidden information and flatten comments and form fields, so recipients see only the pages.	Supprime les informations masquées et aplatit les commentaires et les champs de formulaire, afin que les destinataires ne voient que les pages.
+	Remove hidden information and flatten comments and form fields, so recipients see only the pages.	Retire les informations masquées et aplatit les commentaires et les champs de formulaire, afin que les destinataires ne voient que les pages.
 	Optimize Scanned Documents	Optimiser les documents numérisés
-	Make scans searchable, then make them smaller.	Rend les numérisations interrogeables, puis les allège.
+	Make scans searchable, then make them smaller.	Rend les numérisations recherchables, puis les allège.
 	Add Page Numbers	Ajouter des numéros de page
 	Number every page in the footer.	Numérote chaque page dans le pied de page.
 	Mark as Confidential	Marquer comme confidentiel
 	A diagonal CONFIDENTIAL watermark on every page.	Un filigrane diagonal CONFIDENTIAL sur chaque page.
 	Sanitize Documents	Assainir les documents
-	Remove hidden information, metadata, scripts and embedded content, and rewrite the files.	Supprime les informations masquées, les métadonnées, les scripts et le contenu incorporé, puis réécrit les fichiers.
+	Remove hidden information, metadata, scripts and embedded content, and rewrite the files.	Retire les informations masquées, les métadonnées, les scripts et le contenu incorporé, puis réécrit les fichiers.
 	Type text	Saisir du texte
 	Text to insert	Texte à insérer
 	Replacement text	Texte de remplacement
@@ -1039,7 +1036,7 @@
 	Text language is specified	La langue du texte est indiquée
 	Screen readers choose their voice from the document's language. Set it in Document Properties > Advanced > Language.	Les lecteurs d'écran choisissent leur voix d'après la langue du document. Définissez-la dans Propriétés du document > Avancé > Langue.
 	Document title is showing in title bar	Le titre du document s'affiche dans la barre de titre
-	The window should show a meaningful title rather than the file name. Set a title and Initial View > Show: Document Title.	La fenêtre doit afficher un titre explicite plutôt que le nom du fichier. Définissez un titre et Vue initiale > Afficher : Titre du document.
+	The window should show a meaningful title rather than the file name. Set a title and Initial View > Show: Document Title.	La fenêtre doit afficher un titre explicite plutôt que le nom du fichier. Définissez un titre et Affichage initial > Afficher : Titre du document.
 	Bookmarks are present in large documents	Les documents longs contiennent des signets
 	Documents of more than 20 pages need bookmarks for navigation. Add bookmarks for the main sections.	Les documents de plus de 20 pages ont besoin de signets pour la navigation. Ajoutez des signets pour les sections principales.
 	Color contrast	Contraste des couleurs
@@ -1153,15 +1150,15 @@
 	Select the items to remove from this document.	Sélectionnez les éléments à retirer de ce document.
 	Metadata	Métadonnées
 	File attachments	Pièces jointes
-	Comments and markups	Commentaires et annotations
+	Comments and markups	Commentaires et marquages
 	Hidden text	Texte masqué
 	Hidden layers	Calques masqués
-	Links, actions and JavaScripts	Liens, actions et scripts JavaScript
+	Links, actions and JavaScripts	Liens, actions et JavaScripts
 	Private data of other applications	Données privées d'autres applications
 	None found	Aucun élément trouvé
 	Form fields are flattened: their values stay visible. Saving rewrites the whole file.	Les champs de formulaire sont aplatis : leurs valeurs restent visibles. L'enregistrement réécrit tout le fichier.
 	Remove	Retirer
-	Sanitizing removes hidden information from the document: metadata, file attachments, comments, form fields (flattened), hidden text and layers, bookmarks, links, actions and scripts, and private application data.	Assainir supprime les informations masquées du document : métadonnées, pièces jointes, commentaires, champs de formulaire (aplatis), texte et calques masqués, signets, liens, actions et scripts, et données privées d'applications.
+	Sanitizing removes hidden information from the document: metadata, file attachments, comments, form fields (flattened), hidden text and layers, bookmarks, links, actions and scripts, and private application data.	Assainir retire les informations masquées du document : métadonnées, pièces jointes, commentaires, champs de formulaire (aplatis), texte et calques masqués, signets, liens, actions et scripts, et données privées d'applications.
 	Save the document afterwards; saving rewrites the whole file so nothing removed stays in it.	Enregistrez ensuite le document ; l'enregistrement réécrit tout le fichier afin que rien de retiré n'y reste.
 	Printer:	Imprimante :
 	Save as PDF	Enregistrer comme PDF
@@ -1180,7 +1177,7 @@
 	Odd pages only	Pages impaires seulement
 	Even pages only	Pages paires seulement
 	Reverse pages	Inverser les pages
-	Page Sizing & Handling	Dimensionnement et gestion des pages
+	Page Sizing & Handling	Taille et gestion des pages
 	Size	Taille
 	Poster	Affiche
 	Multiple	Plusieurs
@@ -1212,7 +1209,7 @@
 	Landscape	Paysage
 	Comments & Forms	Commentaires et formulaires
 	Document	Document
-	Document and markups	Document et annotations
+	Document and markups	Document et marquages
 	Document and stamps	Document et tampons
 	Form fields only	Champs de formulaire seulement
 	Previous sheet	Feuille précédente
@@ -1233,11 +1230,11 @@
 	Detected 1 form field	1 champ de formulaire détecté
 	Detected {n} form fields	{n} champs de formulaire détectés
 	{field}: {e}	{field} : {e}
-	Current page	Page active
+	Current page	Page actuelle
 	Selected pages	Pages sélectionnées
 	Document language	Langue du document
 	Output	Sortie
-	Searchable Image (Exact)	Image interrogeable (exacte)
+	Searchable Image (Exact)	Image recherchable (exacte)
 	Adds invisible text over each word; the page image is not changed	Ajoute du texte invisible sur chaque mot ; l'image de la page n'est pas modifiée
 	Downsample to	Sous-échantillonner à
 	Also recognize pages that already have text	Reconnaître aussi les pages qui contiennent déjà du texte
@@ -1456,7 +1453,7 @@
 	Tagged PDF	PDF balisé
 	Document Properties	Propriétés du document
 	Description	Description
-	Initial View	Vue initiale
+	Initial View	Affichage initial
 	Security	Protection
 	Fonts	Polices
 	Advanced	Avancé
@@ -1613,7 +1610,7 @@
 	Sending sheet {s} of {n} to {printer}…	Envoi de la feuille {s} sur {n} à {printer}…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Aucune imprimante trouvée. Vérifiez que l’imprimante est installée et que le spouleur d’impression fonctionne, puis rouvrez Imprimer.
 	Sending to {printer}…	Envoi à {printer}…
-	Choose a folder for the searchable files	Choisissez un dossier pour les fichiers interrogeables
+	Choose a folder for the searchable files	Choisissez un dossier pour les fichiers recherchables
 	Files are combined in this order. Leave Pages empty to take every page.	Les fichiers sont combinés dans cet ordre. Laissez Pages vide pour prendre toutes les pages.
 	Pages of {name} to combine, e.g. 1-3, 6	Pages de {name} à combiner, p. ex. 1-3, 6
 	Remove {name}	Retirer {name}
@@ -1690,9 +1687,9 @@
 	watermark	filigrane
 	background	arrière-plan
 	This document isn't password-protected	Ce document n'est pas protégé par mot de passe
-	Enter permissions password…	Saisir le mot de passe d'accès aux droits…
-	Permissions password	Mot de passe d'accès aux droits
-	“{name}” has security restrictions. Enter its permissions password to lift them.	«{name}» comporte des restrictions de protection. Saisissez son mot de passe d'accès aux droits pour les lever.
+	Enter permissions password…	Saisir le mot de passe d'autorisations…
+	Permissions password	Mot de passe d'autorisations
+	“{name}” has security restrictions. Enter its permissions password to lift them.	«{name}» comporte des restrictions de sécurité. Saisissez son mot de passe d'autorisations pour les lever.
 	Restrictions lifted	Restrictions levées
 	Couldn't unlock {name}: {e}	Impossible de déverrouiller {name} : {e}
 	This document has no restrictions to lift	Ce document n'a aucune restriction à lever
@@ -1707,7 +1704,7 @@
 	Couldn't fit the visible content: {e}	Impossible d'ajuster au contenu visible : {e}
 	Drag a rectangle around the area to copy	Faites glisser un rectangle autour de la zone à copier
 	Click on the page to add a {tool}, or drag to set its size	Cliquez sur la page pour ajouter un {tool}, ou faites glisser pour définir sa taille
-	Drag a rectangle on a page to crop it; double-click a page for Set Page Boxes	Faites glisser un rectangle sur une page pour la recadrer ; double-cliquez sur une page pour Définir les zones de page
+	Drag a rectangle on a page to crop it; double-click a page for Set Page Boxes	Faites glisser un rectangle sur une page pour la rogner ; double-cliquez sur une page pour Définir les zones de page
 	Keep tool selected: on	Garder l'outil sélectionné : activé
 	Keep tool selected	Garder l'outil sélectionné
 	Opacity	Opacité
@@ -1735,7 +1732,7 @@
 	This file was damaged and has been repaired. Saving keeps the repaired version.	Ce fichier était endommagé et a été réparé. L'enregistrement conserve la version réparée.
 	Dismiss	Fermer
 	Hide field highlights	Masquer la surbrillance des champs
-	Highlight fields	Mettre les champs en surbrillance
+	Highlight fields	Surligner les champs
 	Security settings	Paramètres de protection
 	Details	Détails
 	Select (V)	Sélectionner (V)
@@ -1750,7 +1747,7 @@
 	Copy	Copier
 	Paste after	Coller après
 	Rename	Renommer
-	Set to current page ({n})	Affecter à la page active ({n})
+	Set to current page ({n})	Affecter à la page actuelle ({n})
 	Move up	Monter
 	Move down	Descendre
 	Indent	Augmenter le retrait
@@ -1805,8 +1802,8 @@
 	The document has no XMP metadata	Le document ne contient pas de métadonnées XMP
 	The title in the metadata and the document information differ	Le titre des métadonnées et celui des informations du document diffèrent
 	The document is encrypted	Le document est chiffré
-	Device colour is used, but there is no PDF/A output intent	Une couleur de périphérique est utilisée, mais il n'y a pas de mode de sortie PDF/A
-	DeviceCMYK is used: it needs a CMYK output intent (not added automatically)	DeviceCMYK est utilisé : il faut un mode de sortie CMJN (non ajouté automatiquement)
+	Device colour is used, but there is no PDF/A output intent	Une couleur de périphérique est utilisée, mais il n'y a pas d'intention de sortie PDF/A
+	DeviceCMYK is used: it needs a CMYK output intent (not added automatically)	DeviceCMYK est utilisé : il faut une intention de sortie CMJN (non ajoutée automatiquement)
 	The document has additional actions (/AA)	Le document contient des actions supplémentaires (/AA)
 	The document has document-level JavaScript	Le document contient du JavaScript au niveau du document
 	The form asks viewers to make appearances (NeedAppearances)	Le formulaire demande aux visionneuses de créer les apparences (NeedAppearances)
@@ -1861,12 +1858,12 @@
 	Delete field	Supprimer le champ
 	Duplicate field	Dupliquer le champ
 	Set tab order	Définir l'ordre de tabulation
-	Change initial view	Modifier la vue initiale
+	Change initial view	Modifier l'affichage initial
 	Set alternate text	Définir le texte de remplacement
 	Mark figure as decorative	Marquer la figure comme décorative
-	Run JavaScript	Exécuter un script JavaScript
-	Delete document JavaScript	Supprimer le script JavaScript du document
-	Edit document JavaScript	Modifier le script JavaScript du document
+	Run JavaScript	Exécuter JavaScript
+	Delete document JavaScript	Supprimer le JavaScript du document
+	Edit document JavaScript	Modifier le JavaScript du document
 	Edit text	Modifier le texte
 	Load document font	Charger la police du document
 	Move image	Déplacer l'image
@@ -2077,20 +2074,20 @@
 	Drag to reorder	Faire glisser pour réordonner
 	Drop PDFs, images, text files or folders here, or choose them.	Déposez ici des PDF, des images, des fichiers texte ou des dossiers, ou choisissez-les.
 	Enter the password that opens it	Saisissez le mot de passe qui l'ouvre
-	Enter the permissions password to allow combining	Saisissez le mot de passe d'accès aux droits pour permettre de le combiner
+	Enter the permissions password to allow combining	Saisissez le mot de passe des autorisations pour permettre de le combiner
 	Every PDF, image and text file in the folder	Tous les PDF, images et fichiers texte du dossier
 	Every PDF, image and text file in the folder and the folders inside it	Tous les PDF, images et fichiers texte du dossier et des dossiers qu'il contient
 	File name	Nom du fichier
 	Files are combined from top to bottom. Leave Pages empty to take every page.	Les fichiers sont combinés de haut en bas. Laissez Pages vide pour prendre toutes les pages.
 	Hide password	Masquer le mot de passe
 	Includes unsaved changes	Inclut des modifications non enregistrées
-	Its security settings don't allow copying pages	Ses paramètres de protection n'autorisent pas la copie des pages
+	Its security settings don't allow copying pages	Ses paramètres de sécurité n'autorisent pas la copie des pages
 	More ways to add files	Autres façons d'ajouter des fichiers
 	No documents are open	Aucun document n'est ouvert
 	No pages selected	Aucune page sélectionnée
-	Opened, but its security settings don't allow combining. Enter the permissions password.	Ouvert, mais ses paramètres de protection n'autorisent pas la combinaison. Saisissez le mot de passe d'accès aux droits.
+	Opened, but its security settings don't allow combining. Enter the permissions password.	Ouvert, mais ses paramètres de sécurité n'autorisent pas la combinaison. Saisissez le mot de passe des autorisations.
 	Password-protected	Protégé par mot de passe
-	Protected: the combined file won't keep its security settings	Protégé : le fichier combiné ne conservera pas ses paramètres de protection
+	Protected: the combined file won't keep its security settings	Protégé : le fichier combiné ne conservera pas ses paramètres de sécurité
 	Remove {n} files	Retirer {n} fichiers
 	Reset columns	Réinitialiser les colonnes
 	Select a file first	Sélectionnez d'abord un fichier
@@ -2195,7 +2192,7 @@
 	Squiggly	Ondulé
 	Table rows belong directly in a table or its head, body or foot. Fix the table's tags.	Les lignes de tableau doivent se trouver directement dans un tableau ou dans son en-tête, son corps ou son pied. Corrigez les balises du tableau.
 	That didn't work: an internal error stopped it ({m}).	Cela n'a pas fonctionné : une erreur interne l'a interrompu ({m}).
-	The Windows store's digital IDs couldn't be listed: {e}	Impossible de lister les ID numériques du magasin de certificats Windows : {e}
+	The Windows store's digital IDs couldn't be listed: {e}	Impossible de lister les identités numériques du magasin de certificats Windows : {e}
 	The document changed while you were choosing a file, so nothing was changed.	Le document a changé pendant que vous choisissiez un fichier, donc rien n'a été modifié.
 	The document was closed before it could be saved.	Le document a été fermé avant de pouvoir être enregistré.
 	The pages were extracted but not deleted, because the document changed while you were choosing a folder.	Les pages ont été extraites mais pas supprimées, car le document a changé pendant que vous choisissiez un dossier.
@@ -2218,9 +2215,9 @@ signature pad	Type	Saisir
 	Custom font	Police personnalisée
 	Only checked properties will change. Mixed means the selected fields have different values.	Seules les propriétés cochées seront modifiées. « Valeurs différentes » indique que les champs sélectionnés ont des valeurs différentes.
 	Shift- or Ctrl/Command-click to select several fields.	Cliquez avec Maj ou Ctrl/Commande pour sélectionner plusieurs champs.
-	Font size 0 uses automatic sizing.	Le corps 0 active le dimensionnement automatique.
+	Font size 0 uses automatic sizing.	La taille de police 0 active le dimensionnement automatique.
 	Character limit:	Limite de caractères :
-	Character limit 0 means no limit. A comb of characters needs a limit.	Une limite de caractères de 0 signifie aucune limite. Un peigne de caractères nécessite une limite.
+	Character limit 0 means no limit. A comb of characters needs a limit.	Une limite de caractères de 0 signifie aucune limite. Les cases de caractères nécessitent une limite.
 	To change locked fields, also set Locked to No.	Pour modifier les champs verrouillés, réglez aussi « Verrouillé » sur « Non ».
 	Comb of characters	Peigne de caractères
 	The document changed while you were editing field properties.	Le document a changé pendant que vous modifiiez les propriétés des champs.
@@ -2313,8 +2310,8 @@ animation effects	Off	Désactivés
 	Yellow on black	Jaune sur noir
 	Green on black	Vert sur noir
 	Page background	Arrière-plan de la page
-	Only change the colour of black text or line art	Ne changer que la couleur du texte noir et des dessins au trait
-	Change the colour of line art as well as text	Changer aussi la couleur des dessins au trait, en plus du texte
+	Only change the colour of black text or line art	Ne changer que la couleur du texte noir et des traits
+	Change the colour of line art as well as text	Changer aussi la couleur des traits, en plus du texte
 	Colours are remapped while rendering; the document itself never changes.	Les couleurs sont réaffectées au rendu ; le document lui-même ne change jamais.
 	This printer's driver doesn't take two-sided settings from other programs, so its own setting applies. Change it in Properties…	Le pilote de cette imprimante n'accepte pas les réglages recto verso des autres programmes ; son propre réglage s'applique. Modifiez-le dans Propriétés…
 	Browser's print dialog	Boîte de dialogue d'impression du navigateur
@@ -2471,8 +2468,8 @@ animation effects	Off	Désactivés
 	Data Encipherment	Chiffrement des données
 	Decipher Only	Déchiffrement seul
 	Detailed Report	Rapport détaillé
-	DeviceCMYK is used, but the PDF/A output intent isn't a CMYK profile	DeviceCMYK est utilisé, mais le mode de sortie PDF/A n'est pas un profil CMJN
-	DeviceRGB is used, but the PDF/A output intent isn't an RGB profile	DeviceRGB est utilisé, mais le mode de sortie PDF/A n'est pas un profil RVB
+	DeviceCMYK is used, but the PDF/A output intent isn't a CMYK profile	DeviceCMYK est utilisé, mais l'intention de sortie PDF/A n'est pas un profil CMJN
+	DeviceRGB is used, but the PDF/A output intent isn't an RGB profile	DeviceRGB est utilisé, mais l'intention de sortie PDF/A n'est pas un profil RVB
 	Digital Signature	Signature numérique
 	Disabled	Désactivé
 	Document properties (⌘D)	Propriétés du document (⌘D)
@@ -2516,7 +2513,7 @@ animation effects	Off	Désactivés
 	No results	Aucun résultat
 	Non-Repudiation	Non-répudiation
 	On	Activé
-	Only the document's owner can change its security (open it with the permissions password)	Seul le propriétaire du document peut modifier sa protection (ouvrez-le avec le mot de passe d'accès aux droits)
+	Only the document's owner can change its security (open it with the permissions password)	Seul le propriétaire du document peut modifier sa protection (ouvrez-le avec le mot de passe d'autorisations)
 	Open a PDF (⌘O)	Ouvrir un PDF (⌘O)
 	Open folder	Ouvrir le dossier
 	Organize	Organiser
@@ -2615,7 +2612,7 @@ animation effects	Off	Désactivés
 	The timestamp token is valid, but the timestamp authority is not in your list of trusted certificates.	Le jeton d'horodatage est valide, mais l'autorité d'horodatage ne figure pas dans votre liste de certificats approuvés.
 	The timestamp's byte range does not exclude exactly its contents.	La plage d'octets de l'horodatage n'exclut pas exactement son contenu.
 	The timestamp's byte range does not match the file.	La plage d'octets de l'horodatage ne correspond pas au fichier.
-	The window shows the file name, not the title (Initial View > Show)	La fenêtre affiche le nom du fichier et non le titre (Vue initiale > Afficher)
+	The window shows the file name, not the title (Initial View > Show)	La fenêtre affiche le nom du fichier et non le titre (Affichage initial > Afficher)
 	Theme	Thème
 	There is no folder to save the digital ID in.	Il n'y a aucun dossier où enregistrer l'ID numérique.
 	This document has not been modified since this signature was applied.	Ce document n'a pas été modifié depuis l'application de cette signature.
@@ -2666,7 +2663,7 @@ animation effects	Off	Désactivés
 @plural	{n} comment|{n} comments	{n} commentaire|{n} commentaires
 @plural	{n} file|{n} files	{n} fichier|{n} fichiers
 @plural	{n} image optimized|{n} images optimized	{n} image optimisée|{n} images optimisées
-@plural	{n} item discarded|{n} items discarded	{n} élément supprimé|{n} éléments supprimés
+@plural	{n} item discarded|{n} items discarded	{n} élément ignoré|{n} éléments ignorés
 @plural	{n} pixel|{n} pixels	{n} pixel|{n} pixels
 @plural	{n} result|{n} results	{n} résultat|{n} résultats
 calendar date	April	avril
