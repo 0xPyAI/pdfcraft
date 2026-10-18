@@ -5004,7 +5004,7 @@ trailer << /Root 1 0 R >>
     /// Two triangles of a mesh that share an edge cover it together. The sampler tested each
     /// pixel's corner, and only strictly inside a triangle, so the diagonal two triangles share
     /// was left white wherever it ran through the samples, and so was a pixel row or column
-    /// along the mesh's own sides. Vendored hayro-interpret patch 41.
+    /// along the mesh's own sides. Vendored hayro-interpret patch 36.
     #[test]
     fn mesh_triangles_sharing_an_edge_leave_no_seam() {
         // A red square from 10 to 40 on a 50 × 50 page, cut along its diagonal; in device space
@@ -5080,6 +5080,45 @@ trailer << /Root 1 0 R >>
         }
         assert!(spilled.is_empty(), "shaded pixels wholly across the diagonal: {spilled:?}");
         assert!(missing.is_empty(), "unshaded pixels wholly inside the triangle: {missing:?}");
+    }
+
+    /// A pixel whose corner is inside one triangle and whose centre is inside its neighbour
+    /// takes the colour at its corner, whichever triangle comes first (patch 36): the
+    /// centre-coverage pass only fills pixels no triangle has given a colour yet. Here the
+    /// shared diagonal lies at x + y = 50.25 in device space, so pixel (20, 30) has its corner
+    /// in the red triangle and its centre in the blue one.
+    #[test]
+    fn a_shared_edge_pixel_keeps_the_colour_at_its_corner() {
+        let vertex = |x: u8, y: u8, rgb: [u8; 3]| [0, x, y, rgb[0], rgb[1], rgb[2]];
+        let (lo, hi) = (10, 40);
+        let (red, blue) = ([255, 0, 0], [0, 0, 255]);
+        // In PDF space the red triangle is the square's upper left half, the blue one the lower
+        // right; `cm` moves both down a quarter point.
+        let red_triangle = [(lo, lo, red), (hi, hi, red), (lo, hi, red)];
+        let blue_triangle = [(lo, lo, blue), (hi, lo, blue), (hi, hi, blue)];
+        for (label, order) in [("red first", [red_triangle, blue_triangle]), ("blue first", [blue_triangle, red_triangle])] {
+            let mut data = Vec::new();
+            for triangle in order {
+                for (x, y, rgb) in triangle {
+                    data.extend(vertex(x, y, rgb));
+                }
+            }
+            let content = b"1 0 0 1 0 -0.25 cm /Sh0 sh";
+            let mut pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 50 50] /Contents 4 0 R /Resources << /Shading << /Sh0 5 0 R >> >> >> endobj\n".to_vec();
+            pdf.extend_from_slice(format!("4 0 obj << /Length {} >> stream\n", content.len()).as_bytes());
+            pdf.extend_from_slice(content);
+            pdf.extend_from_slice(format!("\nendstream endobj\n5 0 obj << /ShadingType 4 /ColorSpace /DeviceRGB /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 /Decode [0 255 0 255 0 1 0 1 0 1] /Length {} >> stream\n", data.len()).as_bytes());
+            pdf.extend_from_slice(&data);
+            pdf.extend_from_slice(b"\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n");
+            let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+            let page = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(page.error.is_none(), "{label}: {:?}", page.error);
+            let pixel = |x: usize, y: usize| page.rgba[(y * 50 + x) * 4..][..4].to_vec();
+            assert_eq!(pixel(20, 30), [255, 0, 0, 255], "{label}: the corner of pixel (20, 30) is in the red triangle");
+            // Controls: wholly inside one triangle or the other.
+            assert_eq!(pixel(15, 20), [255, 0, 0, 255], "{label}");
+            assert_eq!(pixel(35, 30), [0, 0, 255, 255], "{label}");
+        }
     }
 
     /// Review of the mesh-shading patch: every patch was cut into 722 triangles before anything
