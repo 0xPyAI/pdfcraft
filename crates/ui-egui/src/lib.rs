@@ -1338,7 +1338,11 @@ impl PdfCraftApp {
             };
         }
         let initial = doc.initial_view();
-        self.views.push(DocView::new(id, &doc.info, self.view_defaults));
+        let mut view = DocView::new(id, &doc.info, self.view_defaults);
+        if self.full_screen {
+            view.enter_presentation();
+        }
+        self.views.push(view);
         if activate {
             self.active = Some(self.views.len() - 1);
         }
@@ -1582,8 +1586,22 @@ impl PdfCraftApp {
 
     /// Enter or leave full-screen reading (Acrobat: View ▸ Full Screen Mode, ⌘L).
     pub fn set_full_screen(&mut self, ctx: &egui::Context, on: bool) {
-        self.full_screen = on;
+        self.apply_full_screen(on);
         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(on));
+    }
+
+    /// The full-screen state without the window: every document shows one page (or spread) at a
+    /// time fitted to the screen while it is on (Acrobat's Full Screen Mode, #379, #1459), and
+    /// gets its display back when it is off.
+    pub fn apply_full_screen(&mut self, on: bool) {
+        self.full_screen = on;
+        for view in &mut self.views {
+            if on {
+                view.enter_presentation();
+            } else {
+                view.leave_presentation();
+            }
+        }
     }
 
     /// Answer the Full Screen mode prompt a document raised on opening: enter it, or leave the
@@ -3131,19 +3149,16 @@ impl eframe::App for PdfCraftApp {
             self.window_title = title;
         }
         if self.full_screen && self.active.is_some() {
-            // Full screen: the page, nothing else (Esc or ⌘L to leave).
-            let t = theme::Tokens::get(&ctx);
-            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(if t.dark() { t.pasteboard } else { egui::Color32::from_gray(32) })).show(
-                ui,
-                |ui| {
-                    if let Some(i) = self.active {
-                        match compare_ui::side_by_side(self, i) {
-                            Some((old, new)) => compare_ui::compare_area(self, old, new, ui),
-                            None => canvas::document_area(self, i, ui),
-                        }
+            // Full screen: the page on black, nothing else, as Acrobat's Full Screen Mode (Esc
+            // or ⌘L to leave).
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(egui::Color32::BLACK)).show(ui, |ui| {
+                if let Some(i) = self.active {
+                    match compare_ui::side_by_side(self, i) {
+                        Some((old, new)) => compare_ui::compare_area(self, old, new, ui),
+                        None => canvas::document_area(self, i, ui),
                     }
-                },
-            );
+                }
+            });
             dialogs::show(self, &ctx);
             // Notices too: a refused field value or a failed save must be seen in full screen.
             self.show_progress(&ctx);

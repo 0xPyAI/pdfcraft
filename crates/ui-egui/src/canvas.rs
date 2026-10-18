@@ -81,6 +81,17 @@ pub enum Fit {
     None,
 }
 
+/// The page display as it was before full screen, put back on leaving it
+/// ([`DocView::enter_presentation`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SavedDisplay {
+    pub layout: PageLayout,
+    pub continuous: bool,
+    pub cover: bool,
+    pub fit: Fit,
+    pub zoom: f32,
+}
+
 /// The base page display: one page across, or a two-page spread. Whether it scrolls continuously
 /// is a separate flag (`continuous`), as in Acrobat, so every combination is reachable (#752).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -414,6 +425,9 @@ pub struct DocView {
     pub flash: Option<(usize, [f32; 4], f64)>,
     /// Compare files: differences shaded on this document's pages (page, user-space box, colour).
     pub compare_marks: Vec<(usize, [f32; 4], Color32)>,
+    /// Full screen (Acrobat's Full Screen Mode): the display saved on entering it, while the view
+    /// shows one page or spread at a time, fitted to the screen. `None` outside full screen.
+    presentation: Option<SavedDisplay>,
     pages: HashMap<usize, PageTex>,
     /// Pages the renderer could not draw, with the reason (never re-requested).
     errors: HashMap<usize, String>,
@@ -723,6 +737,7 @@ impl DocView {
             single_edges: None,
             flash: None,
             compare_marks: Vec::new(),
+            presentation: None,
             pages: HashMap::new(),
             errors: HashMap::new(),
             waiting_since: HashMap::new(),
@@ -1370,6 +1385,37 @@ impl DocView {
         self.fit = fit;
         self.goto = Some((self.current, 0.0));
         self.reset_coarse_state();
+    }
+
+    /// Full screen, as Acrobat's Full Screen Mode (#379, #1459): one page at a time (or one
+    /// spread, when two-page view was on: #1353), fitted to the screen, from the current page.
+    /// The display it replaces is kept for [`Self::leave_presentation`]. A no-op while presenting.
+    pub fn enter_presentation(&mut self) {
+        if self.presentation.is_some() {
+            return;
+        }
+        self.presentation =
+            Some(SavedDisplay { layout: self.layout, continuous: self.continuous, cover: self.cover, fit: self.fit, zoom: self.zoom });
+        self.continuous = false;
+        self.fit = Fit::Page;
+        self.selection = None;
+        self.goto = Some((self.current, 0.0));
+    }
+
+    /// Leave full screen: the display from before it comes back, at the page reached meanwhile.
+    pub fn leave_presentation(&mut self) {
+        let Some(saved) = self.presentation.take() else { return };
+        self.layout = saved.layout;
+        self.continuous = saved.continuous;
+        self.cover = saved.cover;
+        self.fit = saved.fit;
+        self.zoom = saved.zoom;
+        self.goto = Some((self.current, 0.0));
+    }
+
+    /// Whether the view is in full screen's one-page-at-a-time display.
+    pub fn presenting(&self) -> bool {
+        self.presentation.is_some()
     }
 
     /// Switch the base page display (Single or Two-page), leaving continuous scrolling as it is.
@@ -2300,6 +2346,16 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_s
     if key(Key::End) {
         view.go_to_page(usize::MAX);
     }
+    // Full screen: Space and Enter go forward a page and Backspace back, as in Acrobat (the
+    // arrows and Page Up / Page Down already turn pages where nothing scrolls, below).
+    if view.presentation.is_some() {
+        if key(Key::Space) || key(Key::Enter) {
+            view.step_page(true);
+        }
+        if key(Key::Backspace) {
+            view.step_page(false);
+        }
+    }
     // As in Acrobat: → / ← go to the next / previous page in every layout (#185), and so do
     // ⌘Page Down / ⌘Page Up, or plain Page Down / Page Up in single-page view.
     let command = ctx.input(|i| i.modifiers.command);
@@ -2469,6 +2525,22 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // Exclude the previous frame's scrollbar tracks from gesture activation.
     let navigation_rect = if view.viewport_screen.is_positive() { avail.intersect(view.viewport_screen) } else { avail };
     let navigation_enabled = app.dialog.is_none() && app.close_request.is_none() && !app.palette_open && ui.is_enabled() && ui.input(|i| i.focused);
+    // Full screen: a click on the document goes forward a page and a shift-click back, as in
+    // Acrobat, unless the click did something else (a link, a word selected). Decided below,
+    // once the pages have had the click.
+    let present_click = view.presentation.is_some()
+        && navigation_enabled
+        && ui.rect_contains_pointer(navigation_rect)
+        && ui.input(|i| i.pointer.primary_clicked())
+        && app.quick_tool == QuickTool::Select;
+    // Shift as held now, or as the click's own event carried it (a synthetic click).
+    let present_back = present_click
+        && ui.input(|i| {
+            i.modifiers.shift
+                || i.events.iter().any(|e| {
+                    matches!(e, egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: false, modifiers, .. } if modifiers.shift)
+                })
+        });
     if zoom_delta.is_finite() && zoom_delta > 0.0 && zoom_delta != 1.0 && navigation_enabled && ui.rect_contains_pointer(navigation_rect) {
         let z = view.zoom * zoom_delta;
         match ui.input(|i| i.pointer.hover_pos()) {
@@ -3953,6 +4025,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         Some(comments::CanvasAction::CopyImageFile(p, i)) => image_action = Some(crate::edit_text_ui::ImageAction::CopyFile(p, i)),
         None => {}
     }
+    // Full screen: the click turned the page unless it did something else first.
+    if present_click && clicked_link.is_none() && view.selection.is_none() && view.clicks < 2 {
+        view.step_page(!present_back);
+    }
     match clicked_link {
         Some(LinkTarget::Page(p, dest)) => view.go_to_dest(p, dest, info),
         Some(LinkTarget::Uri(u)) => app.request_document_url(&u, crate::LinkOrigin::Link),
@@ -4071,8 +4147,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if copy_selected {
         app.execute("edit.copy");
     }
-    // Read mode hides the tools (#2646).
-    if app.mode != crate::Mode::Read {
+    // Read mode hides the tools (#2646), and full screen is the page and nothing else (#1459);
+    // the quick tools come back with the window.
+    if app.mode != crate::Mode::Read && !app.full_screen {
         quick_bar(app, avail, ui);
     }
     if let Some((source, file, destination)) = remote_open {
