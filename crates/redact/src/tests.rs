@@ -842,6 +842,37 @@ fn a_structure_tree_too_large_to_walk_is_removed_whole() {
     assert!(!bytes.windows(14).any(|w| w == b"secret.example"), "the removed link can't be reached any more");
 }
 
+/// #2532 follow-up: an element reached only through the parent tree or the ID tree, not from
+/// the root's /K, still points at a removed annotation, and the root keeps it reachable in a full
+/// rewrite. Both trees are walked too, written in place or as their own objects.
+#[test]
+fn elements_listed_only_in_the_parent_tree_or_the_id_tree_lose_their_references() {
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 5 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] >>".to_vec(),
+        // 4: the removed link; 8: the removed comment
+        b"<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /URI /URI (https://secret.example) >> >>".to_vec(),
+        // 5: the root; its /K reaches only the empty document element 6. The parent tree is
+        // written in place, the ID tree's kid (9) as its own object.
+        b"<< /Type /StructTreeRoot /K 6 0 R /ParentTree << /Nums [0 7 0 R] >> /IDTree << /Kids [9 0 R] >> >>".to_vec(),
+        b"<< /Type /StructElem /S /Document /P 5 0 R >>".to_vec(),
+        // 7: a link element only the parent tree lists
+        b"<< /Type /StructElem /S /Link /P 6 0 R /K << /Type /OBJR /Obj 4 0 R >> /Alt (secret.example link) >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Text /Rect [0 0 10 10] /Contents (hushhush note) >>".to_vec(),
+        b"<< /Names [(note1) 10 0 R] >>".to_vec(),
+        // 10: an annotation element only the ID tree lists
+        b"<< /Type /StructElem /S /Annot /P 6 0 R /ID (note1) /K [<< /Type /OBJR /Obj 8 0 R >>] >>".to_vec(),
+    ];
+    let gone: std::collections::HashSet<ObjRef> = [ObjRef::new(4, 0), ObjRef::new(8, 0)].into();
+    let mut doc = pdf(objs);
+    assert_eq!(crate::tags::drop_object_refs(&mut doc, &gone).unwrap(), 2, "both references go");
+    let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
+    for secret in [&b"secret.example"[..], b"hushhush"] {
+        assert!(!bytes.windows(secret.len()).any(|w| w == secret), "{} survived the rewrite", String::from_utf8_lossy(secret));
+    }
+}
+
 /// Issue #1325: removing comments keeps the annotations that are not comments: the multimedia
 /// and print-production ones (Watermark, PrinterMark, TrapNet, Screen, Movie, RichMedia, 3D).
 #[test]

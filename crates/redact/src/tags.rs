@@ -210,6 +210,12 @@ fn refers_to(doc: &Document, o: &Object, gone: &HashSet<ObjRef>) -> bool {
         .is_some_and(|d| d.name(b"Type") == Some(b"OBJR") && d.get(b"Obj").and_then(Object::as_ref).is_some_and(|r| gone.contains(&r)))
 }
 
+/// What a number or name tree node leads on to: its `/Nums` or `/Names` array (keys and values
+/// alike; the walk ignores numbers and strings) and its `/Kids`.
+fn tree_node_entries(d: &Dict) -> Vec<Object> {
+    [&b"Nums"[..], b"Names", b"Kids"].iter().filter_map(|key| d.get(key).cloned()).collect()
+}
+
 /// Drop the structure tree's object references (OBJR) to `gone`, annotations removed from their
 /// pages (#2447). A tagged PDF's tree points at each link and comment it tags; left there, the
 /// reference keeps the annotation, its URL or text included, in a full rewrite after the page
@@ -236,12 +242,16 @@ pub(crate) fn drop_object_refs_within(doc: &mut Document, gone: &HashSet<ObjRef>
     else {
         return Ok(0);
     };
-    let mut todo: Vec<Object> = root.get(b"K").cloned().into_iter().collect();
+    // Elements are reached from the root's /K, and also from the parent tree and the ID tree:
+    // one listed only there (left behind by an editor, say) still points at its annotation.
+    let mut todo: Vec<Object> = [&b"K"[..], b"ParentTree", b"IDTree"].iter().filter_map(|key| root.get(key).cloned()).collect();
     let mut seen = HashSet::new();
     let mut hits: Vec<ObjRef> = Vec::new();
     while let Some(k) = todo.pop() {
         match k {
             Object::Array(a) => todo.extend(a),
+            // A number or name tree node written in place (§7.9.6, §7.9.7): its values and kids.
+            Object::Dict(d) => todo.extend(tree_node_entries(&d)),
             Object::Ref(r) => {
                 if !seen.insert(r) {
                     continue;
@@ -261,6 +271,8 @@ pub(crate) fn drop_object_refs_within(doc: &mut Document, gone: &HashSet<ObjRef>
                 }
                 let Some(d) = object.as_dict() else { continue };
                 if !d.contains(b"S") {
+                    // A parent tree or ID tree node: its values may be elements.
+                    todo.extend(tree_node_entries(d));
                     continue;
                 }
                 let kids: Vec<Object> = match d.get(b"K").map(|k| doc.resolve(k)) {
