@@ -117,7 +117,9 @@ let form = pdfcraft_xfa::layout_xml(template_xml)?;       // pages of items, for
   engine's own limits end it, and the document's scripts are turned off. Memory a script
   allocates is not capped (the same holds for AcroForm JavaScript).
 - **Static XFA forms** (`/NeedsRendering` absent, AcroForm fields present) keep their AcroForm;
-  only their data is read and written.
+  only their data is read and written. A form with no fields is also static when its `config`
+  packet says `<dynamicRender>forbidden</dynamicRender>` (Designer's static PDF form): its pages
+  are the form and are not laid out again (#3180). Without that, no fields means dynamic.
 - **Flattening and converting.** `strip` takes the XFA out of a document: the packets,
   `/NeedsRendering`, the layout mark, the overrides and the private keys on the fields. The
   engine calls it after flattening an XFA form's fields (so Adobe's viewers show the baked

@@ -30,6 +30,10 @@ const LOAD_STREAM_LIMIT: usize = 256 << 20;
 /// At most this many `/State` entries of a set-layer-visibility action are read.
 const MAX_LAYER_STATE: usize = 1024;
 
+/// Decoded bytes read from an XFA form's configuration packet (or a whole-XDP `/XFA` stream) to
+/// find `dynamicRender`. Designer's packets are a few kilobytes; a whole XDP can hold the template.
+const MAX_XFA_CONFIG_BYTES: usize = 16 << 20;
+
 /// File specifications retained from a remote-Go-To action are deliberately small.
 const MAX_REMOTE_FILE_SPEC_BYTES: usize = 4096;
 const MAX_REMOTE_DESTINATION_NAME_BYTES: usize = 1024;
@@ -87,8 +91,8 @@ pub enum Xfa {
     /// The pages and fields are ordinary PDF; the XFA packets describe the same form (and hold
     /// its data, which Acrobat shows in preference to the fields).
     Static,
-    /// The form is laid out from the XFA packets at open (`/NeedsRendering`, or no fields): the
-    /// PDF pages are only a placeholder.
+    /// The form is laid out from the XFA packets at open (`/NeedsRendering`, or no fields and a
+    /// configuration that doesn't forbid dynamic rendering): the PDF pages are only a placeholder.
     Dynamic,
 }
 
@@ -663,8 +667,12 @@ impl<'a> Inspector<'a> {
         }
         info.has_javascript |= info.fields.iter().any(|f| f.has_actions);
         let needs_rendering = catalog.get(b"NeedsRendering").ok().and_then(|o| self.resolve(o).as_bool().ok()).unwrap_or(false);
-        if catalog.get(b"AcroForm").ok().and_then(|o| self.dict(o)).is_some_and(|form| form.get(b"XFA").is_ok()) {
-            info.xfa = Some(if needs_rendering || info.fields.is_empty() { Xfa::Dynamic } else { Xfa::Static });
+        if let Some(xfa) = catalog.get(b"AcroForm").ok().and_then(|o| self.dict(o)).and_then(|form| form.get(b"XFA").ok()) {
+            // A form with no fields is taken to be laid out from its template, unless its
+            // configuration says it is a static form (#3180): Designer writes
+            // `<dynamicRender>forbidden</dynamicRender>` for one, whose pages are the form.
+            let static_form = self.xfa_dynamic_render(xfa).as_deref() == Some("forbidden");
+            info.xfa = Some(if needs_rendering || (info.fields.is_empty() && !static_form) { Xfa::Dynamic } else { Xfa::Static });
         }
         self.layers(catalog, &mut info.layers);
         info.layer_groups = self.layer_groups(catalog);
@@ -727,6 +735,28 @@ impl<'a> Inspector<'a> {
             }
             info.transitions.push(t);
         }
+    }
+
+    /// The value of `dynamicRender` in an XFA form's configuration packet (`config`, under
+    /// `acrobat/acrobat7`): `required` for a dynamic form, `forbidden` for a static one. `/XFA` is
+    /// either one stream holding the whole XDP or an array of packet names and streams (ISO
+    /// 32000-1 §12.7.8). Lenient: `None` when the packet is missing, unreadable or over
+    /// `MAX_XFA_CONFIG_BYTES` decoded, or has no such element.
+    fn xfa_dynamic_render(&self, xfa: &'a Object) -> Option<String> {
+        let stream = match self.resolve(xfa) {
+            Object::Array(items) => {
+                let at = items.iter().position(|o| matches!(self.resolve(o), Object::String(name, _) if name.as_slice() == b"config"))?;
+                self.resolve(items.get(at.checked_add(1)?)?)
+            }
+            whole => whole,
+        };
+        let stream = stream.as_stream().ok()?;
+        let bytes = if stream.dict.get(b"Filter").is_ok() {
+            stream.decompressed_content_with_limit(MAX_XFA_CONFIG_BYTES).ok()?
+        } else {
+            stream.content.get(..stream.content.len().min(MAX_XFA_CONFIG_BYTES))?.to_vec()
+        };
+        xml_element_text(&bytes, b"dynamicRender")
     }
 
     fn resolve(&self, o: &'a Object) -> &'a Object {
@@ -1612,6 +1642,33 @@ pub fn attachment_data(bytes: &[u8], password: Option<&str>, att: &Attachment) -
         }
     };
     catch_unwind(AssertUnwindSafe(run)).unwrap_or_else(|p| Err(format!("reading the attachment crashed: {}", crate::raster::panic_message(&p))))
+}
+
+/// The trimmed text of the first `<name>` element in `xml` (any namespace prefix), if it is plain
+/// text. A byte scan, not an XML parser: enough for one known element in an XFA packet, whose
+/// tags Designer writes with a line break before each `>`.
+fn xml_element_text(xml: &[u8], name: &[u8]) -> Option<String> {
+    let mut from = 0;
+    while let Some(lt) = xml.get(from..)?.iter().position(|&b| b == b'<').map(|i| i + from) {
+        from = lt + 1;
+        let tag = xml.get(from..)?;
+        // Skip a namespace prefix (`xfa:name`), then require the name followed by `>` or a space
+        // (a self-closing `<name/>` holds no text).
+        let local = tag
+            .iter()
+            .position(|&b| b == b':' || b == b'>' || b == b'/' || b.is_ascii_whitespace())
+            .map_or(tag, |i| if tag.get(i) == Some(&b':') { tag.get(i + 1..).unwrap_or_default() } else { tag });
+        let Some(after) = local.strip_prefix(name) else { continue };
+        if !matches!(after.first(), Some(b) if *b == b'>' || b.is_ascii_whitespace()) {
+            continue;
+        }
+        let close = after.iter().position(|&b| b == b'>')?;
+        let body = after.get(close + 1..)?;
+        let end = body.iter().position(|&b| b == b'<')?;
+        let text = std::str::from_utf8(body.get(..end)?).ok()?.trim();
+        return (!text.is_empty()).then(|| text.to_owned());
+    }
+    None
 }
 
 #[cfg(test)]
@@ -2614,6 +2671,49 @@ trailer << /Root 1 0 R >>
         // UTF-16BE, UTF-8 with BOM, invalid UTF-8 after a BOM (lossy, not dropped), BOM-less
         // raw UTF-8, PDFDocEncoding Latin-1, and a doubled BOM.
         assert_eq!(titles, ["第一章", "目录", "A\u{FFFD}B", "概述", "Café", "A"]);
+    }
+
+    #[test]
+    fn xml_element_text_reads_one_element_as_designer_writes_it() {
+        let text = |xml: &str| xml_element_text(xml.as_bytes(), b"dynamicRender");
+        assert_eq!(text("<acrobat7><dynamicRender\n>forbidden</dynamicRender\n></acrobat7>").as_deref(), Some("forbidden"));
+        assert_eq!(text("<a><xfa:dynamicRender> required </xfa:dynamicRender></a>").as_deref(), Some("required"));
+        // A longer name, a self-closing or empty element, and no element at all give nothing.
+        assert_eq!(text("<dynamicRenderX>forbidden</dynamicRenderX>"), None);
+        assert_eq!(text("<dynamicRender/>"), None);
+        assert_eq!(text("<dynamicRender></dynamicRender>"), None);
+        assert_eq!(text("<config><present/></config>"), None);
+        // Cut short anywhere: no panic, nothing read.
+        let whole = "<dynamicRender>forbidden</dynamicRender>";
+        for end in 0..whole.len() {
+            let _ = text(&whole[..end]);
+        }
+        assert_eq!(text("<dynamicRender>forbidden"), None);
+    }
+
+    /// #3180: an XFA form with no fields was always taken to be dynamic, so its pages were
+    /// replaced by a layout on open, even when its configuration says it is a static form.
+    #[test]
+    fn an_xfa_form_without_fields_is_static_when_its_config_forbids_dynamic_rendering() {
+        let xfa_of = |config: &str, catalog_extra: &str| {
+            let bodies = [
+                format!("<< /Type /Catalog /Pages 2 0 R {catalog_extra} /AcroForm << /Fields [] /XFA [(config) 4 0 R (template) 5 0 R] >> >>"),
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".to_string(),
+                "<< /Type /Page /Parent 2 0 R >>".to_string(),
+                format!("<< /Length {} >>\nstream\n{config}\nendstream", config.len()),
+                "<< /Length 11 >>\nstream\n<template/>\nendstream".to_string(),
+            ];
+            inspect(Arc::new(pdf_of(&bodies)), None).expect("opens").xfa
+        };
+        let config = |value: &str| {
+            format!(
+                r#"<config xmlns="http://www.xfa.org/schema/xci/3.0/"><acrobat><acrobat7><dynamicRender>{value}</dynamicRender></acrobat7></acrobat></config>"#
+            )
+        };
+        assert_eq!(xfa_of(&config("forbidden"), ""), Some(Xfa::Static));
+        assert_eq!(xfa_of(&config("required"), ""), Some(Xfa::Dynamic));
+        assert_eq!(xfa_of("<config/>", ""), Some(Xfa::Dynamic), "no field and no word from the config: dynamic, as before");
+        assert_eq!(xfa_of(&config("forbidden"), "/NeedsRendering true"), Some(Xfa::Dynamic), "/NeedsRendering still wins");
     }
 
     /// A file whose objects are `bodies` in order (object 1 first), with a cross-reference table.

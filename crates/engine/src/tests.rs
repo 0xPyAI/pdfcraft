@@ -3935,6 +3935,40 @@ fn dynamic_xfa_forms_open_with_the_values_and_rows_of_their_data() {
     assert!(!doc.dirty);
 }
 
+/// #3180: an XFA form with no fields whose configuration says `dynamicRender` is `forbidden` is a
+/// static form: its pages are the form. Opening it used to lay the template out into new pages
+/// and write them as a revision, so even a save with no change replaced the pages.
+#[test]
+fn an_xfa_form_without_fields_that_forbids_dynamic_rendering_keeps_its_pages() {
+    let config = r#"<config xmlns="http://www.xfa.org/schema/xci/3.0/"><acrobat><acrobat7><dynamicRender>forbidden</dynamicRender></acrobat7></acrobat></config>"#;
+    let template = pdfcraft_xfa::fixtures::template(1);
+    let with_config = template.replacen("<template ", &format!("{config}\n<template "), 1);
+    assert_ne!(with_config, template, "the config packet went in");
+    // The fixture shell without /NeedsRendering (blanked in place, so the offsets stay right).
+    let shell = |xdp: &str| {
+        let bytes = pdfcraft_xfa::fixtures::shell(xdp);
+        let at = bytes.windows(20).position(|w| w == b"/NeedsRendering true").expect("the fixture sets it");
+        let mut bytes = bytes;
+        bytes.splice(at..at + 20, *b"                    ");
+        Arc::new(bytes)
+    };
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let original = shell(&with_config);
+    let id = s.open("static.pdf", None, original.clone(), None).expect("opens");
+    let doc = s.get(id).unwrap();
+    assert_eq!(doc.info.xfa, Some(pdfcraft_render::Xfa::Static));
+    assert!(doc.xfa.is_none(), "nothing was laid out");
+    assert_eq!(doc.bytes[..], original[..], "no revision was appended on open");
+    assert_eq!(doc.info.pages.len(), 1);
+    // The same form without the config is still taken to be dynamic: laid out from the template
+    // into an appended revision.
+    let plain = shell(&template);
+    let id = s.open("dynamic.pdf", None, plain.clone(), None).expect("opens");
+    let doc = s.get(id).unwrap();
+    assert!(doc.xfa.is_some(), "laid out from the template");
+    assert!(doc.bytes.len() > plain.len() && doc.bytes.starts_with(&plain[..]), "the layout is a revision");
+}
+
 #[test]
 fn static_xfa_forms_take_their_values_from_the_datasets_and_write_them_back() {
     let original = Arc::new(pdfcraft_xfa::fixtures::static_shell("<form1><page1><name>Ada</name><agree>1</agree></page1></form1>"));
