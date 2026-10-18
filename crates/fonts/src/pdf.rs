@@ -839,6 +839,11 @@ impl Metrics {
     fn has_glyph(&self, code: u32) -> bool {
         if self.composite {
             let cid = self.cid(code);
+            // CID 0 is `.notdef` (an unmapped code lands there too), whatever ToUnicode says: Word
+            // maps it to a space and gives it a width, and typing with it draws boxes (#3223).
+            if cid == 0 {
+                return false;
+            }
             // A CID /W leaves out takes /DW, and Skia (Chrome) leaves out every CID of that width: for
             // those, only the subset's program says whether the glyph is there.
             return self.cid_widths.contains_key(&cid)
@@ -1456,6 +1461,34 @@ mod tests {
         assert_eq!(m.encode("Z"), None);
     }
 
+    /// Word's Type 0 subsets map CID 0 as well as the real space glyph to U+0020 and give CID 0 a
+    /// width; CID 0 is `.notdef`, so a typed space takes the real one (#3223).
+    #[test]
+    fn composite_fonts_never_encode_with_cid_0() {
+        let mut doc = Document::new_empty();
+        let cmap = b"/CIDInit /ProcSet findresource begin 1 begincodespacerange <0000> <FFFF> endcodespacerange \
+            1 beginbfrange <0000> <0002> [<0020> <004D> <00E1>] endbfrange \
+            1 beginbfrange <0005> <0007> [<0065> <0072> <0020>] endbfrange end";
+        let tu = doc.add(Object::Stream(Stream::from_raw(Dict::new(), cmap.to_vec())));
+        let mut desc = Dict::new();
+        desc.set(b"Subtype".to_vec(), Object::name("CIDFontType2"));
+        let widths = [889, 444, 389, 278, 444, 333, 250].map(Object::Int).to_vec();
+        desc.set(b"W".to_vec(), Object::Array(vec![Object::Int(0), Object::Array(vec![Object::Int(778)]), Object::Int(1), Object::Array(widths)]));
+        let f = font(
+            &mut doc,
+            vec![
+                ("Subtype", Object::name("Type0")),
+                ("BaseFont", Object::name("BCDEEE+TimesNewRomanPSMT")),
+                ("Encoding", Object::name("Identity-H")),
+                ("DescendantFonts", Object::Array(vec![Object::Dict(desc)])),
+                ("ToUnicode", Object::Ref(tu)),
+            ],
+        );
+        let m = Metrics::from_dict(&doc, &f);
+        assert_eq!(m.encode("Me er").as_deref(), Some(&[0, 1, 0, 5, 0, 7, 0, 5, 0, 6][..]));
+        assert_eq!(m.decode(&[0, 1, 0, 7, 0, 2]), "M á");
+    }
+
     /// Chrome's subsets leave the glyphs of `/DW` width out of `/W` (#1443): "s" (CID 0x56) is
     /// still in the font, but nothing is when the font gives no default width to point at.
     #[test]
@@ -1754,7 +1787,8 @@ mod tests {
                 assert_eq!(got, expected.get(&code).cloned(), "code {code:#06x} in {cmap}");
             }
             let mut reverse: HashMap<char, u32> = HashMap::new();
-            for (&code, text) in &expected {
+            // Code 0 is CID 0, `.notdef`, which no character is encoded with.
+            for (&code, text) in expected.iter().filter(|&(&code, _)| code != 0) {
                 if let Some(c) = only_char(text) {
                     keep(&mut reverse, c, code);
                 }
