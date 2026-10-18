@@ -154,7 +154,6 @@ pub(crate) fn parse_inner<'a>(
         && notdef_ranges.is_empty()
         && bf_entries.is_empty()
         && base.is_none()
-        && metadata.character_collection.is_none()
     {
         return None;
     }

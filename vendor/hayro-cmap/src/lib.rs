@@ -1126,6 +1126,18 @@ endbfchar
     }
 
     #[test]
+    fn truncated_stream_with_only_metadata_reports_failure() {
+        // Character-collection metadata alone is not a usable CMap: an empty
+        // metadata-only map would block the caller's fallback paths, so a
+        // truncated stream with no mappings must report failure here too.
+        assert!(CMap::parse(
+            b"/Registry (Adobe) /Ordering (Japan1) /Supplement 0 <00",
+            |_| None
+        )
+        .is_none());
+    }
+
+    #[test]
     fn bad_bfchar_code_keeps_later_entries_aligned() {
         // The malformed 5-byte code still has a destination object; both
         // must be skipped or every later pair shifts by one object.
