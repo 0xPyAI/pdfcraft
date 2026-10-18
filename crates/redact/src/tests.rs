@@ -79,6 +79,30 @@ fn glyphs_under_a_mark_go_and_the_rest_stays_put() {
     assert!(!content(&doc, 0).contains("1234"));
 }
 
+/// #2130: a font with no /Widths is drawn with its embedded program's advances. Measured with a
+/// guess from its name instead (Courier's 600 units for "Mono"), the end of the line seemed to
+/// lie past a mark that covers all of it on screen, and was kept.
+#[test]
+fn a_whole_line_under_a_mark_goes_even_without_widths() {
+    let text = b"illicit little lilies";
+    let font = "<< /Type /Font /Subtype /TrueType /BaseFont /HouseMono /Encoding /WinAnsiEncoding /FontDescriptor 6 0 R >>";
+    let mut doc = pdf(vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_vec(),
+        stream("", [b"BT /F1 10 Tf 10 100 Td (".as_slice(), text, b") Tj ET"].concat()),
+        font.as_bytes().to_vec(),
+        b"<< /Type /FontDescriptor /FontName /HouseMono /Flags 32 /Ascent 900 /Descent -200 /FontFile2 7 0 R >>".to_vec(),
+        stream(&format!("/Length1 {}", pdfcraft_fonts::INTER_REGULAR.len()), pdfcraft_fonts::INTER_REGULAR),
+    ]);
+    // Inter draws these 21 narrow glyphs in about 60 pt; Courier's guess would need 126.
+    let line = [5.0, 95.0, 90.0, 112.0];
+    mark(&mut doc, 0, &[line], "");
+    let r = apply(&mut doc, None).unwrap();
+    assert_eq!(r.glyphs, text.len(), "every glyph of the line goes");
+    assert_eq!(under(&mut doc, 0, &[[0.0, 0.0, 300.0, 300.0]]), 0, "{}", content(&doc, 0));
+}
+
 #[test]
 fn added_text_parameters_do_not_keep_redacted_text() {
     // An Edit ▸ Add content item: its stream dictionary keeps the source text under /PCAdded.
