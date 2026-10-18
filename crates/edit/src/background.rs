@@ -51,7 +51,9 @@ pub fn page_background(doc: &Document, page: usize) -> Result<Option<Rgb>, EditE
     let mut saved: Vec<State> = Vec::new();
     let mut lost_saves = 0usize;
     // The path being built: its rectangles in page space, and whether it has anything else.
-    let mut rects: Vec<[f64; 4]> = Vec::new();
+    // Each rectangle of the current path: its box on the page, and whether it winds
+    // counterclockwise there (its width and height and the CTM's determinant agree in sign).
+    let mut rects: Vec<([f64; 4], bool)> = Vec::new();
     let mut curved = false;
     let mut clip_pending = false;
     for op in &ops {
@@ -94,7 +96,10 @@ pub fn page_background(doc: &Document, page: usize) -> Result<Option<Rgb>, EditE
                 }
             }
             b"re" => match op.nums::<4>() {
-                Some([x, y, w, h]) => rects.push(bbox(&st.ctm, [x, y, x + w, y + h])),
+                Some([x, y, w, h]) => {
+                    let [a, b, c, d, _, _] = st.ctm.0;
+                    rects.push((bbox(&st.ctm, [x, y, x + w, y + h]), (w * h) * (a * d - b * c) > 0.0));
+                }
                 None => curved = true,
             },
             b"m" | b"l" | b"c" | b"v" | b"y" | b"h" => curved = true,
@@ -102,7 +107,7 @@ pub fn page_background(doc: &Document, page: usize) -> Result<Option<Rgb>, EditE
             b"n" => {
                 if clip_pending {
                     st.clip = match (st.clip, rects.as_slice(), curved) {
-                        (Some(c), [r], false) => Some(intersect(c, *r)),
+                        (Some(c), [(r, _)], false) => Some(intersect(c, *r)),
                         _ => None,
                     };
                 }
@@ -110,7 +115,16 @@ pub fn page_background(doc: &Document, page: usize) -> Result<Option<Rgb>, EditE
             }
             b"f" | b"F" | b"f*" | b"B" | b"B*" => {
                 let opaque = st.plain && st.alpha >= 0.999;
-                let covers = !curved && st.clip.is_some_and(|c| covers(&c, &crop)) && rects.iter().any(|r| covers(r, &crop));
+                // A second rectangle can cut a hole in the one that covers the page: under the
+                // even-odd rule any second one, under nonzero one wound the other way (a
+                // frame-style page border).
+                let even_odd = matches!(op.op.as_slice(), b"f*" | b"B*");
+                let solid = match rects.as_slice() {
+                    [_] => true,
+                    [(_, first), rest @ ..] => !even_odd && rest.iter().all(|(_, ccw)| ccw == first),
+                    [] => false,
+                };
+                let covers = !curved && solid && st.clip.is_some_and(|c| covers(&c, &crop)) && rects.iter().any(|(r, _)| covers(r, &crop));
                 return Ok(st.fill.filter(|_| opaque && covers && !clip_pending).map(|c| c.map(|v| v.clamp(0.0, 1.0))));
             }
             // Anything else painted first: no page background.

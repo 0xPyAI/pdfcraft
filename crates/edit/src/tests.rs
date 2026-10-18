@@ -5264,6 +5264,12 @@ fn a_page_painted_first_with_a_full_page_fill_has_that_background() {
     assert_eq!(page("1 0 0 rg 0 0 300 800 re f", ""), None, "half the page");
     assert_eq!(page("1 0 0 rg 0 0 300 800 re 300 0 300 800 re f", ""), None, "two halves are not one covering rectangle");
     assert_eq!(page("1 0 0 rg 0 0 300 800 re 0 0 600 800 re f", ""), Some([1.0, 0.0, 0.0]), "one of the rectangles covers it");
+    // #2994 review: a second rectangle that cuts a hole: any one under even-odd, one wound the
+    // other way under nonzero.
+    assert_eq!(page("1 0 0 rg 0 0 600 800 re 100 100 200 200 re f*", ""), None, "even-odd hole");
+    assert_eq!(page("1 0 0 rg 0 0 600 800 re 300 100 -200 200 re f", ""), None, "nonzero, reversed inner rectangle");
+    assert_eq!(page("1 0 0 rg 0 0 600 800 re 100 100 200 200 re f", ""), Some([1.0, 0.0, 0.0]), "nonzero, same winding: no hole");
+    assert_eq!(page("1 0 0 rg q -1 0 0 1 600 0 cm 0 0 600 800 re Q 100 100 200 200 re f", ""), None, "reversed by a mirroring cm");
     assert_eq!(page("/Half gs 1 0 0 rg 0 0 600 800 re f", gs), None, "translucent");
     assert_eq!(page("/Mul gs 1 0 0 rg 0 0 600 800 re f", gs), None, "blended");
     assert_eq!(page("0 0 100 100 re W n 1 0 0 rg 0 0 600 800 re f", ""), None, "clipped to a corner");
