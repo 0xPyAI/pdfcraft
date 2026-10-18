@@ -1661,7 +1661,15 @@ fn source_encodes(metrics: &Metrics, text: &str) -> bool {
     text.split(' ').all(|word| metrics.encode(word).is_some())
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How often [`source_space`] ran on this thread, for the test that pins it out of per-character loops.
+    pub(crate) static SOURCE_SPACE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn source_space(doc: &Document, fonts: &Dict, metrics: &Metrics) -> f64 {
+    #[cfg(test)]
+    SOURCE_SPACE_CALLS.with(|c| c.set(c.get().saturating_add(1)));
     let width = |m: &Metrics| m.encode(" ").map(|b| m.codes(&b).iter().map(|(c, _)| m.width(*c)).sum::<f64>());
     if let Some(w) = width(metrics) {
         return w;
