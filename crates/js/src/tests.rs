@@ -1132,3 +1132,37 @@ mod session {
         assert!(o.abandoned || o.error.as_deref().is_some_and(|e| e.contains("too long")), "{o:?}");
     }
 }
+
+#[test]
+fn shared_field_snapshots_isolate_writes_errors_and_script_globals() {
+    let initial = Arc::new(fields());
+    let before = initial.as_ref().clone();
+    let event = Event::field("Calculate", "total", "");
+    let write = run_shared(
+        "var scriptLocal = 1; getField('qty').value = 9; getField('agree').checkThisBox(0, true); event.value = getField('qty').value;",
+        &event,
+        &doc(),
+        Arc::clone(&initial),
+        &[],
+        Limits::default(),
+    );
+    assert_eq!(write.error, None);
+    assert_eq!(write.value, "9");
+    assert_eq!(write.changed.iter().find(|f| f.name == "qty").unwrap().value, ["9"]);
+    assert_eq!(write.changed.iter().find(|f| f.name == "agree").unwrap().value, ["Yes"]);
+    assert_eq!(*initial, before, "script writes cannot mutate the caller's snapshot");
+    let failed = run_shared("getField('qty').value = 99; throw new Error('rejected');", &event, &doc(), Arc::clone(&initial), &[], Limits::default());
+    assert!(failed.error.is_some());
+    assert_eq!(*initial, before, "an exception cannot leak partial writes into the initial snapshot");
+    let read = run_shared(
+        "event.value = typeof scriptLocal + ':' + getField('qty').value + ':' + getField('agree').isBoxChecked(0);",
+        &event,
+        &doc(),
+        initial,
+        &[],
+        Limits::default(),
+    );
+    assert_eq!(read.error, None);
+    assert_eq!(read.value, "undefined:4:false");
+    assert!(read.changed.is_empty());
+}

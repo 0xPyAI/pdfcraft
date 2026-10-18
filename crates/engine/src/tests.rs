@@ -6106,3 +6106,185 @@ fn undo_never_makes_an_unsaved_document_clean() {
     s.undo(new).unwrap();
     assert!(!s.get(new).unwrap().dirty, "once saved, undo back to the saved state is clean");
 }
+/// Reproducible workload with 3,129 fields and 190 ordered custom calculations.
+/// No external PDF assets are needed; only in-memory contributor-original objects.
+fn synthetic_acroform(field_count: usize, calculation_count: usize) -> Vec<u8> {
+    use pdfcraft_cos::{Dict, Object, PdfString};
+    let mut doc = pdfcraft_cos::Document::open(Arc::new(fixture(6))).unwrap();
+    let mut refs = Vec::new();
+    let mut order = Vec::new();
+    for i in 0..field_count {
+        let name = match i {
+            0 => "ranks".to_string(),
+            1 => "trained".to_string(),
+            2 => "bonus".to_string(),
+            _ => format!("field{i}"),
+        };
+        let mut d = Dict::new();
+        d.set(b"Type".to_vec(), Object::name("Annot"));
+        d.set(b"Subtype".to_vec(), Object::name("Widget"));
+        d.set(b"FT".to_vec(), Object::name(if i == 1 { "Btn" } else { "Tx" }));
+        d.set(b"T".to_vec(), PdfString::text(&name));
+        d.set(b"V".to_vec(), if i == 1 { Object::name("Off") } else { Object::String(PdfString::text("0")) });
+        d.set(b"Rect".to_vec(), Object::Array([20, 20, 100, 40].map(Object::Int).to_vec()));
+        d.set(b"P".to_vec(), Object::Ref(pdfcraft_cos::ObjRef::new(4, 0)));
+        if (2..calculation_count + 2).contains(&i) {
+            let js = if i == 2 {
+                "var r = Number(getField('ranks').value); event.value = r + (r > 0 && getField('trained').isBoxChecked(0) ? 3 : 0);".to_string()
+            } else {
+                format!("event.value = Number(getField('{}').value) + 1;", if i == 3 { "bonus".to_string() } else { format!("field{}", i - 1) })
+            };
+            let mut a = Dict::new();
+            a.set(b"S".to_vec(), Object::name("JavaScript"));
+            a.set(b"JS".to_vec(), PdfString::text(&js));
+            let mut aa = Dict::new();
+            aa.set(b"C".to_vec(), Object::Dict(a));
+            d.set(b"AA".to_vec(), Object::Dict(aa));
+        }
+        let r = doc.add(Object::Dict(d));
+        refs.push(Object::Ref(r));
+        if (2..calculation_count + 2).contains(&i) {
+            order.push(Object::Ref(r));
+        }
+    }
+    doc.update_dict(pdfcraft_cos::ObjRef::new(4, 0), |d| d.set(b"Annots".to_vec(), Object::Array(refs.clone()))).unwrap();
+    let mut af = Dict::new();
+    af.set(b"Fields".to_vec(), Object::Array(refs));
+    af.set(b"CO".to_vec(), Object::Array(order));
+    doc.update_dict(doc.root().unwrap(), |d| d.set(b"AcroForm".to_vec(), Object::Dict(af))).unwrap();
+    pdfcraft_cos::write_incremental(&doc, &Default::default()).unwrap()
+}
+
+#[test]
+#[ignore = "manual performance measurement: 3,129 fields, 190 scripts"]
+fn acroform_interaction_benchmark() {
+    let bytes = Arc::new(synthetic_acroform(3129, 190));
+    // Optional local export for comparing CLI build profiles. Never overwrite an input.
+    if let Some(path) = std::env::var_os("PDFCRAFT_BENCH_EXPORT") {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path).unwrap();
+        file.write_all(&bytes).unwrap();
+    }
+    let mut s = Session::new();
+    let id = s.open("synthetic-large-form.pdf", None, bytes, None).unwrap();
+    let value = |s: &Session, name: &str| s.get(id).unwrap().form.iter().find(|f| f.name == name).unwrap().value.clone();
+    for (name, v) in [
+        ("ranks", FieldValue::Text("1".into())),
+        ("trained", FieldValue::Check(true)),
+        ("ranks", FieldValue::Text("2".into())),
+        ("trained", FieldValue::Check(false)),
+        ("ranks", FieldValue::Text("0".into())),
+    ] {
+        let started = std::time::Instant::now();
+        s.apply(id, Edit::SetFieldValue { name: name.into(), value: v }).unwrap();
+        eprintln!("BENCH {name}: {:.3} ms", started.elapsed().as_secs_f64() * 1000.0);
+        assert!(s.take_js_output(id).errors.is_empty());
+    }
+    assert_eq!(value(&s, "bonus"), ["0"]);
+    assert_eq!(value(&s, "field191"), ["189"]);
+    assert_eq!(value(&s, "field3128"), ["0"]);
+}
+
+#[test]
+fn checkbox_and_rank_changes_recalculate_ordered_dependents() {
+    let mut s = Session::new();
+    let id = s.open("skills.pdf", None, Arc::new(synthetic_acroform(8, 4)), None).unwrap();
+    for (name, input, bonus) in [
+        ("trained", FieldValue::Check(true), "0"),
+        ("ranks", FieldValue::Text("1".into()), "4"),
+        ("trained", FieldValue::Check(false), "1"),
+        ("ranks", FieldValue::Text("2".into()), "2"),
+        ("trained", FieldValue::Check(true), "5"),
+        ("ranks", FieldValue::Text("0".into()), "0"),
+    ] {
+        s.apply(id, Edit::SetFieldValue { name: name.into(), value: input }).unwrap();
+        let fields = &s.get(id).unwrap().form;
+        let value = |name: &str| fields.iter().find(|f| f.name == name).unwrap().value.clone();
+        assert_eq!(value("bonus"), [bonus]);
+        assert_eq!(value("field5"), [(bonus.parse::<u32>().unwrap() + 3).to_string()]);
+        assert_eq!(value("field7"), ["0"]);
+        assert!(s.take_js_output(id).errors.is_empty());
+    }
+    s.undo(id).unwrap();
+    assert_eq!(s.get(id).unwrap().form.iter().find(|f| f.name == "bonus").unwrap().value, ["5"]);
+    let saved = s.save_bytes(id).unwrap();
+    let reopened = s.open("saved.pdf", None, saved, None).unwrap();
+    assert_eq!(s.get(reopened).unwrap().form.iter().find(|f| f.name == "bonus").unwrap().value, ["5"]);
+    let appearance = |s: &Session| {
+        let doc = s.get(id).unwrap();
+        let widget = doc.form.iter().find(|f| f.name == "bonus").unwrap().widgets.first().unwrap().obj;
+        doc.editor.as_ref().unwrap().cos.get(widget).as_dict().unwrap().get(b"AP").cloned()
+    };
+    let before = appearance(&s);
+    assert!(before.is_some());
+    s.apply(id, Edit::SetFieldValue { name: "field7".into(), value: FieldValue::Text("9".into()) }).unwrap();
+    assert_eq!(appearance(&s), before, "unchanged calculated values keep their appearance streams");
+}
+
+#[test]
+fn dynamic_calculation_reads_and_side_effects_reach_later_fields() {
+    use pdfcraft_cos::{Dict, Object, PdfString};
+    let mut cos = pdfcraft_cos::Document::open(Arc::new(synthetic_acroform(8, 4))).unwrap();
+    let fields = pdfcraft_forms::fields(&cos);
+    let bonus = fields.iter().find(|f| f.name == "bonus").unwrap();
+    let selector = fields.iter().find(|f| f.name == "field7").unwrap();
+    cos.update_dict(selector.obj, |d| d.set(b"V".to_vec(), PdfString::text("ranks"))).unwrap();
+    let mut a = Dict::new();
+    a.set(b"S".to_vec(), Object::name("JavaScript"));
+    a.set(b"JS".to_vec(), PdfString::text(
+        "var key = getField('field7').value; var v = Number(getField(key).value); getField('field6').value = v * 2; getField('field6').readonly = true; event.value = v + 1;"
+    ));
+    let mut aa = Dict::new();
+    aa.set(b"C".to_vec(), Object::Dict(a));
+    cos.update_dict(bonus.obj, |d| d.set(b"AA".to_vec(), Object::Dict(aa))).unwrap();
+    let bytes = pdfcraft_cos::write_incremental(&cos, &Default::default()).unwrap();
+    let mut s = Session::new();
+    let id = s.open("dynamic.pdf", None, Arc::new(bytes), None).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "ranks".into(), value: FieldValue::Text("4".into()) }).unwrap();
+    let fields = &s.get(id).unwrap().form;
+    let field = |name: &str| fields.iter().find(|f| f.name == name).unwrap();
+    assert_eq!(field("bonus").value, ["5"]);
+    assert_eq!(field("field5").value, ["8"], "later calculations see the ordered result");
+    assert_eq!(field("field6").value, ["8"], "side-effect value applied");
+    assert!(field("field6").read_only(), "side-effect property applied");
+    assert_eq!(field("field7").value, ["ranks"]);
+    assert!(s.take_js_output(id).errors.is_empty());
+}
+
+#[test]
+fn scripted_display_changes_survive_warm_cache_and_new_edit() {
+    use pdfcraft_forms::{FieldEvent, Scripts};
+    let mut cos = pdfcraft_cos::Document::open(Arc::new(synthetic_acroform(2, 0))).unwrap();
+    for (display, flags) in [(1, 6), (3, 36), (2, 0), (0, 4)] {
+        let fields = pdfcraft_forms::fields(&cos);
+        let target = fields.iter().find(|f| f.name == "ranks").unwrap();
+        let other = fields.iter().find(|f| f.name == "trained").unwrap();
+        let old_display = crate::js::field_state(&cos, other).display;
+        let mut runner = crate::js::JsRunner::new(&cos, "synthetic.pdf");
+        // Populate the display cache before a script writes the same field.
+        let warm = runner.run(FieldEvent::Calculate, "event.value = getField('trained').display;", target, "", &fields);
+        assert_eq!(warm.value, old_display.to_string());
+        let result = runner.run(
+            FieldEvent::Calculate,
+            &format!("getField('trained').display = {display}; event.value = getField('trained').display;"),
+            target,
+            "",
+            &fields,
+        );
+        assert_eq!(result.value, display.to_string());
+        assert_eq!(result.changes.len(), 1);
+        assert_eq!(result.changes.first().unwrap().display, Some(display));
+        pdfcraft_forms::apply_script_changes(&mut cos, &result.changes, &mut pdfcraft_forms::NoScripts).unwrap();
+        assert_eq!(cos.get(other.widgets.first().unwrap().obj).as_dict().unwrap().int(b"F").unwrap() & 38, flags);
+        // Within an edit the original implementation reads an immutable pre-edit COS snapshot.
+        let same_edit = runner.run(FieldEvent::Calculate, "event.value = getField('trained').display;", target, "", &fields);
+        assert_eq!(same_edit.value, old_display.to_string());
+        // The next edit must rebuild its cache from the newly written annotation flags.
+        let mut next = crate::js::JsRunner::new(&cos, "synthetic.pdf");
+        let read = next.run(FieldEvent::Calculate, "event.value = getField('trained').display;", target, "", &pdfcraft_forms::fields(&cos));
+        assert_eq!(read.value, display.to_string());
+        assert!(read.changes.is_empty());
+        assert!(runner.output.errors.is_empty());
+        assert!(next.output.errors.is_empty());
+    }
+}

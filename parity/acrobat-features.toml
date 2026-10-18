@@ -4596,7 +4596,7 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.field.properties"]
 tools = ["form_set_props", "form_fill"]
-evidence = ["crates/forms/src/tests.rs::formats_validation_and_calculations_run_like_acrobat"]
+evidence = ["crates/forms/src/tests.rs::formats_validation_and_calculations_run_like_acrobat", "crates/engine/src/tests.rs::checkbox_and_rank_changes_recalculate_ordered_dependents", "crates/engine/src/tests.rs::dynamic_calculation_reads_and_side_effects_reach_later_fields"]
 notes = "/CO order, then other calculated fields; recalculated after every fill and Clear form"
 
 [[feature]]
