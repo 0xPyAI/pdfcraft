@@ -1,8 +1,8 @@
 //! What content editing and redaction need from a PDF font: how to split a string into character
 //! codes, each code's advance width, the glyph height (ascent, descent), and what each code means
 //! (Unicode) — and back, which text the font can show. Widths come from the font dictionary
-//! (`/Widths`, `/W`, `/DW`, `/MissingWidth`); a standard-14 font with no `/Widths` uses the exact
-//! published metrics ([`crate::Std14`]).
+//! (`/Widths`, `/W`, `/DW`, `/MissingWidth`); a simple font with no `/Widths` uses its embedded
+//! sfnt program's advances, else the exact published standard-14 metrics ([`crate::Std14`]).
 //!
 //! Meanings come from `/ToUnicode`, else the encoding (`/Encoding` base and `/Differences` glyph
 //! names, ISO 32000-2 Annex D). A code may deliberately have **no** meaning: where the font's own
@@ -164,6 +164,44 @@ fn cids_with_outlines(doc: &Document, font: &Dict) -> Vec<u64> {
             )
         }
         Some(_) => Vec::new(),
+    }
+}
+
+/// A simple font with no `/Widths` is drawn (and found by text search) with its embedded
+/// program's own advances, so measure with them too; a standard-14 guess from the name can be
+/// wider and leave the end of a line outside a redaction mark (#2130). The glyph is looked up
+/// the way the renderer does: the encoding's character in the Unicode cmap, else the code itself
+/// (as in a symbolic cmap), else `.notdef`. Only sfnt programs are read; others keep the guess.
+fn embedded_widths(doc: &Document, font: &Dict, m: &mut Metrics) {
+    use skrifa::instance::{LocationRef, Size};
+    use skrifa::{GlyphId, MetadataProvider as _, raw::TableProvider as _};
+    let Some(descriptor) = dict(doc, font.get(b"FontDescriptor")) else { return };
+    for key in [b"FontFile2".as_slice(), b"FontFile3".as_slice()] {
+        let Some(object) = descriptor.get(key) else { continue };
+        let object = doc.resolve(object);
+        let Object::Stream(stream) = object.as_ref() else { continue };
+        let Ok(bytes) = stream.decoded_within(16 << 20) else { continue };
+        let Ok(face) = skrifa::FontRef::from_index(&bytes, 0) else { continue };
+        let upem = f64::from(face.metrics(Size::unscaled(), LocationRef::default()).units_per_em);
+        if upem == 0.0 {
+            continue;
+        }
+        let advances = face.glyph_metrics(Size::unscaled(), LocationRef::default());
+        let (charmap, cmap) = (face.charmap(), face.cmap().ok());
+        let found = |g: Option<GlyphId>| g.filter(|g| *g != GlyphId::NOTDEF);
+        m.widths = (0..=255u32)
+            .map(|code| {
+                let glyph = found(m.unicode.encoding.get(&code).and_then(|t| only_char(t)).and_then(|c| charmap.map(c)))
+                    .or_else(|| [0, 0xF000, 0xF100, 0xF200].into_iter().find_map(|o| found(cmap.as_ref()?.map_codepoint(code + o))));
+                // A subset holds only the glyphs it draws: 0 keeps `has_glyph` false for the rest.
+                match glyph {
+                    None if m.subset => 0.0,
+                    _ => advances.advance_width(glyph.unwrap_or(GlyphId::NOTDEF)).map_or(0.0, |w| f64::from(w) * 1000.0 / upem),
+                }
+            })
+            .collect();
+        m.first = 0;
+        return;
     }
 }
 
@@ -607,6 +645,9 @@ impl Metrics {
             Codes::Ranges(r) => r.last().map_or(2, |x| x.0),
         };
         m.unicode = unicode_map(doc, font, m.composite);
+        if m.std14.is_some() {
+            embedded_widths(doc, font, &mut m);
+        }
         let mut reverse = HashMap::new();
         for (&code, text) in m.unicode.explicit.iter().map(|(c, (_, t))| (c, t)).chain(m.unicode.encoding.iter()) {
             if let Some(ch) = only_char(text)
@@ -1216,6 +1257,37 @@ mod tests {
         let broken = font(&mut doc, vec![("FontDescriptor", Object::Dict(descriptor))]);
         assert!(embedded_sfnt(&doc, &broken).is_none());
         assert!(embedded_sfnt(&doc, &Dict::new()).is_none());
+    }
+
+    /// #2130: with no `/Widths`, an embedded program's advances win over a guess from the name
+    /// ("Mono" would mean Courier, 600 units for every glyph).
+    #[test]
+    fn a_font_without_widths_measures_with_its_embedded_program() {
+        use pdfcraft_cos::Stream;
+        use skrifa::MetadataProvider as _;
+        let mut doc = Document::new_empty();
+        let bytes = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+        let face = skrifa::FontRef::new(bytes).unwrap();
+        let (size, location) = (skrifa::instance::Size::unscaled(), skrifa::instance::LocationRef::default());
+        let upem = f64::from(face.metrics(size, location).units_per_em);
+        let advance = |c: char| f64::from(face.glyph_metrics(size, location).advance_width(face.charmap().map(c).unwrap()).unwrap()) / upem;
+        let program = doc.add(Object::Stream(Stream::flate(Dict::new(), bytes)));
+        let mut descriptor = Dict::new();
+        descriptor.set(b"FontFile2".to_vec(), Object::Ref(program));
+        let f = font(
+            &mut doc,
+            vec![
+                ("Subtype", Object::name("TrueType")),
+                ("BaseFont", Object::name("HouseMono")),
+                ("Encoding", Object::name("WinAnsiEncoding")),
+                ("FontDescriptor", Object::Dict(descriptor)),
+            ],
+        );
+        let m = Metrics::from_dict(&doc, &f);
+        for c in ['i', 'l', 'W', ' '] {
+            assert!((m.width(u32::from(c)) - advance(c)).abs() < 1e-9, "{c}: {} vs {}", m.width(u32::from(c)), advance(c));
+        }
+        assert!(m.width(u32::from('i')) < 0.4, "not Courier's 0.6");
     }
 
     #[test]
