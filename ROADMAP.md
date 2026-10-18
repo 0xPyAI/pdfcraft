@@ -567,3 +567,5 @@ Newest first: the date, what moved, and the new overall estimate.
 - **2026-10-13 (M7):** Edit a PDF ▸ Add content: Header and footer, Watermark and Background open an Add / Update / Remove menu (Update and Remove enabled only when the document has that mark), as Acrobat's Watermark control does. The catalogue gains `ToolItem::actions`, so any tool can list more commands (#1192).
 
 - **2026-10-18 (M8, #1350):** Published the history-preserving integration; simplified the inherited-form resource guard for Rust 1.96 Clippy. Formatting, 64 redaction tests, scoped Clippy, layering, assets and the scoped wasm check pass locally. CI remains pending; estimates unchanged.
+
+- **2026-10-18 (renderer, hayro patches 19/35):** A mesh shading (types 4–7) is sampled over its own triangles instead of the whole path: a BricsCAD plan with 310 one-triangle `sh` fills took 2 s per 1024 px tile at every zoom (and hit the 20 s watchdog on a busy machine); now about 70 ms, so zooming into dense topology drawings stays fluid. Estimates unchanged.
