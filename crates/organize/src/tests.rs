@@ -245,6 +245,25 @@ fn move_pages_reorders() {
 }
 
 #[test]
+fn reverse_pages_reorders() {
+    let mut doc = open(fixture());
+    reverse_pages(&mut doc, &[0, 1, 2]).unwrap();
+    assert_eq!(labels(&doc), ["Page 3", "Page 2", "Page 1"]);
+    // Unsorted, repeated indices name the same slots; page 1's slot stays put.
+    reverse_pages(&mut doc, &[2, 1, 2]).unwrap();
+    let doc = save_and_reopen(&doc);
+    assert_eq!(labels(&doc), ["Page 3", "Page 1", "Page 2"]);
+}
+
+#[test]
+fn cannot_reverse_missing_or_fewer_than_two_pages() {
+    let mut doc = open(fixture());
+    assert_eq!(reverse_pages(&mut doc, &[0, 3]), Err(OrganizeError::NoSuchPage(3)));
+    assert!(matches!(reverse_pages(&mut doc, &[1, 1]), Err(OrganizeError::Invalid(_))));
+    assert!(!doc.is_modified(), "failed operations leave the document untouched");
+}
+
+#[test]
 fn inserts_blank_page() {
     let mut doc = open(fixture());
     insert_blank_page(&mut doc, 1, 612.0, 792.0).unwrap();
