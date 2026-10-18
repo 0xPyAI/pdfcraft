@@ -305,6 +305,10 @@ struct Editor {
     saved: Arc<Vec<u8>>,
     /// Passwords that open [`Self::saved`].
     saved_keys: Keys,
+    /// [`Self::saved`] was never written where the document belongs: a new document (combine,
+    /// extract, create) or one restored from recovery. It stays unsaved until a save, whatever
+    /// undo brings back, or closing it would lose the whole document without asking.
+    unsaved_file: bool,
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
     keys: Keys,
@@ -3542,6 +3546,7 @@ impl Session {
                         cos,
                         saved,
                         saved_keys: keys.clone(),
+                        unsaved_file: false,
                         undo: Vec::new(),
                         redo: Vec::new(),
                         keys,
@@ -3839,7 +3844,7 @@ impl Session {
     /// file is clean; undo past a later save is not, because the restored snapshot's own base
     /// is an earlier revision.
     fn sync_dirty(doc: &mut Document) {
-        doc.dirty = doc.editor.as_ref().is_some_and(|e| e.cos.is_modified() || !Arc::ptr_eq(e.cos.bytes(), &e.saved));
+        doc.dirty = doc.editor.as_ref().is_some_and(|e| e.unsaved_file || e.cos.is_modified() || !Arc::ptr_eq(e.cos.bytes(), &e.saved));
     }
 
     /// Use the current state's password for viewing (protection edits change it).
@@ -4124,6 +4129,7 @@ impl Session {
                 pdfcraft_cos::Document::open_with_password(bytes.clone(), keys.reopen.as_deref()).map_err(|e| EditError::Reopen(e.to_string()))?;
             editor.saved = bytes;
             editor.saved_keys = keys;
+            editor.unsaved_file = false;
         }
         if let Some(p) = path {
             doc.name = std::path::Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.clone());
@@ -4187,7 +4193,7 @@ impl Session {
         editor.undo.clear();
         editor.redo.clear();
         Self::adopt_keys(doc);
-        doc.dirty = false;
+        Self::sync_dirty(doc);
         doc.generation += 1;
         Self::refresh(doc).inspect_err(|_| Self::show_released(doc))
     }
@@ -4667,6 +4673,9 @@ impl Session {
         let id = self.open(name, None, bytes, None)?;
         if let Some(d) = self.docs.iter_mut().find(|d| d.id == id) {
             d.dirty = true;
+            if let Some(e) = d.editor.as_mut() {
+                e.unsaved_file = true;
+            }
             // Unsaved work with no edit yet still needs its first recovery snapshot.
             d.generation += 1;
         }
@@ -4719,6 +4728,9 @@ impl Session {
         if let Some(d) = self.docs.iter_mut().find(|d| d.id == id) {
             d.path = path;
             d.dirty = true;
+            if let Some(e) = d.editor.as_mut() {
+                e.unsaved_file = true;
+            }
             d.generation += 1;
             d.snapshot_generation = d.generation; // its bytes are already in the recovery store
         }

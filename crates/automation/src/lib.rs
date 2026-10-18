@@ -3101,4 +3101,23 @@ mod tests {
         std::fs::set_permissions(&target, perms).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// A recovered document, or a new one, rotated and then undone still has never been saved:
+    /// `doc_close` refuses it unless told to discard it (#2346 review).
+    #[test]
+    fn closing_a_recovered_or_new_document_after_undo_is_refused() {
+        let mut a = Automation::new();
+        let recovered = a.session.open("Report.pdf", None, Arc::new(numbered_pages(2)), None).unwrap();
+        a.session.mark_recovered(recovered, Some("Report.pdf".into()));
+        let new = a.session.open_new("Combined.pdf", Arc::new(numbered_pages(2))).unwrap();
+        for id in [recovered, new] {
+            json(&mut a, "page_rotate", json!({"doc": id.0, "pages": [1], "degrees": 90}));
+            json(&mut a, "edit_undo", json!({"doc": id.0}));
+            let refused = a.call("doc_close", &json!({"doc": id.0}));
+            assert!(matches!(&refused, Err(e) if e.to_string().contains("unsaved changes")), "{id:?}: {refused:?}");
+            assert!(a.session.get(id).is_some(), "still open");
+            json(&mut a, "doc_close", json!({"doc": id.0, "discard_changes": true}));
+            assert!(a.session.get(id).is_none());
+        }
+    }
 }

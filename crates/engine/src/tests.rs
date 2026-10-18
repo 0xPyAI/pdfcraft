@@ -5911,3 +5911,31 @@ fn text_blocks_stay_cached_after_an_edit_and_follow_undo_and_redo() {
     assert_eq!(redone[0].editor_text, "Edited");
     assert!(Arc::ptr_eq(&redone, &blocks(&session)));
 }
+
+/// A new document, or one restored from recovery, has never been written where it belongs: undo
+/// back to the bytes it was opened from must not make it clean, or closing it would discard the
+/// whole document without asking. Saving makes it clean; Revert of a saved one too.
+#[test]
+fn undo_never_makes_an_unsaved_document_clean() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let new = s.open_new("Combined.pdf", Arc::new(fixture(2))).unwrap();
+    s.apply(new, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    s.undo(new).unwrap();
+    assert!(s.get(new).unwrap().dirty, "a new document is unsaved until it is saved");
+    assert_eq!(s.autosave_snapshots().len(), 1, "and still needs recovery");
+    s.revert(new).unwrap();
+    assert!(s.get(new).unwrap().dirty, "Revert goes back to the created bytes, which aren't saved anywhere");
+
+    let recovered = s.open("Report.pdf", None, Arc::new(fixture(2)), None).unwrap();
+    s.mark_recovered(recovered, Some("Report.pdf".into()));
+    s.apply(recovered, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    s.undo(recovered).unwrap();
+    assert!(s.get(recovered).unwrap().dirty, "the recovered work was never saved");
+
+    let saved = s.save_bytes(new).unwrap();
+    s.mark_saved(new, saved, Some("Combined.pdf".into())).unwrap();
+    assert!(!s.get(new).unwrap().dirty);
+    s.apply(new, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    s.undo(new).unwrap();
+    assert!(!s.get(new).unwrap().dirty, "once saved, undo back to the saved state is clean");
+}
