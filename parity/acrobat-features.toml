@@ -5728,8 +5728,8 @@ milestone = "M8"
 status = "shipped"
 commands = ["redact.apply"]
 tools = ["redact_apply"]
-evidence = ["crates/redact/src/tests.rs::comments_links_and_fields_under_a_mark_go", "crates/ui-egui/tests/ui_group/redact.rs::marking_applying_and_clearing"]
-notes = "with pop-ups; fields lose all widgets"
+evidence = ["crates/redact/src/tests.rs::comments_links_and_fields_under_a_mark_go", "crates/redact/src/tests.rs::replies_to_a_redacted_comment_go_with_it", "crates/ui-egui/tests/ui_group/redact.rs::marking_applying_and_clearing"]
+notes = "with pop-ups and replies (/IRT, transitively; replies on other pages are not followed); fields lose all widgets"
 
 [[feature]]
 id = "protect.redact-struct-tree"
