@@ -3582,6 +3582,24 @@ fn adding_content_through_tools() {
     assert!(matches!(a.call("content_delete", &json!({ "doc": doc, "page": 1, "index": 5 })), Err(ToolError::Failed(_))));
 }
 
+/// An out-of-range `index` (including `i64::MIN`, which overflowed `index - 1`) is a readable
+/// failure for `content_update` and `content_delete`, not a panic.
+#[test]
+fn content_index_out_of_range_is_an_error_not_a_panic() {
+    let dir = workdir("content-index-range");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_add_text", json!({ "doc": doc, "page": 1, "text": "hi", "at": [10, 10] }));
+    for index in [i64::MIN, i64::MIN + 1, -1, 0, i64::MAX] {
+        for tool in ["content_delete", "content_update"] {
+            let args = json!({ "doc": doc, "page": 1, "index": index, "text": "x" });
+            let args = if tool == "content_delete" { json!({ "doc": doc, "page": 1, "index": index }) } else { args };
+            assert!(matches!(a.call(tool, &args), Err(ToolError::Failed(_))), "{tool} index {index}");
+        }
+    }
+    assert_eq!(ok(&mut a, "content_list", json!({ "doc": doc }))["count"], 1);
+}
+
 /// Text styling on an added image is refused (#1331), as image transforms are on text, and the
 /// refusal leaves the content, the dirty flag and the undo and redo steps as they were.
 #[test]
