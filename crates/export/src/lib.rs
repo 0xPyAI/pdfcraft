@@ -1300,6 +1300,7 @@ mod tests {
                 block("conducted during a WGP tournament.", 164.3, 502.0, 352.5, 516.6),
             ],
             images: Vec::new(),
+            background: None,
         };
         let h = html(std::slice::from_ref(&p), "Regulations");
         assert!(!h.contains("<table>"), "running text became a table: {h}");
@@ -1319,7 +1320,7 @@ mod tests {
             blocks.push(block(lead, 72.0, y, 211.0, y + 12.0));
             blocks.push(blue("https://example.org/event", 212.5, y, 360.0, y + 12.0));
         }
-        let p = Page { width: 612.0, height: 792.0, blocks, images: Vec::new() };
+        let p = Page { width: 612.0, height: 792.0, blocks, images: Vec::new(), background: None };
         let h = html(std::slice::from_ref(&p), "Event");
         assert!(!h.contains("<table>"), "sentences became a table: {h}");
         assert_eq!(h.matches("https://example.org/event").count(), 3, "{h}");
@@ -1336,7 +1337,7 @@ mod tests {
             blocks.push(Block { size: 8.0, ..block(sup, 106.0, y + 5.0, 113.0, y + 13.0) });
             blocks.push(block(&format!("{},000", 30 - 5 * n), 300.0, y, 340.0, y + 12.0));
         }
-        let p = Page { width: 612.0, height: 792.0, blocks, images: Vec::new() };
+        let p = Page { width: 612.0, height: 792.0, blocks, images: Vec::new(), background: None };
         let h = html(std::slice::from_ref(&p), "Prizes");
         assert!(h.contains("<table>"), "the prize table was lost: {h}");
         assert!(h.contains("30,000") && h.contains("15,000"), "{h}");
