@@ -283,6 +283,13 @@ impl Automation {
                 let to = self.position(&a, "to")?;
                 self.apply(&a, Edit::MovePages { pages, to })?
             }
+            "page_reverse" => {
+                let pages = match a.opt_ints("pages")? {
+                    Some(_) => self.pages(&a, "pages")?,
+                    None => (0..self.doc(&a)?.info.pages.len()).collect(),
+                };
+                self.apply(&a, Edit::ReversePages { pages })?
+            }
             "page_insert_blank" => self.insert_blank(&a)?,
             "page_insert_file" => self.insert_file(&a)?,
             "page_extract" => self.page_extract(&a)?,

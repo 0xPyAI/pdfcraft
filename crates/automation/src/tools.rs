@@ -224,6 +224,9 @@ pub fn tools() -> Vec<ToolDef> {
             json!({ "doc": doc(), "pages": pages("to move"), "to": { "type": "integer", "minimum": 1 } }),
             &["doc", "pages", "to"],
         )),
+        t("page_reverse", "Reverse pages", "Reverse the order of pages among the positions they occupy: the listed pages (at least two), or the whole document when pages is omitted. Undoable.")
+            .cmd("page.reverse")
+            .with(schema(json!({ "doc": doc(), "pages": pages("to reverse (default: all)") }), &["doc"])),
         t("page_insert_blank", "Insert a blank page", "Insert a blank page so it becomes page `at`. Size defaults to the neighbouring page. Undoable.")
             .cmd("page.insert_blank")
             .with(schema(

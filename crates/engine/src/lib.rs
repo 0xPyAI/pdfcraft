@@ -1267,6 +1267,10 @@ pub enum Edit {
         pages: Vec<usize>,
         to: usize,
     },
+    /// `pages` reversed among the positions they occupy.
+    ReversePages {
+        pages: Vec<usize>,
+    },
     InsertBlankPage {
         at: usize,
         width: f64,
@@ -1797,6 +1801,7 @@ pub const EDIT_LABELS: &[&str] = &[
     "Delete pages",
     "Move page",
     "Move pages",
+    "Reverse pages",
     "Insert blank page",
     "Duplicate page",
     "Duplicate pages",
@@ -1936,6 +1941,7 @@ impl Edit {
             Edit::RotatePages { pages, .. } => plural("Rotate page", "Rotate pages", pages.len()),
             Edit::DeletePages { pages } => plural("Delete page", "Delete pages", pages.len()),
             Edit::MovePages { pages, .. } => plural("Move page", "Move pages", pages.len()),
+            Edit::ReversePages { .. } => Label::of("Reverse pages"),
             Edit::InsertBlankPage { .. } => Label::of("Insert blank page"),
             Edit::DuplicatePages { pages } => plural("Duplicate page", "Duplicate pages", pages.len()),
             Edit::ReplacePages { pages, .. } => plural("Replace page", "Replace pages", pages.len()),
@@ -2108,6 +2114,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         Edit::RotatePages { .. }
         | Edit::DeletePages { .. }
         | Edit::MovePages { .. }
+        | Edit::ReversePages { .. }
         | Edit::InsertBlankPage { .. }
         | Edit::DuplicatePages { .. }
         | Edit::ReplacePages { .. }
@@ -2318,6 +2325,7 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         Edit::RotatePages { pages, degrees } => pdfcraft_organize::rotate_pages(doc, pages, *degrees)?,
         Edit::DeletePages { pages } => pdfcraft_organize::delete_pages(doc, pages)?,
         Edit::MovePages { pages, to } => pdfcraft_organize::move_pages(doc, pages, *to)?,
+        Edit::ReversePages { pages } => pdfcraft_organize::reverse_pages(doc, pages)?,
         Edit::InsertBlankPage { at, width, height } => {
             pdfcraft_organize::insert_blank_page(doc, *at, *width, *height)?;
         }

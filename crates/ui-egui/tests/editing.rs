@@ -352,6 +352,21 @@ fn shift_click_selects_a_range_and_moves_it() {
 }
 
 #[test]
+fn reverse_pages_reverses_the_selection_or_else_the_whole_document() {
+    let mut h = organize(4);
+    assert!(h.state_mut().execute("page.reverse"));
+    h.run_steps(3);
+    assert_eq!(page_texts(h.state()), ["Page 4", "Page 3", "Page 2", "Page 1"]);
+    h.get_by_label("Page 1").click();
+    h.run_steps(1);
+    h.get_by_label("Page 3").click_modifiers(Modifiers::COMMAND);
+    h.run_steps(2);
+    assert!(h.state_mut().execute("page.reverse"));
+    h.run_steps(3);
+    assert_eq!(page_texts(h.state()), ["Page 2", "Page 3", "Page 4", "Page 1"]);
+}
+
+#[test]
 fn command_click_toggles_and_rotation_applies_to_selection() {
     let mut h = organize(3);
     h.get_by_label("Page 1").click();
