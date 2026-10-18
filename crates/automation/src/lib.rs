@@ -1127,7 +1127,17 @@ impl Automation {
         };
         let (bytes, r) = self.session.optimized_bytes(id, &settings, &discard).map_err(failed)?;
         write_atomic(&path, &bytes)?;
-        let pdf_version = std::str::from_utf8(bytes.get(5..8).unwrap_or_default()).unwrap_or_default();
+        let valid_version = |v: &[u8]| matches!(v, [b'1'..=b'9', b'.', b'0'..=b'9']).then(|| std::str::from_utf8(v).ok()).flatten();
+        let catalog_version = (settings.compatibility == Compatibility::Retain)
+            .then(|| {
+                let pw = self.doc(a).ok().and_then(|d| d.password.as_deref());
+                let doc = pdfcraft_cos::Document::open_with_password(bytes.clone(), pw).ok()?;
+                let root = doc.root()?;
+                doc.get(root).as_dict()?.name(b"Version").and_then(valid_version).map(str::to_owned)
+            })
+            .flatten();
+        let header_version = bytes.strip_prefix(b"%PDF-").and_then(|b| b.get(..3)).and_then(valid_version);
+        let pdf_version = catalog_version.as_deref().or(header_version);
         let o = &r.optimize;
         Ok(json!({
             "path": path.to_string_lossy(),
