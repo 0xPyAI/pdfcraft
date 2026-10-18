@@ -220,6 +220,10 @@ fn tree_node_entries(d: &Dict) -> Vec<Object> {
 /// pages (#2447). A tagged PDF's tree points at each link and comment it tags; left there, the
 /// reference keeps the annotation, its URL or text included, in a full rewrite after the page
 /// no longer lists it. Returns how many references were dropped.
+///
+/// Only elements that are objects of their own are edited: a structure element written in place
+/// (a direct dictionary in a `/K` array or a tree) keeps its references, since changing it means
+/// rewriting the object that holds it. Producers rarely write elements that way.
 pub(crate) fn drop_object_refs(doc: &mut Document, gone: &HashSet<ObjRef>) -> Result<usize, pdfcraft_cos::CosError> {
     drop_object_refs_within(doc, gone, MAX_STRUCT_REFS)
 }
