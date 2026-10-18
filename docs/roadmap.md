@@ -1,6 +1,7 @@
 # PdfCraft roadmap: milestones and what's next
 
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M14/#2383 GPU-limit candidate; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
+> **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M7: the Edit text caret is as tall as the row it is on; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M3, #3149: discard render demand after page geometry changes and check the GPU texture limit before upload; estimates unchanged)
 > **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M8, #1350: named replacement descriptions retired during Sanitize and across shared resources; estimates unchanged)
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M6: AcroForm XML text; estimates unchanged)
@@ -188,6 +189,7 @@ M2 (renderer), M7 (content editing), M10 (OCR and Office), M11 (Preflight and st
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-15 | minor | M7: Edit text caret height follows its row, with a kittest regression; estimates unchanged |
 | 2026-10-18 | minor | M3, #3149: page replacement cancels render demand collected for the previous geometry; all viewer raster upload paths reject empty or oversized textures before cache eviction. Synthetic regressions reproduce the reported 1880×2350 upload at a 2048 limit, retain cached images and unsaved edits, and resume bounded backdrops and tiles. Estimates unchanged. |
 | 2026-10-15 | minor | M6: Plain AcroForm XML imports retain all direct text around comments and processing instructions, including CDATA and character references. Estimates unchanged. |
 | 2026-10-13 | minor | M6: XML/XFDF attribute whitespace survives form and comment export/import; estimates unchanged |
