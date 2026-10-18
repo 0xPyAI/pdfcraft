@@ -7245,11 +7245,11 @@ title = "Make compatible with a chosen PDF version"
 area = "K"
 tier = "P1"
 milestone = "M11"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "shipped"
+commands = ["optimize.advanced"]
+tools = ["doc_optimize"]
+evidence = ["crates/optimize/tests/optimize.rs::compatibility_level_sets_version_unpacks_for_1_4_and_checks_encryption", "crates/automation/tests/automation.rs::optimizing_through_tools", "crates/ui-egui/tests/create.rs::the_pdf_optimizer_dialog_picks_a_preset"]
+notes = "Retain existing (default), PDF 1.4, 1.5, 1.6, 1.7 or 2.0 in PDF Optimizer and doc_optimize; writes the chosen %PDF- header, clears any overriding catalog /Version, disables and unpacks object streams and cross-reference streams for PDF 1.4, and refuses when the document's encryption requires a newer PDF version (#3090)"
 
 [[feature]]
 id = "optimize.optimizer"
@@ -7545,11 +7545,11 @@ title = "Compress document structure (object streams)"
 area = "K"
 tier = "P1"
 milestone = "M11"
-status = "partial"
-commands = ["file.save_as"]
-tools = ["doc_save"]
-evidence = ["crates/cos/tests/writer.rs::full_save_packs_objects_into_object_streams"]
-notes = "on by default for full saves; no Optimizer option yet"
+status = "shipped"
+commands = ["file.save_as", "optimize.advanced"]
+tools = ["doc_save", "doc_optimize"]
+evidence = ["crates/cos/tests/writer.rs::full_save_packs_objects_into_object_streams", "crates/optimize/tests/optimize.rs::compatibility_level_sets_version_unpacks_for_1_4_and_checks_encryption", "crates/automation/tests/automation.rs::optimizing_through_tools", "crates/ui-egui/tests/create.rs::the_pdf_optimizer_dialog_picks_a_preset"]
+notes = "on by default for full saves and in PDF Optimizer ▸ Clean Up (and doc_optimize object_streams); turning it off or targeting PDF 1.4 unpacks object streams into standalone objects with a classic cross-reference table"
 
 [[feature]]
 id = "optimize.flate-unencoded"

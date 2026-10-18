@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, SaveOptions, Stream, write_full};
-use pdfcraft_optimize::{Compression, ImageSettings, Settings, SpaceCategory, audit_space, effective_resolutions, optimize};
+use pdfcraft_optimize::{
+    Compatibility, Compression, ImageSettings, OptimizeError, Settings, SpaceCategory, audit_space, effective_resolutions, optimize,
+};
 
 fn image(doc: &mut Document, w: u32, h: u32, n: usize, jpeg: bool, smask: Option<ObjRef>) -> ObjRef {
     // A smooth gradient with a little texture (photo-like).
@@ -1021,4 +1023,75 @@ fn images_are_not_resampled_when_some_uses_could_not_be_measured() {
     page(&mut doc, &names, "q 72 0 0 72 36 36 cm /F1 Do Q");
     let refs = pdfcraft_annot::page_refs(&doc).unwrap();
     assert_eq!(effective_resolutions(&doc, &refs)[&img], f64::INFINITY);
+}
+
+#[test]
+fn compatibility_level_sets_version_unpacks_for_1_4_and_checks_encryption() {
+    let mut base = Document::new_empty();
+    page(&mut base, &[], "BT /F1 12 Tf 72 720 Td (Compatibility test) Tj ET");
+    let root = base.root().unwrap();
+    base.update_dict(root, |c| c.set(b"Version".to_vec(), Object::name("1.6"))).unwrap();
+
+    for (compat, expected) in [
+        (Compatibility::Pdf1_4, "1.4"),
+        (Compatibility::Pdf1_5, "1.5"),
+        (Compatibility::Pdf1_6, "1.6"),
+        (Compatibility::Pdf1_7, "1.7"),
+        (Compatibility::Pdf2_0, "2.0"),
+    ] {
+        let mut doc = base.clone();
+        let settings = Settings { compatibility: compat, ..Settings::default() };
+        optimize(&mut doc, &settings).unwrap();
+        assert_eq!(doc.version(), expected);
+        assert!(!doc.get(root).as_dict().unwrap().contains(b"Version"), "overriding catalog /Version is cleared");
+        let bytes = write_full(&doc, &SaveOptions { object_streams: settings.effective_object_streams(), ..SaveOptions::default() }).unwrap();
+        assert!(bytes.starts_with(format!("%PDF-{expected}\n").as_bytes()), "{expected}");
+        let has_objstm = bytes.windows(7).any(|w| w == b"/ObjStm");
+        assert_eq!(has_objstm, compat != Compatibility::Pdf1_4, "{compat:?}");
+        let info = pdfcraft_render::inspect(Arc::new(bytes), None).unwrap();
+        assert_eq!(info.pdf_version, expected);
+    }
+
+    // Disabling object_streams on PDF 1.7 writes a classic cross-reference table.
+    let mut doc = base.clone();
+    let settings = Settings { compatibility: Compatibility::Pdf1_7, object_streams: false, ..Settings::default() };
+    optimize(&mut doc, &settings).unwrap();
+    let bytes = write_full(&doc, &SaveOptions { object_streams: settings.effective_object_streams(), ..SaveOptions::default() }).unwrap();
+    assert!(bytes.starts_with(b"%PDF-1.7\n") && !bytes.windows(7).any(|w| w == b"/ObjStm"));
+
+    // Encryption that requires a newer PDF version than the chosen compatibility is refused.
+    let mut aes256 = base.clone();
+    aes256
+        .set_encryption(&pdfcraft_cos::NewEncryption {
+            algorithm: pdfcraft_cos::Algorithm::Aes256,
+            user_password: "u",
+            owner_password: "o",
+            permissions: -1,
+            encrypt_metadata: true,
+            seed: [1; 32],
+        })
+        .unwrap();
+    assert!(matches!(
+        optimize(&mut aes256, &Settings { compatibility: Compatibility::Pdf1_6, ..Settings::default() }),
+        Err(OptimizeError::IncompatibleEncryption { required: "1.7", chosen: "1.6" })
+    ));
+    optimize(&mut aes256, &Settings { compatibility: Compatibility::Pdf2_0, ..Settings::default() }).unwrap();
+    assert_eq!(aes256.version(), "2.0");
+
+    let mut aes128 = base;
+    aes128
+        .set_encryption(&pdfcraft_cos::NewEncryption {
+            algorithm: pdfcraft_cos::Algorithm::Aes128,
+            user_password: "u",
+            owner_password: "o",
+            permissions: -1,
+            encrypt_metadata: true,
+            seed: [1; 32],
+        })
+        .unwrap();
+    assert!(matches!(
+        optimize(&mut aes128, &Settings { compatibility: Compatibility::Pdf1_5, ..Settings::default() }),
+        Err(OptimizeError::IncompatibleEncryption { required: "1.6", chosen: "1.5" })
+    ));
+    optimize(&mut aes128, &Settings { compatibility: Compatibility::Pdf1_6, ..Settings::default() }).unwrap();
 }
