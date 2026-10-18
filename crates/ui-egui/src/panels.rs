@@ -418,17 +418,7 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
         }
         changed |= crate::edit_text_ui::extras_panel(ui, &mut ed.extras);
         if changed {
-            let edit = pdfcraft_engine::Edit::EditTextBlock { page: ed.page, block: ed.block, text: ed.text.clone(), style: ed.style() };
-            if app.apply_edit(edit) {
-                ed.applied();
-                if let Some(doc) = app.session.get(app.views[i].id)
-                    && let Some(block) = doc.text_blocks(ed.page).get(ed.block)
-                {
-                    ed.refresh_source(block, doc.text_lines(ed.page));
-                    ed.fonts = crate::edit_text_ui::install_source_fonts(ui.ctx(), doc, ed.page);
-                }
-            }
-            app.views[i].line_editor = Some(ed);
+            app.apply_line_format(i, ed, Some(ui.ctx()));
         }
         ui.add_space(6.0);
         ui.separator();
@@ -480,6 +470,25 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
     }
     ui.add_space(6.0);
     ui.separator();
+}
+
+impl PdfCraftApp {
+    /// Apply the open paragraph's formatting as one change; the paragraph stays open.
+    pub(crate) fn apply_line_format(&mut self, index: usize, mut ed: crate::edit_text_ui::LineEditor, ctx: Option<&egui::Context>) {
+        let edit = pdfcraft_engine::Edit::EditTextBlock { page: ed.page, block: ed.block, text: ed.text.clone(), style: ed.style() };
+        if self.apply_edit(edit) {
+            ed.applied();
+            if let Some(doc) = self.session.get(self.views[index].id)
+                && let Some(block) = doc.text_blocks(ed.page).get(ed.block)
+            {
+                ed.refresh_source(block, doc.text_lines(ed.page));
+                if let Some(ctx) = ctx {
+                    ed.fonts = crate::edit_text_ui::install_source_fonts(ctx, doc, ed.page);
+                }
+            }
+        }
+        self.views[index].line_editor = Some(ed);
+    }
 }
 
 // ───────────────────────────────────────────────────────────────────────────── right panels
