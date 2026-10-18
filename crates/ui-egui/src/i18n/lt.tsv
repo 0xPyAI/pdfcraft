@@ -1729,6 +1729,9 @@
 	The signature value does not match the signer's certificate: the signature is corrupt.	Parašo reikšmė neatitinka pasirašiusiojo sertifikato: parašas pažeistas.
 	The signature's byte range does not exclude exactly its contents.	Parašo baitų intervalas neišskiria tiksliai jo turinio.
 	The signature's byte range does not match the file.	Parašo baitų intervalas neatitinka failo.
+	The signature's signed attributes have no content type, which CMS requires; it was read anyway.	Parašo pasirašytuosiuose atributuose nėra turinio tipo, kurio reikalauja CMS; parašas vis tiek perskaitytas.
+	The signature's signed attributes have no message digest, so the signature does not cover the document.	Parašo pasirašytuosiuose atributuose nėra pranešimo santraukos, todėl parašas neapima dokumento.
+	The signature's signed attributes name a content type other than data, so it is not a signature of the document.	Parašo pasirašytuosiuose atributuose nurodytas kitas turinio tipas nei duomenys, todėl tai nėra dokumento parašas.
 	The signature's timestamp token could not be verified ({}).	Nepavyko patvirtinti parašo laiko žymos žetono ({}).
 	The signature's timestamp token does not cover the signature value.	Parašo laiko žymos žetonas neapima parašo reikšmės.
 	The signed content is a constructed (segmented) OCTET STRING, as BER allows; it was read anyway.	Pasirašytas turinys yra sudėtinis (segmentuotas) OCTET STRING, kaip leidžia BER; jis vis tiek perskaitytas.
@@ -1754,6 +1757,7 @@
 	This document has not been modified since this timestamp was applied.	Pridėjus šią laiko žymą dokumentas nepakeistas.
 	This signature uses RIPEMD-160, a legacy 160-bit hash algorithm that is no longer recommended for signatures. It still validates, but it should not be relied on.	Šis parašas naudoja RIPEMD-160 — pasenusį 160 bitų maišos algoritmą, kuris parašams neberekomenduojamas. Parašas vis dar patvirtinamas, tačiau juo nereikėtų pasikliauti.
 	This signature uses SHA-1, a weak hash algorithm: collisions in it have been demonstrated. It still validates because many documents signed years ago use it, but it should not be relied on.	Šis parašas naudoja silpną SHA-1 maišos algoritmą, kuriam įrodytos kolizijos. Parašas vis dar patvirtinamas, nes SHA-1 naudoja daug prieš daugelį metų pasirašytų dokumentų, tačiau juo nereikėtų pasikliauti.
+	This signature uses an RSA key shorter than 2048 bits, which is no longer considered strong enough for signatures. It still validates, but it should not be relied on.	Šis parašas naudoja trumpesnį nei 2048 bitų RSA raktą, kuris parašams nebelaikomas pakankamai stipriu. Parašas vis dar patvirtinamas, tačiau juo nereikėtų pasikliauti.
 	Undo {action}	Atšaukti {action}
 	Unsigned signature field	Nepasirašytas parašo laukas
 	Unsigned signature field: {name}	Nepasirašytas parašo laukas: {name}
