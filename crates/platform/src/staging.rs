@@ -155,15 +155,25 @@ fn preserve_target_xattrs(path: &Path, staged: &std::fs::File) -> std::io::Resul
         if size > MAX_VALUE_BYTES || size > MAX_TOTAL_BYTES.saturating_sub(total) {
             return Err(std::io::Error::other("extended attributes exceed the 16 MiB per-value or 64 MiB total limit"));
         }
-        // A nonempty buffer distinguishes an empty value from a request for its size. If a
-        // value grows between these reads, ERANGE refuses the save rather than truncating it.
-        let mut value = vec![0u8; size.max(1)];
-        let len = fgetxattr(&source, &name, value.as_mut_slice())?;
-        let value = value.get(..len).ok_or_else(|| std::io::Error::other("extended attribute changed size while saving"))?;
-        fsetxattr(staged, &name, value, XattrFlags::empty())?;
-        total = total.saturating_add(len);
+        // Resource forks may return a prefix instead of ERANGE on growth; check the size again.
+        let value = read_xattr_value(size, |buffer| Ok(fgetxattr(&source, &name, buffer)?))?;
+        fsetxattr(staged, &name, &value, XattrFlags::empty())?;
+        total = total.saturating_add(value.len());
     }
     Ok(())
+}
+
+/// Read an already size-bounded attribute, refusing a partial result or a changed post-read size.
+#[cfg(target_os = "macos")]
+fn read_xattr_value(size: usize, mut read: impl FnMut(&mut [u8]) -> std::io::Result<usize>) -> std::io::Result<Vec<u8>> {
+    let mut value = vec![0u8; size.max(1)];
+    let len = read(value.as_mut_slice())?;
+    let after = read(&mut [])?;
+    if len != size || after != size {
+        return Err(std::io::Error::other("extended attribute changed size while saving"));
+    }
+    value.truncate(len);
+    Ok(value)
 }
 
 /// Flush the staging file to the disk before it replaces the target. On macOS `sync_all` asks
@@ -333,6 +343,69 @@ mod tests {
         assert_eq!(&value[..len], b"original");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Model an HFS-style partial read while using real macOS metadata and the atomic writer.
+    /// The shared read validator must reject growth before the staging file can be published.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_growing_resource_fork_refuses_publication_and_keeps_original() {
+        use rustix::fs::{XattrFlags, fgetxattr, fsetxattr, getxattr, setxattr};
+        let dir = test_dir("xattrs-growing-fork");
+        let target = dir.join("out.pdf");
+        let name = "com.apple.ResourceFork";
+        for form in [StagingName::TagThenSuffix, StagingName::SuffixThenTag] {
+            std::fs::write(&target, b"ORIGINAL PDF").unwrap();
+            setxattr(&target, name, b"ABC", XattrFlags::empty()).unwrap();
+            let source = std::fs::File::open(&target).unwrap();
+            let result = write_atomically_with(&target, b"REPLACEMENT PDF", form, [23], |staged| {
+                let size = fgetxattr(&source, name, &mut [] as &mut [u8])?;
+                let value = read_xattr_value(size, |buffer| {
+                    if buffer.is_empty() {
+                        return Ok(fgetxattr(&source, name, buffer)?);
+                    }
+                    // HFS can return the prefix that fits instead of ERANGE. APFS need not
+                    // have that behaviour: model the kernel response, not a timing race.
+                    setxattr(&target, name, b"ABCD", XattrFlags::empty())?;
+                    buffer.get_mut(..3).unwrap().copy_from_slice(b"ABC");
+                    Ok(3)
+                })?;
+                fsetxattr(staged, name, &value, XattrFlags::empty())?;
+                Ok(())
+            });
+            let error = result.expect_err("a short prefix of the grown fork must not be published");
+            assert!(error.to_string().contains("changed size"), "{error}");
+            assert_eq!(std::fs::read(&target).unwrap(), b"ORIGINAL PDF");
+            let mut bytes = [0u8; 8];
+            let len = getxattr(&target, name, &mut bytes[..]).unwrap();
+            assert_eq!(&bytes[..len], b"ABCD", "the original's grown fork must remain intact");
+            assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "staging files are removed on refusal");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Stable empty/binary values are accepted; short reads, growth and failed rechecks are refused.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn attribute_reads_require_a_complete_value_and_stable_size() {
+        for bytes in [&b""[..], &b"\0\xffB"[..]] {
+            let value = read_xattr_value(bytes.len(), |buffer| {
+                if !buffer.is_empty() {
+                    buffer.get_mut(..bytes.len()).unwrap().copy_from_slice(bytes);
+                }
+                Ok(bytes.len())
+            })
+            .unwrap();
+            assert_eq!(value, bytes);
+        }
+        for (before, read_len, after) in [(3, 2, 3), (3, 3, 4), (0, 1, 1), (3, 2, 2)] {
+            let result = read_xattr_value(before, |buffer| Ok(if buffer.is_empty() { after } else { read_len }));
+            assert!(result.unwrap_err().to_string().contains("changed size"));
+        }
+        let result = read_xattr_value(3, |buffer| {
+            if buffer.is_empty() { Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "size recheck refused")) } else { Ok(3) }
+        });
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
     }
 
     #[cfg(target_os = "macos")]

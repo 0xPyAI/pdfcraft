@@ -24,6 +24,7 @@ pub enum CloseRequest {
 pub struct PendingOverwrite {
     pub id: pdfcraft_engine::DocId,
     pub dest: String,
+    target: SaveTarget,
     /// What was to run once the document is written (close its tab, quit).
     after: Box<dyn FnOnce(&mut PdfCraftApp) + Send>,
 }
@@ -621,12 +622,12 @@ impl PdfCraftApp {
                     let dialog = rfd::AsyncFileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(name);
                     // The bytes are taken once the user has chosen, so edits made meanwhile are saved too.
                     self.ask_one(crate::pickers::Ask::Save(dialog), None, move |app, dest| {
-                        app.save_doc_to_then(id, &dest.to_string_lossy(), Box::new(after));
+                        app.save_doc_to_then(id, &dest.to_string_lossy(), target, Box::new(after));
                     });
                     return false;
                 }
             };
-            self.save_doc_to_then(id, &destination, Box::new(after))
+            self.save_doc_to_then(id, &destination, target, Box::new(after))
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -681,14 +682,14 @@ impl PdfCraftApp {
     /// `pending_overwrite` behind [`Dialog::OverwriteChanged`](crate::Dialog::OverwriteChanged).
     /// Returns `true` if written now.
     #[cfg(not(target_arch = "wasm32"))]
-    fn save_doc_to_then(&mut self, id: pdfcraft_engine::DocId, dest: &str, after: Box<dyn FnOnce(&mut Self) + Send>) -> bool {
+    fn save_doc_to_then(&mut self, id: pdfcraft_engine::DocId, dest: &str, target: SaveTarget, after: Box<dyn FnOnce(&mut Self) + Send>) -> bool {
         let own = self.session.get(id).and_then(|d| d.path.as_deref()).is_some_and(|p| crate::same_file(p, dest));
         if own && self.watch.disk_differs(id, dest) {
-            self.pending_overwrite = Some(PendingOverwrite { id, dest: dest.to_string(), after });
+            self.pending_overwrite = Some(PendingOverwrite { id, dest: dest.to_string(), target, after });
             self.dialog = Some(crate::Dialog::OverwriteChanged);
             return false;
         }
-        let saved = self.save_doc_to(id, dest);
+        let saved = self.save_doc_to(id, dest, target);
         if saved {
             after(self);
         }
@@ -699,7 +700,7 @@ impl PdfCraftApp {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn overwrite_changed_file(&mut self) {
         let Some(p) = self.pending_overwrite.take() else { return };
-        if self.save_doc_to(p.id, &p.dest) {
+        if self.save_doc_to(p.id, &p.dest, p.target) {
             (p.after)(self);
         }
     }
@@ -715,17 +716,27 @@ impl PdfCraftApp {
 
     /// Write document `id` to `dest` and make it the document's file. Returns `true` if written.
     #[cfg(not(target_arch = "wasm32"))]
-    fn save_doc_to(&mut self, id: pdfcraft_engine::DocId, dest: &str) -> bool {
+    fn save_doc_to(&mut self, id: pdfcraft_engine::DocId, dest: &str, target: SaveTarget) -> bool {
         // Save As answers on a later frame: commit what was typed meanwhile, too (#166), even
         // if another tab is active by then.
         if !self.commit_typing_in(id) || !self.flatten_fill_sign_for_save(id) {
             return false;
         }
-        let Some(name) = self.session.get(id).map(|d| d.name.clone()) else {
+        let Some((name, full)) = self.session.get(id).map(|d| {
+            // Save As to another file is a clean copy, without the earlier revisions that still
+            // hold deleted pages or replaced text (#2165). A signed document stays incremental so
+            // its signatures keep covering the file.
+            let full = target == SaveTarget::As
+                && !d.path.as_deref().is_some_and(|p| crate::same_file(p, dest))
+                && d.read_only_reason.is_none()
+                && !d.is_signed();
+            (d.name.clone(), full)
+        }) else {
             self.notify_tr("The document was closed before it could be saved.");
             return false;
         };
-        let bytes = match self.session.save_bytes(id).and_then(|b| self.session.check_save(id, &b).map(|()| b)) {
+        let bytes = if full { self.session.save_full_bytes(id) } else { self.session.save_bytes(id) };
+        let bytes = match bytes.and_then(|b| self.session.check_save(id, &b).map(|()| b)) {
             Ok(b) => b,
             Err(e) => {
                 self.notify_fmt("Couldn't save {name}: {e}", &[("name", &name), ("e", &e.to_string())]);
