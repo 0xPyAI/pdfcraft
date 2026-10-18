@@ -104,6 +104,20 @@ pub(crate) fn clean(
     changed: &HashSet<i64>,
     empty: &HashSet<i64>,
 ) -> Result<usize, pdfcraft_cos::CosError> {
+    clean_within(doc, page, stream, changed, empty, MAX_STRUCT_REFS)
+}
+
+/// [`clean`], visiting at most `limit` structure-tree references. A tree too large to walk in full
+/// could hide an element that repeats the redacted text, so then every element in the document
+/// loses its alternate and actual text instead (fail-closed, #3302).
+pub(crate) fn clean_within(
+    doc: &mut Document,
+    page: ObjRef,
+    stream: Option<(ObjRef, ObjRef)>,
+    changed: &HashSet<i64>,
+    empty: &HashSet<i64>,
+    limit: usize,
+) -> Result<usize, pdfcraft_cos::CosError> {
     if changed.is_empty() && stream.is_none() {
         return Ok(0);
     }
@@ -114,16 +128,24 @@ pub(crate) fn clean(
     else {
         return Ok(0);
     };
-    // Indirect elements with the page they inherit.
-    let mut todo: Vec<(Object, Option<ObjRef>)> = root.get(b"K").map(|k| vec![(k.clone(), None)]).unwrap_or_default();
+    // Indirect elements with the page they inherit. Elements are reached from the root's /K, and
+    // also from the parent tree and the ID tree: one listed only there still owns marked content
+    // (#3302).
+    let mut todo: Vec<(Object, Option<ObjRef>)> =
+        [&b"K"[..], b"ParentTree", b"IDTree"].iter().filter_map(|key| root.get(key).cloned()).map(|k| (k, None)).collect();
     let mut seen = HashSet::new();
     let mut hits: Vec<(ObjRef, Dict, Option<ObjRef>, bool)> = Vec::new();
     while let Some((k, pg)) = todo.pop() {
         match k {
             Object::Array(a) => todo.extend(a.into_iter().map(|x| (x, pg))),
+            // A number or name tree node written in place.
+            Object::Dict(d) if !d.contains(b"S") => todo.extend(tree_node_entries(&d).into_iter().map(|x| (x, pg))),
             Object::Ref(r) => {
-                if !seen.insert(r) || seen.len() > 2_000_000 {
+                if !seen.insert(r) {
                     continue;
+                }
+                if seen.len() > limit {
+                    return clear_every_element(doc);
                 }
                 let object = doc.get(r);
                 if let Object::Array(a) = &*object {
@@ -132,6 +154,8 @@ pub(crate) fn clean(
                 }
                 let Some(d) = object.as_dict().cloned() else { continue };
                 if !d.contains(b"S") {
+                    // A parent tree or ID tree node: its values may be elements.
+                    todo.extend(tree_node_entries(&d).into_iter().map(|x| (x, pg)));
                     continue;
                 }
                 let pg = d.get(b"Pg").and_then(Object::as_ref).or(pg);
@@ -201,6 +225,30 @@ pub(crate) fn clean(
         n += usize::from(sensitive && doc.get(r).as_dict() != Some(&d));
     }
     Ok(n)
+}
+
+/// The fail-closed end of a walk that couldn't finish: every structure element in the document,
+/// found by reading each object rather than through the tree, loses the text that could repeat
+/// redacted words. Returns how many elements changed.
+fn clear_every_element(doc: &mut Document) -> Result<usize, pdfcraft_cos::CosError> {
+    let keys = [&b"Alt"[..], b"ActualText", b"E"];
+    let elements: Vec<ObjRef> = doc
+        .scan_objects()
+        .filter(|(_, o)| {
+            o.as_dict().is_some_and(|d| {
+                (d.name(b"Type") == Some(b"StructElem") || (d.contains(b"S") && d.contains(b"P"))) && keys.iter().any(|k| d.contains(k))
+            })
+        })
+        .map(|(r, _)| r)
+        .collect();
+    for &r in &elements {
+        doc.update_dict(r, |e| {
+            for key in keys {
+                e.remove(key);
+            }
+        })?;
+    }
+    Ok(elements.len())
 }
 
 /// Whether `o` is an object reference (`/Type /OBJR`, direct or indirect) to one of `gone`.

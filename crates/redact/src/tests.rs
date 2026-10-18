@@ -842,6 +842,63 @@ fn a_structure_tree_too_large_to_walk_is_removed_whole() {
     assert!(!bytes.windows(14).any(|w| w == b"secret.example"), "the removed link can't be reached any more");
 }
 
+/// #3302: an element listed only in the parent tree (not under the root's /K) still owns the
+/// marked content redaction changed, so its /ActualText and /Alt, which repeat the redacted
+/// words, go as they do for an element under /K.
+#[test]
+fn an_element_listed_only_in_the_parent_tree_loses_its_redacted_text() {
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 5 0 R /MarkInfo << /Marked true >> >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /StructParents 0 /Resources << /Font << /F1 9 0 R >> >> >>".to_vec(),
+        stream("", b"/P <</MCID 0>> BDC BT /F1 14 Tf 20 150 Td (Codename Bluefin) Tj ET EMC"),
+        // The root's /K reaches only the empty document element 6; the paragraph 7 is in the
+        // parent tree only.
+        b"<< /Type /StructTreeRoot /K 6 0 R /ParentTree << /Nums [0 [7 0 R]] >> /ParentTreeNextKey 1 >>".to_vec(),
+        b"<< /Type /StructElem /S /Document /P 5 0 R >>".to_vec(),
+        b"<< /Type /StructElem /S /P /P 6 0 R /Pg 3 0 R /K 0 /ActualText (Codename Bluefin) /Alt (Codename Bluefin) >>".to_vec(),
+        b"<< /Type /StructElem /S /Note /P 6 0 R >>".to_vec(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+    ];
+    let mut doc = pdf(objs);
+    mark(&mut doc, 0, &[[10.0, 140.0, 290.0, 170.0]], "");
+    let r = apply(&mut doc, None).unwrap();
+    assert!(r.glyphs > 0 && r.tags >= 1, "{r:?}");
+    let element = doc.get(ObjRef::new(7, 0)).as_dict().cloned().unwrap();
+    assert!(!element.contains(b"ActualText") && !element.contains(b"Alt"), "{element:?}");
+}
+
+/// #3302: a structure tree too large to walk in full fails closed: every element loses its
+/// alternate and actual text, found by reading each object, instead of the walk stopping and
+/// reporting success with elements never checked.
+#[test]
+fn a_tag_walk_cut_short_clears_every_element() {
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 5 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /StructParents 0 >>".to_vec(),
+        b"<< >>".to_vec(),
+        b"<< /Type /StructTreeRoot /K 6 0 R >>".to_vec(),
+        b"<< /Type /StructElem /S /Document /P 5 0 R /K [7 0 R 8 0 R] >>".to_vec(),
+        b"<< /Type /StructElem /S /P /P 6 0 R /Pg 3 0 R /K 0 /ActualText (Codename Bluefin) >>".to_vec(),
+        b"<< /Type /StructElem /S /Figure /P 6 0 R /Alt (A chart) /E (chart) >>".to_vec(),
+    ];
+    let page = ObjRef::new(3, 0);
+    let changed: std::collections::HashSet<i64> = [0].into();
+    let mut doc = pdf(objs.clone());
+    crate::tags::clean_within(&mut doc, page, None, &changed, &Default::default(), 100).unwrap();
+    let figure = doc.get(ObjRef::new(8, 0)).as_dict().cloned().unwrap();
+    assert!(figure.contains(b"Alt"), "a walk that finishes keeps an unrelated element's text");
+
+    let mut doc = pdf(objs);
+    let n = crate::tags::clean_within(&mut doc, page, None, &changed, &Default::default(), 1).unwrap();
+    assert_eq!(n, 2, "both elements with text change");
+    for r in [7, 8] {
+        let e = doc.get(ObjRef::new(r, 0)).as_dict().cloned().unwrap();
+        assert!(!e.contains(b"ActualText") && !e.contains(b"Alt") && !e.contains(b"E"), "{r}: {e:?}");
+    }
+}
+
 /// #2532 follow-up: an element reached only through the parent tree or the ID tree, not from
 /// the root's /K, still points at a removed annotation, and the root keeps it reachable in a full
 /// rewrite. Both trees are walked too, written in place or as their own objects.
