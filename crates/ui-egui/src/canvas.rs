@@ -859,9 +859,9 @@ impl DocView {
     }
 
     /// The document was replaced by a newer version of its file (#431). The reader's place
-    /// stays: zoom, layout, rotation, page, scroll, view history and the find bar, the snapshot
-    /// marker and its pending close, and the page images on screen until their replacements
-    /// are drawn, so nothing flashes. Everything that pointed into the old version (a selected
+    /// stays: zoom, layout, rotation, page, scroll, full screen, view history and the find bar,
+    /// the snapshot marker and its pending close, and the page images on screen until their
+    /// replacements are drawn, so nothing flashes. Everything that pointed into the old version (a selected
     /// comment, a field being typed in, text being edited, a drag, page selection) starts
     /// afresh, so no stale index reaches the new one.
     pub fn document_replaced(&mut self, info: &DocInfo) {
@@ -881,6 +881,8 @@ impl DocView {
         fresh.snapshot = self.snapshot.clone();
         fresh.close_requested = self.close_requested;
         fresh.cover = self.cover;
+        // Still presenting, with the display to go back to on leaving.
+        fresh.presentation = self.presentation.take();
         fresh.back = std::mem::take(&mut self.back);
         fresh.forward = std::mem::take(&mut self.forward);
         fresh.find = self.find.take();

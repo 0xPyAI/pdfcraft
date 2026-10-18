@@ -1338,15 +1338,18 @@ impl PdfCraftApp {
             };
         }
         let initial = doc.initial_view();
-        let mut view = DocView::new(id, &doc.info, self.view_defaults);
-        if self.full_screen {
-            view.enter_presentation();
-        }
+        let view = DocView::new(id, &doc.info, self.view_defaults);
         self.views.push(view);
         if activate {
             self.active = Some(self.views.len() - 1);
         }
         self.apply_initial_view(self.views.len() - 1, &initial);
+        // After the document's own initial view, so leaving full screen comes back to it.
+        if self.full_screen
+            && let Some(view) = self.views.last_mut()
+        {
+            view.enter_presentation();
+        }
         // Full screen is asked for, never taken: a document can't put the app in full screen on
         // its own (the prompt is `dialogs::full_screen_prompt`).
         if activate && initial.full_screen {

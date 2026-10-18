@@ -1702,6 +1702,41 @@ fn full_screen_shows_one_fitted_page_and_clicks_turn_it() {
     assert!(h.query_by_label("Select (V)").is_some(), "the quick tools are back");
 }
 
+/// #2070 review: full screen survives the file being reloaded (Esc still brings the display from
+/// before back), and a document opened in full screen takes its own initial view first, so Esc
+/// comes back to that and full screen stays one spread at a time.
+#[test]
+fn full_screen_survives_a_reload_and_keeps_a_new_documents_own_view() {
+    use pdfcraft_ui_egui::canvas::{Fit, PageLayout};
+    let mut h = harness(&[("layout", "continuous"), ("zoom", "50")]);
+    h.run_steps(4);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::L);
+    h.run_steps(6);
+    {
+        let app = h.state_mut();
+        let info = app.session.get(app.views[0].id).unwrap().info.clone();
+        app.views[0].document_replaced(&info);
+    }
+    h.run_steps(4);
+    assert!(h.state().views[0].presenting(), "still presenting after the reload");
+    h.key_press(Key::Escape);
+    h.run_steps(4);
+    let v = &h.state().views[0];
+    assert!(v.continuous() && v.fit == Fit::None && (v.zoom - 0.5).abs() < 1e-3, "the display from before comes back");
+
+    h.key_press_modifiers(Modifiers::COMMAND, Key::L);
+    h.run_steps(6);
+    let two_columns = String::from_utf8_lossy(PAGES).replace("/Type /Catalog /Pages 2 0 R", "/Type /Catalog /Pages 2 0 R /PageLayout /TwoColumnLeft");
+    h.state_mut().open_bytes("two.pdf", None, two_columns.into_bytes()).expect("opens");
+    h.run_steps(6);
+    let v = h.state().views.last().unwrap();
+    assert!(v.presenting() && v.layout == PageLayout::TwoUp && !v.continuous(), "one spread at a time");
+    h.key_press(Key::Escape);
+    h.run_steps(4);
+    let v = h.state().views.last().unwrap();
+    assert!(v.layout == PageLayout::TwoUp && v.continuous(), "the document's own two-column view comes back");
+}
+
 /// Two-page view stays a spread in full screen (#1353): both pages of the spread, fitted, and
 /// → turns the spread.
 #[test]
