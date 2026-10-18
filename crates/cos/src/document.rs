@@ -1476,7 +1476,7 @@ impl Document {
                 }
             }
             sections.push(XrefRevisionSection { primary, hybrid });
-            next = prev_offset(&sect_trailer, off, log);
+            next = prev_offset(data, &sect_trailer, off, |num| sections.iter().find_map(|s| s.lookup(num, data)), log);
             if trailer.is_none() {
                 trailer = Some(sect_trailer);
             }
@@ -1764,7 +1764,7 @@ impl Document {
             for (num, e) in sect {
                 entries.entry(num).or_insert(e);
             }
-            next = prev_offset(&sect_trailer, off, log);
+            next = prev_offset(data, &sect_trailer, off, |num| entries.get(&num).copied(), log);
             if trailer.is_none() {
                 trailer = Some(sect_trailer);
             }
@@ -1991,15 +1991,36 @@ impl Document {
 }
 
 /// The offset of the section before the one whose trailer this is (`/Prev`), if any. Some writers
-/// (tiff2pdf; JHOVE's PDF-HUL-157 files) give it as a reference, `N 0 R`: other readers rebuild
-/// such a file, and the sections before are at N, so it is read as that, with a note. Any other
-/// value that is not an offset is noted and ends the chain.
-fn prev_offset(trailer: &Dict, off: u64, log: &mut Vec<String>) -> Option<u64> {
+/// give it as a reference, `N 0 R`. When the sections read so far (`lookup`) place that object
+/// and it holds an offset (iText's `indirectPrev.pdf`), that is the offset; otherwise, as the
+/// tiff2pdf files in JHOVE's PDF-HUL-157 cases need, the sections before are at N. Either way the
+/// reference is noted. Any other value that is not an offset is noted and ends the chain.
+fn prev_offset(data: &[u8], trailer: &Dict, off: u64, lookup: impl Fn(u32) -> Option<XrefEntry>, log: &mut Vec<String>) -> Option<u64> {
     match trailer.get(b"Prev") {
         Some(Object::Int(p)) if *p >= 0 => Some(*p as u64),
         Some(Object::Ref(r)) => {
-            log.push(format!("the trailer at {off} gives /Prev as the reference {} 0 R; reading it as offset {}", r.num, r.num));
-            Some(u64::from(r.num))
+            let held = match lookup(r.num) {
+                Some(XrefEntry::InFile { offset, generation }) if generation == r.generation => {
+                    usize::try_from(offset).ok().and_then(|at| parse_indirect(data, at, &|_| None).ok()).and_then(|(at, value)| match value {
+                        Object::Int(p) if at == *r && p >= 0 => Some(p as u64),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            };
+            match held {
+                Some(p) => {
+                    log.push(format!(
+                        "the trailer at {off} gives /Prev as the reference {} {} R; reading the offset {p} it holds",
+                        r.num, r.generation
+                    ));
+                    Some(p)
+                }
+                None => {
+                    log.push(format!("the trailer at {off} gives /Prev as the reference {} 0 R; reading it as offset {}", r.num, r.num));
+                    Some(u64::from(r.num))
+                }
+            }
         }
         Some(_) => {
             log.push(format!("the trailer at {off} has a /Prev that is not an offset; the sections before it are unreachable"));
@@ -2888,6 +2909,39 @@ endobj
             bad.get(ObjRef::new(4, 0)).as_dict().and_then(|d| d.get(b"Title").and_then(|t| t.as_string().map(|s| s.to_text()))),
             Some("Update".into())
         );
+    }
+
+    /// iText's `indirectPrev.pdf` in miniature: the update's trailer gives `/Prev 4 0 R`, and
+    /// object 4, listed in that update, holds the offset of the first section. Read as offset 4
+    /// (inside the header), the chain broke and the file was rebuilt without its revisions.
+    #[test]
+    fn a_prev_reference_to_an_object_holding_the_offset_reads_that_offset() {
+        let mut bytes = build(
+            &["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R >>"],
+            "/Root 1 0 R",
+        );
+        let prev = String::from_utf8_lossy(&bytes).rfind("xref\n0 4").unwrap();
+        let mut at = Vec::new();
+        for (num, body) in
+            [(2, "<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>".to_string()), (4, prev.to_string()), (5, "<< /Type /Page /Parent 2 0 R >>".into())]
+        {
+            at.push(bytes.len());
+            bytes.extend_from_slice(format!("{num} 0 obj\n{body}\nendobj\n").as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend_from_slice(
+            format!(
+                "xref\n2 1\n{:010} 00000 n \n4 2\n{:010} 00000 n \n{:010} 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R /Prev 4 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                at[0], at[1], at[2]
+            )
+            .as_bytes(),
+        );
+        let doc = Document::open(Arc::new(bytes)).unwrap();
+        assert_eq!(doc.revisions().len(), 2, "{:?}", doc.repair_log());
+        assert_eq!(doc.repair_log().len(), 1, "a note about the /Prev, and no rebuild: {:?}", doc.repair_log());
+        assert!(doc.repair_log()[0].contains(&format!("the offset {prev}")), "{:?}", doc.repair_log());
+        assert_eq!(doc.get(ObjRef::new(3, 0)).as_dict().and_then(|d| d.name(b"Type")), Some(&b"Page"[..]));
+        assert_compact_matches_materialized(&doc);
     }
 
     #[test]
