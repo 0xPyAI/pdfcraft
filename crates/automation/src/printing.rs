@@ -65,9 +65,10 @@ impl Automation {
                     o => return Err(bad(format!("unknown order {o:?}"))),
                 };
                 match Layout::multiple(per) {
-                    Layout::Multiple { cols, rows, .. } => Layout::Multiple {
+                    Layout::Multiple { cols, rows, per_sheet, .. } => Layout::Multiple {
                         cols,
                         rows,
+                        per_sheet,
                         order,
                         border: a.opt_bool("border")?.unwrap_or(false),
                         auto_rotate: a.opt_bool("auto_rotate")?.unwrap_or(true),
@@ -124,7 +125,18 @@ impl Automation {
                     bad(format!("unknown paper {p:?}; choose one of {}", PAPERS.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(", ")))
                 })?,
         };
-        let settings = print::Settings { pages, paper, orientation, layout, content };
+        // Print as image (Acrobat's Advanced Print Setup): pictures at `dpi`, grey when
+        // `grayscale` is also asked for.
+        let raster = if a.opt_bool("as_image")?.unwrap_or(false) {
+            let dpi = a.opt_num("dpi")?.unwrap_or(300.0);
+            if !(72.0..=600.0).contains(&dpi) {
+                return Err(bad("dpi must be between 72 and 600"));
+            }
+            Some(print::Raster { dpi, grayscale: a.opt_bool("grayscale")?.unwrap_or(false) })
+        } else {
+            None
+        };
+        let settings = print::Settings { pages, paper, orientation, layout, content, raster, crops: Vec::new() };
         let sizes: Vec<(f64, f64)> = self.doc(a)?.info.pages.iter().map(|p| (p.width as f64, p.height as f64)).collect();
         let sheets = print::layout(&sizes, &settings).map_err(|e| bad(e.to_string()))?.len();
         let bytes = self.session.print_pdf(id, &settings).map_err(failed)?;

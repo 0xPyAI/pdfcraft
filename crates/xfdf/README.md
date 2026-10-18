@@ -13,10 +13,20 @@ let report = import(&mut doc, &bytes)?;                 // XFDF, FDF, XML, CSV o
   circle, polygon, polyline, markup, stamp, caret, ink, attachments, sound, redact) with rect,
   name, author, subject, dates, flags, colours, opacity, width, icon, quads, line ends, ink,
   default appearance, callouts (`callout`, `fringe`, `intent`, `head`), pop-ups and reply threads
-  (`inreplyto`); field values nested by name.
+  (`inreplyto`); field values nested by name, with text preserved across XML comments and processing instructions.
 - **FDF**: fields (with `/Kids` hierarchies) and comments as direct objects.
 - **Form data**: Acrobat's XML (`xfdf:original` keeps names that aren't XML names), CSV and
   tab-delimited text (a row of names, a row of values).
+
+XML and XFDF exports preserve tabs and line breaks in field names and comment metadata with
+character references, so XML attribute normalization cannot change their identities.
+
+Plain AcroForm XML imports retain all direct text around comments and processing instructions,
+including CDATA and character references. Nested-element and XFA interpretation are unchanged.
+
+CSV export and spreadsheet merging quote tabs, and import distinguishes quoted tabs from TSV
+delimiters without changing field identities. Automatic detection of externally authored, ambiguous
+tables remains heuristic.
 
 Import replaces comments with the same `/NM` (and drops the replaced comment's pop-up), draws
 appearances PdfCraft can draw, and sets values through the form's own checks (formats,

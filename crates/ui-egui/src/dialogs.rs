@@ -19,7 +19,12 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     password(app, ctx);
     save_prompt(app, ctx);
     link_prompt(app, ctx);
+    remote_link_prompt(app, ctx);
+    full_screen_prompt(app, ctx);
     crate::updates::dialog(app, ctx);
+    if app.dialog != Some(Dialog::WordCount) {
+        app.word_count_draft.cancel();
+    }
     let Some(dialog) = app.dialog else {
         app.props_draft = None;
         app.view_draft = None;
@@ -58,6 +63,8 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     let mut import_words = false;
     let mut print_go = false;
     let mut revert_now = false;
+    let mut overwrite_now = false;
+    let mut overwrite_elsewhere = false;
     let mut summarize_now = false;
     let mut optimize_now = false;
     let mut duplicate_now: Option<Edit> = None;
@@ -81,6 +88,9 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
             _ => 520.0,
         });
         match dialog {
+            Dialog::WordCount => {
+                close = crate::word_count_ui::body(ui, app);
+            }
             Dialog::CreateImages => {
                 let (go, cancel) = crate::create_ui::image_import_body(ui, app);
                 images_now = go;
@@ -111,7 +121,12 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 let row = |ui: &mut egui::Ui, k: &str, v: String| {
                     // Row labels are UI chrome; values are document data and stay as they are.
                     ui.label(egui::RichText::new(tl!(k)).color(t.text_muted));
-                    ui.label(if v.is_empty() { egui::RichText::new("—").color(t.text_faint) } else { egui::RichText::new(v) });
+                    ui.scope(|ui| {
+                        ui.set_max_width(420.0);
+                        ui.add(
+                            egui::Label::new(if v.is_empty() { egui::RichText::new("—").color(t.text_faint) } else { egui::RichText::new(v) }).wrap(),
+                        );
+                    });
                     ui.end_row();
                 };
                 egui::ScrollArea::vertical().max_height(460.0).auto_shrink([false, true]).show(ui, |ui| {
@@ -339,17 +354,20 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                             let ends = doc.revision_ends();
                             if ends.len() > 1 {
                                 ui.label(egui::RichText::new(tl!("Revisions")).color(t.text_muted));
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.label(ends.len().to_string());
-                                    for n in (1..ends.len()).rev().take(12) {
-                                        if ui
-                                            .small_button(crate::i18n::fmt(tl!("View revision {n}"), &[("n", &n.to_string())]))
-                                            .on_hover_text(tl!("Open the file as it was saved then"))
-                                            .clicked()
-                                        {
-                                            open_revision = Some(n);
+                                // Reserve the full wrapped height before the grid starts the next row.
+                                ui.vertical(|ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label(ends.len().to_string());
+                                        for n in (1..ends.len()).rev().take(12) {
+                                            if ui
+                                                .small_button(crate::i18n::fmt(tl!("View revision {n}"), &[("n", &n.to_string())]))
+                                                .on_hover_text(tl!("Open the file as it was saved then"))
+                                                .clicked()
+                                            {
+                                                open_revision = Some(n);
+                                            }
                                         }
-                                    }
+                                    });
                                 });
                                 ui.end_row();
                             }
@@ -469,14 +487,17 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 ui.add_space(8.0);
                 d.to = d.to.clamp(1, count);
                 d.from = d.from.clamp(1, d.to);
-                let n = d.to - d.from + 1;
                 ui.horizontal(|ui| {
                     ui.label(tl!("Original: replace pages"));
-                    ui.add(egui::DragValue::new(&mut d.from).range(1..=count));
+                    let from = ui.add(egui::DragValue::new(&mut d.from).range(1..=count));
                     ui.label(tl!("to"));
-                    ui.add(egui::DragValue::new(&mut d.to).range(1..=count));
+                    let to = ui.add(egui::DragValue::new(&mut d.to).range(1..=count));
+                    if from.changed() || to.changed() {
+                        d.range_edited = true;
+                    }
                     ui.label(egui::RichText::new(crate::i18n::fmt(tl!("of {name}"), &[("name", &count.to_string())])).color(t.text_muted));
                 });
+                let n = if d.range_edited { d.to - d.from + 1 } else { d.pages.len().max(1) };
                 let max_start = d.src_pages.saturating_sub(n) + 1;
                 d.src_from = d.src_from.clamp(1, max_start.max(1));
                 ui.horizontal(|ui| {
@@ -530,6 +551,15 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 let mut prefs = app.redact_prefs.clone();
                 let (ok, cancel) = crate::redact_ui::props_body(ui, &mut prefs, &t);
                 app.redact_prefs = prefs;
+                if ok && app.redact_prefs.remember {
+                    app.redact_defaults = app.redact_prefs.clone();
+                }
+                if cancel && let Some(before) = app.redact_before.take() {
+                    app.redact_prefs = before;
+                }
+                if ok {
+                    app.redact_before = None;
+                }
                 close = ok || cancel;
                 return;
             }
@@ -711,8 +741,7 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 match action {
                     Some(crate::sign_ui::CertAction::Trust(c)) => app.trust_certificate(*c),
                     Some(crate::sign_ui::CertAction::Export(c)) => {
-                        let pem = crate::sign_ui::certificate_pem(&c);
-                        app.write_files(&[(format!("{}.cer", c.display_name()), std::sync::Arc::new(pem.into_bytes()))], "Export certificate");
+                        app.export_certificate(&c);
                     }
                     None => {}
                 }
@@ -777,11 +806,41 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 });
                 return;
             }
+            Dialog::OverwriteChanged => {
+                #[cfg(not(target_arch = "wasm32"))]
+                let name = app.pending_overwrite.as_ref().and_then(|p| app.session.get(p.id)).map(|d| d.name.clone()).unwrap_or_default();
+                #[cfg(target_arch = "wasm32")]
+                let name = String::new();
+                ui.label(egui::RichText::new(tl!("Save over the changed file?")).font(theme::semibold(18.0)));
+                ui.add_space(8.0);
+                ui.label(crate::i18n::fmt(
+                    tl!("“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one."),
+                    &[("name", &name)],
+                ));
+                ui.add_space(12.0);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if widgets::pill_button(ui, tl!("Save anyway"), true).clicked() {
+                        overwrite_now = true;
+                        close = true;
+                    }
+                    if widgets::pill_button(ui, tl!("Save as…"), false).clicked() {
+                        overwrite_elsewhere = true;
+                        close = true;
+                    }
+                    if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
+                        close = true;
+                    }
+                });
+                return;
+            }
             Dialog::Print => {
                 let Some((i, id)) = app.active_ids() else {
                     close = true;
                     return;
                 };
+                if app.print_draft.handling == crate::print_ui::Handling::Label {
+                    app.read_label_crops(id);
+                }
                 let Some(doc) = app.session.get(id) else { return };
                 let sizes: Vec<(f64, f64)> = doc.info.pages.iter().map(|p| (p.width as f64, p.height as f64)).collect();
                 let labels: Vec<String> = doc.info.pages.iter().map(|p| p.label.clone()).collect();
@@ -793,6 +852,7 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                     ui.ctx().input(|i| i.max_texture_side) as f32,
                 );
                 let view = &mut app.views[i];
+                view.set_print_grayscale(app.print_draft.grayscale);
                 view.queue_print_previews(&rasters);
                 let (go, cancel) = crate::print_ui::body(ui, &mut app.print_draft, &t, &sizes, &labels, &mut |p| {
                     view.need_thumbnail(p, true);
@@ -1098,7 +1158,7 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                             widgets::artcraft_mark(ui, 40.0);
                             ui.vertical(|ui| {
                                 ui.label(egui::RichText::new("PdfCraft").font(theme::semibold(20.0)));
-                                ui.label(crate::i18n::fmt(tl!("Version {v}"), &[("v", env!("CARGO_PKG_VERSION"))]));
+                                ui.label(crate::i18n::fmt(tl!("Version {v}"), &[("v", &pdfcraft_engine::build_info::version())]));
                             });
                         });
                         ui.add_space(6.0);
@@ -1177,9 +1237,10 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
         && let Some(d) = app.replace_draft.take()
         && app.still_pick_target(d.target)
     {
-        let n = d.to - d.from + 1;
+        let pages = if d.range_edited { (d.from - 1..d.to).collect() } else { d.pages.clone() };
+        let n = pages.len();
         app.apply_edit(Edit::ReplacePages {
-            pages: (d.from - 1..d.to).collect(),
+            pages,
             name: d.name.clone(),
             bytes: d.bytes.clone(),
             src_pages: (d.src_from - 1..d.src_from - 1 + n).collect(),
@@ -1191,6 +1252,22 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     }
     if revert_now {
         app.revert_active();
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if overwrite_now {
+            app.overwrite_changed_file();
+        }
+        if overwrite_elsewhere {
+            app.save_changed_file_elsewhere();
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = (overwrite_now, overwrite_elsewhere);
+    // Cancelled or dismissed: the save is dropped.
+    #[cfg(not(target_arch = "wasm32"))]
+    if dialog == Dialog::OverwriteChanged && (modal.should_close() || close) {
+        app.pending_overwrite = None;
     }
     if summarize_now {
         app.summarize_comments();
@@ -1271,6 +1348,10 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 app.apply_edit(Edit::Batch { label: "Change comment properties".into(), edits });
             }
         }
+        // Make Properties Default: the look chosen here, even when it was already the comment's.
+        if d.make_default && d.edited.restylable {
+            app.make_props_default(d.page, d.index, &d.edited);
+        }
     }
     if export_now && let Dialog::Export(kind) = dialog {
         app.start_export(kind);
@@ -1333,7 +1414,9 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
         app.run_compare();
     }
     if a11y_now {
-        app.a11y_skipped.clear();
+        if let Some((_, id)) = app.active_ids() {
+            app.a11y_skipped.retain(|(doc, _)| *doc != id);
+        }
         app.run_accessibility_check();
     }
 }
@@ -1506,6 +1589,80 @@ fn link_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
     }
     if let Some(open) = choice {
         app.resolve_pending_link(open);
+    }
+}
+
+/// A document that asks to open in Full Screen mode (`/PageMode /FullScreen`) is asked about
+/// first, as Acrobat does: full screen hides every control, so it is the person's choice.
+fn full_screen_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
+    let Some(id) = app.pending_full_screen else { return };
+    // The document was closed before an answer: nothing to ask any more.
+    if app.session.get(id).is_none() {
+        app.pending_full_screen = None;
+        return;
+    }
+    let t = Tokens::get(ctx);
+    let mut choice = None;
+    let modal = widgets::show_modal(ctx, "full_screen_prompt", |ui| {
+        ui.set_width(460.0);
+        ui.horizontal(|ui| {
+            ui.add(crate::icons::image("maximize", 22.0, t.accent));
+            ui.label(egui::RichText::new(tl!("Open in Full Screen mode?")).font(theme::semibold(16.0)));
+        });
+        ui.add_space(6.0);
+        ui.add(
+            egui::Label::new(tl!(
+                "This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it."
+            ))
+            .wrap(),
+        );
+        ui.add_space(14.0);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if widgets::pill_button(ui, tl!("Not now"), true).clicked() {
+                choice = Some(false);
+            }
+            if widgets::pill_button(ui, tl!("Full Screen"), false).clicked() {
+                choice = Some(true);
+            }
+        });
+    });
+    if choice.is_none() && modal.should_close() {
+        choice = Some(false);
+    }
+    if let Some(allow) = choice {
+        app.resolve_full_screen_prompt(ctx, allow);
+    }
+}
+
+/// Absolute document-controlled local paths require consent before any filesystem access.
+fn remote_link_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
+    let Some(pending) = app.pending_remote_link.clone() else { return };
+    let mut choice = None;
+    let modal = widgets::show_modal(ctx, "remote_link_prompt", |ui| {
+        ui.set_width(460.0);
+        ui.label(egui::RichText::new(tl!("Open this local PDF?")).font(theme::semibold(16.0)));
+        ui.add_space(6.0);
+        ui.label(tl!("This document is trying to open a local file:"));
+        egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+            ui.add(egui::Label::new(egui::RichText::new(pending.path.to_string_lossy()).monospace()).wrap().selectable(true));
+        });
+        ui.add_space(8.0);
+        ui.label(tl!("Only allow this if you trust the source document."));
+        ui.add_space(14.0);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if widgets::pill_button(ui, tl!("Cancel"), true).clicked() {
+                choice = Some(false);
+            }
+            if widgets::pill_button(ui, tl!("Allow"), false).clicked() {
+                choice = Some(true);
+            }
+        });
+    });
+    if choice.is_none() && modal.should_close() {
+        choice = Some(false);
+    }
+    if let Some(open) = choice {
+        app.resolve_pending_remote_link(open);
     }
 }
 

@@ -1,10 +1,11 @@
 //! Walk page content streams and collect the opaque filled rectangles they draw.
 //!
 //! This is the geometric half of the faux-redaction audit: a rectangle filled with an opaque
-//! color (`re` + `f`) is the classic way a "redaction" is faked. Graphics state tracked here is
-//! deliberately small: the CTM stack (`q`/`Q`/`cm`), the non-stroking color (`g`/`rg`/`k`) and
-//! the non-stroking alpha from ExtGState (`gs` reading `/ca`). Form XObjects are followed
-//! read-only with a depth cap. Anything fancier (arbitrary filled paths, shadings, patterns) is
+//! color (`re` + `f`) is the classic way a "redaction" is faked. A single closed `m`/`l` subpath
+//! whose four corners form an axis-aligned rectangle in user space is the same shape and counts
+//! too (#1510). Graphics state tracked here is deliberately small: the CTM stack (`q`/`Q`/`cm`),
+//! the non-stroking color (`g`/`rg`/`k`) and the non-stroking alpha from ExtGState (`gs` reading
+//! `/ca`). Form XObjects are followed read-only with a depth cap. Anything fancier (other filled paths, shadings, patterns) is
 //! out of scope and documented as such.
 //!
 //! Paint order: a page's content streams are one stream in pieces (ISO 32000-2 §7.8.2), so they
@@ -45,6 +46,58 @@ struct Gs {
     alpha: f64,
 }
 
+/// The path under construction, as far as the audit cares about it.
+enum Path {
+    Empty,
+    /// A `re` rectangle, in user space.
+    Rect([f64; 4]),
+    /// One `m`/`l` subpath, corners already mapped to user space; `true` once closed by `h`.
+    Lines(Vec<[f64; 2]>, bool),
+    /// Anything else: curves, a second subpath, a CTM change mid-path.
+    Other,
+}
+
+impl Path {
+    /// The rectangle a fill of this path paints, if the path is one.
+    fn rect(self) -> Option<[f64; 4]> {
+        match self {
+            Path::Rect(r) => Some(r),
+            Path::Lines(pts, _) => lines_rect(pts),
+            Path::Empty | Path::Other => None,
+        }
+    }
+}
+
+/// The bounding box of a closed polygon that is an axis-aligned rectangle, or `None`. A repeated
+/// start point is dropped first; the remaining four corners must alternate horizontal and
+/// vertical edges.
+fn lines_rect(mut pts: Vec<[f64; 2]>) -> Option<[f64; 4]> {
+    // CTM products leave rounding noise, so corners compare with a tolerance (in points).
+    const EPS: f64 = 1e-6;
+    let same = |a: f64, b: f64| (a - b).abs() <= EPS;
+    if pts.len() == 5 && same(pts[0][0], pts[4][0]) && same(pts[0][1], pts[4][1]) {
+        pts.pop();
+    }
+    let [a, b, c, d] = <[[f64; 2]; 4]>::try_from(pts).ok()?;
+    let fits = |first_horizontal: bool| {
+        [(a, b), (b, c), (c, d), (d, a)]
+            .iter()
+            .enumerate()
+            .all(|(i, (p, q))| if (i % 2 == 0) == first_horizontal { same(p[1], q[1]) } else { same(p[0], q[0]) })
+    };
+    if !(fits(true) || fits(false)) {
+        return None;
+    }
+    let (xs, ys) = ([a[0], b[0], c[0], d[0]], [a[1], b[1], c[1], d[1]]);
+    let r = [
+        xs.into_iter().fold(f64::INFINITY, f64::min),
+        ys.into_iter().fold(f64::INFINITY, f64::min),
+        xs.into_iter().fold(f64::NEG_INFINITY, f64::max),
+        ys.into_iter().fold(f64::NEG_INFINITY, f64::max),
+    ];
+    (r[2] - r[0] > EPS && r[3] - r[1] > EPS).then_some(r)
+}
+
 impl Default for Gs {
     fn default() -> Self {
         Gs { ctm: Matrix::IDENTITY, fill: [0.0, 0.0, 0.0], alpha: 1.0 }
@@ -79,8 +132,7 @@ impl<'a> Walker<'a> {
         depth: usize,
         at_do: Option<(usize, usize)>,
     ) -> Result<(), AuditError> {
-        // A pending `re` rectangle, in the user space active when it was built.
-        let mut pending: Option<[f64; 4]> = None;
+        let mut path = Path::Empty;
         for (i, op) in ops.iter().enumerate() {
             self.bump()?;
             // Paint position of this operator: its own `(piece, joined index)` at page level,
@@ -95,7 +147,7 @@ impl<'a> Walker<'a> {
                     if let Some(g) = stack.pop() {
                         *gs = g;
                     }
-                    pending = None;
+                    path = Path::Empty;
                 }
                 b"cm" => {
                     let before = gs.ctm;
@@ -105,9 +157,9 @@ impl<'a> Walker<'a> {
                         gs.ctm = m.then(&gs.ctm);
                     }
                     // A `cm` that leaves the CTM unchanged (an identity matrix) cannot move the
-                    // pending rectangle, so keep it for the fill (#1333).
-                    if gs.ctm != before {
-                        pending = None;
+                    // pending path, so keep it for the fill (#1333).
+                    if gs.ctm != before && !matches!(path, Path::Empty) {
+                        path = Path::Other;
                     }
                 }
                 b"g" => {
@@ -138,7 +190,7 @@ impl<'a> Walker<'a> {
                     }
                 }
                 b"re" => {
-                    pending = op.nums::<4>().and_then(|[x, y, w, h]| {
+                    let rect = op.nums::<4>().and_then(|[x, y, w, h]| {
                         if [x, y, w, h].iter().all(|v| v.is_finite()) && w != 0.0 && h != 0.0 {
                             let r = gs.ctm.bbox([x.min(x + w), y.min(y + h), x.max(x + w), y.max(y + h)]);
                             (r[2] > r[0] && r[3] > r[1]).then_some(r)
@@ -146,18 +198,42 @@ impl<'a> Walker<'a> {
                             None
                         }
                     });
+                    path = rect.map_or(Path::Other, Path::Rect);
                 }
-                b"f" | b"F" | b"f*" | b"B" | b"B*" => {
-                    if let Some(r) = pending.take()
+                b"m" => {
+                    path = match (path, user_point(gs, op)) {
+                        (Path::Empty, Some(p)) => Path::Lines(vec![p], false),
+                        _ => Path::Other,
+                    };
+                }
+                b"l" => {
+                    path = match (path, user_point(gs, op)) {
+                        // Past a repeated start point it can no longer be a rectangle.
+                        (Path::Lines(mut pts, false), Some(p)) if pts.len() < 5 => {
+                            pts.push(p);
+                            Path::Lines(pts, false)
+                        }
+                        _ => Path::Other,
+                    };
+                }
+                b"h" => {
+                    path = match path {
+                        Path::Lines(pts, _) => Path::Lines(pts, true),
+                        // `re` already closed its subpath, so a further `h` changes nothing.
+                        Path::Rect(r) => Path::Rect(r),
+                        _ => Path::Other,
+                    };
+                }
+                // `b`/`b*` close the path before filling it, which the fill does anyway.
+                b"f" | b"F" | b"f*" | b"B" | b"B*" | b"b" | b"b*" => {
+                    if let Some(r) = std::mem::replace(&mut path, Path::Empty).rect()
                         && gs.alpha >= 1.0
                     {
                         self.out.push(FilledRect { rect: r, rgb: gs.fill, pos });
                     }
-                    // Any other path construction clears the pending rectangle.
                 }
-                b"m" | b"l" | b"c" | b"v" | b"y" | b"h" | b"S" | b"s" | b"n" | b"W" | b"W*" => {
-                    pending = None;
-                }
+                b"S" | b"s" | b"n" => path = Path::Empty,
+                b"c" | b"v" | b"y" | b"W" | b"W*" => path = Path::Other,
                 b"Do" => {
                     if let Some(name) = op.name(0) {
                         if depth >= MAX_DEPTH {
@@ -165,7 +241,7 @@ impl<'a> Walker<'a> {
                         }
                         self.walk_xobject(name, gs, resources, depth, pos)?;
                     }
-                    pending = None;
+                    path = Path::Empty;
                 }
                 _ => {}
             }
@@ -204,6 +280,13 @@ impl<'a> Walker<'a> {
         let mut sub_stack = Vec::new();
         self.walk_ops(&ops, &mut sub_gs, &mut sub_stack, &sub_resources, depth + 1, Some(pos))
     }
+}
+
+/// The `x y` operands of `m`/`l`, mapped to user space.
+fn user_point(gs: &Gs, op: &Op) -> Option<[f64; 2]> {
+    let [x, y] = op.nums::<2>().filter(|v| v.iter().all(|n| n.is_finite()))?;
+    let (x, y) = gs.ctm.apply(x, y);
+    Some([x, y])
 }
 
 /// The non-stroking alpha (`/ca`) of a named ExtGState, defaulting to opaque.

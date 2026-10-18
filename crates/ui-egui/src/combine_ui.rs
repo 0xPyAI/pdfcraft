@@ -380,6 +380,8 @@ pub(crate) struct Incoming {
     pub modified: Option<SystemTime>,
     /// Something to tell the user about where it came from.
     pub note: Option<String>,
+    /// The open document it is, when it came from a tab.
+    pub open_doc: Option<pdfcraft_engine::DocId>,
 }
 
 /// A new value for [`CombineFile::auth`]: counted for the whole run, outside the undo history.
@@ -400,6 +402,9 @@ pub struct CombineFile {
     pub(crate) group: u64,
     pub name: String,
     pub bytes: Arc<Vec<u8>>,
+    /// The file as it was added: `bytes` itself for a PDF, the image or text it was made from
+    /// otherwise (converted anew, with its own date, each time it is added).
+    source: Arc<Vec<u8>>,
     pub pages: usize,
     /// Each page's displayed size in points; shared, so undo snapshots don't copy it.
     pub(crate) sizes: Arc<[(f32, f32)]>,
@@ -420,6 +425,8 @@ pub struct CombineFile {
     pub notes: Vec<String>,
     /// Where it came from, shown among the warnings (e.g. an open document's unsaved changes).
     origin_note: Option<String>,
+    /// The open document it is, when it came from a tab: Add open documents leaves it out.
+    open_doc: Option<pdfcraft_engine::DocId>,
     /// The range last checked and the result: the number of pages it takes and the first of
     /// them (0-based), or why it is wrong.
     checked: Option<(String, RangeCheck)>,
@@ -436,7 +443,7 @@ impl CombineTab {
         // unrelated files, and never count a source split into parts as several additions.
         let mut candidates: HashMap<(&str, usize), Vec<usize>> = HashMap::new();
         for (i, f) in files.iter().enumerate() {
-            candidates.entry((&f.name, f.bytes.len())).or_default().push(i);
+            candidates.entry((&f.name, f.source.len())).or_default().push(i);
         }
         let mut twice = vec![false; files.len()];
         for indices in candidates.values() {
@@ -448,7 +455,7 @@ impl CombineTab {
             let mut contents: HashMap<&[u8], Vec<usize>> = HashMap::new();
             for &i in indices {
                 if let Some(f) = files.get(i) {
-                    contents.entry(f.bytes.as_slice()).or_default().push(i);
+                    contents.entry(f.source.as_slice()).or_default().push(i);
                 }
             }
             for copies in contents.values() {
@@ -726,7 +733,7 @@ pub(crate) fn page(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
             let edge = ui.max_rect().right();
             add_menu(app, ui);
             let open_docs: Vec<(usize, String)> =
-                app.views.iter().enumerate().filter_map(|(i, v)| app.session.get(v.id).map(|d| (i, d.display_name()))).collect();
+                app.views.iter().enumerate().filter_map(|(i, _)| crate::canvas::tab_label(app, i).map(|name| (i, name))).collect();
             let response = ui.add_enabled_ui(!open_docs.is_empty(), |ui| widgets::icon_pill(ui, "file-plus", tl!("Add open documents"), false)).inner;
             response.clone().on_disabled_hover_text(tl!("No documents are open"));
             egui::Popup::menu(&response).show(|ui| {
@@ -2381,14 +2388,15 @@ impl PdfCraftApp {
 
     /// Add picked files to the Combine files list (and show it).
     pub(crate) fn stage_combine(&mut self, files: Vec<(String, Vec<u8>)>) {
-        let incoming = files.into_iter().map(|(name, bytes)| Incoming { name, bytes: Arc::new(bytes), modified: None, note: None }).collect();
+        let incoming =
+            files.into_iter().map(|(name, bytes)| Incoming { name, bytes: Arc::new(bytes), modified: None, note: None, open_doc: None }).collect();
         self.stage_combine_with(incoming);
     }
 
     /// Add files to the Combine files list, with what can be known about them up front.
     pub(crate) fn stage_combine_with(&mut self, files: Vec<Incoming>) {
         let mut added = Vec::new();
-        for Incoming { name, bytes, modified, note } in files {
+        for Incoming { name, bytes, modified, note, open_doc } in files {
             // Images and text files become PDFs as they join the list (#569): from then on they
             // are ordinary files, with pages, thumbnails and page ranges.
             // A file that can't be read joins the list all the same, with why (the Warnings
@@ -2400,6 +2408,7 @@ impl PdfCraftApp {
                 lock: None,
                 notes: Vec::new(),
             };
+            let source = bytes.clone();
             let (bytes, assessed) = match self.session.as_pdf(&name, &bytes) {
                 Ok(pdf) => {
                     let assessed = assess(&pdf, None);
@@ -2428,6 +2437,7 @@ impl PdfCraftApp {
                 group: 0,
                 name,
                 bytes,
+                source,
                 pages: 0,
                 range: String::new(),
                 modified,
@@ -2438,6 +2448,7 @@ impl PdfCraftApp {
                 auth: 0,
                 notes: Vec::new(),
                 origin_note: note,
+                open_doc,
                 checked: None,
             };
             f.take(assessed, None);
@@ -2536,18 +2547,22 @@ impl PdfCraftApp {
         }
     }
 
-    /// Add documents open in tabs (by tab index), as they are now.
+    /// Add documents open in tabs (by tab index), as they are now; those already in the list
+    /// stay out (#1356). The same document, not the same name: two files called alike are two.
     pub(crate) fn add_open_documents(&mut self, tabs: &[usize]) {
         let mut incoming = Vec::new();
         for &i in tabs {
             let Some(doc) = self.views.get(i).and_then(|v| self.session.get(v.id)) else { continue };
+            if self.combine_draft.iter().any(|f| f.open_doc == Some(doc.id)) {
+                continue;
+            }
             #[cfg(not(target_arch = "wasm32"))]
             let modified = if doc.dirty { None } else { doc.path.as_ref().and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok()) };
             #[cfg(target_arch = "wasm32")]
             let modified = None;
             let note = doc.dirty.then(|| tl!("Includes unsaved changes").to_string());
             let name = if doc.name.to_ascii_lowercase().ends_with(".pdf") { doc.name.clone() } else { format!("{}.pdf", doc.name) };
-            incoming.push(Incoming { name, bytes: doc.bytes.clone(), modified, note });
+            incoming.push(Incoming { name, bytes: doc.bytes.clone(), modified, note, open_doc: Some(doc.id) });
         }
         self.stage_combine_with(incoming);
     }
@@ -2634,6 +2649,28 @@ mod tests {
         assert_eq!(&*app.combine_tab.duplicate_warnings(&app.combine_draft), &[true, true, true]);
         app.close_combine_tab();
         assert!(app.combine_tab.duplicate_warnings(&app.combine_draft).is_empty());
+    }
+
+    /// #1303: an image or text file is converted anew, with its own date, each time it is added,
+    /// so it is the file as added that is compared, not the PDF made from it.
+    #[test]
+    fn the_same_image_or_text_file_added_twice_is_a_duplicate() {
+        static NOW: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1_700_000_000);
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(12, 4, image::Rgba([20, 30, 40, 255])).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let png = png.into_inner();
+        let warnings = |first: (&str, &[u8]), second: (&str, &[u8])| {
+            let mut app = PdfCraftApp::new();
+            app.session = std::mem::take(&mut app.session).with_clock(|| NOW.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+            for (name, bytes) in [first, second] {
+                app.stage_combine(vec![(name.into(), bytes.to_vec())]);
+            }
+            assert_ne!(app.combine_draft[0].bytes, app.combine_draft[1].bytes, "each addition is converted with its own date");
+            app.combine_tab.duplicate_warnings(&app.combine_draft).to_vec()
+        };
+        assert_eq!(warnings(("notes.txt", b"Hello"), ("notes.txt", b"Hello")), [true, true], "the same text file");
+        assert_eq!(warnings(("photo.png", &png), ("photo.png", &png)), [true, true], "the same image");
+        assert_eq!(warnings(("notes.txt", b"Hello"), ("notes.txt", b"World")), [false, false], "different text, same name and size");
     }
 
     #[test]

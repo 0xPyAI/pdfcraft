@@ -25,8 +25,42 @@ mcp::McpServer::new(a).serve(stdin, stdout)?             // newline-delimited JS
 - Tools that change a document return its summary (`doc`, `pages`, `dirty`, `undo`, `redo`, …).
 - `comment_image_preview` returns JSON and a PNG: `layer: "background"` (the default) gives the page without the selected image signature/initials; `layer: "image"` gives its embedded image with alpha. The metadata supplies its displayed rectangle, document rotation, `image_rotation` (how far clockwise the image is shown turned: 0 for one placed by PdfCraft, which keeps it upright as displayed) and annotation opacity. Each result can be saved with the CLI's `--out`. Cache the background and transform the image for live movement/resizing; `comment_edit` commits the final geometry in one undo step. Previewing never changes the document.
 - For proportional image signature resizing, use the embedded image layer's width/height ratio rather than a previously stretched annotation rectangle. The GUI preserves this ratio at corners with the opposite corner anchored; edge midpoint handles change only their own axis. `comment_edit` accepts the resulting rectangle.
-- `doc_close` refuses to drop unsaved changes unless `discard_changes: true`. `doc_save` writes atomically, incrementally in place, and in full for a new path.
+- `doc_close` refuses to drop unsaved changes unless `discard_changes: true`. `doc_save` writes atomically, incrementally in place, and in full for a new path. Atomic output writes call `sync_all` on the staging file before replacing the destination. A write or sync error leaves the destination intact, removes staging and leaves the document dirty for retry. A filesystem that does not support syncing returns an error; there is no unsynced fallback. This flushes file contents, but does not guarantee persistence of the parent-directory rename across power loss.
 - With a root set, every read and write path must resolve inside it (symlinks and `..` included). Relative paths resolve inside the root, and `..` is resolved by name before the check. Every path outside the root gets the same refusal (`<path> is outside the allowed directory <root>`), whether or not it exists, so a confined agent can't probe the rest of the disk; on Windows another network share or device path (`\\host\share`, `\\?\UNC\…`, `\\.\…`) is refused without being contacted. "Not found" and other filesystem errors are reported only for paths inside the root. Tools that write several files into a folder name them after the document or input file, with separators, colons and control characters replaced by `_`, so a name can't lead them out of the folder. The root itself must be a folder.
+- `Automation::with_automation_roots` holds a read folder and a write folder (`pdfcraft-cli mcp --automation-read-root DIR --automation-write-root DIR`, see [docs/mcp.md](../../docs/mcp.md)). Reads must lie inside the read root and writes inside the write root, links followed. A root left out grants none of its access. Refusals read `automation path rejected: outside the read root <root>: <path>`. It applies on top of `with_root`.
+
+## Text search and cache limits
+
+`text_word_count` counts the current snapshot without filling the text cache. It returns totals
+and per-page Unicode word/character counts, with optional tagged-table, tagged-code and
+image/OCR exclusions. See [word count](../../docs/word-count.md) for counting rules and limits.
+
+Extracted page text is reused in a session-wide LRU cache: at most **64 MiB** of estimated owned
+text storage and **4,096 pages**, shared by all open documents. Accounting includes glyph-vector
+capacity, each glyph string's capacity, line indexes and word-break flags. Cache hits share the
+renderer result instead of copying glyphs. Oversized pages remain usable by the current call but
+are not cached; evicted pages can be extracted again. A changed document version invalidates its
+cached text on the next text request, and closing a document removes its entries. Cache entries
+do not keep an old PDF byte buffer alive.
+
+This bounds retained text-cache data, not total process memory: active extraction batches,
+renderers, document buffers and the requested output have separate lifetimes. Search still reads
+growing batches (8 to 128 pages), with one lookahead match to determine continuation.
+
+`text_find` keeps matches from readable pages when another reached page fails extraction. It
+returns `warnings` with 1-based `page`, `error` and `error_truncated`, plus `warning_count` and
+`warnings_truncated`. At most 100 warnings and 1,024 UTF-8 bytes per error are returned. Failures
+are retried on later calls; they are not cached as empty pages. Warnings describe pages visited in
+search order, up to the continuation point, not failures in unvisited later pages.
+
+`complete: true` means the requested search was exhausted with no page failures and no further
+matches. `next: {start_page, skip}` exists only when another match would exceed `limit`. A search
+that reaches the end with warnings therefore has `complete: false` **without** `next`. Callers
+should follow `next` when present and separately inspect warnings. A capped search can return
+both. The existing `query`, `count`, `matches` and rectangle semantics are unchanged.
+
+`text_extract`, comment placement and redaction keep strict all-requested-pages-must-succeed
+semantics; they never silently act on partial text.
 
 ## Shared field properties
 
@@ -123,6 +157,10 @@ For inline editor previews, `page_render` accepts `hide_text_block` (a 1-based i
 `text_paragraphs`). It renders the page without that paragraph’s source glyphs and leaves the
 working document unchanged.
 
+`page_render.hide_added_text` does the same for an added text item's 1-based index from
+`content_list` or `object_list`. It removes only that item in a read-only preview and is
+mutually exclusive with `hide_text_block`.
+
 
 ## Existing text and document fonts
 
@@ -134,3 +172,40 @@ faces complete absent subset glyphs. `text_edit.ranges` accepts disjoint UTF-8 b
 undoable and survive saving/reopening. `image_hit` shares the UI's curve and hole hit testing.
 The bounds, limits and font requirements are in [existing-text editing](../../docs/editing-existing-text.md)
 and [image editing](../../docs/editing-images.md).
+
+## Opening local GoToR links
+
+`link_open {doc, page, index, password?}` follows a local PDF link using `link_list`
+numbering. Relative file specifications open normally. An **absolute** file specification
+requires `allow_absolute: true`, after reviewing the target reported by `link_list`.
+Omitting the argument or passing false refuses the request before checking or reading the
+target file. This is an intentional compatibility change for callers that previously opened
+absolute GoToR targets without explicit consent. Opting in does not bypass `--root`, symlink
+confinement, regular-file, PDF-extension, size, or password validation. Consent applies only
+to that call, including each password retry; it is never remembered for other links.
+
+The desktop UI asks Allow/Cancel before following absolute GoToR targets and displays the
+complete path. Relative links retain their existing behavior. Named destinations remain
+unapplied with a warning.
+
+## Folder batches
+
+`doc_batch` runs conversion, OCR and compression over files and optionally recursive
+folders. The CLI also exposes it as `pdfcraft-cli batch`. See the
+[batch guide](../../docs/cli-batch.md) for examples, output protection, errors and limits.
+
+## Viewer navigation history
+
+A running PdfCraft instance launched with `--control FILE` exposes its per-tab history through
+`pdfcraft-cli ui --control FILE command id=view.previous_view` and
+`pdfcraft-cli ui --control FILE command id=view.next_view`. `commands` reports whether each action
+is enabled for the active document. These are the same actions as the rail buttons, View → Page
+navigation, and Ctrl+[ / Ctrl+] (⌘[ / ⌘] on macOS).
+
+Explicit page jumps, including search-result selection and Next/Previous match, enter history
+when the page changes. Automatic search refresh, continuous scrolling, and within-page scroll
+movement do not. Existing page-step commands and single-page wheel turns retain their history
+behavior. Back/Forward
+returns to page tops, does not restore zoom, does not switch documents, and is not saved across
+restarts. Standalone engine/MCP sessions have no viewport, so they do not have a separate
+navigation-history tool; use the opt-in UI control channel to navigate the displayed document.

@@ -156,12 +156,6 @@ pub fn set_overrides(doc: &mut Document, ov: &Overrides) -> Result<(), XfaError>
     Ok(())
 }
 
-/// Index of child `i` among the earlier siblings with the same name.
-fn sib_index(children: &[Node], i: usize) -> usize {
-    let name = children.get(i).and_then(|c| c.common().name.as_deref());
-    children.iter().take(i).filter(|c| c.common().name.as_deref() == name && name.is_some()).count()
-}
-
 fn child_som(parent: &str, name: Option<&str>, index: usize) -> String {
     match name {
         Some(n) if !parent.is_empty() => format!("{parent}.{n}[{index}]"),
@@ -285,11 +279,12 @@ impl Walker<'_> {
         if depth > MAX_DEPTH {
             return out;
         }
+        let sibs = SomIndices::of(nodes);
         for (i, n) in nodes.iter().enumerate() {
             if !self.take() {
                 break;
             }
-            let sib = sib_index(nodes, i);
+            let sib = sibs.at(i);
             match n {
                 Node::Subform(sf) => {
                     let from_data = match (&sf.common.name, self.data) {
@@ -360,12 +355,13 @@ impl Walker<'_> {
                         self.data.and_then(|d| d.text_at(&data_path(self.tpl, &som))).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
                     self.push_events(&som, &g.scripts, None, None, None);
                     let fields: Vec<Node> = g.fields.iter().map(|f| Node::Field(Box::new(f.clone()))).collect();
+                    let fsibs = SomIndices::of(&fields);
                     let mut children = Vec::new();
                     for (fi, f) in g.fields.iter().enumerate() {
                         if !self.take() {
                             break;
                         }
-                        children.push(self.field(f, &som, sib_index(&fields, fi), Some(selected.as_deref().unwrap_or(""))));
+                        children.push(self.field(f, &som, fsibs.at(fi), Some(selected.as_deref().unwrap_or(""))));
                     }
                     out.push(FormNode {
                         name: g.common.name.clone().unwrap_or_else(|| "group".into()),
@@ -451,9 +447,9 @@ pub fn apply_overrides(tpl: &Template, ov: &Overrides) -> Template {
         if depth > MAX_DEPTH {
             return;
         }
-        let sibs: Vec<usize> = (0..nodes.len()).map(|i| sib_index(nodes, i)).collect();
+        let sibs = SomIndices::of(nodes);
         for (i, n) in nodes.iter_mut().enumerate() {
-            let sib = sibs.get(i).copied().unwrap_or(0);
+            let sib = sibs.at(i);
             let name_default = match n {
                 Node::Field(_) => Some("field"),
                 Node::ExclGroup(_) => Some("group"),
@@ -498,8 +494,9 @@ pub fn apply_overrides(tpl: &Template, ov: &Overrides) -> Template {
                         g.common.presence = p;
                     }
                     let fields: Vec<Node> = g.fields.iter().map(|f| Node::Field(Box::new(f.clone()))).collect();
+                    let fsibs = SomIndices::of(&fields);
                     for (fi, f) in g.fields.iter_mut().enumerate() {
-                        let fsom = child_som(&som, f.common.name.as_deref().or(Some("field")), sib_index(&fields, fi));
+                        let fsom = child_som(&som, f.common.name.as_deref().or(Some("field")), fsibs.at(fi));
                         if let Some(p) = ov.presence.get(&fsom) {
                             f.common.presence = Presence::parse(Some(p));
                         }
@@ -632,28 +629,70 @@ fn named_in<'a>(nodes: &'a [Node], name: &str, depth: usize) -> Option<&'a Node>
     })
 }
 
-/// Give the field at `som` in `live` the value [`form_tree`] would give it from `data` now,
-/// so a value change needs no rebuild of the tree. `None`: not a plain field the tree can
-/// refresh alone (a radio button, an object the template doesn't have): rebuild the tree.
+/// Give the field at `som` in `live`, and every other field bound to the same data node (a
+/// field inside an area shares its node with one outside, since areas are left out of data
+/// paths), the value [`form_tree`] would give it from `data` now, so a value change needs no
+/// rebuild of the tree. The walk follows the data path only (through areas and unnamed
+/// containers, which have no data segment), so it costs the depth, not the form. `None`: a
+/// node bound there is not a plain field the tree can refresh alone (a radio button, an
+/// exclusion group, an object the template doesn't have): rebuild the tree.
 pub fn refresh_value(live: &mut FormNode, tpl: &Template, data: Option<&DataNode>, som: &str) -> Option<bool> {
-    let f = template_field(tpl, som)?;
-    let value = Walker::plain_field_value(tpl, data, f, som);
-    fn set(n: &mut FormNode, som: &str, value: &str, depth: usize) -> Option<bool> {
+    template_field(tpl, som)?;
+    let path = data_path(tpl, som);
+    if path.is_empty() {
+        return None;
+    }
+    fn walk(
+        n: &mut FormNode,
+        tpl: &Template,
+        data: Option<&DataNode>,
+        path: &[(String, usize)],
+        pos: usize,
+        changed: &mut bool,
+        depth: usize,
+    ) -> Option<()> {
         if depth > MAX_DEPTH {
-            return None;
+            return Some(());
         }
-        if n.som == som {
-            if n.kind != Some(NodeKind::Field) {
+        for c in n.children.iter_mut() {
+            // No data segment of their own: looked through.
+            let transparent = matches!(c.kind, Some(NodeKind::Area)) || (matches!(c.kind, Some(NodeKind::Subform)) && c.name.starts_with('#'));
+            if transparent {
+                walk(c, tpl, data, path, pos, changed, depth + 1)?;
+                continue;
+            }
+            let Some((name, index)) = path.get(pos) else { continue };
+            if c.name != *name || c.index != *index {
+                continue;
+            }
+            if pos + 1 < path.len() {
+                walk(c, tpl, data, path, pos + 1, changed, depth + 1)?;
+                continue;
+            }
+            // Bound to the node.
+            if c.kind != Some(NodeKind::Field) {
                 return None;
             }
-            let changed = n.value != value;
-            n.value = value.to_string();
-            return Some(changed);
+            let f = template_field(tpl, &c.som)?;
+            let value = Walker::plain_field_value(tpl, data, f, &c.som);
+            if c.value != value {
+                c.value = value;
+                *changed = true;
+            }
         }
-        n.children.iter_mut().find_map(|c| set(c, som, value, depth + 1))
+        Some(())
     }
-    // Not in the live tree (hidden, or past the node budget): nothing to refresh.
-    Some(set(live, som, &value, 0).unwrap_or(false))
+    let mut changed = false;
+    // The root subform is the path's first segment.
+    let (first, rest) = path.split_first()?;
+    if live.name != first.0 || live.index != first.1 {
+        return Some(false);
+    }
+    if rest.is_empty() {
+        return None;
+    }
+    walk(live, tpl, data, &path, 1, &mut changed, 0)?;
+    Some(changed)
 }
 
 /// The data tree of a document's datasets packet.

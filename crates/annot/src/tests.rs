@@ -187,6 +187,7 @@ fn invalid_geometry_is_rejected() {
         assert!(matches!(add_annotation(&mut doc, &new(0, s.clone()), &meta("x")), Err(AnnotError::Invalid(_))), "{s:?}");
     }
     assert_eq!(add_annotation(&mut doc, &new(5, Shape::Rectangle { rect: [0.0, 0.0, 10.0, 10.0] }), &meta("x")), Err(AnnotError::NoSuchPage(5)));
+    assert_eq!(AnnotError::NoSuchPage(5).to_string(), "page 6 does not exist", "the message counts pages from 1 (#1550)");
     assert!(!doc.is_modified(), "failed adds change nothing");
 }
 
@@ -588,6 +589,25 @@ fn links_are_added_edited_listed_and_removed() {
 }
 
 #[test]
+fn link_uri_is_percent_encoded_to_7_bit_ascii() {
+    use crate::links::{self, LinkAction, LinkStyle};
+    let mut doc = fixture();
+    for url in ["https://example.com/ação", "https://example.com/a%20b"] {
+        links::add(&mut doc, 0, [10.0, 10.0, 110.0, 30.0], &LinkAction::Uri(url.into()), &LinkStyle::default()).unwrap();
+    }
+    let doc = reopen(&doc);
+    let urls: Vec<String> = links::list(&doc)
+        .into_iter()
+        .filter_map(|link| match link.action {
+            LinkAction::Uri(url) => Some(url),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(urls, ["https://example.com/a%C3%A7%C3%A3o", "https://example.com/a%20b"]);
+    assert!(urls.iter().all(|url| url.is_ascii()));
+}
+
+#[test]
 fn link_edit_rejects_non_finite_and_overflowed_rectangles_without_mutating_the_pdf() {
     use crate::links::{self, LinkAction, LinkStyle};
     let mut doc = fixture();
@@ -783,7 +803,7 @@ fn replace_text_groups_a_strikeout_and_a_caret() {
     let quads = [[100.0, 720.0, 200.0, 720.0, 100.0, 706.0, 200.0, 706.0]];
     let red = Style { color: [0.89, 0.13, 0.13], opacity: 1.0, width: 1.0, fill: None };
     let blue = Style { color: [0.0, 0.47, 0.84], opacity: 1.0, width: 1.0, fill: None };
-    let i = add_text_replacement(&mut doc, 0, &quads, "new words", "Ada", &red, &blue, &meta("r")).unwrap();
+    let i = add_text_replacement(&mut doc, 0, &quads, "new words", "Ada", &red, &blue, &meta("r"), &meta("r-caret")).unwrap();
     let doc = reopen(&doc);
     let a = list(&doc, 0);
     let strike = &a[i];
@@ -791,13 +811,21 @@ fn replace_text_groups_a_strikeout_and_a_caret() {
     let caret = a.iter().find(|d| d.name(b"Subtype") == Some(b"Caret")).unwrap();
     assert_eq!((text(caret, b"Contents").as_str(), caret.name(b"RT")), ("new words", Some(&b"Group"[..])));
     assert!(caret.reference(b"IRT").is_some());
+    // #2666: the pair needs its own `/NM` each. XFDF names a reply by the `/NM` of what it
+    // replies to, so sharing one id writes `inreplyto` equal to the caret's own `name` and the
+    // pair does not survive an export and import.
+    assert_eq!(text(caret, b"NM").as_str(), "r-caret");
+    assert_eq!(text(strike, b"NM").as_str(), "r");
+    assert_ne!(text(caret, b"NM"), text(strike, b"NM"), "the caret must not carry the strikeout's name");
+    let irt = caret.reference(b"IRT").unwrap();
+    assert_eq!(text(doc.get(irt).as_dict().unwrap(), b"NM").as_str(), "r", "the caret replies to the strikeout");
     let r = rect(caret);
     assert!(r[0] < 200.0 && r[2] > 200.0 && r[1] < 706.0, "at the end of the line, below its baseline: {r:?}");
     // Deleting the strikeout takes the caret with it (the group).
     let mut doc = doc;
     delete_annotation(&mut doc, 0, i).unwrap();
     assert!(!list(&doc, 0).iter().any(|d| d.name(b"Subtype") == Some(b"Caret")));
-    assert!(add_text_replacement(&mut doc, 0, &[], "x", "Ada", &red, &blue, &meta("r")).is_err());
+    assert!(add_text_replacement(&mut doc, 0, &[], "x", "Ada", &red, &blue, &meta("r"), &meta("r-caret")).is_err());
 }
 
 #[test]
@@ -1219,9 +1247,13 @@ fn comment_text_the_standard_fonts_cannot_draw_is_kept_and_marked() {
     on_page.push(Object::Ref(r));
     set_annots(&mut doc, page, on_page).unwrap();
     let k = list(&doc, 0).len() - 1;
-    let err = set_style(&mut doc, 0, k, Some([1.0, 0.0, 0.0]), None, None, None, &meta("")).unwrap_err();
+    let before = list(&doc, 0)[k].clone();
+    let err = set_style(&mut doc, 0, k, Some([1.0, 0.0, 0.0]), Some(0.4), Some(6.0), None, &meta("")).unwrap_err();
     assert!(matches!(&err, AnnotError::Undrawable(m) if m.contains("can't redraw") && m.contains("\"欢\" (U+6B22)")), "{err:?}");
-    assert_eq!(list(&doc, 0)[k].get(b"AP").and_then(|a| a.as_dict()).and_then(|a| a.reference(b"N")), Some(drawn), "its appearance is kept");
+    assert_eq!(list(&doc, 0)[k], before, "a refused restyle keeps the colour, opacity, width and appearance");
+    let err = set_rect(&mut doc, 0, k, [40.0, 40.0, 180.0, 90.0], &meta("")).unwrap_err();
+    assert!(matches!(&err, AnnotError::Undrawable(_)), "{err:?}");
+    assert_eq!(list(&doc, 0)[k], before, "a refused resize keeps the rectangle");
     // New text from the user is taken (and marked), as for any comment.
     set_contents(&mut doc, 0, k, "欢迎光临", &meta("")).unwrap();
     assert_eq!(mark(&doc, k), Some('欢'));
@@ -1267,4 +1299,39 @@ fn cached_appearances_are_reused_while_annotations_are_unchanged() {
     let [a, b] = [&first, &second].map(|copy| ap_content(copy, &list(copy, 0)[idx]));
     assert!(!a.is_empty());
     assert_eq!(a, b, "the reused appearance is byte-identical");
+}
+
+/// #1908: a text box's font size changes in `/DA` (colour kept), the rich text follows, the box
+/// grows to hold the bigger text but never shrinks, and bad sizes and other subtypes are refused.
+#[test]
+fn text_box_font_size_changes_the_da_and_grows_the_box() {
+    let mut doc = fixture();
+    let t = add_annotation(&mut doc, &new(0, Shape::TextBox { rect: [100.0, 680.0, 220.0, 692.0], font_size: 12.0 }), &meta("t")).unwrap();
+    set_style(&mut doc, 0, t, Some([1.0, 0.0, 0.0]), None, None, None, &meta("")).unwrap();
+    set_contents(&mut doc, 0, t, "one two three four five six seven eight nine ten eleven twelve", &meta("")).unwrap();
+    let height = |doc: &Document| {
+        let rect: Vec<f64> = list(doc, 0)[t].get(b"Rect").unwrap().as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+        rect[3] - rect[1]
+    };
+    let before = height(&doc);
+    set_font_size(&mut doc, 0, t, 24.0, &meta("")).unwrap();
+    let doc = reopen(&doc);
+    let d = &list(&doc, 0)[t];
+    assert_eq!(text(d, b"DA"), "1 0 0 rg /Helv 24 Tf");
+    assert!(text(d, b"DS").contains("24pt") && text(d, b"RC").contains("font-size:24pt"));
+    assert_eq!(props(&doc, 0, t).unwrap().font_size, Some(24.0));
+    assert!(height(&doc) > before, "the box grows");
+    let mut doc = doc;
+    let grown = height(&doc);
+    set_font_size(&mut doc, 0, t, 6.0, &meta("")).unwrap();
+    assert!(height(&doc) >= grown, "the box never shrinks");
+    for bad in [0.0, 0.5, 401.0, f64::NAN, f64::INFINITY] {
+        assert!(matches!(set_font_size(&mut doc, 0, t, bad, &meta("")), Err(AnnotError::Invalid(_))), "{bad}");
+    }
+    assert_eq!(props(&doc, 0, t).unwrap().font_size, Some(6.0));
+    let note = add_annotation(&mut doc, &new(0, Shape::Note { at: [50.0, 50.0], icon: NoteIcon::Note }), &meta("t"));
+    if let Ok(i) = note {
+        assert!(set_font_size(&mut doc, 0, i, 12.0, &meta("")).is_err());
+        assert_eq!(props(&doc, 0, i).unwrap().font_size, None);
+    }
 }

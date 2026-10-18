@@ -343,6 +343,27 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, state: &mut A11yState, doc: D
 }
 
 impl PdfCraftApp {
+    /// Prepare for accessibility ▸ Find untagged content.
+    pub(crate) fn find_untagged_content(&mut self) {
+        let Some((_, id)) = self.active_ids() else { return };
+        let Some(doc) = self.session.get(id) else { return };
+        let options = Options { rules: [Rule::TaggedContent, Rule::TaggedAnnotations, Rule::TaggedFormFields].into_iter().collect(), pages: None };
+        let Some(report) = doc.accessibility_check(&options) else {
+            self.notify_tr("This document can't be checked: it couldn't be read for editing");
+            return;
+        };
+        let failed = report.count(Status::Failed);
+        self.a11y.previous = None;
+        self.a11y.options = Some(options);
+        self.a11y.report = Some((id, report));
+        self.right = Some(RightPanel::Accessibility);
+        self.notify(if failed == 0 {
+            tl!("No untagged content was found.").to_string()
+        } else {
+            crate::i18n::fmt(tl!("Found {n} untagged content problems."), &[("n", &failed.to_string())])
+        });
+    }
+
     /// Check for accessibility: the options first, unless they are turned off.
     pub(crate) fn start_accessibility_check(&mut self) {
         if self.a11y_options.show_dialog {
@@ -357,14 +378,18 @@ impl PdfCraftApp {
         let Some((_, id)) = self.active_ids() else { return };
         let Some(doc) = self.session.get(id) else { return };
         let o = &self.a11y_options;
-        let options = Options { rules: o.rules.clone(), pages: (!o.all_pages).then(|| (o.from.max(1) - 1..o.to.max(o.from)).collect()) };
+        // The range was picked on whatever document had the options dialog last; with the dialog
+        // turned off it reaches here unchecked, and a page past the end would select nothing.
+        let to = o.to.clamp(1, doc.info.pages.len().max(1));
+        let from = o.from.clamp(1, to);
+        let options = Options { rules: o.rules.clone(), pages: (!o.all_pages).then(|| (from - 1..to).collect()) };
         let Some(report) = doc.accessibility_check(&options) else {
             self.notify_tr("This document can't be checked: it couldn't be read for editing");
             return;
         };
         // Rules skipped by hand stay skipped when checking again.
         let mut report = report;
-        for r in report.results.iter_mut().filter(|r| self.a11y_skipped.contains(&r.rule)) {
+        for r in report.results.iter_mut().filter(|r| self.a11y_skipped.contains(&(id, r.rule))) {
             r.status = Status::Skipped;
             r.findings.clear();
         }
@@ -448,12 +473,12 @@ impl PdfCraftApp {
                 }
             }
             PanelAction::Skip(rule) => {
-                self.a11y_skipped.insert(rule);
-                if let Some((_, r)) = self.a11y.report.as_mut()
-                    && let Some(x) = r.results.iter_mut().find(|x| x.rule == rule)
-                {
-                    x.status = Status::Skipped;
-                    x.findings.clear();
+                if let Some((id, r)) = self.a11y.report.as_mut() {
+                    self.a11y_skipped.insert((*id, rule));
+                    if let Some(x) = r.results.iter_mut().find(|x| x.rule == rule) {
+                        x.status = Status::Skipped;
+                        x.findings.clear();
+                    }
                 }
             }
             PanelAction::Fix(rule) => {
@@ -604,6 +629,12 @@ pub(crate) fn alt_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> 
 }
 
 impl PdfCraftApp {
+    /// Prepare for accessibility ▸ Tag form fields.
+    pub(crate) fn autotag_form_fields(&mut self) {
+        self.apply_edit(pdfcraft_engine::Edit::AutoTagFormFields);
+        self.choose_right_panel(Some(RightPanel::Tags));
+    }
+
     /// Prepare for accessibility ▸ Add alternate text.
     pub(crate) fn start_alt_text(&mut self) {
         let Some((_, id)) = self.active_ids() else { return };

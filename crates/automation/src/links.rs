@@ -1,7 +1,9 @@
 //! Link tools: list, add, edit and delete links; create links from URLs in the text; remove
 //! all links. Rectangles are points from the top-left of the displayed page.
 
-use pdfcraft_engine::{Edit, LinkAction, LinkHighlight, LinkStyle, read_remote_document, resolve_remote_document_path};
+use pdfcraft_engine::{
+    Edit, LinkAction, LinkHighlight, LinkStyle, read_remote_document, remote_document_path_is_absolute, resolve_remote_document_path,
+};
 use pdfcraft_render::{DestView, LinkTarget, RemoteDestination};
 use serde_json::{Value, json};
 use std::path::Path;
@@ -63,18 +65,34 @@ impl Automation {
 
     pub(crate) fn link_list(&self, a: &Args) -> Result<Value> {
         let doc = self.doc(a)?;
+        let targets: std::collections::HashMap<(usize, usize), &LinkTarget> = doc.info.links.iter().map(|t| ((t.page, t.index), &t.target)).collect();
         let items: Vec<Value> = doc
-            .links
+            .links()
             .iter()
             .map(|l| {
                 let p = &doc.info.pages[l.page];
                 let (v0, v1) = (p.user_to_view(l.rect[0] as f32, l.rect[1] as f32), p.user_to_view(l.rect[2] as f32, l.rect[3] as f32));
                 let rect = [v0[0].min(v1[0]), v0[1].min(v1[1]), v0[0].max(v1[0]), v0[1].max(v1[1])].map(|x| (x * 100.0).round() / 100.0);
                 let mut v = json!({ "page": l.page + 1, "index": l.index + 1, "rect": rect, "visible": l.style.visible });
-                match &l.action {
-                    LinkAction::Page(p) => v["to_page"] = json!(p + 1),
-                    LinkAction::Uri(u) => v["url"] = json!(u),
-                    LinkAction::Other(o) => v["other"] = json!(o),
+                // Where an in-document link goes, as the viewer resolves it: named destinations
+                // included, with the position on the page.
+                let target = targets.get(&(l.page, l.index)).and_then(|t| match t {
+                    LinkTarget::Page(page, view) => Some((*page, view)),
+                    _ => None,
+                });
+                match (&l.action, target) {
+                    (LinkAction::Uri(u), _) => v["url"] = json!(u),
+                    (action, Some((page, view))) => {
+                        v["to_page"] = json!(page + 1);
+                        if let Some(d) = doc.info.pages.get(page).and_then(|p| crate::destination(view, p)) {
+                            v["destination"] = d;
+                        }
+                        if matches!(action, LinkAction::Other(_)) {
+                            v["named"] = json!(true);
+                        }
+                    }
+                    (LinkAction::Page(p), None) => v["to_page"] = json!(p + 1),
+                    (LinkAction::Other(o), None) => v["other"] = json!(o),
                 }
                 v
             })
@@ -106,6 +124,12 @@ impl Automation {
             (source.path.clone(), file.clone(), destination.clone(), *new_window)
         };
         let path = resolve_remote_document_path(source_path.as_deref().map(Path::new), &file).map_err(failed)?;
+        let allow_absolute = a.opt_bool("allow_absolute")?.unwrap_or(false);
+        if remote_document_path_is_absolute(&file) && !allow_absolute {
+            return Err(failed(
+                "this GoToR link names an absolute local path; review the target with link_list and pass allow_absolute: true to open it",
+            ));
+        }
         let path = self.resolve(&path.to_string_lossy(), false)?;
         let bytes = read_remote_document(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -155,7 +179,7 @@ impl Automation {
         let index = a.int("index")?;
         let doc = self.doc(a)?;
         let l = doc
-            .links
+            .links()
             .iter()
             .find(|l| l.page == page && l.index as i64 + 1 == index)
             .ok_or_else(|| failed(format!("page {} has no link {index} (see link_list)", page + 1)))?;
@@ -193,8 +217,8 @@ impl Automation {
             None => None,
         };
         let before = match &pages {
-            Some(ps) => self.doc(a)?.links.iter().filter(|l| ps.contains(&l.page)).count(),
-            None => self.doc(a)?.links.len(),
+            Some(ps) => self.doc(a)?.links().iter().filter(|l| ps.contains(&l.page)).count(),
+            None => self.doc(a)?.links().len(),
         };
         let mut out = self.apply(a, Edit::RemoveLinks { pages })?;
         out["removed"] = json!(before);

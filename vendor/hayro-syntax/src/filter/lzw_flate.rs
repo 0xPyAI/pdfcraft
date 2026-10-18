@@ -1087,6 +1087,9 @@ fn apply_predictor(data: Vec<u8>, params: &PredictorParams) -> Option<Vec<u8>> {
                     return None;
                 }
 
+                // PdfCraft patch: packed TIFF samples can leave padding bits at the end
+                // of a row. split_off requires byte alignment or the next row overwrites it.
+                writer.align();
                 let (data, new_writer) = writer.split_off();
                 writer = new_writer;
                 prev_row = BitChunks::new(data, bit_size, chunk_len)?;
