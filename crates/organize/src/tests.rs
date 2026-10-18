@@ -2723,3 +2723,35 @@ fn a_chain_of_objects_too_deep_to_copy_is_refused_and_leaves_the_destination_alo
         .join();
     assert!(run.is_ok(), "the copy must not overflow the stack");
 }
+
+#[test]
+fn rotate_repeated_indices_accumulate_from_the_current_page_value() {
+    for level in 0..3 {
+        for indices in [vec![0, 0], vec![0, 1, 0]] {
+            let mut doc = open(fixture());
+            let rotation = doc.add(Object::Int(90));
+            let page = pages(&doc).unwrap()[0].obj;
+            let target = match level {
+                0 => page,
+                1 => doc.get(page).as_dict().unwrap().reference(b"Parent").unwrap(),
+                _ => pages_root(&doc).unwrap(),
+            };
+            doc.update_dict(target, |d| d.set(b"Rotate".to_vec(), Object::Ref(rotation))).unwrap();
+            let mut doc = open(write_full(&doc, &SaveOptions::default()).unwrap());
+            let rotation = walk(&doc).unwrap()[0].1.reference(b"Rotate").unwrap();
+            let original_labels = labels(&doc);
+            rotate_pages(&mut doc, &indices, 90).unwrap();
+            assert_eq!(page_rotation(&doc, 0).unwrap(), 270, "level {level}, indices {indices:?}");
+            assert_eq!(*doc.get(rotation), Object::Int(90), "shared source angle is unchanged");
+            for saved in [write_incremental(&doc, &SaveOptions::default()).unwrap(), write_full(&doc, &SaveOptions::default()).unwrap()] {
+                let reopened = open(saved.clone());
+                assert_eq!(page_rotation(&reopened, 0).unwrap(), 270);
+                assert_eq!(page_rotation(&reopened, 1).unwrap(), if indices.len() == 3 { 180 } else { 90 });
+                assert_eq!(page_rotation(&reopened, 2).unwrap(), 90);
+                assert_eq!(labels(&reopened), original_labels);
+                let independent = hayro_syntax::Pdf::new(saved).unwrap();
+                assert_eq!(independent.pages()[0].render_dimensions(), (400.0, 300.0));
+            }
+        }
+    }
+}

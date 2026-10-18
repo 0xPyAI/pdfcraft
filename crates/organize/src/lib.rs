@@ -205,7 +205,10 @@ pub fn rotate_pages(doc: &mut Document, indices: &[usize], degrees: i64) -> Resu
     let delta = degrees.rem_euclid(360);
     for &i in indices {
         let (page, inherited) = &all[i];
-        let current = resolved_rotation(doc, inherited);
+        // Repeated indices must see earlier edits instead of the page walk's snapshot.
+        let current_page = doc.get(*page);
+        let current_attrs = current_page.as_dict().filter(|attrs| attrs.get(b"Rotate").is_some()).unwrap_or(inherited);
+        let current = resolved_rotation(doc, current_attrs);
         let new = (current.rem_euclid(360) + delta).rem_euclid(360);
         doc.update_dict(*page, |d| d.set(b"Rotate".to_vec(), Object::Int(new)))?;
     }
