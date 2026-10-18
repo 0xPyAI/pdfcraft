@@ -44,6 +44,11 @@ This limits appearance generation; it is not a limit on the input PDF or the who
 Structure cleanup resolves named MCIDs and indirect content references. Form content
 references are updated to the cleaned copy; unchanged sibling descriptions remain.
 
+Replacement descriptions are removed only from marked-content spans changed by cleanup.
+Unchanged spans retain their descriptions; unused property entries are retired during redaction
+and hidden-content cleanup, including aliases in shared/inherited resources. Descriptions still
+used by surviving pages or forms are kept.
+
 A redacted page that inherits `/Resources` from the page tree gets them pinned (by reference;
 a direct inherited dictionary is made one shared object first) before it is rewritten. The parent's
 `/Resources` is then retired unless another page still inherits it, so it cannot keep a removed
