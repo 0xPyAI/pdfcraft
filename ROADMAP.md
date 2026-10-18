@@ -172,6 +172,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-20 (M2, PR #3348 review):** Tracking samples retain short repeated punctuation (up to four glyphs), keeping tracked ellipses intact and searchable while longer TOC leaders still preserve title word spaces. Synthetic regressions cover isolated and surrounded ellipses. Estimates unchanged.
+
 - **2026-10-19 (M14, #3373):** The main menu and its long submenus scroll in short windows, keeping their commands reachable. Estimates unchanged.
 
 - **2026-10-19 (M3, #3387):** Save-prompt shortcuts yield to later consent and utility dialogs; a synthetic UI regression checks that an edited document stays open. Estimates unchanged.
@@ -181,6 +183,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 - **2026-10-18 (M5, PR #1971 review):** Nested FDF annotation values that identify a source `/Page` or `/Pages` dictionary become null at every copy depth. A synthetic three-page PDF saved and reopened before export verifies that destination actions cannot pull source page content into the FDF, while unrelated nested metadata and shared references remain intact. FDF import semantics, copied-graph limits and estimates are unchanged.
 - **2026-10-15 (M5, PR #1971 refresh):** Nested FDF annotation values retain shared or cyclic copied graphs. Discovery borrows direct values and records annotation positions with lazy array owners; retained entries are budgeted before cloning. Synthetic stress fixtures include repeated aliases and saved-PDF cache eviction. Limits cover the copied graph; source parsing and page discovery retain their existing limits, with no total source-memory bound. FDF import semantics and estimates are unchanged.
 - **2026-10-13 (M5, nested FDF values):** Comment export copies and renumbers nested indirect values, retaining geometry, colours, borders and shared graphs. Graph/data limits return an error before the destination is written; synthetic saved-PDF and automation exchange regressions. Estimates unchanged.
+- **2026-10-18 (M2, #3086):** Text extraction estimates letter tracking without repeated punctuation gaps so dotted TOC leaders do not swallow word spaces. Synthetic PDF regressions cover leader lengths, phrase search and selection; strongly tracked text stays intact. Estimates unchanged.
 
 - **2026-10-18 (M6, #2892):** Push-button normal labels are editable per widget through Options and form_set_props, independently of field names; rendering, undo/redo and incremental/full save/reopen are covered. Estimates unchanged.
 

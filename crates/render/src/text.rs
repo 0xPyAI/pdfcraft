@@ -1599,8 +1599,25 @@ fn arrange(glyphs: &[TextGlyph]) -> (Vec<usize>, Vec<u32>, Vec<bool>) {
             place_glyphs(&glyphs, &height, &segs[si], &mut sc);
             let h = segs[si].h;
             // Word gaps relative to this line's typical letter gap (handles tracking).
+            // Long runs of repeated punctuation belong to leaders, not letter tracking: a TOC leader
+            // must not raise the threshold above the word gaps in its title (#3086).
             sc.gaps.clear();
-            sc.gaps.extend(sc.placed.windows(2).map(|w| glyphs[w[1]].rect[0] - glyphs[w[0]].rect[2]));
+            sc.gaps.extend(sc.placed.windows(2).enumerate().filter_map(|(w, pair)| {
+                let &[p, c] = pair else { return None };
+                let (p, c) = (glyphs.get(p)?, glyphs.get(c)?);
+                if p.text == c.text && p.text.chars().all(|ch| !ch.is_alphanumeric() && !ch.is_whitespace()) {
+                    // Keep short tracked punctuation, including an ellipsis with a final period.
+                    // Treat five or more matching glyphs as a leader. Three neighbours on each
+                    // side suffice to classify this pair, bounding work even on long runs.
+                    let same = |&&i: &&usize| glyphs.get(i).is_some_and(|g| g.text == p.text);
+                    let before = sc.placed.get(..w).unwrap_or_default().iter().rev().take(3).take_while(same).count();
+                    let after = sc.placed.get(w.saturating_add(2)..).unwrap_or_default().iter().take(3).take_while(same).count();
+                    if before + after >= 3 {
+                        return None;
+                    }
+                }
+                Some(c.rect[0] - p.rect[2])
+            }));
             sc.gaps.sort_by(f32::total_cmp);
             let typical = sc.gaps.get(sc.gaps.len() / 3).copied().unwrap_or(0.0).max(0.0);
             let threshold = (typical + h * WORD_GAP).max(h * WORD_GAP);
@@ -2193,6 +2210,92 @@ mod tests {
         word(&mut v, "CHAPTER", 10.0, 10.0, 9.0); // 3pt tracking between 6pt-wide letters
         word(&mut v, "FOUR", 10.0 + 7.0 * 9.0 + 5.0, 10.0, 9.0);
         assert_eq!(layout(v).plain_text(), "CHAPTER FOUR");
+    }
+
+    #[test]
+    fn toc_leaders_do_not_hide_word_gaps() {
+        use lopdf::{Document, Object, Stream, dictionary};
+        for dots in [0, 5, 10, 20, 40, 60] {
+            for (words, expected) in [
+                ("(Was)-333(ist)-333(OTRS?)", "Was ist OTRS?"),
+                ("(Das)-333(OTRS)-333(Web-Interface)", "Das OTRS Web-Interface"),
+                ("(Neuen)-333(Zugang)-333(beantragen)", "Neuen Zugang beantragen"),
+            ] {
+                // The issue's LaTeX TJ spacing, without embedding the corpus PDF or a font asset.
+                let mut doc = Document::with_version("1.7");
+                let font = doc.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Times-Roman" });
+                let operators = format!("BT /F1 10 Tf 10 100 Td [{words}-441{}-1663(7)] TJ ET", "-500(.)".repeat(dots));
+                let content = doc.add_object(Stream::new(dictionary! {}, operators.into_bytes()));
+                let pages = doc.new_object_id();
+                let page = doc.add_object(dictionary! {
+                    "Type" => "Page", "Parent" => pages,
+                    "MediaBox" => vec![0.into(), 0.into(), 800.into(), Object::Integer(200)],
+                    "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } }, "Contents" => content
+                });
+                doc.objects.insert(pages, dictionary! { "Type" => "Pages", "Kids" => vec![Object::Reference(page)], "Count" => 1 }.into());
+                let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
+                doc.trailer.set("Root", catalog);
+                let mut bytes = Vec::new();
+                doc.save_to(&mut bytes).unwrap();
+                let pdf = Pdf::new(std::sync::Arc::new(bytes)).unwrap();
+                let text = extract_page(&pdf, 0, &InterpreterSettings::default()).unwrap();
+                assert_eq!(text.plain_text(), format!("{expected} {}7", ". ".repeat(dots)), "{dots} leader dots");
+                let hits = text.find_opts(expected, true, true);
+                assert_eq!(hits.len(), 1, "{expected:?}, {dots} leader dots");
+                assert_eq!(text.text_of(hits[0].clone()), expected);
+                assert_eq!(text.line_rects(hits[0].clone()).len(), 1);
+                assert_eq!(text.find(&expected.to_lowercase()), hits);
+                assert!(text.find(&expected.replace(' ', "")).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn short_tracked_ellipses_remain_searchable() {
+        for dots in [3, 4] {
+            let mut v = Vec::new();
+            for i in 0..dots {
+                let x = 10.0 + i as f32 * 4.0;
+                v.push(g(".", x, 10.0, x + 2.0));
+            }
+            let ellipsis = ".".repeat(dots);
+            let text = layout(v.clone());
+            assert_eq!(text.plain_text(), ellipsis);
+            assert_eq!(text.find(&ellipsis), vec![0..dots]);
+            v.insert(0, g("A", 0.0, 10.0, 6.0));
+            let x = 12.0 + dots as f32 * 4.0;
+            v.push(g("B", x, 10.0, x + 6.0));
+            let text = layout(v);
+            let expected = format!("A {ellipsis} B");
+            assert_eq!(text.plain_text(), expected);
+            assert_eq!(text.find(&expected), vec![0..dots + 2]);
+        }
+    }
+
+    #[test]
+    fn leaders_preserve_tracking_in_letters_numbers_and_punctuation() {
+        for advance in [9.0, 12.0] {
+            for leader in [".", "-", "…"] {
+                let mut v = Vec::new();
+                word(&mut v, "CHAPTER-1", 10.0, 10.0, advance);
+                let x = 10.0 + 9.0 * advance + 5.0;
+                word(&mut v, "1.4", x, 10.0, advance);
+                let mut x = x + 3.0 * advance + 5.0;
+                for _ in 0..60 {
+                    v.push(g(leader, x, 10.0, x + 2.5));
+                    x += 11.0;
+                }
+                let text = layout(v);
+                assert_eq!(text.plain_text(), format!("CHAPTER-1 1.4 {}", vec![leader; 60].join(" ")));
+                assert_eq!(text.find("chapter-1 1.4"), vec![0..12]);
+            }
+        }
+        // Decimal punctuation and repeated letters/digits still use their original tracking estimate.
+        for value in ["1.4", "1111", "llll"] {
+            let mut v = Vec::new();
+            word(&mut v, value, 10.0, 10.0, 12.0);
+            assert_eq!(layout(v).plain_text(), value);
+        }
     }
 
     #[test]
