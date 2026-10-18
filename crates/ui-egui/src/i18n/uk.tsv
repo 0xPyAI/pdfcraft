@@ -1701,6 +1701,7 @@
 	Couldn't use {name}: {e}	Не вдалося використати {name}: {e}
 	Couldn't extract pages: {e}	Не вдалося видобути сторінки: {e}
 	Couldn't write {name}: {e}	Не вдалося записати {name}: {e}
+	the name is not a plain file name	назва не є простою назвою файлу
 	Wrote 1 file to {dir}	Записано 1 файл у {dir}
 	Wrote {n} files to {dir}	Записано файлів ({n}) у {dir}
 	No pages match those choices	Жодна сторінка не відповідає вибраним параметрам
@@ -2402,6 +2403,10 @@ animation effects	Off	Вимкнено
 	This document is trying to open a local file:	Цей документ намагається відкрити локальний файл:
 	Move tag earlier	Перемістити тег раніше
 	Move tag later	Перемістити тег пізніше
+
+# Historical snapshot notice bar (View signed version / View revision).
+	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	Ви переглядаєте підписану версію документа «{from}» (редакція {rev}). Це знімок: зміни тут не вплинуть на оригінал.
+	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.	Ви переглядаєте редакцію {rev} документа «{from}». Це знімок: зміни тут не вплинуть на оригінал.
 	Turn upside down (180°)	Перевернути (180°)
 	4 x 6 in label (101.6 x 152.4 mm)	Етикетка 4 × 6 дюйма (101,6 × 152,4 мм)
 	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Обрізає кожну сторінку за надрукованою областю, розвертає її прямо та вписує в аркуш без спотворень. Одна етикетка на аркуш.
