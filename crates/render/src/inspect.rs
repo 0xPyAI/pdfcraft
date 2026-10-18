@@ -2446,9 +2446,15 @@ trailer << /Root 1 0 R >>
         bytes.extend_from_slice(b"startxref\n999999\n%%EOF\n%PDF-1.3\n");
         bytes.extend_from_slice(&[b'x'; 1024]);
 
-        let info = inspect(Arc::new(bytes), None).unwrap();
+        let info = inspect(Arc::new(bytes.clone()), None).unwrap();
         assert_eq!(info.pages.len(), 1);
         assert_eq!(info.title.as_deref(), Some("Kept"));
+        // A later stream whose /Root names the catalog's number with another generation does
+        // not count either: loading `1 1 R` finds no such object.
+        let at = bytes.windows(10).position(|w| w == b"/Root 4 0 ").unwrap();
+        bytes[at..at + 10].copy_from_slice(b"/Root 1 1 ");
+        let info = inspect(Arc::new(bytes), None).unwrap();
+        assert_eq!((info.pages.len(), info.title.as_deref()), (1, Some("Kept")));
     }
 
     #[test]

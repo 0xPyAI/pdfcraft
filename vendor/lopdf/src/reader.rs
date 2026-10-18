@@ -1630,10 +1630,15 @@ impl Reader<'_> {
     /// Newest backwards-scanned `trailer` whose `/Root` references a scanned object, one whose
     /// `/Root` is the catalog first.
     fn find_latest_trailer(&self, xref: &Xref) -> Option<(usize, Dictionary)> {
+        // PdfCraft patch: (#2365) an in-file /Root must also match its generation, as
+        // `get_offset` requires when the root is loaded.
         let usable = |dict: &Dictionary| {
             dict.get(b"Root")
                 .and_then(Object::as_reference)
-                .is_ok_and(|root| xref.entries.contains_key(&root.0))
+                .is_ok_and(|root| match xref.entries.get(&root.0) {
+                    Some(XrefEntry::Normal { generation, .. }) => *generation == root.1,
+                    entry => entry.is_some(),
+                })
         };
         // PdfCraft patch: (#2365) a candidate whose /Root is the catalog (`/Type /Catalog` or
         // `/Pages`) beats one whose /Root is another dictionary, such as /Info, wherever it is;
@@ -1642,9 +1647,12 @@ impl Reader<'_> {
             let Ok(root) = dict.get(b"Root").and_then(Object::as_reference) else {
                 return false;
             };
-            let Some(XrefEntry::Normal { offset, .. }) = xref.entries.get(&root.0) else {
+            let Some(XrefEntry::Normal { offset, generation }) = xref.entries.get(&root.0) else {
                 return false;
             };
+            if *generation != root.1 {
+                return false;
+            }
             parser::indirect_object(self.buffer, *offset as usize, None, self, &mut HashSet::new(), None)
                 .ok()
                 .and_then(|(_, object)| object.as_dict().map(|d| d.has_type(b"Catalog") || d.has(b"Pages")).ok())
