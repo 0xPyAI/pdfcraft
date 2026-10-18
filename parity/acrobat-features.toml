@@ -1070,8 +1070,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/view.rs::the_hand_tool_pans_by_dragging", "crates/ui-egui/tests/viewer.rs::v_h_and_space_pick_the_quick_tools"]
-notes = "drag to pan; Grab/Grabbing cursors; H picks it, V goes back to Select, Space held pans temporarily"
+evidence = ["crates/ui-egui/tests/view.rs::the_hand_tool_pans_by_dragging", "crates/ui-egui/tests/view.rs::the_hand_tool_moves_the_page_with_the_pointer", "crates/ui-egui/tests/viewer.rs::v_h_and_space_pick_the_quick_tools"]
+notes = "drag to pan: the page follows the pointer point for point in the frame it moves, and stops where it is let go (no fling); Grab/Grabbing cursors; H picks it, V goes back to Select, Space held pans temporarily. Checked with kittest pointer events, not yet on a desktop"
 
 [[feature]]
 id = "view.rotate-view"

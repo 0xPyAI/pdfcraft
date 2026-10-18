@@ -1047,6 +1047,47 @@ fn the_hand_tool_pans_by_dragging() {
 }
 
 #[test]
+fn the_hand_tool_moves_the_page_with_the_pointer() {
+    // With the Hand tool the page stays under the pointer, point for point, in the frame the
+    // pointer moves (#924, #1992). The drag used to reach the scroll offset only after the frame
+    // was drawn (and, before the page view stopped animating its scrolls, eased in over several
+    // frames), so the page trailed behind the pointer; the points moved before egui tells a drag
+    // from a click were lost on top.
+    let mut h = harness_stepping(1.0 / 60.0, &[("layout", "continuous"), ("zoom", "600"), ("quick", "hand")]);
+    let start = h.state().views[0].viewport_rect().center();
+    h.hover_at(start);
+    h.run_steps(2);
+    let page = |h: &Harness<'static, PdfCraftApp>| rect(h, 0).expect("page 1 on screen").min;
+    let grabbed = page(&h);
+    let click_dist = h.ctx.options(|o| o.input_options.max_click_dist);
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+    h.event(button(start, true));
+    h.step();
+    // A slow start, two points a frame, then quick strokes both ways. Once the pointer is further
+    // than a click may wander, the page has moved exactly as far as it, in every frame.
+    let mut pointer = start;
+    let strokes = [egui::vec2(-2.0, -2.0); 5].into_iter().chain([egui::vec2(-40.0, -150.0), egui::vec2(25.0, 60.0)]);
+    for stroke in strokes {
+        pointer += stroke;
+        h.event(egui::Event::PointerMoved(pointer));
+        h.step();
+        if (pointer - start).length() > click_dist {
+            assert_eq!(page(&h) - grabbed, pointer - start, "the page keeps up with the pointer in the same frame");
+        }
+    }
+    // Held still, it stays: nothing is left to ease in.
+    h.run_steps(30);
+    assert_eq!(page(&h) - grabbed, pointer - start, "nothing moves the page once the pointer stops");
+    // Let go mid-stroke, it stops with the pointer: the Hand tool doesn't fling the page on.
+    pointer += egui::vec2(0.0, -30.0);
+    h.event(egui::Event::PointerMoved(pointer));
+    h.step();
+    h.event(button(pointer, false));
+    h.run_steps(30);
+    assert_eq!(page(&h) - grabbed, pointer - start, "the page stays where it was let go");
+}
+
+#[test]
 fn required_fields_get_a_red_border_when_highlighting() {
     let _gpu = gpu();
     let mut h = form_harness();

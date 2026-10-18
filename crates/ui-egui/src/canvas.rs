@@ -582,6 +582,8 @@ pub struct DocView {
     pub(crate) last_scroll: Vec2,
     /// Side-by-side compare: scroll to here this frame, following the other half.
     pub(crate) sync_scroll: Option<Vec2>,
+    /// The page widget's id, by which the Hand tool finds its drag before the pages are laid out.
+    page_widget: Option<egui::Id>,
     pan_hold_until: f64,
     /// Pages whose raster proved slow (see `SLOW_MILLIS`): only these get the zoom/pan
     /// settle holds. Fast pages render straight through, with no added latency.
@@ -777,6 +779,7 @@ impl DocView {
             sharp_hold_until: 0.0,
             last_scroll: Vec2::ZERO,
             sync_scroll: None,
+            page_widget: None,
             pan_hold_until: 0.0,
             slow_pages: HashSet::new(),
             comments: Default::default(),
@@ -2578,6 +2581,25 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if !std::mem::replace(&mut view.shown, true) {
         scroll = scroll.scroll_offset(Vec2::ZERO);
     }
+    // The Hand tool pans here, before the pages are laid out, so the page moves with the pointer
+    // in the frame the pointer moves (#924). Scrolling by the drag from inside the area moved the
+    // page only after that frame was drawn, a frame behind. The frame egui tells the drag from a
+    // click, the page catches up with all the pointer has moved since the press. A jump asked for
+    // below still wins.
+    if app.quick_tool == QuickTool::Hand
+        && !middle_gesture
+        && let Some(id) = view.page_widget.filter(|id| ui.ctx().is_being_dragged(*id))
+    {
+        let moved = if ui.ctx().drag_started_id() == Some(id) {
+            ui.input(|i| i.pointer.total_drag_delta()).unwrap_or(Vec2::ZERO)
+        } else {
+            ui.input(|i| i.pointer.delta())
+        };
+        // Within the content, as egui keeps it: past an end the page would show there for a
+        // frame and spring back. `max` is never NaN or below zero, so the clamp can't panic.
+        let max = vec2((content_w - avail.width()).max(0.0), (content_h - avail.height()).max(0.0));
+        scroll = scroll.scroll_offset((view.last_scroll - moved).clamp(Vec2::ZERO, max));
+    }
     if let Some(v) = view.sync_scroll.take() {
         scroll = scroll.scroll_offset(v);
     }
@@ -2723,14 +2745,14 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             ui.scroll_with_delta_animation(delta, egui::style::ScrollAnimation::none());
         }
         let (resp_rect, resp) = ui.allocate_exact_size(vec2(content_w, content_h), Sense::click_and_drag());
+        view.page_widget = Some(resp.id);
         // A drag lasts only while egui reports it, so the mark can't outlive one.
         if !resp.dragged_by(egui::PointerButton::Primary) {
             view.selection_drag = false;
         }
-        // The Hand tool pans: the content widget takes every drag, so scroll by its delta.
+        // The Hand tool pans by this widget's drag, before the pages are laid out (above).
         if hand {
             if resp.dragged() {
-                ui.scroll_with_delta(resp.drag_delta());
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             } else if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
