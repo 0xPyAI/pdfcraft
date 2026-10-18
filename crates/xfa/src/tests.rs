@@ -2117,3 +2117,40 @@ fn som_indices_count_earlier_same_named_siblings() {
     let sibs = SomIndices::of(&children);
     assert_eq!((0..=children.len()).map(|i| sibs.at(i)).collect::<Vec<_>>(), [0, 0, 1, 0, 2, 1, 0]);
 }
+
+/// A TIFF is drawn as viewers show it, turned by its Orientation tag: a 2 × 1 picture (red,
+/// blue) tagged 6 (turn 90° clockwise) is 1 × 2, red above blue, in layout and in the PDF.
+#[test]
+fn a_tiff_picture_is_turned_by_its_orientation_tag() {
+    let strip: &[u8] = &[255, 0, 0, 0, 0, 255];
+    let (bps_at, strip_at) = (8 + 2 + 10 * 12 + 4, 8 + 2 + 10 * 12 + 4 + 6);
+    let mut b = b"II*\0".to_vec();
+    b.extend_from_slice(&8u32.to_le_bytes());
+    b.extend_from_slice(&10u16.to_le_bytes());
+    for (tag, ty, count, value) in [
+        (256u16, 3u16, 1u32, 2u32),
+        (257, 3, 1, 1),
+        (258, 3, 3, bps_at as u32),
+        (259, 3, 1, 1),
+        (262, 3, 1, 2),
+        (273, 4, 1, strip_at as u32),
+        (274, 3, 1, 6),
+        (277, 3, 1, 3),
+        (278, 3, 1, 1),
+        (279, 4, 1, strip.len() as u32),
+    ] {
+        b.extend_from_slice(&tag.to_le_bytes());
+        b.extend_from_slice(&ty.to_le_bytes());
+        b.extend_from_slice(&count.to_le_bytes());
+        b.extend_from_slice(&value.to_le_bytes());
+    }
+    b.extend_from_slice(&0u32.to_le_bytes());
+    for _ in 0..3 {
+        b.extend_from_slice(&8u16.to_le_bytes());
+    }
+    b.extend_from_slice(strip);
+    let d = crate::image::decode(&b).unwrap();
+    assert_eq!(crate::image::size(&b), Some((1, 2)), "layout size");
+    assert_eq!((d.width, d.height), (1, 2), "decoded size");
+    assert_eq!(d.samples, vec![255, 0, 0, 0, 0, 255]);
+}

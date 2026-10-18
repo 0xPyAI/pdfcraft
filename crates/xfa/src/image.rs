@@ -71,8 +71,29 @@ fn header_size(data: &[u8]) -> Option<(u32, u32)> {
         }
         // The decoders read only the headers (TIFF: the first IFD) until asked for pixels.
         Kind::Bmp => reader(data, image::ImageFormat::Bmp).into_dimensions().ok().filter(|&(w, h)| w > 0 && h > 0),
-        Kind::Tiff => reader(data, image::ImageFormat::Tiff).into_dimensions().ok().filter(|&(w, h)| w > 0 && h > 0),
+        Kind::Tiff => {
+            use image::{ImageDecoder, metadata::Orientation};
+            let mut decoder = reader(data, image::ImageFormat::Tiff).into_decoder().ok()?;
+            let (w, h) = decoder.dimensions();
+            // Shown turned a quarter: the size viewers show is the stored one swapped.
+            let turned = matches!(
+                decoder.orientation().ok()?,
+                Orientation::Rotate90 | Orientation::Rotate270 | Orientation::Rotate90FlipH | Orientation::Rotate270FlipH
+            );
+            let (w, h) = if turned { (h, w) } else { (w, h) };
+            (w > 0 && h > 0).then_some((w, h))
+        }
     }
+}
+
+/// A TIFF's first page as viewers show it: turned and flipped as its Orientation tag says.
+fn decode_tiff(data: &[u8]) -> image::ImageResult<image::DynamicImage> {
+    use image::ImageDecoder;
+    let mut decoder = reader(data, image::ImageFormat::Tiff).into_decoder()?;
+    let orientation = decoder.orientation()?;
+    let mut img = image::DynamicImage::from_decoder(decoder)?;
+    img.apply_orientation(orientation);
+    Ok(img)
 }
 
 /// A decoder told the limits, so a frame larger than its header claims is refused before it is
@@ -153,8 +174,8 @@ pub fn decode(data: &[u8]) -> Result<Decoded, String> {
                 Kind::Bmp => image::ImageFormat::Bmp,
                 _ => image::ImageFormat::Tiff,
             };
-            let img =
-                reader(data, format).decode().map_err(|e| if matches!(e, image::ImageError::Limits(_)) { too_big() } else { bad(e.to_string()) })?;
+            let img = if k == Kind::Tiff { decode_tiff(data) } else { reader(data, format).decode() }
+                .map_err(|e| if matches!(e, image::ImageError::Limits(_)) { too_big() } else { bad(e.to_string()) })?;
             let rgba = img.into_rgba8();
             let (width, height) = rgba.dimensions();
             if !fits(width, height) {
