@@ -4808,7 +4808,7 @@ fn row_state_page(content: &str) -> Document {
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
         "<< /Type /ExtGState /ca 0.3 /CA 0.3 >>".into(),
         "<< /Type /OCG /Name (Hidden layer) >>".into(),
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 7 0 R /Resources << /Font << /F1 3 0 R >> /ExtGState << /GS0 4 0 R >> /Properties << /L1 5 0 R >> >> >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 7 0 R /Resources << /Font << /F1 3 0 R >> /ExtGState << /GS0 4 0 R /GS1 << /Type /ExtGState /ca 0.3 /CA 0.3 /BM /Normal >> /GS2 << /Type /ExtGState /ca 1 /CA 1 >> >> /Properties << /L1 5 0 R >> >> >>".into(),
         format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
     ];
     let mut out = b"%PDF-1.7\n".to_vec();
@@ -4888,4 +4888,20 @@ fn editing_a_row_keeps_the_layer_opacity_and_scale_of_the_rows_around_it() {
     let blocks = text::text_blocks(&row_state_page(&pages[3].0), 0).unwrap();
     assert_eq!(blocks.len(), 1);
     assert_eq!(blocks[0].text, "Hello world, this is the first line and the second");
+}
+
+/// What keeps rows apart is the graphics state they are drawn in, not the `gs` operators
+/// before them: a repeated `gs` without q/Q, or another name with the same settings, is still one
+/// paragraph, and a `gs` that changes the opacity or puts it back is not.
+#[test]
+fn rows_under_repeated_or_equal_gs_states_stay_one_paragraph() {
+    let row1 = "BT /F1 12 Tf 72 700 Td (Hello world, this is the first line) Tj ET\n";
+    let row2 = "BT /F1 12 Tf 72 686 Td (and the second) Tj ET";
+    let paragraphs = |content: String| text::text_blocks(&row_state_page(&content), 0).unwrap().len();
+    assert_eq!(paragraphs(format!("/GS0 gs {row1}/GS0 gs {row2}")), 1, "the same name twice");
+    assert_eq!(paragraphs(format!("/GS0 gs {row1}/GS0 gs /GS0 gs {row2}")), 1, "the same name three times");
+    assert_eq!(paragraphs(format!("/GS0 gs {row1}/GS1 gs {row2}")), 1, "two names, the same settings");
+    assert_eq!(paragraphs(format!("/GS2 gs {row1}{row2}")), 1, "settings that are the defaults");
+    assert_eq!(paragraphs(format!("{row1}/GS0 gs {row2}")), 2, "another opacity");
+    assert_eq!(paragraphs(format!("/GS0 gs {row1}/GS2 gs {row2}")), 2, "the opacity put back");
 }

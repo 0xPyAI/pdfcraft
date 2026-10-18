@@ -231,17 +231,64 @@ impl TextState {
 }
 
 /// What a run is drawn in beyond its text state: the optional content groups of the `/OC`
-/// marked-content sequences around it, and the graphics state parameter dictionaries (`gs`)
-/// applied before it. A rewrite writes a paragraph in its first run's place, so runs that differ
-/// here are never joined: one in a hidden layer or at another opacity would lose it.
+/// marked-content sequences around it, and the effective graphics state parameters (`gs`) in
+/// force. A rewrite writes a paragraph in its first run's place, so runs that differ here are
+/// never joined: one in a hidden layer or at another opacity would lose it.
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Paint {
     layers: Vec<Vec<u8>>,
-    gs: Vec<Vec<u8>>,
+    gs: Gs,
 }
 
-/// How many `gs` operators a [`Paint`] records; the rest of a run of them is not told apart.
-const MAX_PAINT_GS: usize = 32;
+/// The transparency parameters of the graphics state: what the `gs` operators have set, resolved,
+/// so a repeated `gs` or two names with the same settings leave it as it was.
+#[derive(Clone, Debug, PartialEq)]
+struct Gs {
+    /// `ca`, the fill opacity.
+    fill_alpha: f64,
+    /// `CA`, the stroke opacity.
+    stroke_alpha: f64,
+    /// `BM`, the blend mode (`Compatible` is `Normal`).
+    blend: Vec<u8>,
+    /// `SMask`, when it is not `None`: the reference of an indirect soft mask, else the dictionary.
+    soft_mask: Option<Object>,
+}
+
+impl Default for Gs {
+    fn default() -> Self {
+        Gs { fill_alpha: 1.0, stroke_alpha: 1.0, blend: b"Normal".to_vec(), soft_mask: None }
+    }
+}
+
+impl Gs {
+    /// Applies the parameters a graphics state parameter dictionary sets; the others stay.
+    fn apply(&mut self, doc: &Document, params: &Dict) {
+        let num = |key: &[u8]| params.get(key).and_then(|o| doc.resolve(o).as_f64()).filter(|v| v.is_finite());
+        if let Some(v) = num(b"ca") {
+            self.fill_alpha = v;
+        }
+        if let Some(v) = num(b"CA") {
+            self.stroke_alpha = v;
+        }
+        if let Some(bm) = params.get(b"BM").map(|o| doc.resolve(o)) {
+            let first = bm
+                .as_name()
+                .map(<[u8]>::to_vec)
+                .or_else(|| bm.as_array().and_then(|a| a.iter().find_map(|o| doc.resolve(o).as_name().map(<[u8]>::to_vec))));
+            if let Some(name) = first {
+                self.blend = if name == b"Compatible" { b"Normal".to_vec() } else { name };
+            }
+        }
+        if let Some(mask) = params.get(b"SMask") {
+            self.soft_mask = match (mask.as_ref(), &*doc.resolve(mask)) {
+                (_, Object::Name(_)) => None,
+                (Some(r), _) => Some(Object::Ref(r)),
+                (None, Object::Dict(d)) => Some(Object::Dict(d.clone())),
+                (None, _) => None,
+            };
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 struct Origin {
@@ -534,8 +581,8 @@ struct Ts {
     leading: f64,
     rise: f64,
     render_mode: i64,
-    /// The `gs` resource names applied so far (see [`Paint`]).
-    gs: Vec<Vec<u8>>,
+    /// The transparency parameters the `gs` operators have set so far (see [`Paint`]).
+    gs: Gs,
 }
 
 fn content_streams(doc: &Document, page: &Dict) -> Vec<(Object, Vec<u8>)> {
@@ -745,7 +792,7 @@ impl Carry {
             leading: 0.0,
             rise: 0.0,
             render_mode: 0,
-            gs: Vec::new(),
+            gs: Gs::default(),
         };
         Carry { ts, stack: Vec::new(), marked: Vec::new(), layers: Vec::new() }
     }
@@ -757,12 +804,14 @@ type Invocation = (usize, Vec<u8>, Ts);
 fn interpret(
     doc: &Document,
     ops: &[Op],
-    fonts_res: &Dict,
+    resources: &Dict,
     cache: &mut HashMap<Vec<u8>, (Rc<Metrics>, Option<String>)>,
     carry: &mut Carry,
     mut invoked: Option<&mut Vec<Invocation>>,
     logical_text: bool,
 ) -> Vec<Shown> {
+    let fonts_res = resources.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
+    let states = resources.get(b"ExtGState").map(|g| doc.resolve(g)).and_then(|g| g.as_dict().cloned()).unwrap_or_default();
     let mut out: Vec<Shown> = Vec::new();
     let mut ts = carry.ts.clone();
     let mut at_bt = (0usize, ts.clone());
@@ -865,10 +914,9 @@ fn interpret(
             b"Ts" => ts.rise = op.num(0).unwrap_or(0.0),
             b"Tr" => ts.render_mode = op.operands.first().and_then(Object::as_int).unwrap_or(-1),
             b"gs" => {
-                if let Some(name) = op.name(0)
-                    && ts.gs.len() < MAX_PAINT_GS
-                {
-                    ts.gs.push(name.to_vec());
+                let params = op.name(0).and_then(|name| states.get(name)).map(|p| doc.resolve(p));
+                if let Some(params) = params.as_deref().and_then(Object::as_dict) {
+                    ts.gs.apply(doc, params);
                 }
             }
             b"Do" => {
@@ -1045,7 +1093,6 @@ fn interpret(
 pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError> {
     let p = page_dict(doc, page)?;
     let res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
-    let fonts_res = res.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
     let mut cache = HashMap::new();
     let mut lines: Vec<TextLine> = Vec::new();
     let mut carry = Carry::new();
@@ -1053,7 +1100,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
     // joined, so an operator whose operands end one piece still has them.
     let pieces = Pieces::join(&content_streams(doc, &p.dict).into_iter().map(|(_, d)| d).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
-    let shown = interpret(doc, &ops, &fonts_res, &mut cache, &mut carry, None, true);
+    let shown = interpret(doc, &ops, &res, &mut cache, &mut carry, None, true);
     let mut last: Option<(usize, Pen)> = None; // the stream piece and where its last run ended
     for mut s in shown {
         // A single RTL glyph's ActualText (e.g. lam-alef) is an inline ligature, not a
@@ -1296,10 +1343,9 @@ fn reading_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError
     }
     /// `stream` gives the stream number of the operator at an index of `ops`.
     fn walk(w: &mut Walk, ops: &[Op], resources: &Dict, carry: &mut Carry, stream: &dyn Fn(usize) -> usize) {
-        let fonts_res = resources.get(b"Font").map(|f| w.doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
         let mut cache = HashMap::new();
         let mut invoked = Vec::new();
-        let shown = interpret(w.doc, ops, &fonts_res, &mut cache, carry, Some(&mut invoked), true);
+        let shown = interpret(w.doc, ops, resources, &mut cache, carry, Some(&mut invoked), true);
         let mut last = None;
         let mut last_stream = None;
         let mut forms = invoked.into_iter().peekable();
@@ -1925,11 +1971,10 @@ pub fn clear_block(doc: &mut Document, page: usize, block: usize) -> Result<(), 
     drops.extend(target.lines.iter().filter_map(|i| lines.get(*i)).flat_map(|l| l.ops.iter().copied()));
     let p = page_dict(doc, page)?;
     let res = p.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
-    let fonts = res.get(b"Font").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
     let streams = content_streams(doc, &p.dict);
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
-    let shown = interpret(doc, &ops, &fonts, &mut HashMap::new(), &mut Carry::new(), None, false);
+    let shown = interpret(doc, &ops, &res, &mut HashMap::new(), &mut Carry::new(), None, false);
     let mut patches = HashMap::new();
     for s in shown.into_iter().filter(|s| drops.contains(&s.op)) {
         if s.state.render_mode >= 4 {
@@ -2586,7 +2631,7 @@ pub(crate) fn translate_blocks(doc: &mut Document, page: usize, indexes: &[usize
     let fonts = res.get(b"Font").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
-    let shown = interpret(doc, &ops, &fonts, &mut HashMap::new(), &mut Carry::new(), None, false);
+    let shown = interpret(doc, &ops, &res, &mut HashMap::new(), &mut Carry::new(), None, false);
     let mut patches = HashMap::new();
     // Keep full precision: a tiny rounded text-space change can be magnified by a CTM,
     // and restoring rise/spacing must not alter following unselected text.
