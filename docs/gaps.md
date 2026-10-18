@@ -353,7 +353,8 @@ update the numbers.
 ### 21. Compare: filters by Acrobat's finer kinds of change, page ranges, scanned documents
 
 - **Done:** the synchronised side-by-side view; the Compare panel's Show: Text / Visual filter
-  hides either kind from the list and the shading.
+  (Text hides the text changes from the list and the shading, Visual hides the visual differences
+  from the shading; they are counted, not listed).
 - **Missing:** telling images, annotations, formatting and background/header-footer changes apart
   (all of them are Visual today), scrolling the two halves by matching content rather than by
   offset, page ranges, scanned documents.

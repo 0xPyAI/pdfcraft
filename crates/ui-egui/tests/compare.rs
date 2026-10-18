@@ -73,8 +73,9 @@ fn text_and_visual_versions() -> (Vec<u8>, Vec<u8>) {
     (v1, s.save_bytes(id).unwrap().to_vec())
 }
 
-/// The Compare panel's Show: Text / Visual filter hides that kind of change from the list and
-/// from the shading on both halves, and brings it back.
+/// The Compare panel's Show: Text / Visual filter, on both halves: Text takes the text changes
+/// out of the list and the shading, Visual takes the visual differences (counted, never listed)
+/// out of the shading, and each brings them back.
 #[test]
 fn compare_filters_hide_text_or_visual_changes() {
     let (v1, v2) = text_and_visual_versions();

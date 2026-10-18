@@ -24,8 +24,8 @@ pub struct CompareState {
     pub leader: usize,
     /// Each half's scroll offset last frame, to tell which one moved.
     pub prev_scroll: [egui::Vec2; 2],
-    /// Show: whether the list and the shading include the text changes and the visual
-    /// differences (Acrobat's Filter).
+    /// Show: whether the text changes are in the list and the shading, and whether the visual
+    /// differences (counted, never listed) are shaded (Acrobat's Filter).
     pub show_text: bool,
     pub show_visual: bool,
 }
