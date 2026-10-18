@@ -681,9 +681,13 @@ impl Automation {
                 // Where the paragraph is drawn after the edit: moved by dx, dy (up is +dy).
                 let [dx, dy] = style.offset.unwrap_or([0.0, 0.0]);
                 let moved = [block.rect[0] + dx, block.rect[1] + dy, block.rect[2] + dx, block.rect[3] + dy];
+                let wanted: String = text.split_whitespace().collect();
                 let mut out = self.apply(&a, Edit::EditTextBlock { page, block: index, text, style })?;
                 let after = self.doc(&a)?.text_blocks(page);
-                let edited = block_overlapping(&after, moved);
+                // Only a paragraph that now shows the requested text is the edited one. A neighbour
+                // that overlaps the old box (overlaid text, a text layer) must not take its number.
+                let edited = block_overlapping(&after, moved)
+                    .filter(|&i| !wanted.is_empty() && after.get(i).is_some_and(|b| b.text.split_whitespace().collect::<String>().contains(&wanted)));
                 if let Some(b) = edited.and_then(|i| after.get(i)) {
                     out["paragraph"] = json!({ "text": b.text, "lines": b.lines.len(), "font": b.base_font });
                 }

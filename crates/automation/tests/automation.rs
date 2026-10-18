@@ -6871,6 +6871,39 @@ fn three_paragraph_pdf() -> Vec<u8> {
     write_full(&doc, &SaveOptions::default()).unwrap()
 }
 
+/// A one-page PDF whose second paragraph is drawn over the first one's box, as an OCR text layer
+/// or a stamp would be.
+fn overlaid_paragraph_pdf() -> Vec<u8> {
+    use pdfcraft_cos::{Dict, Document, ObjRef, Object, SaveOptions, Stream, write_full};
+    use std::sync::Arc;
+
+    let content = "BT /F1 12 Tf 14.4 TL 1 0 0 1 10 250 Tm (Alpha paragraph, first row.) Tj T* (Alpha paragraph, second row.) Tj ET \
+                   BT /F1 12 Tf 14.4 TL 1 0 0 1 10 243 Tm (Zulu overlay.) Tj ET";
+    let mut doc = Document::open(Arc::new(fixture(1))).unwrap();
+    doc.set(ObjRef::new(5, 0), Object::Stream(Stream::flate(Dict::new(), content.as_bytes())));
+    write_full(&doc, &SaveOptions::default()).unwrap()
+}
+
+/// Emptying a paragraph that another paragraph overlaps must not hand the emptied paragraph's
+/// number to the neighbour that took over its box: the next edit by that number would rewrite it.
+#[test]
+fn an_emptied_paragraph_does_not_pass_its_number_to_an_overlapping_neighbour() {
+    let dir = workdir("text-edit-overlap-number");
+    std::fs::write(dir.join("p.pdf"), overlaid_paragraph_pdf()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path":"p.pdf"}))["doc"].as_u64().unwrap();
+    let listed = ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
+    assert_eq!(listed["count"], 2, "{listed}");
+    let k = listed["paragraphs"].as_array().unwrap().iter().position(|p| p["text"].as_str().unwrap().starts_with("Alpha")).unwrap() + 1;
+
+    let first = ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":k,"text":""}));
+    assert_eq!(first["stale_paragraphs"], json!([k]), "the emptied paragraph's number is gone: {first}");
+    let again = a.call("text_edit", &json!({"doc":doc,"page":1,"paragraph":k,"text":"Rewritten."}));
+    assert!(matches!(&again, Err(ToolError::InvalidArgs(m)) if m.contains("text_paragraphs")), "{again:?}");
+    assert!(page_text(&mut a, doc).join(" ").contains("Zulu overlay."), "the neighbour is untouched");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// #2516: a paragraph number names the paragraph `text_paragraphs` listed. When an edit regroups
 /// the page so that paragraph no longer exists on its own, the next edit by that number is
 /// refused. It used to rewrite whichever paragraph had taken the number, and that text was gone.
