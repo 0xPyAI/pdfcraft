@@ -238,6 +238,74 @@ fn saving_a_repaired_file_puts_the_repair_on_disk() {
     assert_eq!(info["pages"].as_array().unwrap().len(), 2);
 }
 
+/// Custom document properties through the tools: set and cleared with doc_set_info under any
+/// name the spec does not use, listed by doc_info apart from the standard entries, bad names
+/// refused without a change.
+#[test]
+fn custom_document_properties_are_set_listed_and_cleared_through_the_tools() {
+    let dir = workdir("custom-info");
+    std::fs::write(dir.join("a.pdf"), fixture(1)).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Title", "value": "Report" }));
+    ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Project", "value": "Apollo" }));
+    ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Revision", "value": "7" }));
+    let info = ok(&mut a, "doc_info", json!({ "doc": doc }));
+    assert_eq!(info["title"], "Report");
+    let mut custom: Vec<(String, String)> =
+        info["custom"].as_array().unwrap().iter().map(|c| (c["name"].as_str().unwrap().into(), c["value"].as_str().unwrap().into())).collect();
+    custom.sort();
+    assert_eq!(custom, [("Project".to_string(), "Apollo".to_string()), ("Revision".to_string(), "7".to_string())], "{}", info["custom"]);
+    assert!(a.call("doc_set_info", &json!({ "doc": doc, "key": "Bad Name", "value": "x" })).is_err(), "a name with a space is refused");
+    assert!(a.call("doc_set_info", &json!({ "doc": doc, "key": "", "value": "x" })).is_err());
+    ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Project", "value": "" }));
+    let info = ok(&mut a, "doc_info", json!({ "doc": doc }));
+    assert_eq!(info["custom"].as_array().unwrap().len(), 1, "{}", info["custom"]);
+    assert_eq!(info["custom"][0]["name"], "Revision");
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "out/custom.pdf" }));
+    let mut b = auto(&dir);
+    let re = ok(&mut b, "doc_open", json!({ "path": "out/custom.pdf" }))["doc"].as_u64().unwrap();
+    let info = ok(&mut b, "doc_info", json!({ "doc": re }));
+    assert_eq!(info["custom"][0]["value"], "7", "{}", info["custom"]);
+}
+
+/// The custom list `doc_info` shows when a file opens is the one it shows after an unrelated
+/// edit: a name value, a blank or NUL-padded string and a number are judged the same way by the
+/// open-time reader and by the engine's refresh.
+#[test]
+fn custom_document_properties_do_not_change_after_an_unrelated_edit() {
+    let dir = workdir("custom-info-stable");
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>",
+        "<< /Producer (Test) /Project (Apollo) /Dept /RnD /Blank (   ) /Padded (Lab\\000\\000) /Revision 7 /Empty () /Mixed ( \\000Lab\\000 ) /Pad ( \\000 ) >>",
+    ];
+    let mut pdf = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        pdf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R /Info 4 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    std::fs::write(dir.join("custom.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "custom.pdf" }))["doc"].as_u64().unwrap();
+    let opened = ok(&mut a, "doc_info", json!({ "doc": doc }))["custom"].clone();
+    let names: Vec<&str> = opened.as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["Project", "Padded", "Mixed"], "{opened}");
+    assert_eq!(opened[1]["value"], "Lab", "{opened}");
+    assert_eq!(opened[2]["value"], "Lab", "{opened}");
+    ok(&mut a, "doc_set_info", json!({ "doc": doc, "key": "Title", "value": "Report" }));
+    let edited = ok(&mut a, "doc_info", json!({ "doc": doc }))["custom"].clone();
+    assert_eq!(edited, opened);
+}
+
 #[test]
 fn autotag_preview_proposes_text_without_changing_the_pdf() {
     let dir = workdir("autotag-preview");
