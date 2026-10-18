@@ -810,11 +810,12 @@ fn flattened_widgets_and_far_pop_ups_leave_the_structure_tree() {
 }
 
 /// #2532 review: a structure tree larger than the walk's limit can't be searched in full, so a
-/// reference the walk never reached could keep a removed annotation. Then the whole tree goes
-/// (with `/MarkInfo`), rather than reporting success with references left behind; under the
-/// limit only the reference goes.
+/// reference the walk never reached could keep a removed annotation. Then it is an error, and
+/// nothing is changed, rather than success with references left behind (removing only the tree
+/// would leave an outline's `/SE` reaching them, review on #3285); under the limit only the
+/// reference goes.
 #[test]
-fn a_structure_tree_too_large_to_walk_is_removed_whole() {
+fn a_structure_tree_too_large_to_walk_is_refused() {
     let objs: Vec<Vec<u8>> = vec![
         b"<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 5 0 R >>".to_vec(),
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
@@ -835,11 +836,8 @@ fn a_structure_tree_too_large_to_walk_is_removed_whole() {
     assert!(catalog(&doc).contains(b"StructTreeRoot") && catalog(&doc).contains(b"MarkInfo"), "under the limit the tree stays");
 
     let mut doc = pdf(objs);
-    crate::tags::drop_object_refs_within(&mut doc, &gone, 2).unwrap();
-    assert!(!catalog(&doc).contains(b"StructTreeRoot"), "a tree the walk couldn't finish goes whole");
-    assert!(!catalog(&doc).contains(b"MarkInfo"));
-    let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
-    assert!(!bytes.windows(14).any(|w| w == b"secret.example"), "the removed link can't be reached any more");
+    assert!(matches!(crate::tags::drop_object_refs_within(&mut doc, &gone, 2), Err(RedactError::Tags)), "a tree the walk couldn't finish is refused");
+    assert!(catalog(&doc).contains(b"StructTreeRoot"), "nothing changed");
 }
 
 /// #3302: an element listed only in the parent tree (not under the root's /K) still owns the
@@ -868,11 +866,10 @@ fn an_element_listed_only_in_the_parent_tree_loses_its_redacted_text() {
     assert!(!element.contains(b"ActualText") && !element.contains(b"Alt"), "{element:?}");
 }
 
-/// #3302: a structure tree too large to walk in full fails closed: every element loses its
-/// alternate and actual text, found by reading each object, instead of the walk stopping and
-/// reporting success with elements never checked.
+/// #3302: a structure tree too large to walk in full fails closed: an error, so the redaction
+/// isn't made, instead of the walk stopping and reporting success with elements never checked.
 #[test]
-fn a_tag_walk_cut_short_clears_every_element() {
+fn a_tag_walk_cut_short_is_refused() {
     let objs: Vec<Vec<u8>> = vec![
         b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 5 0 R >>".to_vec(),
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
@@ -886,17 +883,12 @@ fn a_tag_walk_cut_short_clears_every_element() {
     let page = ObjRef::new(3, 0);
     let changed: std::collections::HashSet<i64> = [0].into();
     let mut doc = pdf(objs.clone());
-    crate::tags::clean_within(&mut doc, page, None, &changed, &Default::default(), 100).unwrap();
+    assert_eq!(crate::tags::clean_within(&mut doc, page, None, &changed, &Default::default(), 100).unwrap(), 1);
     let figure = doc.get(ObjRef::new(8, 0)).as_dict().cloned().unwrap();
     assert!(figure.contains(b"Alt"), "a walk that finishes keeps an unrelated element's text");
 
     let mut doc = pdf(objs);
-    let n = crate::tags::clean_within(&mut doc, page, None, &changed, &Default::default(), 1).unwrap();
-    assert_eq!(n, 2, "both elements with text change");
-    for r in [7, 8] {
-        let e = doc.get(ObjRef::new(r, 0)).as_dict().cloned().unwrap();
-        assert!(!e.contains(b"ActualText") && !e.contains(b"Alt") && !e.contains(b"E"), "{r}: {e:?}");
-    }
+    assert!(matches!(crate::tags::clean_within(&mut doc, page, None, &changed, &Default::default(), 1), Err(RedactError::Tags)));
 }
 
 /// #2532 follow-up: an element reached only through the parent tree or the ID tree, not from
@@ -957,37 +949,11 @@ fn an_element_inheriting_its_page_loses_its_redacted_text_when_the_parent_tree_l
     }
 }
 
-/// #3285 review: when the tag walk is cut short while redaction replaced a form's stream, the
-/// marked-content references it never reached still name the original stream through /Stm, so
-/// the tree goes, as it does for removed annotations. Without a replaced stream it stays.
-#[test]
-fn a_tag_walk_cut_short_over_a_replaced_stream_removes_the_tree() {
-    let objs: Vec<Vec<u8>> = vec![
-        b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 5 0 R /MarkInfo << /Marked true >> >>".to_vec(),
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /StructParents 0 >>".to_vec(),
-        stream("/Type /XObject /Subtype /Form /BBox [0 0 10 10]", b"/P <</MCID 0>> BDC EMC"),
-        b"<< /Type /StructTreeRoot /K 6 0 R >>".to_vec(),
-        b"<< /Type /StructElem /S /Document /P 5 0 R /K [7 0 R] >>".to_vec(),
-        b"<< /Type /StructElem /S /P /P 6 0 R /Pg 3 0 R /K << /Type /MCR /MCID 0 /Stm 4 0 R >> >>".to_vec(),
-        stream("/Type /XObject /Subtype /Form /BBox [0 0 10 10]", b""),
-    ];
-    let page = ObjRef::new(3, 0);
-    let streams = Some((ObjRef::new(4, 0), ObjRef::new(8, 0)));
-    let has_tree = |doc: &Document| doc.get(doc.root().unwrap()).as_dict().is_some_and(|c| c.contains(b"StructTreeRoot") && c.contains(b"MarkInfo"));
-    let mut doc = pdf(objs.clone());
-    crate::tags::clean_within(&mut doc, page, None, &[0].into(), &Default::default(), 1).unwrap();
-    assert!(has_tree(&doc), "without a replaced stream the tree stays");
-    let mut doc = pdf(objs);
-    crate::tags::clean_within(&mut doc, page, streams, &Default::default(), &Default::default(), 1).unwrap();
-    assert!(!has_tree(&doc), "a cut-short walk over a replaced stream drops the tree");
-}
-
 /// #3285 review: a structure element written in place, here as an ID tree value, can't be
-/// edited without rewriting what holds it; when it tags a removed annotation the tree goes
-/// instead of keeping the annotation reachable in a full rewrite.
+/// edited without rewriting what holds it; when it tags a removed annotation, removing hidden
+/// information is refused instead of keeping the annotation reachable in a full rewrite.
 #[test]
-fn an_element_written_in_place_that_tags_a_removed_annotation_removes_the_tree() {
+fn an_element_written_in_place_that_tags_a_removed_annotation_is_refused() {
     let objs: Vec<Vec<u8>> = vec![
         b"<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 5 0 R >>".to_vec(),
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
@@ -998,11 +964,74 @@ fn an_element_written_in_place_that_tags_a_removed_annotation_removes_the_tree()
     ];
     let gone: std::collections::HashSet<ObjRef> = [ObjRef::new(4, 0)].into();
     let mut doc = pdf(objs);
-    crate::tags::drop_object_refs(&mut doc, &gone).unwrap();
-    let catalog = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
-    assert!(!catalog.contains(b"StructTreeRoot") && !catalog.contains(b"MarkInfo"), "{catalog:?}");
-    let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
-    assert!(!bytes.windows(8).any(|w| w == b"hushhush"), "the removed comment can't be reached any more");
+    assert!(matches!(crate::tags::drop_object_refs(&mut doc, &gone), Err(RedactError::Tags)));
+}
+
+/// Whether a full rewrite of `doc` still holds the redacted word.
+fn bluefin_survives(doc: &Document) -> bool {
+    let bytes = write_full(doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
+    bytes.windows(7).any(|w| w == b"Bluefin")
+}
+
+/// #3285 review (the maintainer's probes): an element written in place in the parent tree that
+/// owns the redacted text can't be changed, so applying is refused; the same element as an object
+/// of its own is cleaned, and nothing of the word is left in a full rewrite.
+#[test]
+fn an_element_written_in_place_owning_redacted_text_is_refused() {
+    let objs = |element: &str| -> Vec<Vec<u8>> {
+        vec![
+            b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 5 0 R /MarkInfo << /Marked true >> >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /StructParents 0 /Resources << /Font << /F1 9 0 R >> >> >>"
+                .to_vec(),
+            stream("", b"/P <</MCID 0>> BDC BT /F1 14 Tf 20 150 Td (Codename Bluefin) Tj ET EMC"),
+            format!("<< /Type /StructTreeRoot /K 6 0 R /ParentTree << /Nums [0 [{element}]] >> /ParentTreeNextKey 1 >>").into_bytes(),
+            b"<< /Type /StructElem /S /Document /P 5 0 R >>".to_vec(),
+            b"<< /Type /StructElem /S /P /P 6 0 R /Pg 3 0 R /K 0 /ActualText (Codename Bluefin) >>".to_vec(),
+            b"<< >>".to_vec(),
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+        ]
+    };
+    let mut doc = pdf(objs("<< /Type /StructElem /S /P /P 6 0 R /Pg 3 0 R /K 0 /ActualText (Codename Bluefin) >>"));
+    mark(&mut doc, 0, &[[10.0, 140.0, 290.0, 170.0]], "");
+    assert!(matches!(apply(&mut doc, None), Err(RedactError::Tags)));
+    let mut doc = pdf(objs("7 0 R"));
+    mark(&mut doc, 0, &[[10.0, 140.0, 290.0, 170.0]], "");
+    let r = apply(&mut doc, None).unwrap();
+    assert!(r.glyphs > 0 && !bluefin_survives(&doc), "{r:?}");
+}
+
+/// #3285 review: an element whose inherited page can't be found (more ancestors than the lookup
+/// follows) isn't taken for one with no page: applying is refused. Within the limit the page is
+/// found and the text goes.
+#[test]
+fn an_element_whose_inherited_page_is_out_of_reach_is_refused() {
+    let objs = |depth: u32| -> Vec<Vec<u8>> {
+        let mut objs: Vec<Vec<u8>> = vec![
+            b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 5 0 R /MarkInfo << /Marked true >> >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /StructParents 0 /Resources << /Font << /F1 9 0 R >> >> >>"
+                .to_vec(),
+            stream("", b"/P <</MCID 0>> BDC BT /F1 14 Tf 20 150 Td (Codename Bluefin) Tj ET EMC"),
+            b"<< /Type /StructTreeRoot /K 6 0 R /ParentTree << /Nums [0 [7 0 R]] >> /ParentTreeNextKey 1 >>".to_vec(),
+            b"<< /Type /StructElem /S /Document /P 5 0 R /Pg 3 0 R >>".to_vec(),
+            format!("<< /Type /StructElem /S /P /P {} 0 R /K 0 /ActualText (Codename Bluefin) >>", 10 + depth - 1).into_bytes(),
+            b"<< >>".to_vec(),
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+        ];
+        for i in 0..depth {
+            let parent = if i == 0 { 6 } else { 10 + i - 1 };
+            objs.push(format!("<< /Type /StructElem /S /Div /P {parent} 0 R >>").into_bytes());
+        }
+        objs
+    };
+    let mut doc = pdf(objs(300));
+    mark(&mut doc, 0, &[[10.0, 140.0, 290.0, 170.0]], "");
+    assert!(matches!(apply(&mut doc, None), Err(RedactError::Tags)));
+    let mut doc = pdf(objs(100));
+    mark(&mut doc, 0, &[[10.0, 140.0, 290.0, 170.0]], "");
+    apply(&mut doc, None).unwrap();
+    assert!(!bluefin_survives(&doc));
 }
 
 /// Issue #1325: removing comments keeps the annotations that are not comments: the multimedia

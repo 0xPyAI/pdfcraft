@@ -51,6 +51,13 @@ pub enum RedactError {
         "redaction appearance has invalid geometry or exceeds the 8 MiB budget; reduce the marked area, turn off repeated text or apply fewer pages at once (nothing was redacted)"
     )]
     OverlayLimit,
+    /// The structure tree couldn't be cleaned completely (#3302): an element written in place that
+    /// would need changing, an element whose inherited page can't be found, or a tree too large to
+    /// walk. Tags that kept the removed text or annotation would undo the redaction.
+    #[error(
+        "the document's tags can't be cleaned completely (an element written in place, or a structure tree too large or too deep to follow), so nothing was changed"
+    )]
+    Tags,
     #[error(transparent)]
     Edit(#[from] pdfcraft_edit::EditError),
     #[error(transparent)]
