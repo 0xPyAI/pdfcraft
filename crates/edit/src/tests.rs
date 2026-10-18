@@ -4979,9 +4979,15 @@ fn flattening_comments_keeps_annotations_that_are_not_comments() {
 /// A page of three vertical (`Identity-V`) columns at 20 pt: `ABCDEF` at x = 500, the same
 /// text 30 pt to its left, and `ABCD` far away. Synthetic font: no font program is needed.
 fn vertical_columns_page() -> Document {
-    let mut doc = text_page(
+    vertical_page(
         "BT /V1 20 Tf 500 720 Td <004100420043004400450046> Tj ET\nBT /V1 20 Tf 470 720 Td <004100420043004400450046> Tj ET\nBT /V1 20 Tf 300 720 Td <0041004200430044> Tj ET",
-    );
+    )
+}
+
+/// A page drawing `content` with the vertical font `/V1` (as in [`vertical_columns_page`]) and
+/// Helvetica `/F1`.
+fn vertical_page(content: &str) -> Document {
+    let mut doc = text_page(content);
     let mut font = Dict::from_iter([
         (b"Type".to_vec(), Object::name("Font")),
         (b"Subtype".to_vec(), Object::name("Type0")),
@@ -5001,7 +5007,13 @@ fn vertical_columns_page() -> Document {
         ]))]),
     );
     let p = pdfcraft_model::pages(&doc)[0].obj;
-    let fonts = Dict::from_iter([(b"V1".to_vec(), Object::Dict(font))]);
+    let helvetica = Dict::from_iter([
+        (b"Type".to_vec(), Object::name("Font")),
+        (b"Subtype".to_vec(), Object::name("Type1")),
+        (b"BaseFont".to_vec(), Object::name("Helvetica")),
+        (b"Encoding".to_vec(), Object::name("WinAnsiEncoding")),
+    ]);
+    let fonts = Dict::from_iter([(b"V1".to_vec(), Object::Dict(font)), (b"F1".to_vec(), Object::Dict(helvetica))]);
     let resources = Dict::from_iter([(b"Font".to_vec(), Object::Dict(fonts))]);
     doc.update_dict(p, |d| d.set(b"Resources".to_vec(), Object::Dict(resources))).unwrap();
     doc
@@ -5036,10 +5048,8 @@ fn vertical_text_lines_are_columns_and_editing_one_keeps_its_neighbour() {
     }
 }
 
-#[test]
-fn text_whose_cmap_writing_mode_cannot_be_read_is_not_edited() {
-    let mut doc = vertical_columns_page();
-    // An embedded CMap that uses itself: which way its glyphs advance can't be known.
+/// Gives `/V1` an embedded CMap that uses itself: which way its glyphs advance can't be known.
+fn make_cmap_cyclic(doc: &mut Document) {
     let cmap = doc.add(Object::Null);
     doc.set(
         cmap,
@@ -5048,7 +5058,7 @@ fn text_whose_cmap_writing_mode_cannot_be_read_is_not_edited() {
             b"1 begincodespacerange <0000> <ffff> endcodespacerange",
         )),
     );
-    let p = pdfcraft_model::pages(&doc)[0].obj;
+    let p = pdfcraft_model::pages(doc)[0].obj;
     doc.update_dict(p, |d| {
         if let Some(Object::Dict(res)) = d.get_mut(b"Resources")
             && let Some(Object::Dict(fonts)) = res.get_mut(b"Font")
@@ -5058,6 +5068,51 @@ fn text_whose_cmap_writing_mode_cannot_be_read_is_not_edited() {
         }
     })
     .unwrap();
+}
+
+#[test]
+fn text_whose_cmap_writing_mode_cannot_be_read_is_not_edited() {
+    let mut doc = vertical_columns_page();
+    make_cmap_cyclic(&mut doc);
     let error = text::replace_line(&mut doc, 0, 0, "ABCDEA").unwrap_err();
     assert!(error.to_string().contains("cyclic"), "{error}");
+}
+
+#[test]
+fn a_cyclic_cmap_falls_back_to_horizontal_and_only_refuses_its_own_lines() {
+    let mut doc = vertical_page("BT /V1 20 Tf 100 700 Td <00410042> Tj ET\nBT /F1 12 Tf 100 600 Td (Plain) Tj ET");
+    make_cmap_cyclic(&mut doc);
+    // The page is still listed: the broken font's text as horizontal, the rest untouched.
+    let lines = text::text_lines(&doc, 0).unwrap();
+    let texts: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+    assert_eq!(texts, ["AB", "Plain"], "{texts:?}");
+    assert!(lines[0].rect[2] - lines[0].rect[0] > 30.0 && lines[0].rect[3] - lines[0].rect[1] < 30.0, "{:?}", lines[0].rect);
+    assert_eq!(text::reading_blocks(&doc, 0).unwrap().len(), 2);
+    assert_eq!(text::text_blocks(&doc, 0).unwrap().len(), 2);
+    // Only the line in the broken font is refused.
+    let error = text::replace_line(&mut doc.clone(), 0, 0, "BA").unwrap_err();
+    assert!(error.to_string().contains("cyclic"), "{error}");
+    let block = text::text_blocks(&doc, 0).unwrap().iter().position(|b| b.text == "AB").unwrap();
+    let error = text::replace_block(&mut doc.clone(), 0, block, "BA").unwrap_err();
+    assert!(error.to_string().contains("cyclic"), "{error}");
+    text::replace_line(&mut doc, 0, 1, "Changed").unwrap();
+    let texts: Vec<String> = text::text_lines(&doc, 0).unwrap().into_iter().map(|l| l.text).collect();
+    assert_eq!(texts, ["AB", "Changed"]);
+}
+
+#[test]
+fn vertical_text_drawn_one_glyph_per_tj_is_one_line() {
+    // One text object, a `Tj` per glyph; and a column with a text object per glyph.
+    let doc = vertical_page(
+        "BT /V1 20 Tf 500 720 Td <0041> Tj <0042> Tj <0043> Tj ET\n\
+         BT /V1 20 Tf 1 0 0 1 470 720 Tm <0041> Tj ET\nBT /V1 20 Tf 1 0 0 1 470 700 Tm <0042> Tj ET\nBT /V1 20 Tf 1 0 0 1 470 680 Tm <0043> Tj ET",
+    );
+    let lines = text::text_lines(&doc, 0).unwrap();
+    let columns: Vec<(f64, &str)> = lines.iter().map(|l| (l.baseline()[0], l.text.as_str())).collect();
+    assert_eq!(columns, [(500.0, "ABC"), (470.0, "ABC")], "{columns:?}");
+    for line in &lines {
+        let r = line.rect;
+        assert!((r[1] - 660.0).abs() < 0.5 && (r[3] - 720.0).abs() < 0.5, "{r:?}");
+    }
+    assert_eq!(text::text_blocks(&doc, 0).unwrap().len(), 2);
 }

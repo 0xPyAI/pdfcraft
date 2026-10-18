@@ -68,9 +68,17 @@ pub struct TextLine {
     /// Some of the line's text is `/ActualText`, which is already in logical order: visual-order
     /// Indic recovery would scramble it.
     actual_text: bool,
+    /// Why the line can't be edited: its font's writing mode (its CMap's `WMode`) couldn't be read,
+    /// so which way its glyphs advance is unknown. The line is listed as horizontal text.
+    unreadable_mode: Option<String>,
 }
 
 impl TextLine {
+    /// Refuses editing a line whose font's writing mode couldn't be read (§9.7.4.3).
+    fn ensure_editable(&self) -> Result<(), EditError> {
+        self.unreadable_mode.as_ref().map_or(Ok(()), |why| Err(EditError::Invalid(why.clone())))
+    }
+
     /// Origin of the source baseline in PDF user space, independent of font ascent/descent.
     pub fn baseline(&self) -> [f64; 2] {
         [self.origin.x, self.origin.baseline]
@@ -522,6 +530,9 @@ struct Ts {
     /// The font's vertical advance per unit of font size (`/DW2`'s w1, normally −1) when its
     /// CMap writes vertically (`WMode 1`, §9.7.4.3): each glyph then moves the pen down, not right.
     vertical: Option<f64>,
+    /// Why the font's writing mode couldn't be read (a broken or cyclic CMap). Its text is then
+    /// listed as horizontal, but the lines in it are refused for editing.
+    unreadable: Option<Rc<str>>,
 }
 
 fn content_streams(doc: &Document, page: &Dict) -> Vec<(Object, Vec<u8>)> {
@@ -670,9 +681,15 @@ struct Shown {
 
 impl Shown {
     /// The unit direction of its baseline, where it starts and ends along it, and the baseline's
-    /// offset across it (for upright text: the user-space x, x and y).
+    /// offset across it (for upright text: the user-space x, x and y). A vertical run goes along
+    /// its column instead, the way the pen moves: for upright text down, with the column's x
+    /// across.
     fn span(&self) -> ((f64, f64), f64, f64, f64) {
-        let dir = direction(&self.tm.then(&self.state.ctm));
+        let m = self.tm.then(&self.state.ctm);
+        let dir = match self.state.vertical {
+            Some(w1) => direction(&Matrix([m.0[2] * w1.signum(), m.0[3] * w1.signum(), 0.0, 0.0, 0.0, 0.0])),
+            None => direction(&m),
+        };
         let (start, across) = to_frame(dir, (self.start_x, self.baseline));
         (dir, start, to_frame(dir, (self.end_x, self.end_y)).0, across)
     }
@@ -702,8 +719,8 @@ impl Pen {
         let (dir, start, _, across) = s.span();
         let gap = start - self.end;
         let same_dir = (dir.0 - self.dir.0).abs() < 1e-3 && (dir.1 - self.dir.1).abs() < 1e-3;
-        // The geometry above is along a horizontal baseline: vertical runs never continue one.
-        let same_dir = same_dir && !self.vertical && s.state.vertical.is_none();
+        // A column continues a column (along which the pen moves), a baseline a baseline.
+        let same_dir = same_dir && self.vertical == s.state.vertical.is_some();
         (same_dir && (across - self.across).abs() < self.size * 0.3 && gap > -self.size && gap < self.size * reach, gap)
     }
 }
@@ -732,6 +749,7 @@ impl Carry {
             rise: 0.0,
             render_mode: 0,
             vertical: None,
+            unreadable: None,
         };
         Carry { ts, stack: Vec::new(), marked: Vec::new() }
     }
@@ -848,8 +866,12 @@ fn interpret(
                     });
                     ts.font = Some((name.to_vec(), m.clone()));
                     ts.face = face.clone();
-                    // Which way the glyphs advance is unknown: refuse rather than guess (§9.7.4.3).
-                    ts.vertical = vertical.clone().map_err(EditError::Invalid)?;
+                    // Which way the glyphs advance is unknown (§9.7.4.3): list the font's text as
+                    // horizontal and record why, so editing its lines is refused (not the page).
+                    match vertical {
+                        Ok(v) => (ts.vertical, ts.unreadable) = (*v, None),
+                        Err(e) => (ts.vertical, ts.unreadable) = (None, Some(Rc::from(e.as_str()))),
+                    }
                 }
             }
             b"Tc" => ts.char_spacing = op.num(0).unwrap_or(0.0),
@@ -1129,6 +1151,9 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
             l.decodable &= s.decodable;
             l.visual_order |= s.visual_order;
             l.actual_text |= s.actual_text;
+            if l.unreadable_mode.is_none() {
+                l.unreadable_mode = s.state.unreadable.as_deref().map(str::to_owned);
+            }
             // Spaces may use a separate subset font; they do not change the visible style.
         } else {
             lines.push(TextLine {
@@ -1149,6 +1174,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
                 scope: s.scope,
                 logical_order: s.logical_order,
                 actual_text: s.actual_text,
+                unreadable_mode: s.state.unreadable.as_deref().map(str::to_owned),
                 ops: std::iter::once(s.op).chain(s.extra_ops.iter().copied()).collect(),
                 origin: Origin {
                     tm: s.tm.0,
@@ -1219,6 +1245,9 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
         l.decodable &= s.decodable;
         l.visual_order |= s.visual_order;
         l.actual_text |= s.actual_text;
+        if l.unreadable_mode.is_none() {
+            l.unreadable_mode = s.state.unreadable.as_deref().map(str::to_owned);
+        }
     } else {
         lines.push(TextLine {
             text: s.text.clone(),
@@ -1238,6 +1267,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
             scope: s.scope,
             logical_order: s.logical_order,
             actual_text: s.actual_text,
+            unreadable_mode: s.state.unreadable.as_deref().map(str::to_owned),
             ops: std::iter::once(s.op).chain(s.extra_ops.iter().copied()).collect(),
             origin: Origin {
                 tm: s.tm.0,
@@ -1806,6 +1836,7 @@ pub(crate) fn replace_line_with_limit(doc: &mut Document, page: usize, line: usi
     let text = text.replace(['\n', '\r'], " ");
     let lines = text_lines(doc, page)?;
     let target = lines.get(line).cloned().ok_or_else(|| EditError::Invalid(format!("page {} has no line {}", page + 1, line + 1)))?;
+    target.ensure_editable()?;
     let p = page_dict(doc, page)?;
     let mut res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
     let mut fonts_res = res.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
@@ -1961,6 +1992,7 @@ pub fn clear_block(doc: &mut Document, page: usize, block: usize) -> Result<(), 
     let blocks = group_blocks(&lines);
     let target = blocks.get(block).ok_or_else(|| EditError::Invalid("the paragraph no longer exists".into()))?;
     let targets: Vec<&TextLine> = target.lines.iter().filter_map(|i| lines.get(*i)).collect();
+    targets.iter().try_for_each(|line| line.ensure_editable())?;
     let mut drops = coincident_ops(&lines, &targets);
     drops.extend(target.lines.iter().filter_map(|i| lines.get(*i)).flat_map(|l| l.ops.iter().copied()));
     let p = page_dict(doc, page)?;
@@ -2126,6 +2158,7 @@ fn rewrite_block_from(
     let b = blocks.get(block).cloned().ok_or_else(|| EditError::Invalid(format!("page {} has no paragraph {}", page + 1, block + 1)))?;
     let members: Vec<&TextLine> = b.lines.iter().map(|i| &lines[*i]).collect();
     let first = members.first().copied().ok_or_else(|| EditError::Invalid("the paragraph has no source runs".into()))?;
+    members.iter().try_for_each(|line| line.ensure_editable())?;
     let p = page_dict(doc, page)?;
     let mut res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
     let mut fonts_res = res.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
@@ -2556,7 +2589,8 @@ pub(crate) fn selectable_blocks(
 
 /// The vertical advance per unit of font size of a font that writes vertically: `/DW2`'s w1
 /// (default −1000, §9.7.4.3), or `None` for horizontal text. Per-glyph `/W2` entries are not
-/// read. An encoding whose writing mode can't be read is an error, as in [`vertical_encoding`].
+/// read. An encoding whose writing mode can't be read is an error, as in [`vertical_encoding`];
+/// listing text treats it as horizontal and records the error (see [`Ts::unreadable`]).
 fn vertical_advance(doc: &Document, font: &Dict) -> Result<Option<f64>, EditError> {
     if !vertical_encoding(doc, font)? {
         return Ok(None);
@@ -2636,6 +2670,7 @@ pub(crate) fn translate_blocks(doc: &mut Document, page: usize, indexes: &[usize
         let b = blocks.get(*index).ok_or_else(|| EditError::Invalid("a selected paragraph no longer exists".into()))?;
         for line in &b.lines {
             let l = lines.get(*line).ok_or_else(|| EditError::Invalid("a selected text line no longer exists".into()))?;
+            l.ensure_editable()?;
             selected.extend(l.ops.iter().copied());
         }
     }
