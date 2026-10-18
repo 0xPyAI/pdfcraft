@@ -1401,6 +1401,7 @@ fn union(a: &mut [f32; 4], b: &[f32; 4]) {
 ///
 /// Heuristics (documented so they can be tuned and tested; plan/architecture.md §8):
 /// 1. *Segments:* consecutive glyphs (content order) on one baseline with no column-sized gap.
+///    A smaller glyph right next to the previous one (a sub- or superscript) stays in the segment.
 ///    Segments on the same baseline that nearly touch are merged (text drawn out of order).
 /// 2. *Blocks:* segments stacked with line-sized gaps and overlapping horizontally.
 /// 3. *Block order:* repeatedly take the top-most remaining block, preferring a block to its left
@@ -1453,7 +1454,10 @@ fn arrange(glyphs: &[TextGlyph]) -> (Vec<usize>, Vec<u32>, Vec<bool>) {
             let Some(p) = s.first.end.checked_sub(1) else { return false };
             let ph = height(p).min(height(i));
             let gap = g[0] - glyphs[p].rect[2];
-            (cy(i) - cy(p)).abs() < ph * 0.5 && gap < ph * 3.0 && g[0] > glyphs[p].rect[0] - ph * 2.0
+            // A sub- or superscript is a smaller glyph on a shifted baseline: its em box centre sits off the line by
+            // more than half its own height, but by less than half the height of the full-size glyph beside it.
+            let centre_limit = if gap.abs() < ph { height(p).max(height(i)) * 0.5 } else { ph * 0.5 };
+            (cy(i) - cy(p)).abs() < centre_limit && gap < ph * 3.0 && g[0] > glyphs[p].rect[0] - ph * 2.0
         });
         let reset = cont && segs.last().is_some_and(|s| restarts_run(&glyphs, s.first.start, i, furthest_progress));
         if cont
@@ -1635,6 +1639,23 @@ fn arrange(glyphs: &[TextGlyph]) -> (Vec<usize>, Vec<u32>, Vec<bool>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn em_box(text: &str, x0: f32, y0: f32, x1: f32, y1: f32) -> TextGlyph {
+        TextGlyph { text: text.into(), rect: [x0, y0, x1, y1], quad: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], direction: [1.0, 0.0] }
+    }
+
+    #[test]
+    fn subscript_stays_in_its_word() {
+        // "CO2-E": an 8.1 pt "CO" and "-E", with a 4.7 pt "2" drawn 2.7 pt lower (#3174).
+        let glyphs = vec![
+            em_box("C", 0.0, 92.5, 5.0, 100.6),
+            em_box("O", 5.0, 92.5, 11.0, 100.6),
+            em_box("2", 11.0, 97.9, 13.5, 102.6),
+            em_box("-", 13.5, 92.5, 16.0, 100.6),
+            em_box("E", 16.0, 92.5, 21.0, 100.6),
+        ];
+        assert_eq!(layout(glyphs).plain_text(), "CO2-E");
+    }
 
     #[test]
     fn identity_v_columns_are_searchable_in_reading_order() {
