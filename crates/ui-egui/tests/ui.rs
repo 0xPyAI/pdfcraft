@@ -170,6 +170,27 @@ fn collapse_and_escape_close_the_expanded_all_tools() {
 }
 
 #[test]
+fn escape_in_a_dialog_over_the_expanded_all_tools_leaves_the_view_open() {
+    let mut h = harness(|app| app.set_option("tools", "full").unwrap());
+    h.state_mut().dialog = Some(pdfcraft_ui_egui::Dialog::About);
+    h.run_steps(3);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.state().all_tools_full, "Escape belonged to the dialog");
+}
+
+#[test]
+fn another_workspace_from_the_mode_option_puts_the_expanded_all_tools_away() {
+    let mut app = PdfCraftApp::new();
+    app.set_option("tools", "full").unwrap();
+    app.set_option("mode", "all").unwrap();
+    assert!(app.all_tools_full, "All tools itself keeps the view");
+    app.set_option("mode", "read").unwrap();
+    app.set_option("mode", "all").unwrap();
+    assert!(!app.all_tools_full, "coming back shows the sidebar, as the mode bar does");
+}
+
+#[test]
 fn opening_a_pdf_shows_comments_and_bookmarks() {
     let mut h = harness(|app| app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens"));
     // Documents with comments open on the Comments panel, like Acrobat.

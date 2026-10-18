@@ -12,11 +12,23 @@ const TILE: egui::Vec2 = vec2(148.0, 118.0);
 /// Item names a tile lists when the search found the tool by them.
 const MATCHES_SHOWN: usize = 2;
 
+/// Whether `query` (already trimmed and lower-cased) is in `label` or its translation.
+/// A right-to-left language's translations are in display order (their words run the other way)
+/// while the query is in typing order, so there several words match one by one, as in the
+/// command palette.
+fn label_hit(label: &str, translated: &str, query: &str, rtl: bool) -> bool {
+    let translated = translated.to_lowercase();
+    label.to_lowercase().contains(query)
+        || translated.contains(query)
+        || (rtl && query.contains(char::is_whitespace) && query.split_whitespace().all(|word| translated.contains(word)))
+}
+
 /// Whether `group` matches `query` (already trimmed and lower-cased), in English or the UI
 /// language. `None` is no match; otherwise the items that matched, empty when the tool's own
 /// name did.
 fn matches(query: &str, group: &ToolGroup) -> Option<Vec<&'static str>> {
-    let hit = |label: &str| label.to_lowercase().contains(query) || tl!(label).to_lowercase().contains(query);
+    let rtl = crate::i18n::current().rtl();
+    let hit = |label: &str| label_hit(label, tl!(label), query, rtl);
     if query.is_empty() || hit(group.label) {
         return Some(Vec::new());
     }
@@ -26,7 +38,8 @@ fn matches(query: &str, group: &ToolGroup) -> Option<Vec<&'static str>> {
 
 pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
-    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+    // A dialog or prompt over the view owns Escape.
+    if !app.modal_open() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         app.all_tools_full = false;
         return;
     }
@@ -154,5 +167,15 @@ mod tests {
         let rotate = matches("rotate", group("organize")).expect("Organize pages lists Rotate");
         assert!(!rotate.is_empty() && rotate.iter().all(|l| l.to_lowercase().contains("rotate")), "{rotate:?}");
         assert_eq!(matches("no such tool anywhere", group("organize")), None);
+    }
+
+    #[test]
+    fn right_to_left_labels_match_a_query_typed_in_logical_order() {
+        let shown = crate::bidi::display_rtl("تنظيم الصفحات");
+        assert_ne!(shown, "تنظيم الصفحات", "the catalogue reverses the words for display");
+        assert!(label_hit("Organize pages", &shown, "تنظيم الصفحات", true));
+        assert!(label_hit("Organize pages", &shown, "الصفحات", true), "one word");
+        assert!(!label_hit("Organize pages", &shown, "تنظيم الملفات", true), "every word must be there");
+        assert!(!label_hit("Organize pages", &shown, "تنظيم الصفحات", false), "left-to-right labels stay exact");
     }
 }
