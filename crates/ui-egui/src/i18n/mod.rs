@@ -411,7 +411,38 @@ pub fn set_current(lang: Lang) {
 /// `label` as it reads inside a sentence ("add a text box"): lowercased, except in languages
 /// that capitalise nouns (German), where lowercasing would misspell it.
 pub fn in_sentence(label: &str) -> std::borrow::Cow<'_, str> {
-    if current().code() == "de" { std::borrow::Cow::Borrowed(label) } else { std::borrow::Cow::Owned(label.to_lowercase()) }
+    match current().code() {
+        "de" => std::borrow::Cow::Borrowed(label),
+        "tr" => std::borrow::Cow::Owned(label.chars().flat_map(lower_turkish).collect()),
+        _ => std::borrow::Cow::Owned(label.to_lowercase()),
+    }
+}
+
+/// The translation of `english` in upper case, for section titles. Rust's case mapping knows no
+/// language, and Turkish has a dotted and a dotless i (`i` ↔ `İ`, `ı` ↔ `I`): "Gelişmiş" must
+/// become "GELİŞMİŞ", not "GELIŞMIŞ". A label without a Turkish row is still English and keeps
+/// the English rule.
+pub fn upper_label(english: &str) -> String {
+    let lang = current();
+    let shown = tr(lang, english);
+    if lang.code() == "tr" && has(lang, english) { shown.chars().flat_map(upper_turkish).collect() } else { shown.to_uppercase() }
+}
+
+fn upper_turkish(c: char) -> std::char::ToUppercase {
+    match c {
+        'i' => 'İ'.to_uppercase(),
+        'ı' => 'I'.to_uppercase(),
+        c => c.to_uppercase(),
+    }
+}
+
+fn lower_turkish(c: char) -> std::char::ToLowercase {
+    match c {
+        // `İ`.to_lowercase() is "i" plus a combining dot above.
+        'İ' => 'i'.to_lowercase(),
+        'I' => 'ı'.to_lowercase(),
+        c => c.to_lowercase(),
+    }
 }
 
 pub fn current() -> Lang {
@@ -1959,6 +1990,20 @@ mod tests {
         set_current(Lang::from_code("de").expect("de registered"));
         assert_eq!(in_sentence("Textfeld"), "Textfeld");
         set_current(Lang::EN);
+    }
+
+    #[test]
+    fn turkish_keeps_its_dotted_and_dotless_i_when_changing_case() {
+        set_current(Lang::from_code("tr").expect("tr registered"));
+        assert_eq!(upper_label("Advanced"), "GELİŞMİŞ");
+        assert_eq!(upper_label("Signatures"), "İMZALAR");
+        // A label with no Turkish row is still English and keeps the English rule.
+        assert_eq!(upper_label("Untranslated title"), "UNTRANSLATED TITLE");
+        assert_eq!(in_sentence("İmza Alanı"), "imza alanı");
+        assert_eq!(in_sentence("Işık"), "ışık");
+        set_current(Lang::EN);
+        assert_eq!(upper_label("Advanced"), "ADVANCED");
+        assert_eq!(in_sentence("Image"), "image");
     }
 
     #[test]
