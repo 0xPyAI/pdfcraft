@@ -1118,6 +1118,45 @@ endbfchar
     }
 
     #[test]
+    fn truncated_stream_with_no_entries_reports_failure() {
+        // The tolerant parser keeps collected entries, but a stream that
+        // breaks before any entry must still report failure so callers
+        // fall back to the font's own encoding.
+        assert!(CMap::parse(b"<00", |_| None).is_none());
+    }
+
+    #[test]
+    fn bad_bfchar_code_keeps_later_entries_aligned() {
+        // The malformed 5-byte code still has a destination object; both
+        // must be skipped or every later pair shifts by one object.
+        let cmap = parse_with_preamble(
+            br#"
+2 beginbfchar
+<0102030405> <0041>
+<42> <0059>
+endbfchar
+"#,
+        );
+        assert_eq!(cmap.lookup_bf_string(0x41), None);
+        assert_eq!(cmap.lookup_bf_string(0x42), Some(BfString::Char('Y')));
+    }
+
+    #[test]
+    fn bfrange_array_stops_at_exhaustion() {
+        // One member for 256 codes: the array cannot be resynced, so the
+        // loop must stop rather than spin over the remaining codes.
+        let cmap = parse_with_preamble(
+            br#"
+1 beginbfrange
+<0000> <00FF> [<0041>]
+endbfrange
+"#,
+        );
+        assert_eq!(cmap.lookup_bf_string(0x00), Some(BfString::Char('A')));
+        assert_eq!(cmap.lookup_bf_string(0x01), None);
+    }
+
+    #[test]
     fn unresolvable_usecmap_is_skipped() {
         let cmap = parse_with_preamble(
             br#"

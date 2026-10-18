@@ -49,11 +49,15 @@ pub(crate) fn parse_inner<'a>(
     let mut writing_mode = None;
     let mut last_name: Option<Vec<u8>> = None;
 
-    // PdfCraft patch: track whether the scan completed. A CMap with an unparseable
-    // tail keeps the entries read so far instead of being discarded wholesale.
-    let mut completed = false;
+    // PdfCraft patch: track whether the scan was cut short. A CMap with an
+    // unparseable tail keeps the entries read so far instead of being
+    // discarded wholesale; one that yielded nothing still reports failure.
+    let mut truncated = false;
     while !scanner.at_end() {
-        let Ok(obj) = scanner.parse_object() else { break };
+        let Ok(obj) = scanner.parse_object() else {
+            truncated = true;
+            break;
+        };
 
         let Object::Name(name) = &obj else { continue };
 
@@ -118,7 +122,6 @@ pub(crate) fn parse_inner<'a>(
         }
     }
 
-    completed = true;
 
     // Since we will use binary search for finding the correct entry, sort now.
     ranges.sort();
@@ -146,7 +149,7 @@ pub(crate) fn parse_inner<'a>(
 
     // PdfCraft patch: a truncated CMap that yielded nothing still reports failure,
     // so callers fall back to the font's own encoding exactly as before.
-    if !completed
+    if truncated
         && ranges.is_empty()
         && notdef_ranges.is_empty()
         && bf_entries.is_empty()
@@ -285,7 +288,12 @@ fn parse_bf_char<F>(
 
         // PdfCraft patch: a malformed bfchar entry (e.g. a non-hex destination)
         // is skipped, not fatal - the entries after it still apply.
-        let Some(code) = extract_u32_code(&obj, &mut ctx.buf) else { continue };
+        let Some(code) = extract_u32_code(&obj, &mut ctx.buf) else {
+            // The malformed code is still followed by its destination
+            // object; skip it so later entries stay aligned.
+            let _ = scanner.parse_object();
+            continue;
+        };
         let Ok(dst) = scanner.parse_string() else { continue };
         if dst.decode_into(&mut ctx.buf).is_err() { continue }
         let Some(dst_base) = decode_be(&ctx.buf) else { continue };
@@ -313,8 +321,18 @@ fn parse_bf_range<F>(
         }
 
         // PdfCraft patch: a malformed bfrange entry is skipped, not fatal.
-        let Some(start) = extract_u32_code(&obj, &mut ctx.buf) else { continue };
-        let Some(end) = read_u32_code(scanner, &mut ctx.buf) else { continue };
+        let Some(start) = extract_u32_code(&obj, &mut ctx.buf) else {
+            // Skip the range's end and destination objects too, so later
+            // entries stay aligned.
+            let _ = scanner.parse_object();
+            let _ = scanner.parse_object();
+            continue;
+        };
+        let Some(end) = read_u32_code(scanner, &mut ctx.buf) else {
+            // Skip the destination object as well to stay aligned.
+            let _ = scanner.parse_object();
+            continue;
+        };
 
         let Ok(next) = scanner.parse_object() else { continue };
 
@@ -332,8 +350,11 @@ fn parse_bf_range<F>(
                 let mut array_scanner = array.objects();
 
                 for code in start..=end {
-                    // A bad array member drops only that member.
-                    let Ok(s) = array_scanner.parse_string() else { continue };
+                    // An exhausted or broken array cannot be resynced to a
+                    // member boundary; stop instead of spinning over the
+                    // remaining codes. A decodable-but-bad member still
+                    // drops only itself.
+                    let Ok(s) = array_scanner.parse_string() else { break };
                     if s.decode_into(&mut ctx.buf).is_err() { continue }
                     let Some(dst_base) = decode_be(&ctx.buf) else { continue };
 
