@@ -4975,3 +4975,89 @@ fn flattening_comments_keeps_annotations_that_are_not_comments() {
     let without_widget: Vec<&str> = all.iter().copied().filter(|s| *s != "Widget").collect();
     assert_eq!(left(&reopen(&doc)), without_widget, "flattening fields touches no annotation that isn't a widget");
 }
+
+/// A page of three vertical (`Identity-V`) columns at 20 pt: `ABCDEF` at x = 500, the same
+/// text 30 pt to its left, and `ABCD` far away. Synthetic font: no font program is needed.
+fn vertical_columns_page() -> Document {
+    let mut doc = text_page(
+        "BT /V1 20 Tf 500 720 Td <004100420043004400450046> Tj ET\nBT /V1 20 Tf 470 720 Td <004100420043004400450046> Tj ET\nBT /V1 20 Tf 300 720 Td <0041004200430044> Tj ET",
+    );
+    let mut font = Dict::from_iter([
+        (b"Type".to_vec(), Object::name("Font")),
+        (b"Subtype".to_vec(), Object::name("Type0")),
+        (b"BaseFont".to_vec(), Object::name("SyntheticCID")),
+        (b"Encoding".to_vec(), Object::name("Identity-V")),
+    ]);
+    let unicode = doc.add(Object::Stream(Stream::flate(
+        Dict::new(),
+        b"1 begincodespacerange <0000> <ffff> endcodespacerange 6 beginbfchar <0041> <0041> <0042> <0042> <0043> <0043> <0044> <0044> <0045> <0045> <0046> <0046> endbfchar",
+    )));
+    font.set(b"ToUnicode".to_vec(), Object::Ref(unicode));
+    font.set(
+        b"DescendantFonts".to_vec(),
+        Object::Array(vec![Object::Dict(Dict::from_iter([
+            (b"Subtype".to_vec(), Object::name("CIDFontType2")),
+            (b"DW".to_vec(), Object::Int(1000)),
+        ]))]),
+    );
+    let p = pdfcraft_model::pages(&doc)[0].obj;
+    let fonts = Dict::from_iter([(b"V1".to_vec(), Object::Dict(font))]);
+    let resources = Dict::from_iter([(b"Font".to_vec(), Object::Dict(fonts))]);
+    doc.update_dict(p, |d| d.set(b"Resources".to_vec(), Object::Dict(resources))).unwrap();
+    doc
+}
+
+#[test]
+fn vertical_text_lines_are_columns_and_editing_one_keeps_its_neighbour() {
+    let doc = vertical_columns_page();
+    let lines = text::text_lines(&doc, 0).unwrap();
+    let first = lines.iter().find(|l| l.baseline()[0] == 500.0).unwrap();
+    let r = first.rect;
+    // Six glyphs, each 20 pt wide and advancing 20 pt down, centred on x = 500.
+    assert!((r[0] - 490.0).abs() < 0.5 && (r[2] - 510.0).abs() < 0.5, "{r:?}");
+    assert!((r[1] - 600.0).abs() < 0.5 && (r[3] - 720.0).abs() < 0.5, "{r:?}");
+    for edit in [0, 1] {
+        let mut doc = vertical_columns_page();
+        let lines = text::text_lines(&doc, 0).unwrap();
+        if edit == 0 {
+            let line = lines.iter().position(|l| l.baseline()[0] == 500.0).unwrap();
+            text::replace_line(&mut doc, 0, line, "ABCDEA").unwrap();
+        } else {
+            let blocks = text::text_blocks(&doc, 0).unwrap();
+            let block = blocks.iter().position(|b| b.lines.iter().any(|&i| lines[i].baseline()[0] == 500.0)).unwrap();
+            assert_eq!(blocks[block].lines.len(), 1, "{blocks:?}");
+            text::replace_block(&mut doc, 0, block, "ABCDEA").unwrap();
+        }
+        let after = text::text_lines(&doc, 0).unwrap();
+        let texts: Vec<(f64, &str)> = after.iter().map(|l| (l.baseline()[0], l.text.as_str())).collect();
+        assert!(texts.contains(&(500.0, "ABCDEA")), "{texts:?}");
+        assert!(texts.contains(&(470.0, "ABCDEF")), "{texts:?}");
+        assert!(texts.contains(&(300.0, "ABCD")), "{texts:?}");
+    }
+}
+
+#[test]
+fn text_whose_cmap_writing_mode_cannot_be_read_is_not_edited() {
+    let mut doc = vertical_columns_page();
+    // An embedded CMap that uses itself: which way its glyphs advance can't be known.
+    let cmap = doc.add(Object::Null);
+    doc.set(
+        cmap,
+        Object::Stream(Stream::flate(
+            Dict::from_iter([(b"UseCMap".to_vec(), Object::Ref(cmap))]),
+            b"1 begincodespacerange <0000> <ffff> endcodespacerange",
+        )),
+    );
+    let p = pdfcraft_model::pages(&doc)[0].obj;
+    doc.update_dict(p, |d| {
+        if let Some(Object::Dict(res)) = d.get_mut(b"Resources")
+            && let Some(Object::Dict(fonts)) = res.get_mut(b"Font")
+            && let Some(Object::Dict(font)) = fonts.get_mut(b"V1")
+        {
+            font.set(b"Encoding".to_vec(), Object::Ref(cmap));
+        }
+    })
+    .unwrap();
+    let error = text::replace_line(&mut doc, 0, 0, "ABCDEA").unwrap_err();
+    assert!(error.to_string().contains("cyclic"), "{error}");
+}
