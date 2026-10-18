@@ -140,14 +140,16 @@ fn address_char(c: char) -> bool {
 
 fn email(s: &[char], i: usize) -> Option<usize> {
     let local = |c: &char| address_char(*c) || "._%+-".contains(*c);
-    if !address_char(s[i]) || i.checked_sub(1).and_then(|p| s.get(p)).is_some_and(local) {
+    // A match starts at the first character of a run of local characters, which may be
+    // punctuation ("_admin@host.com"), but the run needs a letter or digit.
+    if !local(&s[i]) || i.checked_sub(1).and_then(|p| s.get(p)).is_some_and(local) {
         return None;
     }
     let mut j = i;
     while j < s.len() && local(&s[j]) {
         j += 1;
     }
-    if s.get(j) != Some(&'@') {
+    if s.get(j) != Some(&'@') || !s[i..j].iter().any(|c| address_char(*c)) {
         return None;
     }
     let d0 = j + 1;
@@ -399,6 +401,18 @@ mod tests {
             found(Pattern::Email, "Write to ada.lovelace+pdf@example.co.uk, or bob@host (no TLD) or x@y.z."),
             ["ada.lovelace+pdf@example.co.uk"]
         );
+    }
+
+    #[test]
+    fn emails_with_a_leading_punctuation_character() {
+        for lead in ["_", "-", ".", "%", "+"] {
+            let address = format!("{lead}john@example.com");
+            assert_eq!(found(Pattern::Email, &format!("Write to {address} now")), [address.as_str()], "lead {lead:?}");
+        }
+        // A run of local characters is still matched whole, never from its middle.
+        assert_eq!(found(Pattern::Email, "a.b@x.com, foo_john@example.com"), ["a.b@x.com", "foo_john@example.com"]);
+        // Punctuation alone is no local part.
+        assert_eq!(found(Pattern::Email, "Write to ..@example.com or -@example.com"), Vec::<String>::new());
     }
 
     #[test]
