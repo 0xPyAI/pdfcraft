@@ -24,6 +24,9 @@ pub(crate) fn decode(data: &[u8], params: &ImageDecodeParams) -> Option<FilterRe
         // PdfCraft patch: (#3179) with no /ColorSpace in the image dictionary the colours come from
         // the JP2 header (ISO 32000-2 §7.4.9), so its palette (`pclr`) is applied here; with a
         // /ColorSpace the header colour data is ignored, and an /Indexed space takes the raw indices.
+        // A /ColorSpace that does not resolve also leaves `num_components` unset: the header's
+        // colours are then the only ones there are, so the palette is applied too (raw indices
+        // would be drawn as gray).
         resolve_palette_indices: params.num_components.is_none(),
         strict: false,
         target_resolution: params.target_dimension,

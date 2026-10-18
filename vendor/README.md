@@ -44,6 +44,7 @@ horizontal differencing and an 8-bit control) and
 JPEG 2000 palettes (#3179): `hayro-syntax::filter::jpx::decode` applies a JP2 palette (`pclr`)
 when the image dictionary has no `/ColorSpace`, since the colour then comes from the JP2 header
 (ISO 32000-2 §7.4.9). With a `/ColorSpace` the raw indices are kept, as an `/Indexed` space needs.
+A `/ColorSpace` that does not resolve counts as none: the JP2 colours are then the only ones.
 Without the patch a palette image with no `/ColorSpace` was drawn as its indices, in gray.
 Covered by `filter::jpx::tests::jpx_palette_is_applied_without_a_color_space` and
 `filter::jpx::tests::jpx_palette_indices_stay_raw_for_an_indexed_color_space`.
