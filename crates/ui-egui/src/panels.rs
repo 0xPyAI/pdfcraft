@@ -800,6 +800,9 @@ pub fn right_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     if let Some((p, i)) = app.views.get_mut(index).and_then(|v| v.comments.default_request.take()) {
         app.make_comment_default(p, i);
     }
+    if let Some((p, i, open)) = app.views.get_mut(index).and_then(|v| v.comments.attachment_request.take()) {
+        app.comment_attachment_action(id, p, i, open);
+    }
     if let Some((p, i)) = app.views.get_mut(index).and_then(|v| v.comments.props_request.take()) {
         app.open_comment_props(p, i);
     }

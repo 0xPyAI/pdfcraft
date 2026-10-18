@@ -3870,6 +3870,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if let Some((p, i)) = app.views[index].comments.default_request.take() {
         app.make_comment_default(p, i);
     }
+    if let Some((p, i, open)) = app.views[index].comments.attachment_request.take() {
+        let doc = app.views[index].id;
+        app.comment_attachment_action(doc, p, i, open);
+    }
     if let Some((name, w)) = field_props {
         app.open_field_props(&name, w);
     }
