@@ -1703,6 +1703,7 @@
 	Couldn't use {name}: {e}	تعذّر استخدام {name}: {e}
 	Couldn't extract pages: {e}	تعذّر استخراج الصفحات: {e}
 	Couldn't write {name}: {e}	تعذّرت كتابة {name}: {e}
+	the name is not a plain file name	الاسم ليس اسم ملف بسيطًا
 	Wrote 1 file to {dir}	كُتب ملف واحد في {dir}
 	Wrote {n} files to {dir}	كُتب {n} ملفات في {dir}
 	No pages match those choices	لا صفحات تطابق هذه الاختيارات
@@ -2402,6 +2403,9 @@ animation effects	Off	معطّلة
 	Move tag earlier	نقل العلامة للأعلى
 	Move tag later	نقل العلامة للأسفل
 
+# Historical snapshot notice bar (View signed version / View revision).
+	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	أنت تعرض النسخة الموقعة من “{from}” (المراجعة {rev}). هذه لقطة: التغييرات هنا لن تؤثر على الأصل.
+	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.	أنت تعرض المراجعة {rev} من “{from}”. هذه لقطة: التغييرات هنا لن تؤثر على الأصل.
 # Completion: the rows the newer catalogs (lt, cs, es …) grew — certificates,
 # digital-signature verification detail, accessibility checks, calendar weekdays
 # and the newer plural counts — same clean-room Arabic as the rest of the file.

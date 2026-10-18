@@ -5,10 +5,10 @@
 use std::path::PathBuf;
 
 use egui::{Align, Color32, CornerRadius, Layout, Pos2, Rect, Stroke, vec2};
-use pdfcraft_engine::sign::{self, Appearance, AppearanceLabels, Certificate, DigitalId, Modification, Name, PrivateKey};
+use pdfcraft_engine::sign::{self, Appearance, AppearanceLabels, Certificate, DigitalId, Name, PrivateKey};
 use pdfcraft_engine::{SignOptions, SignatureImage, SignatureInfo, SignatureStatus};
 
-use crate::canvas::{DocView, PageXform};
+use crate::canvas::{DocView, PageXform, Snapshot, SnapshotKind};
 use crate::fill_sign::SavedSig;
 use crate::theme::{self, Tokens};
 use crate::{PdfCraftApp, icons, widgets};
@@ -266,6 +266,12 @@ fn entry_unusable(u: &sign::windows::Unusable) -> DigitalIdEntry {
 }
 
 impl PdfCraftApp {
+    /// Export certificate: write `c` as PEM into a chosen folder, named after its subject.
+    pub(crate) fn export_certificate(&mut self, c: &Certificate) {
+        let name = format!("{}.cer", crate::files::attachment_file_name(&c.display_name()));
+        self.write_files(&[(name, std::sync::Arc::new(certificate_pem(c).into_bytes()))], "Export certificate");
+    }
+
     /// Start signing: the rectangle (or field) is known; show Sign with a Digital ID.
     pub fn start_signing(&mut self, page: usize, rect: Option<[f64; 4]>, field: Option<String>, certify: Option<u8>) {
         self.refresh_os_key_store_ids();
@@ -528,36 +534,100 @@ impl PdfCraftApp {
         if !certs.iter().any(|c| c.raw == cert.raw) {
             certs.push(cert);
         }
+        self.apply_trusted_certificates(certs);
+    }
+
+    /// Replace the trust store and redraw from the rebuilt display copy. One helper
+    /// so no caller can revalidate without invalidating: trust changes verdicts,
+    /// verdicts choose what the display copy shows, and the old rasters would
+    /// otherwise linger while the badge already follows the new verdict.
+    /// Trust alone is not an edit: nothing becomes dirty.
+    pub fn apply_trusted_certificates(&mut self, certs: Vec<Certificate>) {
         self.session.set_trusted_certificates(certs);
+        for view in &mut self.views {
+            view.invalidate_content();
+        }
+    }
+
+    /// A file name without its PDF extension, for snapshot tab names.
+    fn file_stem(name: &str) -> String {
+        name.trim_end_matches(".pdf").trim_end_matches(".PDF").to_string()
     }
 
     /// Open saved revision `n` (1 = the oldest) of the active document as a new document.
+    /// A repeat reuses the tab: every click used to open another identical one.
     pub fn open_revision(&mut self, n: usize) {
         let Some((_, id)) = self.active_ids() else { return };
+        let Some(doc) = self.session.get(id) else { return };
+        // The revision's byte range, as `Session::open_revision` reads it. An unknown `n`
+        // skips the lookup: the whole file could otherwise match the latest revision's tab
+        // instead of erroring.
+        let ends = doc.revision_ends();
+        if let Some(&end) = n.checked_sub(1).and_then(|k| ends.get(k)) {
+            let end = end.min(doc.bytes.len());
+            if let Some(index) = self.find_snapshot(SnapshotKind::Revision, &doc.name, &doc.bytes[..end]) {
+                self.active = Some(index);
+                return;
+            }
+        }
+        let from = doc.name.clone();
         match self.session.open_revision(id, n) {
             Ok(new) => {
                 // The reading-colours preference is app-wide: the newly opened revision starts with it.
                 self.session.set_reading_colors(new, self.reading_colors);
                 let Some(doc) = self.session.get(new) else { return };
-                self.views.push(DocView::new(new, &doc.info, self.view_defaults));
+                let mut view = DocView::new(new, &doc.info, self.view_defaults);
+                view.snapshot = Some(Snapshot { kind: SnapshotKind::Revision, revision: n, from });
+                self.views.push(view);
                 self.active = Some(self.views.len() - 1);
             }
             Err(e) => self.notify_fmt("Couldn't open revision {n}: {e}", &[("n", &n.to_string()), ("e", &e.to_string())]),
         }
     }
 
+    /// A tab already showing these exact snapshot bytes: its index, so a repeat
+    /// switches to it instead of opening another identical tab. An exact match on
+    /// the source document wins, so the banner names the file opened from; a
+    /// bytes-only match still reuses the tab (incremental saves append, so one
+    /// file's revision can be byte-identical to another tab's, and a snapshot's
+    /// own repeats name the snapshot itself).
+    fn find_snapshot(&self, kind: SnapshotKind, from: &str, bytes: &[u8]) -> Option<usize> {
+        let mut fallback = None;
+        for (i, v) in self.views.iter().enumerate() {
+            let same_kind = v.snapshot.as_ref().is_some_and(|s| s.kind == kind);
+            let same_bytes = same_kind && self.session.get(v.id).is_some_and(|d| d.bytes.as_slice() == bytes);
+            if !same_bytes {
+                continue;
+            }
+            if v.snapshot.as_ref().is_some_and(|s| s.from == from) {
+                return Some(i);
+            }
+            fallback.get_or_insert(i);
+        }
+        fallback
+    }
+
     /// Open the signed version of a signature as a new document (View signed version).
-    pub fn view_signed_version(&mut self, len: usize) {
+    /// A repeat reuses the tab: every click used to open another identical one.
+    pub fn view_signed_version(&mut self, len: usize, revision: usize) {
         let Some((_, id)) = self.active_ids() else { return };
         let Some(doc) = self.session.get(id) else { return };
-        let bytes = doc.bytes[..len.min(doc.bytes.len())].to_vec();
-        let name = format!("{} (signed version)", doc.name.trim_end_matches(".pdf"));
+        let end = len.min(doc.bytes.len());
+        if let Some(index) = self.find_snapshot(SnapshotKind::SignedVersion, &doc.name, &doc.bytes[..end]) {
+            self.active = Some(index);
+            return;
+        }
+        let from = doc.name.clone();
+        let bytes = doc.bytes[..end].to_vec();
+        let name = format!("{} (signed version)", Self::file_stem(&from));
         match self.session.open(format!("{name}.pdf"), None, std::sync::Arc::new(bytes), doc.password.clone().as_deref()) {
             Ok(new) => {
                 // The reading-colours preference is app-wide: the newly opened copy starts with it.
                 self.session.set_reading_colors(new, self.reading_colors);
                 let Some(doc) = self.session.get(new) else { return };
-                self.views.push(DocView::new(new, &doc.info, self.view_defaults));
+                let mut view = DocView::new(new, &doc.info, self.view_defaults);
+                view.snapshot = Some(Snapshot { kind: SnapshotKind::SignedVersion, revision, from });
+                self.views.push(view);
                 self.active = Some(self.views.len() - 1);
             }
             Err(e) => self.notify_fmt("Couldn't open the signed version: {e}", &[("e", &e.to_string())]),
@@ -1084,11 +1154,16 @@ fn status_icon(s: &SignatureInfo) -> (&'static str, Color32) {
     if !s.signed {
         return ("pen-line", Color32::from_gray(0x80));
     }
-    match (s.status, &s.modification) {
-        (SignatureStatus::Valid, Modification::None) => ("circle-check", Color32::from_rgb(0x2D, 0x9D, 0x78)),
-        (SignatureStatus::Valid, _) => ("circle-check", Color32::from_rgb(0x2D, 0x9D, 0x78)),
-        (SignatureStatus::Unknown, _) => ("triangle-alert", Color32::from_rgb(0xE6, 0x86, 0x19)),
-        (SignatureStatus::Invalid, _) => ("circle-x", Color32::from_rgb(0xD7, 0x37, 0x3F)),
+    signature_status_style(s.status)
+}
+
+/// One look per signature verdict, shared by the Signatures panel and the page badges so
+/// the two can't drift apart.
+pub(crate) fn signature_status_style(status: SignatureStatus) -> (&'static str, Color32) {
+    match status {
+        SignatureStatus::Valid => ("circle-check", Color32::from_rgb(0x2D, 0x9D, 0x78)),
+        SignatureStatus::Unknown => ("triangle-alert", Color32::from_rgb(0xE6, 0x86, 0x19)),
+        SignatureStatus::Invalid => ("circle-x", Color32::from_rgb(0xD7, 0x37, 0x3F)),
     }
 }
 
@@ -1098,7 +1173,10 @@ pub enum PanelAction {
     Validate,
     GoTo(usize),
     Trust(Box<Certificate>),
-    ViewSigned(usize),
+    ViewSigned {
+        len: usize,
+        revision: usize,
+    },
     Sign(String),
     ExportCertificate(Box<Certificate>),
     /// Certificate Viewer for the signer's chain (signer first).
@@ -1231,7 +1309,7 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, sigs: &[SignatureInfo], expan
                     action = Some(PanelAction::Trust(Box::new(c.clone())));
                 }
                 if ui.button(tl!("View signed version")).clicked() {
-                    action = Some(PanelAction::ViewSigned(s.signed_len));
+                    action = Some(PanelAction::ViewSigned { len: s.signed_len, revision: s.revision });
                 }
                 if let Some(c) = &s.certificate
                     && ui.button(tl!("Show certificate…")).clicked()
@@ -1422,6 +1500,30 @@ mod tests {
         app.sign_draft = Some(draft);
         let i = app.create_digital_id()?;
         Ok(PathBuf::from(&app.digital_ids[i].path))
+    }
+
+    #[test]
+    fn an_exported_certificate_is_written_inside_the_chosen_folder() {
+        let dir = scratch();
+        let out = dir.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let key = PrivateKey::generate_p256().unwrap();
+        let cert = Certificate::self_signed(&Name::build("../x", "", "", "", ""), &key, sign::Time::from_unix(0), 1, &[1]).unwrap();
+        let mut app = PdfCraftApp::new();
+        app.export_dir_override = Some(out.to_string_lossy().into_owned());
+        app.export_certificate(&cert);
+        let written: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(written, vec![std::ffi::OsString::from("out")]);
+        let pem = std::fs::read_to_string(out.join(".._x.cer")).unwrap();
+        assert!(pem.starts_with("-----BEGIN CERTIFICATE-----"), "{pem}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn signature_status_style_gives_each_verdict_its_panel_icon() {
+        assert_eq!(signature_status_style(SignatureStatus::Valid).0, "circle-check");
+        assert_eq!(signature_status_style(SignatureStatus::Unknown).0, "triangle-alert");
+        assert_eq!(signature_status_style(SignatureStatus::Invalid).0, "circle-x");
     }
 
     #[test]
