@@ -183,7 +183,7 @@ pub fn write_incremental(doc: &Document, opts: &SaveOptions) -> Result<Vec<u8>, 
     }
     // Reconstructed files have no chain to append to; added or removed encryption must
     // rewrite every object; redaction must not leave the old revision behind. All need a full save.
-    if doc.revisions().is_empty() || doc.encryption_changed() || doc.full_save_required() {
+    if doc.reconstructed() || doc.encryption_changed() || doc.full_save_required() {
         return write_full(doc, opts);
     }
     let mut doc = doc.clone();

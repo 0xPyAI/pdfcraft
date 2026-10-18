@@ -214,6 +214,30 @@ fn page_transitions_are_set_and_removed_through_the_tools() {
     );
 }
 
+/// #1937 through the tools: a damaged file is repaired on open (`doc_info` lists the repair) and
+/// `doc_save` over it writes the rebuilt file, so opening it again needs no repair.
+#[test]
+fn saving_a_repaired_file_puts_the_repair_on_disk() {
+    let dir = workdir("repaired-save");
+    let good = fixture(2);
+    let mut broken = b"%PDF-1.7\n%shifted\n".to_vec();
+    broken.extend_from_slice(&good[b"%PDF-1.7\n".len()..]);
+    std::fs::write(dir.join("broken.pdf"), &broken).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "broken.pdf" }))["doc"].as_u64().unwrap();
+    let info = ok(&mut a, "doc_info", json!({ "doc": doc }));
+    assert!(info["repairs"].as_array().unwrap().iter().any(|r| r.as_str().unwrap_or("").contains("rebuilt")), "{}", info["repairs"]);
+    let saved = ok(&mut a, "doc_save", json!({ "doc": doc }));
+    assert_eq!(saved["incremental"], false, "{saved}");
+    let bytes = std::fs::read(dir.join("broken.pdf")).unwrap();
+    assert_ne!(bytes, broken, "the damaged bytes were written back");
+    let reopened = pdfcraft_cos::Document::open(std::sync::Arc::new(bytes)).unwrap();
+    assert!(reopened.repair_log().is_empty(), "{:?}", reopened.repair_log());
+    let info = ok(&mut a, "doc_info", json!({ "doc": doc }));
+    assert_eq!(info["repairs"].as_array().unwrap().len(), 0, "{}", info["repairs"]);
+    assert_eq!(info["pages"].as_array().unwrap().len(), 2);
+}
+
 #[test]
 fn autotag_preview_proposes_text_without_changing_the_pdf() {
     let dir = workdir("autotag-preview");
