@@ -756,7 +756,7 @@ impl<'a> Inspector<'a> {
         } else {
             stream.content.get(..stream.content.len().min(MAX_XFA_CONFIG_BYTES))?.to_vec()
         };
-        xml_path_text(&xfa_packet_text(&bytes), &["config", "acrobat", "acrobat7", "dynamicRender"])
+        xfa_config_dynamic_render(&xfa_packet_text(&bytes))
     }
 
     fn resolve(&self, o: &'a Object) -> &'a Object {
@@ -1705,43 +1705,49 @@ fn next_tag(xml: &str, mut from: usize) -> Option<Tag<'_>> {
     }
 }
 
-/// What `<name>…</name>` holds: the content of the first element called `name` (any prefix) in
-/// `xml`. `None` when there is none, it closes itself, or it is never closed.
-fn xml_element_body<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
+/// What `<name>…</name>` holds: the content of the first top-level element of `xml` called `name`
+/// (any prefix). Elements nested in other elements are not looked at. `None` when there is none,
+/// it closes itself, or it is never closed.
+fn xml_child_body<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
     let mut at = 0;
-    let open = loop {
-        let tag = next_tag(xml, at)?;
-        at = tag.end;
-        if !tag.close && tag.local == name {
-            if tag.empty {
-                return None;
-            }
-            break tag.end;
-        }
-    };
     let mut depth = 0_usize;
+    // Where the wanted element's content starts, once its opening tag is seen at the top level.
+    let mut open = None;
     loop {
         let tag = next_tag(xml, at)?;
         at = tag.end;
-        if tag.local == name {
-            if tag.close {
-                if depth == 0 {
-                    return xml.get(open..tag.start);
-                }
-                depth -= 1;
-            } else if !tag.empty {
-                depth = depth.saturating_add(1);
+        if tag.close {
+            depth = depth.checked_sub(1)?;
+            if depth == 0
+                && let Some(start) = open
+            {
+                return xml.get(start..tag.start);
             }
+        } else if !tag.empty {
+            if depth == 0 && tag.local == name {
+                open = Some(tag.end);
+            }
+            depth = depth.saturating_add(1);
+        } else if depth == 0 && tag.local == name {
+            return None;
         }
     }
 }
 
-/// The trimmed text at `path` (element names from the outside in, any prefix) in `xml`, if it is
-/// plain text: `config/acrobat/acrobat7/dynamicRender` in an XFA configuration packet.
+/// The trimmed text at `path` (element names from the outside in, any prefix, each a child of the
+/// one before) in `xml`, if it is plain text.
 fn xml_path_text(xml: &str, path: &[&str]) -> Option<String> {
-    let body = path.iter().try_fold(xml, |within, name| xml_element_body(within, name))?;
+    let body = path.iter().try_fold(xml, |within, name| xml_child_body(within, name))?;
     let text = body.trim();
     (!text.is_empty() && !text.contains('<')).then(|| text.to_owned())
+}
+
+/// `dynamicRender` at `config/acrobat/acrobat7` in the configuration packet: the `config` child
+/// of the `xdp` root in a whole-XDP stream, or the `config` packet itself. The same names inside
+/// the form data or the template are not the configuration.
+fn xfa_config_dynamic_render(packet: &str) -> Option<String> {
+    const IN_CONFIG: [&str; 4] = ["config", "acrobat", "acrobat7", "dynamicRender"];
+    xml_path_text(packet, &["xdp", IN_CONFIG[0], IN_CONFIG[1], IN_CONFIG[2], IN_CONFIG[3]]).or_else(|| xml_path_text(packet, &IN_CONFIG))
 }
 
 #[cfg(test)]
@@ -2748,8 +2754,7 @@ trailer << /Root 1 0 R >>
 
     #[test]
     fn xfa_dynamic_render_is_read_from_config_acrobat7_only() {
-        const PATH: &[&str] = &["config", "acrobat", "acrobat7", "dynamicRender"];
-        let text = |xml: &str| xml_path_text(xml, PATH);
+        let text = xfa_config_dynamic_render;
         let config =
             |inner: &str| format!("<config xmlns=\"http://www.xfa.org/schema/xci/3.0/\"><acrobat><acrobat7>{inner}</acrobat7></acrobat></config>");
         // Designer's style: a line break before each `>`.
@@ -2772,6 +2777,21 @@ trailer << /Root 1 0 R >>
         // A whole XDP with the config after the template.
         let xdp = format!("<xdp:xdp><template><subform/></template>{}</xdp:xdp>", config("<dynamicRender>forbidden</dynamicRender>"));
         assert_eq!(text(&xdp).as_deref(), Some("forbidden"));
+        // A whole config path inside the form data, before the real config packet, is data: the
+        // real packet's value counts (review on #3192).
+        let xdp = format!(
+            "<?xml version=\"1.0\"?><xdp:xdp><xfa:datasets><xfa:data>{}</xfa:data></xfa:datasets>{}</xdp:xdp>",
+            config("<dynamicRender>forbidden</dynamicRender>"),
+            config("<dynamicRender>required</dynamicRender>")
+        );
+        assert_eq!(text(&xdp).as_deref(), Some("required"));
+        // Only in the data, or nested in the template: no configuration at all.
+        let xdp = format!("<xdp:xdp><xfa:datasets><xfa:data>{}</xfa:data></xfa:datasets></xdp:xdp>", config("<dynamicRender>forbidden</dynamicRender>"));
+        assert_eq!(text(&xdp), None);
+        let xdp = format!("<xdp:xdp><template>{}</template></xdp:xdp>", config("<dynamicRender>forbidden</dynamicRender>"));
+        assert_eq!(text(&xdp), None);
+        // acrobat7 must be a child of acrobat, not deeper.
+        assert_eq!(text("<config><acrobat><x><acrobat7><dynamicRender>forbidden</dynamicRender></acrobat7></x></acrobat></config>"), None);
         // Cut short anywhere: no panic, nothing read.
         let whole = config("<!-- x --><dynamicRender>forbidden</dynamicRender>");
         for end in 0..whole.len() {
