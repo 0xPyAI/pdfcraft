@@ -81,6 +81,37 @@ fn horizontally_scaled_text_is_measured_and_drawn_narrower() {
 }
 
 #[test]
+fn a_non_interactive_field_is_measured_at_the_scale_its_text_is_drawn() {
+    // A growing, non-interactive text field (drawn as text by the layout, not as a widget),
+    // then a draw below it. However condensed the field's text is, the draw sits the same
+    // distance below its last line: the field is as tall as the lines it shows.
+    // Long enough to take more than a multi-line field's three lines at either scale.
+    const TEXT: &str = "Remarks that run over several lines of a narrow box, and then over several more lines again, until the box has grown well past the three lines it starts with";
+    let gap = |scale: u32| {
+        let xdp = format!(
+            r##"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <field name="note" w="100pt" access="nonInteractive"><ui><textEdit multiLine="1"/></ui><value><text>{TEXT}</text></value><font typeface="Arial" size="10pt" fontHorizontalScale="{scale}%"/></field>
+ <draw name="after" w="100pt" h="20pt"><value><text>AFTER</text></value><font typeface="Arial" size="10pt"/></draw>
+</subform>
+</template></xdp:xdp>"##
+        );
+        let form = layout_xml(&xdp).unwrap();
+        let spans: Vec<&text::Span> = form.pages[0].items.iter().filter_map(|i| if let Item::Text(s) = i { Some(s) } else { None }).collect();
+        let after = spans.iter().find(|s| s.text.contains("AFTER")).expect("the draw").baseline;
+        let lines: std::collections::BTreeSet<i64> =
+            spans.iter().filter(|s| !s.text.contains("AFTER")).map(|s| (s.baseline * 100.0).round() as i64).collect();
+        let last = *lines.iter().next_back().expect("the field's lines") as f64 / 100.0;
+        (lines.len(), after - last)
+    };
+    let (full_lines, full_gap) = gap(100);
+    let (narrow_lines, narrow_gap) = gap(60);
+    assert!(narrow_lines < full_lines, "condensed, the text takes fewer lines: {narrow_lines} vs {full_lines}");
+    assert!((narrow_gap - full_gap).abs() < 0.01, "the field shrinks with its text: gap {narrow_gap} vs {full_gap}");
+}
+
+#[test]
 fn horizontally_scaled_text_is_written_with_tz_inside_its_own_graphics_state() {
     let (xdp, _) = scaled_text_template();
     let mut doc = Document::open(Arc::new(shell(&xdp))).unwrap();

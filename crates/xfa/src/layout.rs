@@ -1062,6 +1062,14 @@ impl Layouter<'_> {
         }
     }
 
+    /// The face a field's text is laid out in: at its horizontal scale when the layout draws
+    /// the text itself (a non-interactive field), as designed when the forms layer draws it in
+    /// a widget, whose appearances have no horizontal scaling.
+    fn field_text_face(f: &Field, font: &Font) -> Face {
+        let face = Face::of(font);
+        if f.access == Access::NonInteractive { face } else { face.unscaled() }
+    }
+
     /// The height the text of a multi-line text field takes (its value in the data, else the
     /// template's), for a field without a fixed height, which grows to hold its text. `ctx`
     /// is the field's own (its SOM ends in the field). Zero for anything else.
@@ -1078,7 +1086,7 @@ impl Layouter<'_> {
         };
         let w = (inner_w - beside - f.ui_margin.horizontal() - 4.0).max(1.0);
         let font = ctx.font.apply(&f.common.font);
-        text::measure_height(&text::plain(value.trim_end()), w, &ctx.para, &Face::of(&font).unscaled(), &|_| String::new())
+        text::measure_height(&text::plain(value.trim_end()), w, &ctx.para, &Self::field_text_face(f, &font), &|_| String::new())
     }
 
     fn group_height(&self, g: &ExclGroup, inner_w: f64, ctx: &Ctx, depth: usize) -> f64 {
@@ -1583,7 +1591,9 @@ impl Layouter<'_> {
                     right: f.ui_margin.right + 2.0,
                 };
                 let para = Para { v_align: VAlign::Top, ..fctx.para.clone() };
-                let block = text::layout(&text::plain(value.trim_end()), ui.inset(&m), &para, &Face::of(&fctx.font), &|_| String::new());
+                // In the face it was measured in, so it takes the lines it was given.
+                let face = Self::field_text_face(f, &fctx.font);
+                let block = text::layout(&text::plain(value.trim_end()), ui.inset(&m), &para, &face, &|_| String::new());
                 return self.push_block(block);
             }
         }
