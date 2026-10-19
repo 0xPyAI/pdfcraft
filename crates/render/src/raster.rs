@@ -2881,6 +2881,33 @@ trailer << /Root 1 0 R >>
         assert_eq!(px(20, 80), vec![255, 0, 0, 255], "checkbox must show the /Yes appearance, not the decoy stream");
     }
 
+    /// Microsoft Reporting Services (bank statements, invoices) writes `stream \r\n`, a space
+    /// before the line break. The content stream was then taken to start at the space and the
+    /// page rendered blank, while Preview, Chrome and Poppler showed it. Vendored hayro-syntax
+    /// patch: spaces and tabs before the line break are skipped, with the right `/Length` and
+    /// with a wrong one. Spaces with no line break after them never start stream data.
+    #[test]
+    fn space_before_the_line_break_after_stream_still_renders() {
+        let pdf = |eol: &str, length: u32| {
+            format!(
+                "%PDF-1.3\r\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\r\n\
+                 2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\r\n\
+                 3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >> endobj\r\n\
+                 4 0 obj << /Length {length} >> stream{eol}0 0 0 rg 20 20 60 60 re f\r\nendstream\r\nendobj\r\n\
+                 trailer << /Root 1 0 R >>\r\n%%EOF"
+            )
+            .into_bytes()
+        };
+        for (eol, length) in [(" \r\n", 25), (" \n", 25), ("\t \r", 25), (" \r\n", 999), ("\r\n", 25)] {
+            let mut r = PageRenderer::new(Arc::new(pdf(eol, length)), RenderConfig::default());
+            let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(p.error.is_none(), "{eol:?}: {:?}", p.error);
+            let px = |x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..4].to_vec();
+            assert_eq!(px(50, 50), vec![0, 0, 0, 255], "stream{eol:?} (/Length {length}) must draw the square");
+            assert_eq!(px(5, 5), vec![255, 255, 255, 255], "outside the square stays white");
+        }
+    }
+
     /// An appearance whose /BBox is a line or a point, or whose /Matrix collapses it to one, has
     /// no mapping onto the annotation's /Rect: the scale (/Rect size over transformed box size)
     /// divided by zero, and the infinite or NaN matrix reached the device with everything the
