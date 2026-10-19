@@ -3163,6 +3163,16 @@ fn dotted_field_names_are_made_with_parent_fields() {
         set_props(&mut doc.clone(), "address.city", &FieldProps { name: Some("grp".into()), ..FieldProps::default() }).is_err(),
         "address.grp is taken"
     );
+    // A move the destination refuses leaves the field where it was (review on #2957): it was
+    // taken out of the tree before the destination was checked, and stayed out.
+    doc.update_dict(address, |d| d.set(b"MaxLen".to_vec(), Object::Int(3))).unwrap();
+    let at_top = top(&doc);
+    assert!(set_props(&mut doc, "name", &FieldProps { name: Some("address.name".into()), ..FieldProps::default() }).is_err());
+    assert_eq!(top(&doc), at_top, "name is still in the form's /Fields");
+    doc.update_dict(address, |d| {
+        d.remove(b"MaxLen");
+    })
+    .unwrap();
 
     for bad in ["MASTER", "MASTER.street1.x", "MASTER..x", ".x", "x.", "MASTER. "] {
         assert!(add_field(&mut doc, 0, [300.0, 200.0, 450.0, 220.0], &text, Some(bad)).is_err(), "{bad:?}");

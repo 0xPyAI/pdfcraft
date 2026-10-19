@@ -545,13 +545,11 @@ fn child_named(doc: &Document, af: ObjRef, parent: Option<ObjRef>, name: &str) -
 /// the field a neutral one of its own, as `/Ff` and `/Q` can.
 const PASSED_VALUES: [&[u8]; 3] = [b"V", b"DV", b"MaxLen"];
 
-/// Put `field` in the field tree under the full name `parts`: its own `/T` is the last part,
-/// and the parts before it name parent fields, reused where the tree has them and made where
-/// not (Acrobat makes `a.b` a field `b` under a field `a`).
-fn attach(doc: &mut Document, af: ObjRef, field: ObjRef, parts: &[&str]) -> Result<(), FormError> {
+/// Whether `field` may go in the field tree under the full name `parts`, changing nothing. The
+/// field list holds only terminal fields, so a parent left empty by a move isn't in it: a node
+/// of the same name there is found here.
+fn check_place(doc: &Document, af: ObjRef, field: ObjRef, parts: &[&str]) -> Result<(), FormError> {
     let Some((own, parents)) = parts.split_last() else { return invalid("field names can't be empty") };
-    // First check the place, changing nothing. The field list holds only terminal fields, so a
-    // parent left empty by a move isn't in it: a node of the same name there is found here.
     let owned = doc.get(field).as_dict().cloned().unwrap_or_default();
     let mut at: Option<ObjRef> = None;
     let mut whole_path = true;
@@ -567,10 +565,20 @@ fn attach(doc: &mut Document, af: ObjRef, field: ObjRef, parts: &[&str]) -> Resu
         }
         at = Some(r);
     }
-    // `field` is new or already out of the tree, so a node found is another.
+    // A field being moved is still in the tree here, but under another full name (a move to its
+    // own name changes nothing and doesn't get here), so a node found is another.
     if whole_path && child_named(doc, af, at, own).is_some() {
         return invalid(format!("a field named {:?} already exists", parts.join(".")));
     }
+    Ok(())
+}
+
+/// Put `field` in the field tree under the full name `parts`: its own `/T` is the last part,
+/// and the parts before it name parent fields, reused where the tree has them and made where
+/// not (Acrobat makes `a.b` a field `b` under a field `a`).
+fn attach(doc: &mut Document, af: ObjRef, field: ObjRef, parts: &[&str]) -> Result<(), FormError> {
+    let Some((own, parents)) = parts.split_last() else { return invalid("field names can't be empty") };
+    check_place(doc, af, field, parts)?;
     let mut parent: Option<ObjRef> = None;
     let mut inherits = false;
     for part in parents {
@@ -1107,6 +1115,8 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
             }
             let af = ensure_form(doc)?;
             own_inherited(doc, f.obj)?;
+            // Before it leaves its place, so a refused move leaves it where it was.
+            check_place(doc, af, f.obj, &parts)?;
             detach(doc, f.obj)?;
             attach(doc, af, f.obj, &parts)?;
             new_name = n.to_string();
