@@ -6765,3 +6765,34 @@ fn a_root_less_write_output_is_atomic_too() {
     assert!(matches!(&e, ToolError::Failed(m) if m.contains("is a folder")), "{e:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn text_box_and_callout_fill_and_border_through_tools() {
+    let dir = workdir("textbox-fill");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    for kind in ["textbox", "callout"] {
+        let mut args = json!({ "doc": doc, "page": 1, "type": kind, "rect": [80, 40, 180, 100], "contents": "Example" });
+        if kind == "callout" {
+            args["to"] = json!([20, 120]);
+        }
+        let added = ok(&mut a, "comment_add", args);
+        let comment = &added["comment"];
+        ok(&mut a, "comment_edit", json!({ "doc": doc, "page": 1, "index": comment["index"], "fill": "white", "width": 3 }));
+    }
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "filled.pdf" }));
+    let mut session = pdfcraft_engine::Session::new();
+    let bytes = std::sync::Arc::new(std::fs::read(dir.join("filled.pdf")).unwrap());
+    let saved = session.open("filled.pdf", None, bytes, None).unwrap();
+    for index in 0..2 {
+        let props = session.get(saved).unwrap().comment_props(0, index).unwrap();
+        assert_eq!((props.fill, props.width), (Some([1.0; 3]), Some(3.0)));
+        ok(&mut a, "comment_edit", json!({ "doc": doc, "page": 1, "index": index + 1, "fill": "none" }));
+    }
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "transparent.pdf" }));
+    let bytes = std::sync::Arc::new(std::fs::read(dir.join("transparent.pdf")).unwrap());
+    let saved = session.open("transparent.pdf", None, bytes, None).unwrap();
+    for index in 0..2 {
+        assert_eq!(session.get(saved).unwrap().comment_props(0, index).unwrap().fill, None);
+    }
+}
