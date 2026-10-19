@@ -3419,6 +3419,36 @@ trailer << /Root 1 0 R >>
         }
     }
 
+    /// A shaded Type 3 glyph must use bounds in device coordinates at every position.
+    #[test]
+    fn shaded_type3_glyph_draws_at_multiple_positions() {
+        let content = "BT /F 30 Tf 1 0 0 1 50 70 Tm (A) Tj 1 0 0 1 220 70 Tm (A) Tj ET";
+        let glyph = "100 0 d0 0 0 100 100 re W n /S sh";
+        let pdf = format!(
+            "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 150] /Resources << /Font << /F 5 0 R >> >> /Contents 4 0 R >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /Font /Subtype /Type3 /FontBBox [0 0 100 100] /FontMatrix [0.01 0 0 0.01 0 0] /CharProcs << /A 6 0 R >> /Encoding << /Differences [65 /A] >> /FirstChar 65 /LastChar 65 /Widths [100] /Resources << /Shading << /S 7 0 R >> >> >> endobj
+6 0 obj << /Length {} >> stream
+{glyph}
+endstream endobj
+7 0 obj << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> /Extend [true true] >> endobj
+trailer << /Root 1 0 R >>
+%%EOF", content.len(), glyph.len()
+        );
+        let mut renderer = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default());
+        let page = renderer.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+        assert!(page.error.is_none(), "{:?}", page.error);
+        for x in [65usize, 235] {
+            let pixel = &page.rgba[(65 * 300 + x) * 4..][..4];
+            assert!(pixel[0] < 240 && pixel[2] < 240 && pixel[1] < 10, "glyph at {x}: {pixel:?}");
+        }
+    }
+
     /// From `cargo xtask fuzz`: a Type 3 font without /Resources inherits the page's, where its
     /// own name is defined, and its glyph shows text in itself (vendored patch:
     /// `MAX_PAINT_NESTING`). Must terminate; a normal Type 3 glyph must still paint.
