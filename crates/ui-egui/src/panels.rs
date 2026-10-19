@@ -826,7 +826,11 @@ pub fn right_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
         },
         Some(Nav::Flash(p, r)) => {
             let v = &mut app.views[index];
-            v.go_to_page(p);
+            if let Some(doc) = app.session.get(id) {
+                v.reveal_rect(p, r, &doc.info);
+            } else {
+                v.go_to_page(p);
+            }
             v.flash = Some((p, r, 0.0));
         }
         None => {}

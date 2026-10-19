@@ -1207,6 +1207,21 @@ impl DocView {
         self.current = page;
     }
 
+    /// Reveal a user-space rectangle without changing zoom, centred where the scroll bounds allow.
+    pub(crate) fn reveal_rect(&mut self, page: usize, rect: [f32; 4], info: &DocInfo) {
+        self.go_to_page(page);
+        self.goto_point = None;
+        let Some(p) = info.pages.get(self.current) else { return };
+        if !rect.iter().all(|v| v.is_finite()) {
+            return;
+        }
+        // Halve before adding so even large finite coordinates cannot overflow the midpoint.
+        let x = rect[0] * 0.5 + rect[2] * 0.5;
+        let y = rect[1] * 0.5 + rect[3] * 0.5;
+        let [fx, fy] = p.dest_fraction(Some(x), Some(y), self.rotation);
+        self.goto_point = Some((self.current, fx, fy, vec2(self.viewport_w, self.viewport_h) / 2.0));
+    }
+
     /// Go to a destination, a bookmark's or a link's (ISO 32000-2 §12.3.2.2): its page, scrolled
     /// and zoomed as `dest` asks, as Acrobat does. `/XYZ` puts (left, top) at the window's
     /// top-left at its zoom (null or 0 keeps the zoom); `/Fit`, `/FitH` and `/FitV` switch to fit

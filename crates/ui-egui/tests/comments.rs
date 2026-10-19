@@ -100,6 +100,53 @@ fn comments(h: &Harness<'static, PdfCraftApp>) -> Vec<Annotation> {
     s.session.get(s.views[0].id).unwrap().info.annotations.clone()
 }
 
+/// #3418: choosing a sidebar comment must reveal the annotation, not just its page's top.
+#[test]
+fn sidebar_comment_centres_the_annotation_at_high_zoom() {
+    for (layout, rotation) in [("continuous", 0), ("single", 0), ("two-page", 0), ("continuous", 90), ("continuous", 180), ("continuous", 270)] {
+        let mut h = harness(move |app| {
+            app.set_option("panel", "comments").unwrap();
+            app.set_option("layout", layout).unwrap();
+            app.set_option("zoom", "800").unwrap();
+            app.views[0].rotation = rotation;
+            let shape = pdfcraft_engine::Shape::Note { at: [150.0, 90.0], icon: pdfcraft_engine::NoteIcon::Comment };
+            assert!(app.apply_edit(pdfcraft_engine::Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
+                page: 1,
+                style: pdfcraft_engine::Style::default_for(&shape),
+                shape,
+                contents: "Reveal this note".into(),
+                author: "Tester".into(),
+            })));
+            app.views[0].comments.selected = None;
+            app.set_option("page", "1").unwrap();
+        });
+        h.get_by_label("Reveal this note").click();
+        h.run_steps(8);
+        assert_eq!(h.state().views[0].comments.selected, Some((1, 0)), "the sidebar card was selected");
+        let a = &comments(&h)[0];
+        let view = &h.state().views[0];
+        let page = view.page_screen_rect(1).expect("the selected comment's page is drawn");
+        let (u, v) = ((a.rect[0] + a.rect[2]) / 600.0, 1.0 - (a.rect[1] + a.rect[3]) / 400.0);
+        let (u, v) = match rotation {
+            90 => (1.0 - v, u),
+            180 => (1.0 - u, 1.0 - v),
+            270 => (v, 1.0 - u),
+            _ => (u, v),
+        };
+        let centre = pos2(page.left() + u * page.width(), page.top() + v * page.height());
+        let viewport = view.viewport_rect();
+        assert!(centre.distance(viewport.center()) < 3.0, "{layout}, {rotation}°: comment at {centre:?}, viewport {viewport:?}");
+        assert!((view.zoom - 8.0).abs() < 0.01, "revealing a comment preserves zoom");
+        if layout == "continuous"
+            && rotation == 0
+            && let Ok(dir) = std::env::var("PDFCRAFT_SHOTS")
+        {
+            settle(&mut h);
+            h.render().unwrap().save(format!("{dir}/comment-centred.png")).unwrap();
+        }
+    }
+}
+
 #[test]
 fn dragging_over_text_with_the_highlighter_highlights_it() {
     let mut h = harness(|app| app.set_option("quick", "highlight").unwrap());
