@@ -1334,6 +1334,10 @@ mod tests {
         assert!(parser.acquire(|| panic!("must not retry"), || false).unwrap().is_none());
     }
 
+    /// The waits here only guard against a hang; they don't time anything. The initializer is
+    /// held until the end of the test, so a waiter that can't cancel waits forever and fails the
+    /// guard however long it is, and a correct one returns as soon as its thread runs. Two
+    /// seconds was too short for a busy FreeBSD VM in CI to start the threads (#1970).
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn waiting_worker_can_cancel_before_initializer_returns() {
@@ -1341,6 +1345,7 @@ mod tests {
             sync::{atomic::AtomicUsize, mpsc},
             time::Duration,
         };
+        const HANG_GUARD: Duration = Duration::from_secs(600);
         let parser = Arc::new(PoolParser::default());
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
@@ -1350,14 +1355,16 @@ mod tests {
                 parser.acquire(
                     || {
                         started_tx.send(()).unwrap();
-                        release_rx.recv().unwrap();
+                        // A failed test drops the sender: that ends the hold, it is not a
+                        // second failure.
+                        let _ = release_rx.recv();
                         Pdf::new(ONE_PAGE.to_vec()).ok()
                     },
                     || false,
                 )
             })
         };
-        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        started_rx.recv_timeout(HANG_GUARD).expect("the initializer starts");
         let cancelled = Arc::new(AtomicBool::new(false));
         let checks = Arc::new(AtomicUsize::new(0));
         let (done_tx, done_rx) = mpsc::channel();
@@ -1374,13 +1381,13 @@ mod tests {
                 done_tx.send(result.unwrap().is_none()).unwrap();
             })
         };
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + HANG_GUARD;
         while checks.load(Ordering::Relaxed) == 0 {
-            assert!(std::time::Instant::now() < deadline);
-            std::thread::yield_now();
+            assert!(std::time::Instant::now() < deadline, "the waiter never checked for cancellation");
+            std::thread::sleep(Duration::from_millis(1));
         }
         cancelled.store(true, Ordering::Release);
-        assert!(done_rx.recv_timeout(Duration::from_secs(2)).unwrap());
+        assert!(done_rx.recv_timeout(HANG_GUARD).expect("the waiter cancels while the initializer is held"));
         waiter.join().unwrap();
         release_tx.send(()).unwrap();
         assert!(initializer.join().unwrap().unwrap().is_some());
