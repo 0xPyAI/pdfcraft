@@ -5278,4 +5278,32 @@ fn a_page_painted_first_with_a_full_page_fill_has_that_background() {
     assert_eq!(page("BT ET 0 0 600 800 re S 1 0 0 rg 0 0 600 800 re f", ""), None, "a stroke first");
     assert_eq!(page("0 0 m 600 0 l 600 800 l 0 800 l h f", ""), None, "a path that isn't a rectangle");
     assert_eq!(page("1 0 0 rg 0 0 600 800 re 100 100 m 200 100 l 200 200 l h f*", ""), None, "a page fill with a hole cut in it");
+    // #2994 review: a rectangle turned 45° about the crop box's centre covers it only if the crop
+    // box's corners are inside it; its bounding box covering the crop box isn't enough. This one
+    // reaches 500 from the centre along each axis (its box covers the 500 × 700 crop box) but
+    // 354 along the diagonals, short of the corners. One reaching 707 covers them.
+    let turned = "0.70710678 0.70710678 -0.70710678 0.70710678 250 350 cm";
+    assert_eq!(page(&format!("1 0 0 rg {turned} -353.553 -353.553 707.107 707.107 re f"), ""), None, "a turned fill short of the corners");
+    assert_eq!(page(&format!("1 0 0 rg {turned} -500 -500 1000 1000 re f"), ""), Some([1.0, 0.0, 0.0]), "a turned fill over them");
+    // The same for a clip.
+    assert_eq!(page(&format!("{turned} -353.553 -353.553 707.107 707.107 re W n 1 0 0 rg -2000 -2000 4000 4000 re f"), ""), None, "a turned clip");
+    assert_eq!(
+        page(&format!("{turned} -500 -500 1000 1000 re W n 1 0 0 rg -2000 -2000 4000 4000 re f"), ""),
+        Some([1.0, 0.0, 0.0]),
+        "a turned clip over the corners"
+    );
+    // Clips add up: two that each cover the page leave it covered, one that doesn't among them
+    // doesn't.
+    assert_eq!(page("0 0 600 800 re W n 0 0 550 750 re W n 1 0 0 rg 0 0 600 800 re f", ""), Some([1.0, 0.0, 0.0]), "two covering clips");
+    assert_eq!(page("0 0 600 800 re W n 0 0 300 750 re W n 1 0 0 rg 0 0 600 800 re f", ""), None, "the second clip doesn't cover");
+    // Past 64 clipping rectangles the clip counts as unknown.
+    let clips = "0 0 600 800 re W n ".repeat(65);
+    assert_eq!(page(&format!("{clips}1 0 0 rg 0 0 600 800 re f"), ""), None, "too many clips to follow");
+    // A rectangle drawn the other way round (negative width) covers the page all the same.
+    assert_eq!(page("1 0 0 rg 600 0 -600 800 re f", ""), Some([1.0, 0.0, 0.0]), "drawn clockwise");
+    // The crop box counts as covered within half a percent of its size (2.5 × 3.5 here), the
+    // edge of that included.
+    assert_eq!(page("1 0 0 rg 2 3 496 694 re f", ""), Some([1.0, 0.0, 0.0]), "within the tolerance");
+    assert_eq!(page("1 0 0 rg 2.5 3.5 495 693 re f", ""), Some([1.0, 0.0, 0.0]), "on the tolerance's edge");
+    assert_eq!(page("1 0 0 rg 3 4 494 692 re f", ""), None, "past the tolerance");
 }

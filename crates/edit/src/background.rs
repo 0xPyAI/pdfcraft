@@ -9,6 +9,13 @@ use crate::{EditError, Rgb};
 /// How deep `q` may nest while looking for the background (deeper saves are not tracked).
 const MAX_SAVES: usize = 64;
 
+/// How many clipping rectangles are kept; past that the clip counts as unknown.
+const MAX_CLIPS: usize = 64;
+
+/// A rectangle as it lands on the page: its four corners in page space, in order. Under a
+/// rotating or shearing CTM it is a parallelogram, so its bounding box says too much (#2994).
+type Quad = [(f64, f64); 4];
+
 /// The colour space a fill colour is given in.
 #[derive(Clone, Copy, PartialEq)]
 enum Space {
@@ -19,7 +26,7 @@ enum Space {
     Other,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct State {
     ctm: Matrix,
     space: Space,
@@ -28,9 +35,9 @@ struct State {
     /// plain paint.
     alpha: f64,
     plain: bool,
-    /// The clip, as a rectangle in page space; `None` when a clip that isn't one rectangle was
-    /// set (its area can't be told).
-    clip: Option<[f64; 4]>,
+    /// The clip, as the rectangles it is the intersection of, in page space; `None` when a clip
+    /// that isn't one rectangle was set (its area can't be told).
+    clip: Option<Vec<Quad>>,
 }
 
 /// The page's background colour: the colour of the first thing its content paints, when that is
@@ -47,20 +54,20 @@ pub fn page_background(doc: &Document, page: usize) -> Result<Option<Rgb>, EditE
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
 
-    let mut st = State { ctm: Matrix::IDENTITY, space: Space::Gray, fill: Some([0.0; 3]), alpha: 1.0, plain: true, clip: Some(crop) };
+    let mut st = State { ctm: Matrix::IDENTITY, space: Space::Gray, fill: Some([0.0; 3]), alpha: 1.0, plain: true, clip: Some(Vec::new()) };
     let mut saved: Vec<State> = Vec::new();
     let mut lost_saves = 0usize;
     // The path being built: its rectangles in page space, and whether it has anything else.
     // Each rectangle of the current path: its box on the page, and whether it winds
     // counterclockwise there (its width and height and the CTM's determinant agree in sign).
-    let mut rects: Vec<([f64; 4], bool)> = Vec::new();
+    let mut rects: Vec<(Quad, bool)> = Vec::new();
     let mut curved = false;
     let mut clip_pending = false;
     for op in &ops {
         match op.op.as_slice() {
             b"q" => {
                 if saved.len() < MAX_SAVES {
-                    saved.push(st);
+                    saved.push(st.clone());
                 } else {
                     lost_saves = lost_saves.saturating_add(1);
                 }
@@ -98,7 +105,7 @@ pub fn page_background(doc: &Document, page: usize) -> Result<Option<Rgb>, EditE
             b"re" => match op.nums::<4>() {
                 Some([x, y, w, h]) => {
                     let [a, b, c, d, _, _] = st.ctm.0;
-                    rects.push((bbox(&st.ctm, [x, y, x + w, y + h]), (w * h) * (a * d - b * c) > 0.0));
+                    rects.push((quad(&st.ctm, [x, y, x + w, y + h]), (w * h) * (a * d - b * c) > 0.0));
                 }
                 None => curved = true,
             },
@@ -106,8 +113,11 @@ pub fn page_background(doc: &Document, page: usize) -> Result<Option<Rgb>, EditE
             b"W" | b"W*" => clip_pending = true,
             b"n" => {
                 if clip_pending {
-                    st.clip = match (st.clip, rects.as_slice(), curved) {
-                        (Some(c), [(r, _)], false) => Some(intersect(c, *r)),
+                    st.clip = match (st.clip.take(), rects.as_slice(), curved) {
+                        (Some(mut c), [(r, _)], false) if c.len() < MAX_CLIPS => {
+                            c.push(*r);
+                            Some(c)
+                        }
                         _ => None,
                     };
                 }
@@ -124,7 +134,10 @@ pub fn page_background(doc: &Document, page: usize) -> Result<Option<Rgb>, EditE
                     [(_, first), rest @ ..] => !even_odd && rest.iter().all(|(_, ccw)| ccw == first),
                     [] => false,
                 };
-                let covers = !curved && solid && st.clip.is_some_and(|c| covers(&c, &crop)) && rects.iter().any(|(r, _)| covers(r, &crop));
+                let covers = !curved
+                    && solid
+                    && st.clip.as_ref().is_some_and(|c| c.iter().all(|q| covers(q, &crop)))
+                    && rects.iter().any(|(r, _)| covers(r, &crop));
                 return Ok(st.fill.filter(|_| opaque && covers && !clip_pending).map(|c| c.map(|v| v.clamp(0.0, 1.0))));
             }
             // Anything else painted first: no page background.
@@ -167,23 +180,22 @@ fn apply_gstate(doc: &Document, g: &Dict, st: &mut State) {
     }
 }
 
-/// The page-space bounding box of a user-space rectangle under `ctm`.
-fn bbox(ctm: &Matrix, r: [f64; 4]) -> [f64; 4] {
-    let pts = [ctm.apply(r[0], r[1]), ctm.apply(r[2], r[1]), ctm.apply(r[0], r[3]), ctm.apply(r[2], r[3])];
-    pts.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)])
+/// The page-space corners of a user-space rectangle under `ctm`, in order around it.
+fn quad(ctm: &Matrix, r: [f64; 4]) -> Quad {
+    [ctm.apply(r[0], r[1]), ctm.apply(r[2], r[1]), ctm.apply(r[2], r[3]), ctm.apply(r[0], r[3])]
 }
 
-fn intersect(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
-    [a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]
-}
-
-/// Whether `outer` covers `page`, give or take half a percent of its size.
-fn covers(outer: &[f64; 4], page: &[f64; 4]) -> bool {
+/// Whether `outer` covers `page`, give or take half a percent of its size: each corner of the
+/// page, pulled in by that much, lies inside the parallelogram `outer`.
+fn covers(outer: &Quad, page: &[f64; 4]) -> bool {
     let (w, h) = ((page[2] - page[0]).abs(), (page[3] - page[1]).abs());
     let (tx, ty) = (w * 0.005, h * 0.005);
-    outer.iter().all(|v| v.is_finite())
-        && outer[0] <= page[0] + tx
-        && outer[1] <= page[1] + ty
-        && outer[2] >= page[2] - tx
-        && outer[3] >= page[3] - ty
+    let (x0, y0, x1, y1) = (page[0].min(page[2]) + tx, page[1].min(page[3]) + ty, page[0].max(page[2]) - tx, page[1].max(page[3]) - ty);
+    let cross = |a: (f64, f64), b: (f64, f64), p: (f64, f64)| (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0);
+    // Twice the signed area: its sign says which way the corners run.
+    let area: f64 = (0..4).map(|i| cross((0.0, 0.0), outer[i], outer[(i + 1) % 4])).sum();
+    if !area.is_finite() || area.abs() < f64::EPSILON || outer.iter().any(|p| !(p.0.is_finite() && p.1.is_finite())) {
+        return false;
+    }
+    [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].iter().all(|&p| (0..4).all(|i| cross(outer[i], outer[(i + 1) % 4], p) * area.signum() >= 0.0))
 }
