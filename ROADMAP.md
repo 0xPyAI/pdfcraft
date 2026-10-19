@@ -172,6 +172,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-19 (M2, radial luminosity masks):** Added synthetic radial-fade coverage for the existing masked-gradient fix (#2132): centre, midpoint, antialiased clip and per-pixel shading reference, including previews, scales and tiles. Removing the existing native-gradient mask guard reproduces an opaque midpoint; restoring it passes. No new renderer behavior or estimate change.
+
 - **2026-10-19 (M14, #3373):** The main menu and its long submenus scroll in short windows, keeping their commands reachable. Estimates unchanged.
 
 - **2026-10-19 (M3, #3387):** Save-prompt shortcuts yield to later consent and utility dialogs; a synthetic UI regression checks that an edited document stays open. Estimates unchanged.
