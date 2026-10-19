@@ -5253,3 +5253,22 @@ fn stacked_rows_that_merely_overlap_do_not_join_into_one_row() {
     let blocks = text::text_blocks(&doc, 0).unwrap();
     assert_eq!(blocks.len(), 2, "two separate rows stay two paragraphs, not one: {blocks:?}");
 }
+
+/// Two equal-size rows with no horizontal overlap must not join into one row either (#3252):
+/// the wider tolerance is for a run distinctly smaller or larger than its neighbour (a
+/// super/subscript), not for two ordinary body-text rows that happen to sit close enough
+/// vertically — here a 5pt baseline shift, inside the widened 50% tolerance but outside the
+/// original 20% one, with the second row starting just past where the first ends.
+#[test]
+fn equal_size_rows_need_the_tighter_tolerance_even_without_overlap() {
+    let doc = text_page("BT /F1 12 Tf 72 700 Td (Short line one) Tj 75 -5 Td (Second line two here) Tj ET");
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].size, lines[1].size, "same size: no super/subscript here");
+    let gap = lines[1].rect[0] - lines[0].rect[2];
+    assert!(gap >= 0.0, "no horizontal overlap: {gap}");
+    let baseline_shift = lines[0].rect[3] - lines[1].rect[3];
+    assert!((2.4..6.0).contains(&baseline_shift), "between the old and new vertical tolerance: {baseline_shift}");
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 2, "two separate rows stay two paragraphs, not one: {blocks:?}");
+}
