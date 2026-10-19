@@ -4494,8 +4494,12 @@ fn notices(
         let mut text =
             crate::i18n::fmt(tl!("Dynamic XFA form laid out from its template: {pages}, {fields}."), &[("pages", &pages), ("fields", &fields)]);
         if !x.warnings.is_empty() {
+            // The notes are clauses ("a picture is left out"); the first starts a sentence here.
+            let notes = x.warnings.join("; ");
+            let mut chars = notes.chars();
             text.push(' ');
-            text.push_str(&x.warnings.join("; "));
+            text.extend(chars.next().into_iter().flat_map(char::to_uppercase));
+            text.push_str(chars.as_str());
             text.push('.');
         }
         Some(("text-cursor-input", text, true))

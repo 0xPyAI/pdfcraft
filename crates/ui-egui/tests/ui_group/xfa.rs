@@ -66,8 +66,8 @@ fn a_dynamic_xfa_form_is_laid_out_and_filled() {
 fn a_dynamic_xfa_form_says_when_laying_it_out_took_its_usage_rights_off() {
     let xdp = pdfcraft_xfa::fixtures::template(2);
     let h = open(pdfcraft_xfa::fixtures::usage_rights_shell(&xdp, "", false));
-    h.get_by_label_contains("laid out from its template: 2 pages, 11 fields");
-    h.get_by_label_contains("usage rights were removed");
+    // The note starts its own sentence after the layout's.
+    h.get_by_label_contains("laid out from its template: 2 pages, 11 fields. The form's usage rights were removed");
 }
 
 #[test]
