@@ -1060,6 +1060,18 @@ impl Layouter<'_> {
         let lines = if f.multiline { 3.0 } else { 1.0 };
         let ui = match f.ui {
             Ui::CheckButton => f.check_size.unwrap_or(10.0).max(text::line_height(font.size)),
+            // A button shows its caption: as tall as the caption's text in its own font.
+            Ui::Button if f.caption.as_ref().is_some_and(|c| !c.value.is_empty()) => {
+                let cap = f.caption.as_ref().map_or(0.0, |c| {
+                    let rich = match &c.value {
+                        Value::Rich(r) => r.clone(),
+                        other => text::plain(&other.plain().unwrap_or_default()),
+                    };
+                    let w = (inner_w - f.ui_margin.horizontal()).max(1.0);
+                    text::measure_height(&rich, w, &ctx.para.apply(&c.para), &Face::of(&ctx.font.apply(&c.font)), &|id| self.embed(id))
+                });
+                cap + f.ui_margin.vertical()
+            }
             _ => (text::line_height(font.size) * lines).max(self.grown_text_height(f, inner_w, ctx)) + 4.0 + f.ui_margin.vertical(),
         };
         match self.caption_reserve(f, inner_w, ctx) {

@@ -1253,6 +1253,20 @@ fn a_button_without_a_width_is_as_wide_as_its_caption() {
 }
 
 #[test]
+fn a_button_without_a_height_is_as_tall_as_its_caption() {
+    // A 10pt field font, an 8pt caption: the button is as tall as its caption's line (no
+    // text-field padding), and never below its minimum height.
+    let button = |min_h: &str| {
+        let items = positioned(&format!(
+            r#"<field name="help" x="1in" y="0" w="100pt" minH="{min_h}"><ui><button/></ui><font typeface="Times New Roman" size="10pt"/><caption><value><text>Help</text></value><font typeface="Arial" size="8pt"/></caption></field>"#
+        ));
+        items.iter().find_map(|i| if let Item::Widget(w) = i { Some(w.rect.h) } else { None }).expect("the button")
+    };
+    assert!((button("2pt") - text::line_height(8.0)).abs() < 0.05, "{}", button("2pt"));
+    assert!((button("10.5pt") - 10.5).abs() < 0.05, "{}", button("10.5pt"));
+}
+
+#[test]
 fn page_area_without_occur_serves_every_body_page() {
     let section = |n: u32| {
         format!(
