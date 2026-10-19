@@ -3169,6 +3169,26 @@ fn dotted_field_names_are_made_with_parent_fields() {
     let at_top = top(&doc);
     assert!(set_props(&mut doc, "name", &FieldProps { name: Some("address.name".into()), ..FieldProps::default() }).is_err());
     assert_eq!(top(&doc), at_top, "name is still in the form's /Fields");
+    // Nor is what it inherits copied onto it first (review on #2957): src.f inherits /V from src.
+    add_field(&mut doc, 0, [300.0, 540.0, 450.0, 560.0], &text, Some("src.f")).unwrap();
+    let f = field(&fields(&doc), "src.f").obj;
+    let src = doc.get(f).as_dict().and_then(|d| d.reference(b"Parent")).unwrap();
+    doc.update_dict(src, |d| d.set(b"V".to_vec(), Object::String(PdfString::literal(b"inh".to_vec())))).unwrap();
+    assert!(set_props(&mut doc, "src.f", &FieldProps { name: Some("address.f".into()), ..FieldProps::default() }).is_err());
+    assert!(!doc.get(f).as_dict().unwrap().contains(b"V"), "src.f still only inherits its value");
+    // What it inherits counts as its own where it goes: with /V on address and no /MaxLen,
+    // src.f moves, keeping its value.
+    doc.update_dict(address, |d| {
+        d.remove(b"MaxLen");
+        d.set(b"V".to_vec(), Object::String(PdfString::literal(b"x".to_vec())));
+    })
+    .unwrap();
+    set_props(&mut doc, "src.f", &FieldProps { name: Some("address.f".into()), ..FieldProps::default() }).unwrap();
+    assert_eq!(field(&fields(&doc), "address.f").value, ["inh"]);
+    doc.update_dict(address, |d| {
+        d.remove(b"V");
+    })
+    .unwrap();
     doc.update_dict(address, |d| {
         d.remove(b"MaxLen");
     })

@@ -548,9 +548,13 @@ const PASSED_VALUES: [&[u8]; 3] = [b"V", b"DV", b"MaxLen"];
 /// Whether `field` may go in the field tree under the full name `parts`, changing nothing. The
 /// field list holds only terminal fields, so a parent left empty by a move isn't in it: a node
 /// of the same name there is found here.
-fn check_place(doc: &Document, af: ObjRef, field: ObjRef, parts: &[&str]) -> Result<(), FormError> {
+/// `inherited` is what the field will hold as its own before it moves (see [`inherited`]).
+fn check_place(doc: &Document, af: ObjRef, field: ObjRef, parts: &[&str], inherited: &Dict) -> Result<(), FormError> {
     let Some((own, parents)) = parts.split_last() else { return invalid("field names can't be empty") };
-    let owned = doc.get(field).as_dict().cloned().unwrap_or_default();
+    let mut owned = doc.get(field).as_dict().cloned().unwrap_or_default();
+    for (k, v) in inherited.iter() {
+        owned.set(k.to_vec(), v.clone());
+    }
     let mut at: Option<ObjRef> = None;
     let mut whole_path = true;
     for part in parents {
@@ -578,7 +582,7 @@ fn check_place(doc: &Document, af: ObjRef, field: ObjRef, parts: &[&str]) -> Res
 /// not (Acrobat makes `a.b` a field `b` under a field `a`).
 fn attach(doc: &mut Document, af: ObjRef, field: ObjRef, parts: &[&str]) -> Result<(), FormError> {
     let Some((own, parents)) = parts.split_last() else { return invalid("field names can't be empty") };
-    check_place(doc, af, field, parts)?;
+    check_place(doc, af, field, parts, &Dict::new())?;
     let mut parent: Option<ObjRef> = None;
     let mut inherits = false;
     for part in parents {
@@ -621,8 +625,8 @@ fn attach(doc: &mut Document, af: ObjRef, field: ObjRef, parts: &[&str]) -> Resu
     link(doc, af, parent, field)
 }
 
-/// Copy onto `field` what it inherits from its parents, so it keeps them when it moves.
-fn own_inherited(doc: &mut Document, field: ObjRef) -> Result<(), FormError> {
+/// What `field` inherits from its parents and doesn't hold itself, changing nothing.
+fn inherited(doc: &Document, field: ObjRef) -> Dict {
     let own = doc.get(field).as_dict().cloned().unwrap_or_default();
     let mut add = Dict::new();
     let mut seen = std::collections::HashSet::new();
@@ -639,6 +643,11 @@ fn own_inherited(doc: &mut Document, field: ObjRef) -> Result<(), FormError> {
         }
         parent = d.reference(b"Parent");
     }
+    add
+}
+
+/// Copy onto `field` what it inherits (`add`, from [`inherited`]), so it keeps it when it moves.
+fn own_inherited(doc: &mut Document, field: ObjRef, add: &Dict) -> Result<(), FormError> {
     if add.iter().next().is_some() {
         doc.update_dict(field, |d| {
             for (k, v) in add.iter() {
@@ -1114,9 +1123,10 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
                 return invalid(why);
             }
             let af = ensure_form(doc)?;
-            own_inherited(doc, f.obj)?;
-            // Before it leaves its place, so a refused move leaves it where it was.
-            check_place(doc, af, f.obj, &parts)?;
+            // Checked before anything changes, so a refused move leaves the field as it was.
+            let add = inherited(doc, f.obj);
+            check_place(doc, af, f.obj, &parts, &add)?;
+            own_inherited(doc, f.obj, &add)?;
             detach(doc, f.obj)?;
             attach(doc, af, f.obj, &parts)?;
             new_name = n.to_string();
