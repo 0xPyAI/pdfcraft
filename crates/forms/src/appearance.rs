@@ -230,7 +230,7 @@ pub(crate) fn button_caption(doc: &Document, da: &str, caption: &str, width: f64
         Some((o, enc)) => (da.font.clone(), o, enc),
         None => ("Helv".to_string(), helvetica(), FontText::WinAnsi),
     };
-    let missing = if enc == FontText::WinAnsi { pdfcraft_fonts::first_undrawable(caption) } else { None };
+    let missing = enc.first_unencodable(caption);
     let size = if da.size > 0.0 { da.size } else { auto };
     let tw = enc.width(caption, size);
     let mut out =

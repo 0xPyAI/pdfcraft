@@ -112,6 +112,26 @@ fn a_button_caption_is_drawn_in_its_fields_font_size_and_color() {
 }
 
 #[test]
+fn a_button_caption_its_fonts_encoding_cant_hold_is_reported() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [7 0 R] >>".into(),
+        "<< /Fields [7 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R /CN 6 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        "<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UCS2-H /DescendantFonts [<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 4 >> >>] >>".into(),
+        // A UCS-2 CMap holds 签 but not a character beyond U+FFFF, which is drawn as `?`.
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (go) /Ff 65536 /DA (/CN 9 Tf 0 g) /MK << /CA <FEFF7B7E>> >> /Rect [50 700 140 711] /P 3 0 R >>".into(),
+    ];
+    let mut doc = document(&objs);
+    redraw_field(&mut doc, "go").unwrap();
+    assert!(undrawn_fields(&doc).is_empty(), "签 is drawn");
+    set_props(&mut doc, "go", &FieldProps { caption: Some((0, "签\u{2000B}".into())), ..Default::default() }).unwrap();
+    assert!(ap(&doc, &field(&fields(&doc), "go").widgets[0]).contains("/CN 9.00 Tf"));
+    assert_eq!(undrawn_fields(&doc), [("go".to_string(), '\u{2000B}')]);
+}
+
+#[test]
 fn button_caption_preserves_other_widgets_and_shared_dictionaries() {
     for indirect_caption in [false, true] {
         let mut doc = one_page();
