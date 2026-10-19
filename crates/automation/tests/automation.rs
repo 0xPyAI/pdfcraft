@@ -6767,6 +6767,65 @@ fn a_root_less_write_output_is_atomic_too() {
 }
 
 #[test]
+fn fdf_nested_comment_values_survive_export_import_and_save_through_tools() {
+    use pdfcraft_cos::{Dict, Document, Object, PdfString, SaveOptions, write_full};
+    use std::sync::Arc;
+    let dir = workdir("fdf-nested-values");
+    let mut source = Document::open(Arc::new(fixture(1))).unwrap();
+    let page = pdfcraft_model::pages(&source)[0].obj;
+    let mut note = Dict::new();
+    note.set(b"Type".to_vec(), Object::name("Annot"));
+    note.set(b"Subtype".to_vec(), Object::name("Square"));
+    note.set(b"NM".to_vec(), PdfString::text("nested-values"));
+    note.set(b"Rect".to_vec(), Object::Array([10, 20, 30, 40].map(|value| Object::Ref(source.add(Object::Int(value)))).into()));
+    note.set(b"C".to_vec(), Object::Array([0.25, 0.5, 0.75].map(|value| Object::Ref(source.add(Object::Real(value)))).into()));
+    let note = source.add(note);
+    source.update_dict(page, |dict| dict.set(b"Annots".to_vec(), Object::Array(vec![Object::Ref(note)]))).unwrap();
+    std::fs::write(dir.join("source.pdf"), write_full(&source, &SaveOptions::default()).unwrap()).unwrap();
+    let mut a = auto(&dir);
+    let source = ok(&mut a, "doc_open", json!({ "path": "source.pdf" }))["doc"].as_u64().unwrap();
+
+    ok(&mut a, "doc_export_data", json!({ "doc": source, "path": "notes.fdf", "what": "comments" }));
+    let target = ok(&mut a, "doc_open", json!({ "path": "b.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_import_data", json!({ "doc": target, "path": "notes.fdf" }));
+    ok(&mut a, "doc_save", json!({ "doc": target, "path": "restored.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "restored.pdf" }))["doc"].as_u64().unwrap();
+    let after = ok(&mut a, "comment_list", json!({ "doc": reopened }));
+    // The saved input has legal indirect scalar numbers. The engine's source inspection
+    // currently reads those as defaults, so compare the restored data to the fixture's
+    // known values (converted from PDF bottom-left to the tool's top-left coordinates).
+    assert_eq!(after["comments"][0]["rect"], json!([10.0, 260.0, 30.0, 280.0]));
+    assert_eq!(after["comments"][0]["color"], "#4080BF");
+}
+
+#[test]
+fn refused_fdf_export_keeps_the_destination_and_source_through_tools() {
+    use pdfcraft_cos::{Dict, Document, Object, SaveOptions, write_full};
+    use std::sync::Arc;
+    let dir = workdir("fdf-export-limit");
+    let mut source = Document::open(Arc::new(fixture(1))).unwrap();
+    let page = pdfcraft_model::pages(&source)[0].obj;
+    let mut note = Dict::new();
+    note.set(b"Type".to_vec(), Object::name("Annot"));
+    note.set(b"Subtype".to_vec(), Object::name("Square"));
+    note.set(b"Rect".to_vec(), Object::Array(vec![10.into(), 20.into(), 30.into(), 40.into()]));
+    note.set(b"PCData".to_vec(), Object::Array(vec![Object::Null; 100_001]));
+    let note = source.add(note);
+    source.update_dict(page, |dict| dict.set(b"Annots".to_vec(), Object::Array(vec![Object::Ref(note)]))).unwrap();
+    let bytes = write_full(&source, &SaveOptions::default()).unwrap();
+    std::fs::write(dir.join("source.pdf"), &bytes).unwrap();
+    std::fs::write(dir.join("notes.fdf"), b"existing destination").unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "source.pdf" }))["doc"].as_u64().unwrap();
+    let before = ok(&mut a, "comment_list", json!({ "doc": doc }));
+    let error = a.call("doc_export_data", &json!({ "doc": doc, "path": "notes.fdf", "what": "comments" })).unwrap_err();
+    assert!(error.to_string().contains("100,000 values"), "{error}");
+    assert_eq!(std::fs::read(dir.join("notes.fdf")).unwrap(), b"existing destination");
+    assert_eq!(std::fs::read(dir.join("source.pdf")).unwrap(), bytes);
+    assert_eq!(ok(&mut a, "comment_list", json!({ "doc": doc })), before);
+}
+
+#[test]
 fn text_box_and_callout_fill_and_border_through_tools() {
     let dir = workdir("textbox-fill");
     let mut a = auto(&dir);
