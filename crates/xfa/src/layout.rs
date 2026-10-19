@@ -1662,13 +1662,13 @@ impl Layouter<'_> {
             }
             Ui::Button => {
                 let caption = f.caption.as_ref().and_then(|c| c.value.plain()).unwrap_or_default().trim().to_string();
-                // A button's box is its field border; without one it is invisible (a link
-                // over text, say).
+                // A button's box is its field border, around the whole field (its margins pad
+                // the caption, not the box); without one it is invisible (a link over text, say).
                 let border = match &f.common.border {
                     Some(b) => widget_border(Some(b), false),
                     None => WidgetBorder { color: None, fill: None, shape: BorderShape::None, width: 0.0 },
                 };
-                (WidgetKind::Button { caption }, ui, border, None, f.tooltip.clone())
+                (WidgetKind::Button { caption }, rect, border, None, f.tooltip.clone())
             }
             Ui::DateTimeEdit => {
                 let pattern = date_pattern(f.picture.as_deref());

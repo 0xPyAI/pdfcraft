@@ -1267,6 +1267,17 @@ fn a_button_without_a_height_is_as_tall_as_its_caption() {
 }
 
 #[test]
+fn a_buttons_box_is_the_whole_field_whatever_its_margins() {
+    // The button's box is its field's border: its margins pad the caption, not the box.
+    let items = positioned(
+        r#"<field name="help" x="1in" y="10pt" w="100pt" h="20pt"><ui><button/></ui><margin topInset="5pt" leftInset="3pt"/><border><edge/></border><caption><value><text>Help</text></value><font typeface="Arial" size="8pt"/></caption></field>"#,
+    );
+    let button = items.iter().find_map(|i| if let Item::Widget(w) = i { Some(w.rect) } else { None }).expect("the button");
+    assert!((button.w - 100.0).abs() < 0.05 && (button.h - 20.0).abs() < 0.05, "{button:?}");
+    assert!((button.x - (36.0 + 72.0)).abs() < 0.05, "{button:?}");
+}
+
+#[test]
 fn page_area_without_occur_serves_every_body_page() {
     let section = |n: u32| {
         format!(
