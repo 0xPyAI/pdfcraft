@@ -445,7 +445,8 @@ impl Type0Font {
     /// identity `/ToUnicode` name, when the code is a control or a lone surrogate).
     pub(crate) fn char_code_to_unicode(&self, code: u32) -> Option<BfString> {
         if self.identity_to_unicode {
-            // Controls and lone surrogates are not text.
+            // Controls and lone surrogates are not text. The same rule builds the editing
+            // map, `identity_to_unicode` in crates/fonts/src/pdf.rs: keep both alike.
             return char::from_u32(code)
                 .filter(|c| !c.is_control())
                 .map(BfString::Char);

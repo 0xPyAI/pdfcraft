@@ -1216,7 +1216,9 @@ fn unicode_map(doc: &Document, font: &Dict, composite: bool) -> Unicode {
         // `/ToUnicode /Identity-H` is not a stream, as ISO 32000-2 §9.10.3 requires, but CAD
         // exporters (WSCAD among them) write it for composite fonts whose two-byte codes are the
         // UTF-16 code units. Acrobat shows them as code = Unicode, and so does the renderer's
-        // text layer; without it the text could be seen but not edited or found.
+        // text layer; without it the text could be seen but not edited or found. The same rule
+        // (code = Unicode, no controls or lone surrogates) is in the vendored renderer,
+        // `Type0Font::char_code_to_unicode` in vendor/hayro-interpret/src/font/cid.rs: keep both alike.
         Some(Object::Name(n)) if composite && matches!(n.as_slice(), b"Identity-H" | b"Identity-V") => {
             parse_to_unicode(&identity_to_unicode(), &mut out);
         }
