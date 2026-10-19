@@ -399,6 +399,25 @@ fn named_image(doc: &Document, page: usize, name: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
+#[test]
+fn redaction_clears_pixels_intersected_without_covering_their_centres() {
+    for (content, rect) in
+        [(&b"q 200 0 0 100 0 0 cm /Im Do Q"[..], [10.0, 10.0, 20.0, 90.0]), (&b"q 0 100 -200 0 200 0 cm /Im Do Q"[..], [10.0, 5.0, 190.0, 10.0])]
+    {
+        let mut doc = one_page(
+            content,
+            "/XObject << /Im 7 0 R >>",
+            vec![stream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", [123, 234])],
+        );
+        mark(&mut doc, 0, &[rect], "");
+        let report = apply(&mut doc, None).unwrap();
+        assert_eq!(report.images_cleared, 1);
+        let saved = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        assert_eq!(named_image(&saved, 0, b"Im"), None);
+        assert_eq!(named_image(&saved, 0, b"PCRedacted1"), Some(vec![0, 234]));
+    }
+}
+
 /// Apply Redactions gives the page its own pruned /Resources, but the dictionary it drew through
 /// before (inherited from the /Pages node, or shared with another page) still named the removed
 /// image and form, so a full-rewrite save kept them.
