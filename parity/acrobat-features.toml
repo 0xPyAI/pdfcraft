@@ -4524,8 +4524,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.field.properties"]
 tools = ["form_set_props", "form_fill"]
-evidence = ["crates/forms/src/af.rs::dates_times_and_masks", "crates/forms/src/tests.rs::formats_validation_and_calculations_run_like_acrobat"]
-notes = "AFDate_FormatEx/KeystrokeEx, AFDate_Format presets, AFTime_Format(Ex): lenient parsing, month and day names, impossible dates refused"
+evidence = ["crates/forms/src/af.rs::dates_times_and_masks", "crates/forms/src/tests.rs::formats_validation_and_calculations_run_like_acrobat", "crates/forms/src/af.rs::digits_typed_without_separators_fill_adjacent_fields"]
+notes = "AFDate_FormatEx/KeystrokeEx, AFDate_Format presets, AFTime_Format(Ex): lenient parsing, month and day names, impossible dates refused; digits typed without separators fill fields the format writes side by side by their fixed widths (20261018 for yyyymmdd, 1430 for HHMM). A run of digits is split only where the format itself has no separator: 20261018 typed into a yyyy-mm-dd field is still refused"
 
 [[feature]]
 id = "form.af-special"

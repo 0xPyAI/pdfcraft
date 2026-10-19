@@ -218,6 +218,37 @@ fn the_calendar_follows_a_complete_date_typed_while_it_is_open() {
     h.get_by_label("April 2025");
 }
 
+/// A date format with its fields side by side ("yyyymmdd") refused every typed date, and its
+/// calendar opened on today's month.
+#[test]
+fn an_undelimited_date_field_takes_a_typed_date_and_its_calendar_opens_on_it() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = harness();
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField {
+        page: 0,
+        rect: [50.0, 40.0, 200.0, 60.0],
+        kind: pdfcraft_engine::NewField::Date,
+        name: Some("due".into()),
+    });
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldProps {
+        name: "due".into(),
+        props: Box::new(pdfcraft_engine::FieldProps {
+            format: Some(pdfcraft_engine::form_scripts::Format::Date("yyyymmdd".into())),
+            ..Default::default()
+        }),
+    }));
+    h.run_steps(4);
+    click_field(&mut h, "due", 0);
+    h.event(egui::Event::Text("20250314".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Tab);
+    h.run_steps(4);
+    assert_eq!(h.state().toast, None, "the typed date was not refused");
+    assert_eq!(value(&h, "due"), ["20250314"]);
+    click_field(&mut h, "due", 0);
+    h.get_by_label("March 2025");
+}
+
 #[test]
 fn lithuanian_calendar_localizes_months_and_weekdays_without_changing_field_values() {
     use egui_kittest::kittest::Queryable;
