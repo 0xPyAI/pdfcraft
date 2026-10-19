@@ -677,6 +677,9 @@ pub(crate) fn glyph_name_to_unicode(name: &str) -> Option<char> {
 /// isn't a character, adds nothing; `None` when nothing is left.
 pub(crate) fn glyph_name_to_text(name: &str) -> Option<BfString> {
     let hex = |h: &str| u32::from_str_radix(h, 16).ok().and_then(char::from_u32);
+    // The specification's digits are uppercase only (`uni20ac` maps to nothing, review on
+    // #3239).
+    let upper_hex = |d: &str| d.bytes().all(|b| matches!(b, b'0'..=b'9' | b'A'..=b'F'));
     let base = name.split('.').next().unwrap_or_default();
     let mut text = String::new();
     for part in base.split('_') {
@@ -684,7 +687,7 @@ pub(crate) fn glyph_name_to_text(name: &str) -> Option<BfString> {
             text.push_str(s);
         } else if let Some(digits) = part
             .strip_prefix("uni")
-            .filter(|d| !d.is_empty() && d.len() % 4 == 0 && d.bytes().all(|b| b.is_ascii_hexdigit()))
+            .filter(|d| !d.is_empty() && d.len() % 4 == 0 && upper_hex(d))
         {
             // All ASCII, so every fourth byte is a char boundary. A group that isn't a
             // character (a surrogate) makes the whole component map to nothing.
@@ -695,7 +698,7 @@ pub(crate) fn glyph_name_to_text(name: &str) -> Option<BfString> {
             text.extend(chars);
         } else if let Some(c) = part
             .strip_prefix('u')
-            .filter(|d| (4..=6).contains(&d.len()) && d.bytes().all(|b| b.is_ascii_hexdigit()))
+            .filter(|d| (4..=6).contains(&d.len()) && upper_hex(d))
             .and_then(hex)
         {
             text.push(c);
