@@ -44,6 +44,13 @@ fn attr_measure(n: XmlNode, name: &str) -> Option<f64> {
     n.attribute(name).and_then(measure)
 }
 
+/// A horizontal scale such as `90%` (a bare number is a percentage too), as a fraction, within
+/// 1% and 1000%; `None` when it isn't a positive number.
+fn scale(v: &str) -> Option<f64> {
+    let v: f64 = v.trim().trim_end_matches('%').trim().parse().ok()?;
+    (v.is_finite() && v > 0.0).then(|| (v / 100.0).clamp(0.01, 10.0))
+}
+
 fn child<'a, 'd>(n: XmlNode<'a, 'd>, name: &str) -> Option<XmlNode<'a, 'd>> {
     n.children().find(|c| c.is_element() && c.tag_name().name() == name)
 }
@@ -148,6 +155,7 @@ fn parse_font(n: Option<XmlNode>) -> FontSpec {
         italic: n.attribute("posture").map(|p| p == "italic"),
         underline: n.attribute("underline").map(|u| u != "0"),
         color: parse_color(child(n, "fill").and_then(|f| child(f, "color"))),
+        h_scale: n.attribute("fontHorizontalScale").and_then(scale),
     }
 }
 
@@ -196,6 +204,7 @@ fn parse_rich(body: XmlNode) -> RichText {
         italic: Option<bool>,
         underline: Option<bool>,
         size: Option<f64>,
+        h_scale: Option<f64>,
     }
     fn styled(base: &Style, css: Option<&str>) -> Style {
         let mut s = base.clone();
@@ -207,6 +216,7 @@ fn parse_rich(body: XmlNode) -> RichText {
                 "font-style" => s.italic = Some(v == "italic" || v == "oblique"),
                 "text-decoration" => s.underline = Some(v.contains("underline")),
                 "font-size" => s.size = measure(v).filter(|x| *x > 0.0),
+                "xfa-font-horizontal-scale" => s.h_scale = scale(v),
                 _ => {}
             }
         }
@@ -232,6 +242,7 @@ fn parse_rich(body: XmlNode) -> RichText {
                             italic: style.italic,
                             underline: style.underline,
                             size: style.size,
+                            h_scale: style.h_scale,
                             embed: None,
                         },
                     );
@@ -271,7 +282,15 @@ fn parse_rich(body: XmlNode) -> RichText {
                         push_run(
                             out,
                             explicit,
-                            Run { text: String::new(), bold: st.bold, italic: st.italic, underline: st.underline, size: st.size, embed: Some(e) },
+                            Run {
+                                text: String::new(),
+                                bold: st.bold,
+                                italic: st.italic,
+                                underline: st.underline,
+                                size: st.size,
+                                h_scale: st.h_scale,
+                                embed: Some(e),
+                            },
                         );
                     }
                     walk(c, &st, out, explicit, depth + 1);

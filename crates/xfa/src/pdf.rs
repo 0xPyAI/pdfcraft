@@ -612,11 +612,17 @@ impl Emitter<'_> {
                     }
                     let name = s.face.resource_name();
                     fonts.insert(name, s.face.family.base_font(s.face.bold, s.face.italic));
+                    // Horizontal scaling is text state, which outlives the text object: a
+                    // condensed span gets a graphics state of its own, so the next isn't.
+                    let scaled = (s.face.h_scale - 1.0).abs() > 1e-6;
+                    let (open, tz, close) =
+                        if scaled { ("q BT", format!(" {} Tz", n(s.face.h_scale * 100.0)), " ET Q") } else { ("BT", String::new(), " ET") };
                     content.extend(
-                        format!("BT /{name} {} Tf {} rg 1 0 0 1 {} {} Tm ", n(s.face.size), rgb(s.face.color), n(s.x), n(h - s.baseline)).bytes(),
+                        format!("{open} /{name} {} Tf {} rg{tz} 1 0 0 1 {} {} Tm ", n(s.face.size), rgb(s.face.color), n(s.x), n(h - s.baseline))
+                            .bytes(),
                     );
                     content.extend(literal(&win_ansi(&s.text)));
-                    content.extend_from_slice(b" Tj ET\n");
+                    content.extend_from_slice(format!(" Tj{close}\n").as_bytes());
                 }
                 Item::Image { rect, data, content_type } => {
                     let Some(r) = self.image_xobject(data, content_type) else { continue };

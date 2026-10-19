@@ -33,6 +33,72 @@ fn measurements_convert_to_points() {
     assert_eq!(measure("NaNpt"), None);
 }
 
+/// Two draws of the same text, one at `fontHorizontalScale="80%"`, each 90% as wide as the
+/// text is at full width, and a rich-text draw condensed to half by its span style.
+fn scaled_text_template() -> (String, &'static str) {
+    const TEXT: &str = "Approving authority name and title";
+    let w = pdfcraft_fonts::helvetica_width(TEXT, 10.0) * 0.9;
+    let xdp = format!(
+        r##"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <draw name="narrow" w="{w}pt" h="0.5in"><value><text>{TEXT}</text></value><font typeface="Arial" size="10pt" fontHorizontalScale="80%"/></draw>
+ <draw name="plain" w="{w}pt" h="0.5in"><value><text>{TEXT}</text></value><font typeface="Arial" size="10pt"/></draw>
+ <draw name="rich" w="7in" h="0.3in"><value><exData contentType="text/html"><body xmlns="http://www.w3.org/1999/xhtml"><p>Full <span style="xfa-font-horizontal-scale:50%">half</span></p></body></exData></value><font typeface="Arial" size="10pt"/></draw>
+</subform>
+</template></xdp:xdp>"##
+    );
+    (xdp, TEXT)
+}
+
+#[test]
+fn horizontally_scaled_text_is_measured_and_drawn_narrower() {
+    let (xdp, text) = scaled_text_template();
+    let (tpl, _) = parse(&xdp).unwrap();
+    let Node::Draw(narrow) = &tpl.root.children[0] else { panic!() };
+    assert_eq!(narrow.common.font.h_scale, Some(0.8), "fontHorizontalScale is a percentage");
+    let form = layout_xml(&xdp).unwrap();
+    let spans: Vec<&text::Span> = form.pages[0].items.iter().filter_map(|i| if let Item::Text(s) = i { Some(s) } else { None }).collect();
+    let lines = |scale: f64, words: &[&str]| {
+        let mut b: Vec<i64> = spans
+            .iter()
+            .filter(|s| s.face.h_scale == scale && words.iter().any(|w| s.text.contains(w)))
+            .map(|s| (s.baseline * 100.0).round() as i64)
+            .collect();
+        b.dedup();
+        b.len()
+    };
+    let words: Vec<&str> = text.split(' ').collect();
+    // At 80% the text is 72% of its full width: it fits the 90% box on one line.
+    assert_eq!(lines(0.8, &words), 1, "{spans:?}");
+    // At full width it doesn't: two lines.
+    assert_eq!(lines(1.0, &["Approving", "title"]), 2, "{spans:?}");
+    // A span's own scale applies to it alone.
+    let half = spans.iter().find(|s| s.text.contains("half")).expect("the half span");
+    let full = spans.iter().find(|s| s.text.contains("Full")).expect("the full span");
+    assert_eq!((half.face.h_scale, full.face.h_scale), (0.5, 1.0));
+    assert!((half.face.width("half") - full.face.width("half") / 2.0).abs() < 1e-9);
+}
+
+#[test]
+fn horizontally_scaled_text_is_written_with_tz_inside_its_own_graphics_state() {
+    let (xdp, _) = scaled_text_template();
+    let mut doc = Document::open(Arc::new(shell(&xdp))).unwrap();
+    render_into(&mut doc).unwrap();
+    let root = doc.get(doc.root().unwrap());
+    let pages = doc.resolve(root.as_dict().unwrap().get(b"Pages").unwrap());
+    let kid = pages.as_dict().unwrap().get(b"Kids").unwrap().as_array().unwrap()[0].clone();
+    let page = doc.resolve(&kid);
+    let contents = doc.resolve(page.as_dict().unwrap().get(b"Contents").unwrap());
+    let Object::Stream(c) = &*contents else { panic!("a content stream") };
+    let ops = String::from_utf8_lossy(&c.decoded().unwrap()).into_owned();
+    let scaled: Vec<&str> = ops.lines().filter(|l| l.contains(" Tz ")).collect();
+    assert!(!scaled.is_empty() && scaled.iter().all(|l| l.starts_with("q BT ") && l.ends_with(" ET Q")), "{ops}");
+    assert!(scaled.iter().any(|l| l.contains(" 80 Tz ")) && scaled.iter().any(|l| l.contains(" 50 Tz ")), "{ops}");
+    // Full-width text sets no scale, and none is left over from the condensed text before it.
+    assert!(ops.lines().filter(|l| l.contains(" Tj ") && !l.contains(" Tz ")).all(|l| l.starts_with("BT ")), "{ops}");
+}
+
 #[test]
 fn the_template_parses_with_fonts_captions_and_rich_text() {
     let (tpl, warnings) = parse(&template(2)).unwrap();

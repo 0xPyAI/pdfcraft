@@ -155,6 +155,8 @@ pub struct FontSpec {
     pub italic: Option<bool>,
     pub underline: Option<bool>,
     pub color: Option<Color>,
+    /// `fontHorizontalScale`, as a fraction (0.9 for `90%`).
+    pub h_scale: Option<f64>,
 }
 
 /// A font with every property resolved.
@@ -166,12 +168,14 @@ pub struct Font {
     pub italic: bool,
     pub underline: bool,
     pub color: Color,
+    /// Horizontal scale of the glyphs, as a fraction (1.0: as designed).
+    pub h_scale: f64,
 }
 
 impl Default for Font {
     /// XFA's default font: Courier 10 pt.
     fn default() -> Self {
-        Font { typeface: "Courier".into(), size: 10.0, bold: false, italic: false, underline: false, color: Color::BLACK }
+        Font { typeface: "Courier".into(), size: 10.0, bold: false, italic: false, underline: false, color: Color::BLACK, h_scale: 1.0 }
     }
 }
 
@@ -184,6 +188,7 @@ impl Font {
             italic: spec.italic.unwrap_or(self.italic),
             underline: spec.underline.unwrap_or(self.underline),
             color: spec.color.unwrap_or(self.color),
+            h_scale: spec.h_scale.unwrap_or(self.h_scale),
         }
     }
 }
@@ -611,6 +616,8 @@ pub struct Run {
     pub italic: Option<bool>,
     pub underline: Option<bool>,
     pub size: Option<f64>,
+    /// `xfa-font-horizontal-scale`, as a fraction.
+    pub h_scale: Option<f64>,
     /// A floating field embedded in the text (`xfa:embed="#id"`), shown by its value.
     pub embed: Option<String>,
 }
