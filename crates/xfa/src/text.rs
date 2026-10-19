@@ -204,9 +204,12 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
         let mut first_in_para = true;
         let indent = |first: bool| if first { para.text_indent.max(0.0) } else { 0.0 };
         for w in ws {
-            // A word fits when what it draws does: the spaces after it would end the line.
+            // A word fits when what it draws does: the spaces after it would end the line. Spaces
+            // alone draw nothing, so they always stay on the line (keeping their width, so a word
+            // after them still starts past them).
             let ink = ink_width(&w);
-            let fits = line.width + ink <= avail - indent(line.first) || line.words.is_empty() && ink <= avail - indent(line.first);
+            let blank = w.text.trim_end_matches(' ').is_empty();
+            let fits = blank || line.width + ink <= avail - indent(line.first) || line.words.is_empty() && ink <= avail - indent(line.first);
             if !fits && !line.words.is_empty() {
                 let done = std::mem::replace(&mut line, Line { words: Vec::new(), width: 0.0, size: base.size, first: false });
                 lines.push((done, p.h_align));

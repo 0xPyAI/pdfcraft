@@ -2097,6 +2097,10 @@ fn a_space_at_the_end_of_a_line_does_not_count_when_fitting_it() {
     let spans = draw_spans(&one_draw("a. DATE   ", w, "left"));
     let baselines: std::collections::BTreeSet<i64> = spans.iter().map(|s| (s.baseline * 100.0).round() as i64).collect();
     assert_eq!(baselines.len(), 1, "{spans:?}");
+    // Nor do they add a blank line: the text measures as tall as without them.
+    let face = text::Face::of(&Font { typeface: "Arial".into(), size: 10.0, ..Font::default() });
+    let height = |t: &str| text::measure_height(&text::plain(t), w, &Para::default(), &face, &|_| String::new());
+    assert_eq!(height("a. DATE   "), height("a. DATE"));
     // Text that is wider than the box still wraps.
     let spans = draw_spans(&one_draw("a. DATES ", w, "left"));
     let baselines: std::collections::BTreeSet<i64> = spans.iter().map(|s| (s.baseline * 100.0).round() as i64).collect();
