@@ -2354,6 +2354,17 @@ const SUPPRESS_SECS: f64 = 0.25;
 /// Short rolling extension while egui still has an unprocessed wheel tail.
 const SUPPRESS_TAIL_SECS: f64 = 0.05;
 
+// The viewer moves between docking and the central panel as modes change; keep its scroll
+// identity tied to the document instead of either parent UI.
+fn page_scroll<R>(
+    ui: &mut egui::Ui,
+    scroll: egui::ScrollArea,
+    id: egui::Id,
+    draw: impl FnOnce(&mut egui::Ui, egui::Rect) -> R,
+) -> egui::scroll_area::ScrollAreaOutput<R> {
+    ui.scope_builder(egui::UiBuilder::new().id(id), |ui| scroll.show_viewport(ui, draw)).inner
+}
+
 pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     // Keyboard scrolling applies to this frame's page view only, never later.
@@ -2820,7 +2831,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         }
     }
     let selection_wheel = view.selection_drag && navigation_enabled && unobstructed && !single_paging && ui.rect_contains_pointer(avail);
-    let out = scroll.show_viewport(ui, |ui, viewport| {
+    let out = page_scroll(ui, scroll, egui::Id::new(("page-view-scope", view.id)), |ui, viewport| {
         // egui's drag responses accept every pointer button. Keep a wheel gesture from also
         // selecting text, drawing a mark, or panning with the Hand tool.
         if middle_gesture {

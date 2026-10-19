@@ -200,6 +200,7 @@ M2 (renderer), M7 (content editing), M10 (OCR and Office), M11 (Preflight and st
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-15 | minor | M7: Edit text caret height follows its row, with a kittest regression; estimates unchanged |
+| 2026-10-19 | minor | M3 #3360: retain each document’s scroll position when switching Read and the docking workspace at fixed zoom. Estimates unchanged. |
 | 2026-10-18 | minor | M4, PR #1919 review: repeated page indices apply each rotation to the latest page-local value, preserving indirect/inherited angles. Synthetic adjacent/interleaved duplicates retain siblings and page contents through incremental and full saves. Estimates unchanged. |
 | 2026-10-18 | minor | M3, #3149: page replacement cancels render demand collected for the previous geometry; all viewer raster upload paths reject empty or oversized textures before cache eviction. Synthetic regressions reproduce the reported 1880×2350 upload at a 2048 limit, retain cached images and unsaved edits, and resume bounded backdrops and tiles. Estimates unchanged. |
 | 2026-10-17 | minor | M4 #2997: Ctrl-drag (Option on macOS) in the Organize grid copies the dragged pages into the drop gap (a "+" badge says so; the copies land selected, one undo step); `page_duplicate` takes `at`, and the UI control channel's `ui.drag` modifiers reach the input state. Estimates unchanged. |
