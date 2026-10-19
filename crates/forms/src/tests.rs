@@ -88,6 +88,30 @@ fn ap(doc: &Document, w: &Widget) -> String {
 }
 
 #[test]
+fn a_button_caption_is_drawn_in_its_fields_font_size_and_color() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [7 0 R 8 0 R] >>".into(),
+        "<< /Fields [7 0 R 8 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R /HeBo 6 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>".into(),
+        // Its /DA asks for 9pt Helvetica Bold in blue.
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (menu) /Ff 65536 /DA (/HeBo 9 Tf 0 0 1 rg) /MK << /CA (Menu) >> /Rect [50 700 140 711] /P 3 0 R >>".into(),
+        // An automatic size (0): sized to the button, as before.
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (auto) /Ff 65536 /MK << /CA (Auto) >> /Rect [50 600 140 630] /P 3 0 R >>".into(),
+    ];
+    let mut doc = document(&objs);
+    redraw_field(&mut doc, "menu").unwrap();
+    redraw_field(&mut doc, "auto").unwrap();
+    let all = fields(&doc);
+    let menu = ap(&doc, &field(&all, "menu").widgets[0]);
+    assert!(menu.contains("/HeBo 9.00 Tf") && menu.contains("0 0 1 rg"), "{menu}");
+    let auto = ap(&doc, &field(&all, "auto").widgets[0]);
+    assert!(auto.contains("/Helv 14.00 Tf") && auto.contains(" 0 g"), "{auto}");
+}
+
+#[test]
 fn button_caption_preserves_other_widgets_and_shared_dictionaries() {
     for indirect_caption in [false, true] {
         let mut doc = one_page();

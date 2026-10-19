@@ -7,7 +7,6 @@
 //! immediately so every viewer shows the empty field.
 
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, Stream};
-use pdfcraft_fonts::{helvetica_width, literal, win_ansi};
 
 use crate::{Field, FieldKind, FormError, Widget, appearance, fields, flags, page_refs};
 
@@ -706,7 +705,7 @@ fn redraw_widgets(doc: &mut Document, name: &str, only: Option<usize>) -> Result
                 appearance::check_box_states(doc, w, f.kind, &on)
             }
             FieldKind::PushButton => {
-                let (s, m) = button_appearance(doc, w);
+                let (s, m) = button_appearance(doc, w, &f.da);
                 missing = m;
                 let r = doc.add(Object::Stream(s));
                 let mut d = Dict::new();
@@ -767,7 +766,9 @@ fn form_stream(place: crate::appearance::Placement, content: Vec<u8>, resources:
 /// A push button: background, border, its icon (`/MK /I`, scaled to fit and centred) and its
 /// centred caption (unless the layout is icon only, `/TP 1`). The caption is drawn in Helvetica,
 /// with the first character it can't draw (drawn as `?`), for the caller to mark and report.
-fn button_appearance(doc: &Document, w: &Widget) -> (Stream, Option<char>) {
+/// A push button's appearance: its icon and caption, the caption in the font its `/DA` asks for
+/// (the widget's, else `field_da`, the field's own or inherited one).
+fn button_appearance(doc: &Document, w: &Widget, field_da: &str) -> (Stream, Option<char>) {
     let (mut c, place) = frame_only(doc, w);
     let (width, height) = (place.layout_w, place.layout_h);
     let wobj = doc.get(w.obj);
@@ -792,21 +793,15 @@ fn button_appearance(doc: &Document, w: &Widget) -> (Stream, Option<char>) {
         }
     }
     let mut missing = None;
-    if !icon_only && !caption.is_empty() {
-        missing = pdfcraft_fonts::first_undrawable(&caption);
-        let size = ((height - 4.0) * 0.6).clamp(4.0, 14.0);
-        let tw = helvetica_width(&caption, size);
-        content.extend(format!("BT /Helv {size:.2} Tf 0 g 1 0 0 1 {:.3} {:.3} Tm ", (width - tw) / 2.0, (height - size * 0.7) / 2.0).bytes());
-        content.extend(literal(&win_ansi(&caption)));
-        content.extend_from_slice(b" Tj ET\n");
-    }
-    let mut font = Dict::new();
-    font.set(b"Type".to_vec(), Object::name("Font"));
-    font.set(b"Subtype".to_vec(), Object::name("Type1"));
-    font.set(b"BaseFont".to_vec(), Object::name("Helvetica"));
-    font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
     let mut fonts = Dict::new();
-    fonts.set(b"Helv".to_vec(), Object::Dict(font));
+    if !icon_only && !caption.is_empty() {
+        let da = wobj.as_dict().and_then(|d| d.get(b"DA")).and_then(|o| doc.resolve(o).as_string().map(|s| s.to_text()));
+        let auto = ((height - 4.0) * 0.6).clamp(4.0, 14.0);
+        let (ops, name, font, m) = appearance::button_caption(doc, da.as_deref().unwrap_or(field_da), &caption, width, height, auto);
+        content.extend(ops);
+        fonts.set(name.into_bytes(), font);
+        missing = m;
+    }
     let mut res = Dict::new();
     res.set(b"Font".to_vec(), Object::Dict(fonts));
     if !xobjects.is_empty() {
