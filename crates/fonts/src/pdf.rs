@@ -1143,7 +1143,8 @@ pub fn glyph_unicode(name: &str) -> Option<char> {
     chars.next().filter(|_| chars.len() == 0)
 }
 
-/// Code → Unicode for a font: its ToUnicode CMap, else (simple fonts) its encoding.
+/// Code → Unicode for a font: its ToUnicode CMap (for a composite font, also the name
+/// `/Identity-H` or `/Identity-V`, read as code = Unicode), else (simple fonts) its encoding.
 fn unicode_map(doc: &Document, font: &Dict, composite: bool) -> Unicode {
     let mut out = Unicode::default();
     if !composite {
@@ -1214,8 +1215,8 @@ fn unicode_map(doc: &Document, font: &Dict, composite: bool) -> Unicode {
         }
         // `/ToUnicode /Identity-H` is not a stream, as ISO 32000-2 §9.10.3 requires, but CAD
         // exporters (WSCAD among them) write it for composite fonts whose two-byte codes are the
-        // UTF-16 code units. Acrobat, MuPDF and pdf.js read it as code = Unicode, and so does
-        // the renderer's text layer; without it the text could be seen but not edited or found.
+        // UTF-16 code units. Acrobat shows them as code = Unicode, and so does the renderer's
+        // text layer; without it the text could be seen but not edited or found.
         Some(Object::Name(n)) if composite && matches!(n.as_slice(), b"Identity-H" | b"Identity-V") => {
             parse_to_unicode(&identity_to_unicode(), &mut out);
         }

@@ -46,13 +46,15 @@ pub(crate) struct Type0Font {
     /// CNS1, Korea1), whose glyph numbering no substitute other than a CID-keyed CFF font shares.
     adobe_collection: bool,
     /// PdfCraft patch: `/ToUnicode /Identity-H` (a name, not a CMap stream), which CAD exporters
-    /// such as WSCAD write for fonts whose two-byte codes are UTF-16 code units. Acrobat, MuPDF
-    /// and pdf.js read the code as the Unicode value; the identity CMap the name resolves to
-    /// maps codes to CIDs only and gave no text at all.
+    /// such as WSCAD write for fonts whose two-byte codes are UTF-16 code units. Acrobat shows
+    /// such text as the code's Unicode value; the identity CMap the name resolves to maps codes
+    /// to CIDs only and gave no text at all.
     identity_to_unicode: bool,
 }
 
 impl Type0Font {
+    /// Reads a Type 0 font from its dictionary: the descendant CID font, the encoding CMap and
+    /// the code-to-Unicode map (`/ToUnicode`, the `/Identity-H` name, or the UCS2 CMap).
     pub(crate) fn new(
         dict: &Dict<'_>,
         font_resolver: &FontResolverFn,
@@ -439,6 +441,8 @@ impl Type0Font {
         }
     }
 
+    /// The text a character code stands for, or `None` when the font gives none (or, for an
+    /// identity `/ToUnicode` name, when the code is a control or a lone surrogate).
     pub(crate) fn char_code_to_unicode(&self, code: u32) -> Option<BfString> {
         if self.identity_to_unicode {
             // Controls and lone surrogates are not text.
