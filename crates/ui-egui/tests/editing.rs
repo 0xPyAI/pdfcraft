@@ -2165,7 +2165,7 @@ fn a_secured_form_shows_its_form_notice_and_its_security() {
     });
     h.run_steps(4);
     h.get_by_label_contains("interactive form fields. This document is secured. Some changes are restricted by its security settings.");
-    h.get_by_label("Highlight fields");
+    h.get_by_label("Hide field highlights");
     h.get_by_label("Security settings");
     h.get_by_label("Unlock…");
 }

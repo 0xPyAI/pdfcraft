@@ -228,6 +228,6 @@ fn a_secured_dynamic_xfa_form_shows_its_layout_and_its_security() {
     .unwrap();
     let h = open(pdfcraft_cos::write_full(&doc, &Default::default()).unwrap());
     h.get_by_label_contains("laid out from its template: 2 pages, 11 fields. This document is secured.");
-    h.get_by_label("Highlight fields");
+    h.get_by_label("Hide field highlights");
     h.get_by_label("Security settings");
 }
