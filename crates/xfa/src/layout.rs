@@ -912,7 +912,8 @@ impl Layouter<'_> {
         let ctx = ctx.with_som(c, 0);
         let som = ctx.som.clone();
         // A container without a width is as wide as its content (a radio group beside its
-        // question, say); a leaf without one takes what is available.
+        // question, say), and so is a text label or a button (as wide as its caption), within
+        // what is available; any other field without one takes what is available.
         let w = match c.w {
             Some(w) => w,
             None => match node {
@@ -920,7 +921,13 @@ impl Layouter<'_> {
                     let inner = (avail_w - c.margin.horizontal()).max(1.0);
                     (self.content_width(node, inner, &ctx, depth) + c.margin.horizontal()).min(avail_w)
                 }
-                Node::Field(_) | Node::Draw(_) => avail_w,
+                Node::Draw(d) => self.natural_width(&d.value, &ctx.font, &ctx.para).map_or(avail_w, |t| (t + c.margin.horizontal()).min(avail_w)),
+                Node::Field(f) if f.ui == Ui::Button => f
+                    .caption
+                    .as_ref()
+                    .and_then(|cap| self.natural_width(&cap.value, &ctx.font.apply(&cap.font), &ctx.para.apply(&cap.para)))
+                    .map_or(avail_w, |t| (t + c.margin.horizontal() + f.ui_margin.horizontal()).min(avail_w)),
+                Node::Field(_) => avail_w,
             },
         };
         let w = clamp_opt(w, c.min_w, c.max_w);
@@ -1002,6 +1009,17 @@ impl Layouter<'_> {
                 .min(avail_w),
             Layout::Tb | Layout::Table => visible.map(|k| self.size_of(k, avail_w, ctx, depth + 1).0).fold(0.0, f64::max).min(avail_w),
         }
+    }
+
+    /// How wide text `v` is unwrapped, in `font` and `para`, with a hair to spare so that laying
+    /// it out at that width keeps it on its lines; `None` for what isn't text.
+    fn natural_width(&self, v: &Value, font: &Font, para: &Para) -> Option<f64> {
+        let rich = match v {
+            Value::Text(t) => text::plain(t),
+            Value::Rich(r) => r.clone(),
+            _ => return None,
+        };
+        Some(text::natural_width(&rich, para, &Face::of(font), &|id| self.embed(id)) + 0.01)
     }
 
     fn value_height(&self, v: &Value, w: f64, ctx: &Ctx) -> f64 {

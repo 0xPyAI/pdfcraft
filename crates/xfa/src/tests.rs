@@ -1195,6 +1195,63 @@ fn repeating_subforms_inside_positioned_content_get_their_instances() {
 /// treated like a subform (at most once), so once the first body page was out the layout fell
 /// back to the last page area, here one limited to a single use, and drew its content over every
 /// body page (and listed a copy of its fields per page).
+/// A positioned subform holding `body`, laid out; its page's items.
+fn positioned(body: &str) -> Vec<Item> {
+    let xdp = format!(
+        r##"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <subform name="box" w="7.5in" h="3in">{body}</subform>
+</subform>
+</template></xdp:xdp>"##
+    );
+    layout_xml(&xdp).unwrap().pages.into_iter().next().unwrap().items
+}
+
+#[test]
+fn a_label_without_a_width_is_as_wide_as_its_text() {
+    const TEXT: &str = "PERSONNEL ONLY: from date (YYYYMMDD):";
+    let natural = pdfcraft_fonts::helvetica_width(TEXT, 8.0);
+    // Right-aligned, with a minimum narrower than the text: the box is as wide as the text and
+    // starts where it is placed, so the text does too (not at the far right of the subform).
+    let items = positioned(&format!(
+        r#"<draw name="a" x="1in" y="0" minW="50pt"><value><text>{TEXT}</text></value><font typeface="Arial" size="8pt"/><para hAlign="right"/></draw>"#
+    ));
+    let span = items.iter().find_map(|i| if let Item::Text(s) = i { Some(s) } else { None }).expect("the text");
+    assert!((span.x - (36.0 + 72.0)).abs() < 0.05, "starts at its x: {}", span.x);
+    // With a minimum wider than the text, the box is that wide and the text ends at its right.
+    let items = positioned(&format!(
+        r#"<draw name="a" x="1in" y="0" minW="{}pt"><value><text>{TEXT}</text></value><font typeface="Arial" size="8pt"/><para hAlign="right"/></draw>"#,
+        natural + 40.0
+    ));
+    let span = items.iter().find_map(|i| if let Item::Text(s) = i { Some(s) } else { None }).expect("the text");
+    assert!((span.x + span.face.width(&span.text) - (36.0 + 72.0 + natural + 40.0)).abs() < 0.05, "ends at its right: {}", span.x);
+    // Text longer than the room left still wraps at the container's width.
+    let long = "word ".repeat(200);
+    let items = positioned(&format!(r#"<draw name="a" x="0" y="0"><value><text>{long}</text></value><font typeface="Arial" size="8pt"/></draw>"#));
+    let lines: std::collections::BTreeSet<i64> =
+        items.iter().filter_map(|i| if let Item::Text(s) = i { Some((s.baseline * 100.0).round() as i64) } else { None }).collect();
+    assert!(lines.len() > 1, "wraps: {} line(s)", lines.len());
+}
+
+#[test]
+fn a_button_without_a_width_is_as_wide_as_its_caption() {
+    // No width, a minimum narrower than its caption: as wide as the caption, not the subform.
+    let caption = "Open the instructions for this form";
+    let items = positioned(&format!(
+        r#"<field name="help" x="1in" y="0" minW="40pt" minH="12pt"><ui><button/></ui><caption><value><text>{caption}</text></value><font typeface="Arial" size="8pt"/></caption></field>"#
+    ));
+    let button = items.iter().find_map(|i| if let Item::Widget(w) = i { Some(w) } else { None }).expect("the button");
+    let natural = pdfcraft_fonts::helvetica_width(caption, 8.0);
+    assert!(button.rect.w >= natural && button.rect.w < natural + 10.0, "{} for a caption of {natural}", button.rect.w);
+    // A minimum wider than the caption wins.
+    let items = positioned(
+        r#"<field name="help" x="1in" y="0" minW="200pt" minH="12pt"><ui><button/></ui><caption><value><text>Help</text></value><font typeface="Arial" size="8pt"/></caption></field>"#,
+    );
+    let button = items.iter().find_map(|i| if let Item::Widget(w) = i { Some(w) } else { None }).expect("the button");
+    assert!((button.rect.w - 200.0).abs() < 0.05, "{}", button.rect.w);
+}
+
 #[test]
 fn page_area_without_occur_serves_every_body_page() {
     let section = |n: u32| {
