@@ -2141,3 +2141,18 @@ fn som_indices_count_earlier_same_named_siblings() {
     let sibs = SomIndices::of(&children);
     assert_eq!((0..=children.len()).map(|i| sibs.at(i)).collect::<Vec<_>>(), [0, 0, 1, 0, 2, 1, 0]);
 }
+
+#[test]
+fn a_date_typed_by_another_of_its_edit_pictures_patterns_is_written_in_the_first() {
+    let (tpl, _) = crate::parse(&crate::fixtures::date_alternatives_template()).unwrap();
+    let typed = |som: &str, text: &str| crate::typed_date(&tpl, som, text);
+    let leave = "form[0].leave[0]";
+    assert_eq!(typed(leave, "261018").as_deref(), Some("20261018"), "by yymmdd");
+    assert_eq!(typed(leave, "2026118").as_deref(), Some("20261108"), "by yyyymd");
+    assert_eq!(typed(leave, "26 10 18").as_deref(), Some("20261018"), "by yy mm dd");
+    assert_eq!(typed(leave, "20261018"), None, "the first pattern reads it: it stays as typed");
+    assert_eq!(typed(leave, "not a date"), None);
+    assert_eq!(typed(leave, "2618"), None, "no pattern has room for four digits");
+    assert_eq!(typed("form[0].born[0]", "181026"), None, "one pattern: nothing else to try");
+    assert_eq!(typed("form[0].name[0]", "261018"), None, "not a date field");
+}

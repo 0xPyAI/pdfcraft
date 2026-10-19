@@ -810,6 +810,28 @@ pub(crate) fn on_data_replaced(doc: &mut pdfcraft_cos::Document, tpl: &Template,
     r.finish().map(|_| ())
 }
 
+/// A text value typed into the laid-out XFA date field `name` by another of its edit picture's
+/// patterns, written in the first ([`pdfcraft_xfa::typed_date`]); `None` for anything else.
+/// `tpl` is the template the scripts use, when they run; otherwise it is read from `doc`.
+pub(crate) fn typed_date(
+    doc: &pdfcraft_cos::Document,
+    tpl: Option<&Template>,
+    name: &str,
+    value: &pdfcraft_forms::FieldValue,
+) -> Option<pdfcraft_forms::FieldValue> {
+    let pdfcraft_forms::FieldValue::Text(text) = value else { return None };
+    let som = pdfcraft_xfa::fields_by_som(doc).into_iter().find_map(|(som, n)| (n == name).then_some(som))?;
+    let read;
+    let tpl = match tpl {
+        Some(t) => t,
+        None => {
+            read = pdfcraft_xfa::template_of(doc).ok()?;
+            &read
+        }
+    };
+    pdfcraft_xfa::typed_date(tpl, &som, text).map(pdfcraft_forms::FieldValue::Text)
+}
+
 /// A button's click script (or any event, by SOM path and activity), then calculations.
 pub(crate) fn on_event(doc: &mut pdfcraft_cos::Document, tpl: &Template, som: &str, activity: &str, run: &mut XfaRun) -> Result<(), String> {
     let mut r = Runner::new(doc, tpl, run, EVENT_BUDGET_MS);
