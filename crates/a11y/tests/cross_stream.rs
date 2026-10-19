@@ -1,6 +1,6 @@
 use pdfcraft_a11y::{Options, Rule, Status, autotag_text, check, figures, mark_decorative, mark_tag_artifact, tag_content, tags};
 use pdfcraft_content::{Op, Pieces};
-use pdfcraft_cos::{Document, ObjRef, Object};
+use pdfcraft_cos::{Dict, Document, ObjRef, Object, SaveOptions, Stream, write_full, write_incremental};
 
 const FONT: &str = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>";
 const HIDDEN_AND_AFTER: &str = "BT /F1 12 Tf 72 520 Td (Hidden) Tj ET\nBT /F1 12 Tf 72 500 Td (After) Tj ET";
@@ -95,6 +95,93 @@ fn joined_ops(doc: &Document) -> (Vec<Op>, usize) {
 
 fn shown_strings(ops: &[Op]) -> Vec<String> {
     ops.iter().filter(|op| op.is("Tj")).filter_map(|op| op.operands.first()?.as_string().map(|s| s.to_text())).collect()
+}
+
+#[test]
+fn mark_decorative_leaves_the_other_stream_untouched() {
+    let mut doc = tagged_figure_two_streams("0 0 1 rg 300 600 100 50 re f", "BT /F1 12 Tf 72 500 Td (After) Tj ET");
+    let before = doc.get(ObjRef::new(11, 0)).clone();
+    mark_decorative(&mut doc, ObjRef::new(8, 0)).expect("mark decorative succeeds");
+    assert!(figures(&doc).is_empty());
+    assert_eq!(*doc.get(ObjRef::new(11, 0)), *before, "the second stream holds no figure and keeps its object");
+    let page = doc.get(ObjRef::new(3, 0));
+    let contents = page.as_dict().unwrap().get(b"Contents").unwrap().as_array().unwrap();
+    assert_eq!(contents[1].as_ref(), Some(ObjRef::new(11, 0)), "the untouched stream must not be replaced by a re-encoded copy");
+}
+
+/// A and B supply different operands to R's BDC. Reusing R must not let the first
+/// occurrence's splice remove the unselected second occurrence's BDC.
+fn split_marked_content(shared: bool) -> Document {
+    let mut doc = tagged_figure_two_streams("", "");
+    doc.set(ObjRef::new(10, 0), Object::Stream(Stream::flate(Dict::new(), b"/Figure << /MCID 0 >>")));
+    let body = Object::Stream(Stream::flate(Dict::new(), b"BDC 0 0 10 10 re f EMC"));
+    doc.set(ObjRef::new(11, 0), body.clone());
+    let b = doc.add(Object::Stream(Stream::flate(Dict::new(), b"/Span << /MCID 1 >>")));
+    let second = if shared { ObjRef::new(11, 0) } else { doc.add(body) };
+    doc.update_dict(ObjRef::new(3, 0), |p| {
+        p.set(
+            b"Contents".to_vec(),
+            Object::Array(vec![Object::Ref(ObjRef::new(10, 0)), Object::Ref(ObjRef::new(11, 0)), Object::Ref(b), Object::Ref(second)]),
+        );
+    })
+    .unwrap();
+    Document::open(std::sync::Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap()
+}
+
+fn assert_selected_occurrence_only(shared: bool) {
+    let mut doc = split_marked_content(shared);
+    let (before, skipped) = joined_ops(&doc);
+    assert_eq!(skipped, 0);
+    assert_eq!(before.iter().filter(|op| op.is("BDC")).count(), 2);
+    let figure = figures(&doc)[0].obj;
+    mark_decorative(&mut doc, figure).unwrap();
+    for bytes in [write_full(&doc, &SaveOptions::default()).unwrap(), write_incremental(&doc, &SaveOptions::default()).unwrap()] {
+        let reopened = Document::open(std::sync::Arc::new(bytes)).unwrap();
+        let (ops, skipped) = joined_ops(&reopened);
+        assert_eq!(skipped, 0);
+        assert_eq!(ops.iter().filter(|op| op.is("BMC") && op.name(0) == Some(b"Artifact")).count(), 1);
+        let unselected: Vec<_> = ops.iter().filter(|op| op.is("BDC")).collect();
+        assert_eq!(unselected.len(), 1, "unselected Span must retain its BDC after save/reopen");
+        assert_eq!(unselected[0].name(0), Some(b"Span".as_slice()));
+        assert_eq!(unselected[0].operands[1].as_dict().unwrap().get(b"MCID").and_then(Object::as_int), Some(1));
+        assert_eq!(ops.iter().filter(|op| op.is("re")).count(), 2);
+        assert_eq!(ops.iter().filter(|op| op.is("EMC")).count(), 2);
+        assert!(figures(&reopened).is_empty());
+    }
+}
+
+#[test]
+fn mark_decorative_isolates_shared_stream_occurrences_after_save() {
+    assert_selected_occurrence_only(true);
+}
+
+#[test]
+fn mark_decorative_preserves_unique_stream_occurrences_after_save() {
+    assert_selected_occurrence_only(false);
+}
+
+#[test]
+fn mark_decorative_leaves_another_page_using_the_stream_untouched() {
+    let mut doc = tagged_figure_two_streams("", "BT /F1 12 Tf 72 500 Td (After) Tj ET");
+    let page = doc.get(ObjRef::new(3, 0)).as_dict().unwrap().clone();
+    let other_page = doc.add(Object::Dict(page));
+    doc.update_dict(ObjRef::new(2, 0), |p| {
+        p.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(ObjRef::new(3, 0)), Object::Ref(other_page)]));
+        p.set(b"Count".to_vec(), Object::Int(2));
+    })
+    .unwrap();
+    let before = doc.get(ObjRef::new(10, 0)).clone();
+    mark_decorative(&mut doc, ObjRef::new(8, 0)).unwrap();
+    for bytes in [write_full(&doc, &SaveOptions::default()).unwrap(), write_incremental(&doc, &SaveOptions::default()).unwrap()] {
+        let reopened = Document::open(std::sync::Arc::new(bytes)).unwrap();
+        let pages = pdfcraft_model::pages(&reopened);
+        assert_eq!(pages.len(), 2);
+        let contents = pages[1].dict.get(b"Contents").unwrap().as_array().unwrap();
+        assert_eq!(*reopened.resolve(&contents[0]), *before, "the other page's shared figure stream must stay intact");
+        let (ops, skipped) = joined_ops(&reopened);
+        assert_eq!(skipped, 0);
+        assert!(ops.iter().any(|op| op.is("BMC") && op.name(0) == Some(b"Artifact")));
+    }
 }
 
 #[test]

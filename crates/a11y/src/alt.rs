@@ -357,14 +357,9 @@ fn artifact_marked_content(doc: &mut Document, page: &pdfcraft_model::Page, ids:
         dict.remove(b"Filter");
         dict.remove(b"DecodeParms");
         let stream = Object::Stream(Stream::flate(dict, &new));
-        let stored = match entry {
-            Object::Ref(r) => {
-                doc.set(r, stream);
-                Object::Ref(r)
-            }
-            _ => Object::Ref(doc.add(stream)),
-        };
-        next.push(stored);
+        // Splicing depends on this occurrence's neighbours. The original stream may also
+        // appear elsewhere in this array or on another page, where it must stay unchanged.
+        next.push(Object::Ref(doc.add(stream)));
     }
     if changed {
         let contents = match next.as_slice() {
