@@ -289,8 +289,13 @@ pub(crate) fn draw_image_xobject<'a, 'b>(
     // PdfCraft patch (39): an image without a mask covers its whole placement rectangle, so in
     // a knockout group it replaces what the group drew there (#2971). A stencil's or a masked
     // image's shape is its mask; those composite as before (exact where the mask is opaque or
-    // transparent, which is what masks mostly are).
-    if !x_object.is_mask && !has_alpha {
+    // transparent, which is what masks mostly are). Only an image that decodes clears: one that
+    // doesn't (over `MAX_IMAGE_PIXELS`, damaged data) draws nothing, so it replaces nothing.
+    if !x_object.is_mask
+        && !has_alpha
+        && device.in_knockout_group()
+        && x_object.decoded_raster(None).is_some()
+    {
         device.knockout_shape(&(transform * Rect::new(0.0, 0.0, width, height).to_path(0.1)));
     }
 

@@ -83,6 +83,12 @@ pub trait Device<'a> {
     /// element replaces what the group drew under its shape, so a device clears that first;
     /// the element's layer then composites over the cleared area as usual.
     fn knockout_shape(&mut self, _shape: &BezPath) {}
+    /// PdfCraft patch (39): whether `knockout_shape` would clear anything now, that is whether
+    /// the innermost transparency group is a knockout group. Lets the interpreter skip work it
+    /// only needs for the clear.
+    fn in_knockout_group(&mut self) -> bool {
+        false
+    }
     /// PdfCraft patch (39): whether a transparency group drawn now is an element of a knockout
     /// group that the device wants cleared under the group's shape first. If so the
     /// interpreter draws the group's content once between `begin_knockout_erase` and

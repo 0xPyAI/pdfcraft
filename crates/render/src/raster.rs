@@ -6056,7 +6056,7 @@ trailer << /Root 1 0 R >>
 4 0 obj << /Length 39 >> stream
 /Fm1 Do /G gs 0 1 0 rg 10 10 30 30 re f
 endstream endobj
-5 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency {group} >> /Resources << /ExtGState << /A << /ca 0.5 >> >> /XObject << /In 6 0 R /Msk 7 0 R /Neu 8 0 R /Img 9 0 R /Sm 10 0 R /Nimg 12 0 R /Deep 13 0 R >> >> /Length {} >> stream
+5 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency {group} >> /Resources << /ExtGState << /A << /ca 0.5 >> >> /XObject << /In 6 0 R /Msk 7 0 R /Neu 8 0 R /Img 9 0 R /Sm 10 0 R /Nimg 12 0 R /Deep 13 0 R /Shg 16 0 R /Big 17 0 R >> >> /Length {} >> stream
 {form}
 endstream endobj
 6 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /A << /ca 0.5 >> >> >> /Length 34 >> stream
@@ -6085,6 +6085,13 @@ endstream endobj
 endstream endobj
 14 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Length 28 >> stream
 0 0 1 rg 100 50 150 120 re f
+endstream endobj
+15 0 obj << /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 1 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [0 0 1] /C1 [0 0 1] /N 1 >> /Extend [true true] /BBox [100 50 140 170] >> >> endobj
+16 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /Pattern << /P 15 0 R >> >> /Length 38 >> stream
+/Pattern cs /P scn 100 50 150 120 re f
+endstream endobj
+17 0 obj << /Type /XObject /Subtype /Image /Width 20000 /Height 20000 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 7 >> stream
+0000FF>
 endstream endobj
 trailer << /Root 1 0 R >>
 %%EOF",
@@ -6151,6 +6158,24 @@ trailer << /Root 1 0 R >>
         // A stencil mask must not erase the red beside it.
         let stencil = render(ko, &format!("{red}0 0 1 rg q 150 0 0 120 100 50 cm /Msk Do Q"));
         check(&stencil, 50, 40, [255, 128, 128], "red beside a stencil");
+        // Where the stencil paints (every sample 0), its blue is drawn (review on #2974: the check
+        // above alone passed even if the stencil drew nothing). A stencil composites as it did
+        // before rather than knocking the red out, and its exact colour also depends on #2975 (a
+        // stencil's fill opacity applied twice), so only "blue was drawn here" is pinned.
+        let under = px(&stencil, 130, 100);
+        assert!(under != [255, 128, 128] && under[2] >= 150 && under[0] < 230, "stencil drew nothing: {under:?}");
+
+        // A shading's /BBox clips it (ISO 32000-2 Table 77), so a shading fill's shape is its path
+        // inside the box: the erase pass must clear only that, or the red outside the box but
+        // inside the path stays erased (review on #2974).
+        let shaded = render(ko, &format!("{red}/Shg Do"));
+        check(&shaded, 120, 100, [128, 128, 255], "the shading inside its box");
+        check(&shaded, 155, 100, [255, 128, 128], "red outside the shading's box");
+
+        // An image that isn't decoded (here over the renderer's pixel limit) draws nothing, so it
+        // must not clear what is under its rectangle either (review on #2974).
+        let undecoded = render(ko, &format!("{red}q 160 0 0 100 60 50 cm /Big Do Q"));
+        check(&undecoded, 100, 100, [255, 128, 128], "red under an image that isn't drawn");
     }
 
     /// Reading colours replace *document* colours, never annotation colours (issue #1548): a

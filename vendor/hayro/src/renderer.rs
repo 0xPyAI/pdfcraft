@@ -1063,7 +1063,14 @@ impl Renderer {
         if self.erasing {
             self.ctx.set_blend_mode(knockout_blend_mode());
             self.ctx.set_paint(AlphaColor::<Srgb>::new([0.0, 0.0, 0.0, 0.0]));
-            return None;
+            // A shading's `/BBox` clips what it paints, so it clips what it clears too.
+            return match paint {
+                Paint::Pattern(p) => match p.as_ref() {
+                    Pattern::Shading(s) => s.shading.clip_path.clone(),
+                    _ => None,
+                },
+                _ => None,
+            };
         }
         let mut paint_transform = Affine::IDENTITY;
         let mut clip_path = None;
@@ -1725,6 +1732,10 @@ impl<'a> Device<'a> for Renderer {
         self.erasing = false;
         self.erase_groups = 0;
         self.ctx.set_blend_mode(knockout_blend_mode());
+    }
+
+    fn in_knockout_group(&mut self) -> bool {
+        self.in_knockout()
     }
 
     fn knockout_shape(&mut self, shape: &BezPath) {
