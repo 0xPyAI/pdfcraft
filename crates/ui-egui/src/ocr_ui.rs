@@ -65,6 +65,9 @@ pub struct BatchProgress {
 pub struct OcrRun {
     pub doc: DocId,
     pub progress: Arc<Mutex<OcrProgress>>,
+    /// Started by Edit on a scanned page, not asked for: it shows no progress, and says nothing when
+    /// it found no words (a page with text of its own is skipped, and Edit must not make noise).
+    pub automatic: bool,
 }
 
 pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (bool, bool) {
@@ -165,7 +168,7 @@ impl PdfCraftApp {
             OcrPages::Range => (d.from.saturating_sub(1)..d.to).collect(),
         };
         let settings = d.settings();
-        self.start_ocr_pages(id, &pages, settings);
+        self.start_ocr_pages(id, &pages, settings, false);
     }
 
     /// Edit on a scanned page: like Acrobat's "Converting scanned page to Editable Text and
@@ -216,11 +219,11 @@ impl PdfCraftApp {
         let mut settings = self.ocr_draft.settings();
         settings.skip_text_pages = true;
         settings.native_text_only = true;
-        self.start_ocr_pages(id, &[page], settings);
+        self.start_ocr_pages(id, &[page], settings, true);
     }
 
     /// Recognize `pages` (0-based; empty = all) of document `id` in the background.
-    fn start_ocr_pages(&mut self, id: DocId, pages: &[usize], settings: OcrSettings) {
+    fn start_ocr_pages(&mut self, id: DocId, pages: &[usize], settings: OcrSettings, automatic: bool) {
         let Some(job) = self.session.ocr_job(id, pages, settings) else { return };
         let progress = Arc::new(Mutex::new(OcrProgress { total: job.pages.len(), ..Default::default() }));
         let p = progress.clone();
@@ -245,7 +248,7 @@ impl PdfCraftApp {
         }
         #[cfg(target_arch = "wasm32")]
         work();
-        self.ocr_run = Some(OcrRun { doc: id, progress });
+        self.ocr_run = Some(OcrRun { doc: id, progress, automatic });
         self.poll_ocr();
     }
 
@@ -369,7 +372,7 @@ impl PdfCraftApp {
             }
         }
         let Some(run) = self.ocr_run.as_ref() else { return };
-        let (doc, progress) = (run.doc, run.progress.clone());
+        let (doc, progress, automatic) = (run.doc, run.progress.clone(), run.automatic);
         let Ok(mut s) = progress.lock() else { return };
         let Some(result) = s.result.take() else {
             let msg = crate::i18n::fmt(
@@ -377,7 +380,7 @@ impl PdfCraftApp {
                 &[("d", &(s.done + 1).min(s.total.max(1)).to_string()), ("t", &s.total.max(1).to_string())],
             );
             drop(s);
-            if self.toast.as_ref().is_none_or(|t| t.0 != msg) {
+            if !automatic && self.toast.as_ref().is_none_or(|t| t.0 != msg) {
                 self.notify(msg);
             }
             if let Some(ctx) = &self.ctx {
@@ -402,6 +405,10 @@ impl PdfCraftApp {
                     && let Some(view) = self.views.iter_mut().find(|v| v.id == doc)
                 {
                     view.document_changed(&info);
+                }
+                // An automatic run that found nothing (a page that has text of its own) says nothing.
+                if automatic && words == 0 {
+                    return;
                 }
                 let words_part = if words == 1 {
                     crate::i18n::fmt(tl!("Recognized 1 word"), &[])

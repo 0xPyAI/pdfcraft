@@ -273,6 +273,9 @@ fn editing_a_page_with_text_over_a_background_picture_changes_nothing() {
     assert!(h.state().ocr_run.is_none());
     assert_eq!(h.state().session.get(id).unwrap().can_undo(), None, "nothing was recognized or marked modified");
     assert!(!h.state().session.get(id).unwrap().dirty, "the file is not marked modified");
+    // And Edit says nothing about recognizing: no progress, no "0 words ... already had text".
+    let toast = h.state().toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+    assert!(!toast.contains("ecogniz") && !toast.contains("already had text"), "{toast:?}");
 }
 
 /// A page that is not a scan when Edit looks at it is looked at again after the document changes:
