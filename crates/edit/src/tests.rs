@@ -4975,3 +4975,20 @@ fn flattening_comments_keeps_annotations_that_are_not_comments() {
     let without_widget: Vec<&str> = all.iter().copied().filter(|s| *s != "Widget").collect();
     assert_eq!(left(&reopen(&doc)), without_widget, "flattening fields touches no annotation that isn't a widget");
 }
+
+/// A footnote marker (`Ts` text rise, a smaller `Tf` size) does not split the paragraph around it
+/// into separate editable zones (#3252): on `main` this read as three blocks — the text up to the
+/// marker, the marker alone, and the text after it — because the row-joining baseline tolerance
+/// was scaled by the smaller of the two runs' sizes, far tighter than a typical superscript's rise.
+#[test]
+fn a_superscript_footnote_marker_stays_in_its_paragraphs_row() {
+    let doc = text_page(
+        "BT /F1 12 Tf 72 700 Td (and A.) Tj 0 -14 Td (Edward Siecienski) Tj 4 Ts /F1 7.2 Tf (3) Tj 0 Ts /F1 12 Tf (. More words continue the paragraph right after the marker.) Tj ET",
+    );
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 4, "the marker is its own line, raised and smaller: {lines:?}");
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 1, "one paragraph, not split at the marker: {blocks:?}");
+    assert_eq!(blocks[0].rows.len(), 2, "two visual rows, the second carrying the marker");
+    assert_eq!(blocks[0].text, "and A. Edward Siecienski3. More words continue the paragraph right after the marker.", "{:?}", blocks[0]);
+}

@@ -71,7 +71,11 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
             scanned
                 && (mixed || same_style(prev, line))
                 && same_plane(prev, line)
-                && (prev.frame_origin().1 - line.frame_origin().1).abs() < prev.size.min(line.size) * 0.2
+                // A superscript or subscript run (a footnote marker, say) sits on the same visual
+                // row as the text around it, raised or lowered by `Ts` from the body baseline
+                // (#3252). That shift is typically up to half the body size, not the marker's own
+                // smaller size, so the tolerance is scaled by the larger of the two.
+                && (prev.frame_origin().1 - line.frame_origin().1).abs() < prev.size.max(line.size) * 0.5
                 && gap >= -prev.size.min(line.size) * 0.2
                 && gap < prev.size.max(line.size) * 1.5
                 // Separate same-style text objects that merely touch or overlap, with no space
