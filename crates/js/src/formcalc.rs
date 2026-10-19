@@ -1924,7 +1924,7 @@ fn parse_date(text: &str, picture: &str) -> Option<(i64, u32, u32)> {
 }
 
 /// Number of days in month `m` (1-12) of year `y`, leap years included.
-fn days_in(y: i64, m: u32) -> u32 {
+pub(crate) fn days_in(y: i64, m: u32) -> u32 {
     match m {
         2 if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,
         2 => 28,

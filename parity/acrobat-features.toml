@@ -5136,8 +5136,8 @@ milestone = "M6"
 status = "partial"
 commands = ["tools.js_console"]
 tools = ["js_run"]
-evidence = ["crates/js/src/tests.rs::calculate_scripts_read_fields_and_set_the_value", "crates/engine/src/tests.rs::form_javascript_validates_calculates_and_formats", "crates/automation/tests/automation.rs::javascript_through_tools"]
-notes = "boa (pure Rust) with the forms object model: event, getField/Field (value, readonly, display, colours, items, check boxes), app, util.printf/printd/printx, console, display, color; no annotations, layers or dialogs (app.response returns null) yet."
+evidence = ["crates/js/src/tests.rs::calculate_scripts_read_fields_and_set_the_value", "crates/js/src/tests.rs::scand_allows_separators_between_fields_but_nothing_before_or_after_them", "crates/engine/src/tests.rs::form_javascript_validates_calculates_and_formats", "crates/automation/tests/automation.rs::javascript_through_tools"]
+notes = "boa (pure Rust) with the forms object model: event, getField/Field (value, readonly, display, colours, items, check boxes), app, util.printf/printd/printx/scand (scand reads dates as another viewer was observed to, in AcroForm and XFA scripts), console, display, color; no annotations, layers or dialogs (app.response returns null) yet."
 
 [[feature]]
 id = "form.js-console"
