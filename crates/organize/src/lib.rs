@@ -499,9 +499,10 @@ pub fn reverse_pages(doc: &mut Document, indices: &[usize]) -> Result<(), Organi
     rebuild(doc, &all)
 }
 
-/// Duplicate pages: copies of `indices` (in order) are inserted after the last of them, sharing
+/// Duplicate pages: copies of `indices` (in order) are inserted at `at` in the page order
+/// (clamped to the document's end), or after the last of them when `at` is `None`, sharing
 /// fonts and images with the originals.
-pub fn duplicate_pages(doc: &mut Document, indices: &[usize]) -> Result<(), OrganizeError> {
+pub fn duplicate_pages(doc: &mut Document, indices: &[usize], at: Option<usize>) -> Result<(), OrganizeError> {
     let n = page_count(doc)?;
     check(indices, n)?;
     let Some(&last) = indices.iter().max() else { return Ok(()) };
@@ -509,7 +510,7 @@ pub fn duplicate_pages(doc: &mut Document, indices: &[usize]) -> Result<(), Orga
     order.sort_unstable();
     order.dedup();
     let src = doc.clone();
-    import_pages(doc, &src, &order, last + 1).map(|_| ())
+    import_pages(doc, &src, &order, at.unwrap_or(last + 1)).map(|_| ())
 }
 
 /// Replace Pages: the content of `targets` (in order) is replaced by that of `src_pages` of
