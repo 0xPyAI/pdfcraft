@@ -560,6 +560,10 @@ fn small_rsa_keys_say_so_and_others_do_not() {
     assert_eq!(rsa([vec![0, 0x80], vec![0; 255]].concat()).weakness(), None);
     assert_eq!(rsa(vec![0xFF; 512]).weakness(), None);
     assert_eq!(rsa(Vec::new()).weakness(), note, "an empty modulus is not a strong key");
+    // The key description counts the same bits, so it never says 2048 next to the warning.
+    assert_eq!(rsa([vec![0], vec![0xC0; 128]].concat()).describe(), "RSA 1024-bit");
+    assert_eq!(rsa([vec![0x7F], vec![0xFF; 255]].concat()).describe(), "RSA 2047-bit");
+    assert_eq!(rsa([vec![0, 0x80], vec![0; 255]].concat()).describe(), "RSA 2048-bit");
     assert_eq!(PublicKey::P256(vec![4; 65]).weakness(), None);
     let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
     assert_eq!(id.certificate.public_key.weakness(), None, "the 2048-bit test identity");

@@ -386,7 +386,7 @@ impl PublicKey {
     /// "RSA 2048-bit", "ECDSA P-256"…
     pub fn describe(&self) -> String {
         match self {
-            PublicKey::Rsa { n, .. } => format!("RSA {}-bit", n.len() * 8),
+            PublicKey::Rsa { n, .. } => format!("RSA {}-bit", rsa_bits(n)),
             PublicKey::P256(_) => "ECDSA P-256".into(),
             PublicKey::P384(_) => "ECDSA P-384".into(),
             PublicKey::P521(_) => "ECDSA P-521".into(),
