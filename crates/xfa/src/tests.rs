@@ -351,6 +351,55 @@ fn a_date_is_read_from_the_data_in_its_data_picture() {
 }
 
 #[test]
+fn som_paths_name_the_template_field_their_numbers_count_to() {
+    let xml = r#"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form">
+ <field name="x"><bind><picture>first</picture></bind></field>
+ <subform name="row"><occur min="1" max="-1"/><field name="d"><bind><picture>row</picture></bind></field></subform>
+ <field name="x"><bind><picture>second</picture></bind></field>
+ <subform><field name="u"><bind><picture>inner</picture></bind></field></subform>
+</subform>
+</template></xdp:xdp>"#;
+    let (tpl, _) = parse(xml).unwrap();
+    let picture = |som: &str| crate::data::template_field(&tpl, som).and_then(|f| f.data_picture.clone());
+    // Same-named siblings count up; each SOM number is its own field.
+    assert_eq!(picture("form[0].x[0]").as_deref(), Some("first"));
+    assert_eq!(picture("form[0].x[1]").as_deref(), Some("second"));
+    assert_eq!(picture("form[0].x[2]"), None, "no third x");
+    // The instances of a repeating subform follow its number: all are the one template node.
+    assert_eq!(picture("form[0].row[0].d[0]").as_deref(), Some("row"));
+    assert_eq!(picture("form[0].row[3].d[0]").as_deref(), Some("row"));
+    // An unnamed subform is looked through, as data paths do.
+    assert_eq!(picture("form[0].u[0]").as_deref(), Some("inner"));
+}
+
+#[test]
+fn a_refreshed_field_takes_its_value_from_its_own_template_field() {
+    // Two text fields named `x` with different defaults; the data holds only the first.
+    let xml = r#"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form">
+ <field name="x"><ui><textEdit/></ui><value><text>first</text></value></field>
+ <field name="x"><ui><textEdit/></ui><value><text>second</text></value></field>
+</subform>
+</template><xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"><xfa:data><form><x>a</x></form></xfa:data></xfa:datasets></xdp:xdp>"#;
+    let (tpl, _) = parse(xml).unwrap();
+    let data = parse_datasets(xml).unwrap();
+    let mut live = form_tree(&tpl, Some(&data), &Overrides::default()).root;
+    let value = |live: &crate::script::FormNode, som: &str| node_at(live, som).map(|n| n.value.clone());
+    assert_eq!(value(&live, "form[0].x[1]").as_deref(), Some("second"));
+    assert_eq!(crate::script::refresh_value(&mut live, &tpl, Some(&data), "form[0].x[1]"), Some(false), "nothing to change");
+    assert_eq!(value(&live, "form[0].x[1]").as_deref(), Some("second"), "not the first x's default");
+}
+
+/// The node of `live` at `som`.
+fn node_at<'a>(live: &'a crate::script::FormNode, som: &str) -> Option<&'a crate::script::FormNode> {
+    if live.som == som {
+        return Some(live);
+    }
+    live.children.iter().find_map(|c| node_at(c, som))
+}
+
+#[test]
 fn data_fills_the_fields_and_adds_rows() {
     let form = layout_xml(&template_with_data(1, DATA)).unwrap();
     let all: Vec<&Widget> = form.pages.iter().flat_map(widgets).collect();

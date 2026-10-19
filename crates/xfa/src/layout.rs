@@ -13,7 +13,7 @@ use std::sync::Arc;
 use base64::Engine;
 
 use crate::XfaError;
-use crate::data::{DataNode, data_path, data_to_iso, date_letters, is_on, iso_to_pattern};
+use crate::data::{DataNode, data_date_letters, data_path, data_to_iso, date_letters, is_on, iso_to_pattern};
 use crate::model::*;
 use crate::text::{self, Block, Face, Span};
 
@@ -1638,7 +1638,7 @@ impl Layouter<'_> {
                 let pattern = date_pattern(f.picture.as_deref());
                 // The data holds the date in the field's data picture, or else as an ISO date; the
                 // field shows it in its own pattern.
-                let data_pattern = f.data_picture.as_deref().and_then(date_letters);
+                let data_pattern = data_date_letters(f);
                 let shown = plain_value
                     .as_ref()
                     .map(|v| if data_value.is_some() { iso_to_pattern(&data_to_iso(v, data_pattern.as_deref()), &pattern) } else { v.clone() });

@@ -283,6 +283,42 @@ pub fn bound_date_template(data: &str) -> String {
     )
 }
 
+/// Date fields shown as `MM/DD/YYYY` whose data pictures differ: two siblings both named
+/// `due`, the first bound `YYYYMMDD` and the second `DDMMYYYY`, and `month`, bound `YYYYMM`
+/// (a year and month, no day).
+pub fn sibling_date_template(data: &str) -> String {
+    let datasets = if data.is_empty() {
+        String::new()
+    } else {
+        format!("<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\"><xfa:data>{data}</xfa:data></xfa:datasets>")
+    };
+    let field = |name: &str, bind: &str| {
+        format!(
+            r#"<field name="{name}" w="2in" h="0.3in"><ui><dateTimeEdit/><picture>date{{MM/DD/YYYY}}</picture></ui><value><date/></value><bind match="once"><picture>date{{{bind}}}</picture></bind></field>"#
+        )
+    };
+    format!(
+        r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <subform name="page" layout="tb">
+  {}
+  {}
+  {}
+ </subform>
+</subform>
+</template>
+{datasets}
+</xdp:xdp>
+"##,
+        field("due", "YYYYMMDD"),
+        field("due", "DDMMYYYY"),
+        field("month", "YYYYMM")
+    )
+}
+
 /// A 2 × 2 RGBA PNG: red, green / blue, transparent.
 pub fn tiny_png() -> Vec<u8> {
     TINY_PNG.to_vec()

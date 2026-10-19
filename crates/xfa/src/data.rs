@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, Stream};
 
 use crate::XfaError;
-use crate::model::{Field, Node, Template};
+use crate::model::{Field, Node, SomIndices, Template};
 use crate::packets::{Encoding, encode};
 
 const XFA_DATA_NS: &str = "http://www.xfa.org/schema/xfa-data/1.0/";
@@ -175,6 +175,16 @@ pub(crate) fn date_letters(picture: &str) -> Option<String> {
     Some(inner.replace('E', "d").to_ascii_lowercase())
 }
 
+/// The date letters of `f`'s data picture, when it holds a whole date. A data picture without a
+/// year, a month or a day can't hold the date the field shows, so such a field's data keeps
+/// ISO dates.
+pub(crate) fn data_date_letters(f: &Field) -> Option<String> {
+    let letters = f.data_picture.as_deref().and_then(date_letters)?;
+    let tokens = date_tokens(&letters);
+    let has = |any: &[&str]| tokens.iter().any(|t| any.contains(&t.as_str()));
+    (has(&["yyyy", "yy"]) && has(&["mm", "m"]) && has(&["dd", "d"])).then_some(letters)
+}
+
 /// A date as the data holds it, written in `data_pattern` (the field's data picture), read as
 /// an ISO date. A value that doesn't match, or a field without a data picture, is taken as it
 /// is: the data holds ISO dates by default.
@@ -190,24 +200,56 @@ fn iso_to_data(iso: String, data_pattern: Option<&str>) -> String {
     }
 }
 
-/// The template field a SOM path names (instance numbers aside), looking through unnamed
-/// subforms and areas as [`data_path`] does; `None` when the template has no such field.
-fn template_field<'a>(tpl: &'a Template, som: &str) -> Option<&'a Field> {
+/// The child of `nodes` the SOM segment `name[index]` names, numbered as the form numbers its
+/// objects ([`SomIndices`]): same-named siblings count up, and the instances of a repeating
+/// subform take the numbers from its own on. Unnamed subforms and areas are looked through,
+/// as [`named`] does.
+fn named_at<'a>(nodes: &'a [Node], name: &str, index: usize, depth: usize) -> Option<&'a Node> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    let sibs = SomIndices::of(nodes);
+    let mut repeating = None;
+    for (i, n) in nodes.iter().enumerate() {
+        if n.common().name.as_deref() != Some(name) {
+            continue;
+        }
+        let sib = sibs.at(i);
+        if sib == index {
+            return Some(n);
+        }
+        if sib < index && matches!(n, Node::Subform(sf) if sf.occur.max != Some(1)) {
+            repeating = Some(n);
+        }
+    }
+    repeating.or_else(|| {
+        nodes.iter().find_map(|n| match n {
+            Node::Subform(sf) if sf.common.name.is_none() => named_at(&sf.children, name, index, depth + 1),
+            Node::Area(a) if a.common.name.is_none() => named_at(&a.children, name, index, depth + 1),
+            _ => None,
+        })
+    })
+}
+
+/// The template field the object at a SOM path is an instance of, each segment's number counted
+/// as the form counts it ([`named_at`]). `None` when the template has no such field, or it is
+/// a button of an exclusion group (whose buttons take their value from the group).
+pub(crate) fn template_field<'a>(tpl: &'a Template, som: &str) -> Option<&'a Field> {
     let path = som_to_path(som);
     let ((root, _), rest) = path.split_first()?;
     if tpl.root.common.name.as_deref() != Some(root.as_str()) {
         return None;
     }
-    let ((last, _), inner) = rest.split_last()?;
+    let ((last, last_index), inner) = rest.split_last()?;
     let mut children: &[Node] = &tpl.root.children;
-    for (name, _) in inner {
-        children = match named(children, name, 0)? {
+    for (name, index) in inner {
+        children = match named_at(children, name, *index, 0)? {
             Node::Subform(sf) => &sf.children,
             Node::Area(a) => &a.children,
             _ => return None,
         };
     }
-    match named(children, last, 0)? {
+    match named_at(children, last, *last_index, 0)? {
         Node::Field(f) => Some(f),
         _ => None,
     }
@@ -215,7 +257,7 @@ fn template_field<'a>(tpl: &'a Template, som: &str) -> Option<&'a Field> {
 
 /// The date letters of the data picture of the field `som` names, when it has one.
 fn data_date_pattern(tpl: Option<&Template>, som: &str) -> Option<String> {
-    tpl.and_then(|t| template_field(t, som)).and_then(|f| f.data_picture.as_deref()).and_then(date_letters)
+    tpl.and_then(|t| template_field(t, som)).and_then(data_date_letters)
 }
 
 /// What a field holds, for writing the datasets.

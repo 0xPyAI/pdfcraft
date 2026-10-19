@@ -589,46 +589,6 @@ pub fn template_of(doc: &Document) -> Result<Template, XfaError> {
     crate::parse(&packets.xdp).map(|(t, _)| t)
 }
 
-/// The template field the object at `som` is an instance of, when it is a field outside an
-/// exclusion group (whose buttons take their value from the group).
-fn template_field<'a>(tpl: &'a Template, som: &str) -> Option<&'a Field> {
-    let path = crate::data::som_to_path(som);
-    let (first, rest) = path.split_first()?;
-    if tpl.root.common.name.as_deref() != Some(first.0.as_str()) {
-        return None;
-    }
-    let mut level: &[Node] = &tpl.root.children;
-    let mut found: Option<&Node> = None;
-    for (name, _) in rest {
-        let next = named_in(level, name, 0)?;
-        level = match next {
-            Node::Subform(sf) => &sf.children,
-            Node::Area(a) => &a.children,
-            _ => &[],
-        };
-        found = Some(next);
-    }
-    match found {
-        Some(Node::Field(f)) => Some(f),
-        _ => None,
-    }
-}
-
-/// The child of `nodes` named `name`, looking through unnamed subforms and areas (as data
-/// paths do); exclusion groups are not looked into.
-fn named_in<'a>(nodes: &'a [Node], name: &str, depth: usize) -> Option<&'a Node> {
-    if depth > MAX_DEPTH {
-        return None;
-    }
-    nodes.iter().find(|n| n.common().name.as_deref() == Some(name)).or_else(|| {
-        nodes.iter().find_map(|n| match n {
-            Node::Subform(sf) if sf.common.name.is_none() => named_in(&sf.children, name, depth + 1),
-            Node::Area(a) if a.common.name.is_none() => named_in(&a.children, name, depth + 1),
-            _ => None,
-        })
-    })
-}
-
 /// Give the field at `som` in `live`, and every other field bound to the same data node (a
 /// field inside an area shares its node with one outside, since areas are left out of data
 /// paths), the value [`form_tree`] would give it from `data` now, so a value change needs no
@@ -637,7 +597,7 @@ fn named_in<'a>(nodes: &'a [Node], name: &str, depth: usize) -> Option<&'a Node>
 /// node bound there is not a plain field the tree can refresh alone (a radio button, an
 /// exclusion group, an object the template doesn't have): rebuild the tree.
 pub fn refresh_value(live: &mut FormNode, tpl: &Template, data: Option<&DataNode>, som: &str) -> Option<bool> {
-    template_field(tpl, som)?;
+    crate::data::template_field(tpl, som)?;
     let path = data_path(tpl, som);
     if path.is_empty() {
         return None;
@@ -673,7 +633,7 @@ pub fn refresh_value(live: &mut FormNode, tpl: &Template, data: Option<&DataNode
             if c.kind != Some(NodeKind::Field) {
                 return None;
             }
-            let f = template_field(tpl, &c.som)?;
+            let f = crate::data::template_field(tpl, &c.som)?;
             let value = Walker::plain_field_value(tpl, data, f, &c.som);
             if c.value != value {
                 c.value = value;
