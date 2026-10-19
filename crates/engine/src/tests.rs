@@ -4445,8 +4445,9 @@ fn hundreds_of_xfa_calculations_run_in_one_engine_within_the_open_budget() {
 #[test]
 fn xfa_scripts_of_one_event_see_the_form_as_the_engine_holds_it() {
     // In document order: `a` holds 1; `b`'s calculate writes `a` then fails; `c`'s calculate
-    // reads `a`. A failed script's half-done changes reach nobody. And `d` sets a choice list
-    // by its shown text: the next script reads the saved value the engine kept.
+    // reads `a`. A failed script keeps what it changed before the error, and the next script
+    // sees it. And `d` sets a choice list by its shown text: the next script reads the saved
+    // value the engine kept.
     let tpl = pdfcraft_xfa::fixtures::fields_template("<form><page1><country>JP</country></page1></form>").replace(
         r#"<field name="summary" w="3in" h="0.3in" access="readOnly"><ui><textEdit/></ui>"#,
         r#"<field name="a" w="1in" h="0.3in"><ui><numericEdit/></ui><value><integer>1</integer></value></field>
@@ -4462,11 +4463,31 @@ fn xfa_scripts_of_one_event_see_the_form_as_the_engine_holds_it() {
     let value = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).map(|f| f.value.clone()).unwrap_or_default();
     let out = s.take_js_output(id);
     assert!(out.errors.iter().any(|e| e.contains("boom")), "{out:?}");
-    assert_eq!(value(&s, "a"), vec!["1".to_string()], "the failed script's write reached nothing");
-    assert_eq!(value(&s, "c"), vec!["2".to_string()]);
+    assert_eq!(value(&s, "a"), vec!["99".to_string()], "the failed script's write before the error stands");
+    assert_eq!(value(&s, "c"), vec!["100".to_string()]);
     assert_eq!(value(&s, "country"), vec!["CA".to_string()], "shown text mapped to the saved value");
     assert_eq!(value(&s, "e"), vec!["CA".to_string()], "the next script reads the saved value");
     assert_eq!(value(&s, "summary"), vec!["Country: CA".to_string()]);
+}
+
+/// A script that fails partway keeps what it did before the error, as JavaScript does: a form
+/// whose check box opens the next boxes and then trips over an object the form no longer has
+/// still opens them (DA Form 31's leave types).
+#[test]
+fn an_xfa_script_that_fails_partway_keeps_what_it_changed_before_the_error() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::partly_failing_script_template()));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("form.pdf", None, bytes, None).expect("opens");
+    let field = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).cloned();
+    assert!(field(&s, "leave").is_some_and(|f| f.flags & 1 != 0), "protected until `kind` is checked");
+    assert!(field(&s, "details").is_none(), "invisible: not laid out");
+    s.take_js_output(id);
+    s.apply(id, Edit::SetFieldValue { name: "kind".into(), value: FieldValue::Check(true) }).unwrap();
+    let out = s.take_js_output(id);
+    assert!(out.errors.iter().any(|e| e.contains("kind") && e.contains("change")), "the error is still reported: {out:?}");
+    assert!(field(&s, "leave").is_some_and(|f| f.flags & 1 == 0), "opened before the error");
+    assert!(field(&s, "details").is_some(), "shown before the error");
+    s.apply(id, Edit::SetFieldValue { name: "leave".into(), value: FieldValue::Check(true) }).expect("can be checked now");
 }
 
 #[test]

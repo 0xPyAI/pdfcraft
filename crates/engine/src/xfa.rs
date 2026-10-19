@@ -669,9 +669,12 @@ impl<'a, 'b> Runner<'a, 'b> {
         for n in &o.notes {
             self.error(format!("{} ({}): {n}", ev.som, ev.activity));
         }
+        // A script that fails keeps what it changed before the error, as JavaScript does: forms
+        // often trip over an object an earlier version had, late in a script whose first lines
+        // did the work (opening the next fields, showing a subform). An abandoned script, or
+        // one the engine failed, reports no changes.
         if let Some(e) = &o.error {
             self.error(format!("{} ({}): {e}", ev.som, ev.activity));
-            return Ok(Some(o));
         }
         if self.apply_effects(ev, &o.effects)? {
             self.relayout()?;

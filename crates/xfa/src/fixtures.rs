@@ -396,3 +396,32 @@ pub fn signed_shell() -> Vec<u8> {
     ];
     assemble(objs)
 }
+
+/// A check box `kind` whose change script, once it is checked, opens the protected check box
+/// `leave` and shows the invisible field `details`, then fails on an object the form doesn't
+/// have (as scripts written for an earlier version of a form do).
+pub fn partly_failing_script_template() -> String {
+    r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <subform name="page" layout="tb">
+  <field name="kind" w="0.3in" h="0.3in"><ui><checkButton/></ui><items><integer>1</integer><integer>0</integer></items><value><integer>0</integer></value>
+   <event activity="change"><script contentType="application/x-javascript">
+if (this.rawValue == "1") {
+  this.resolveNode("leave").access = "open";
+  this.resolveNode("details").presence = "visible";
+  this.resolveNode("noSuchField").rawValue = "0";
+}
+   </script></event>
+  </field>
+  <field name="leave" w="0.3in" h="0.3in" access="protected"><ui><checkButton/></ui><items><integer>1</integer><integer>0</integer></items><value><integer>0</integer></value></field>
+  <field name="details" w="2in" h="0.3in" presence="invisible"><ui><textEdit/></ui></field>
+ </subform>
+</subform>
+</template>
+</xdp:xdp>
+"##
+    .to_string()
+}
