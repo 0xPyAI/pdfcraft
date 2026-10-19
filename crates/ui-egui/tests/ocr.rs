@@ -309,6 +309,33 @@ fn a_page_that_becomes_a_scan_while_edit_is_on_is_recognized() {
     assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Recognize text"));
 }
 
+/// Edit changes the document only while the user is editing: not in Read mode (which leaves the Edit
+/// tool picked), and not beneath a dialog. The page is recognized once those are gone.
+#[test]
+fn edit_recognizes_a_scan_only_outside_read_mode_and_beneath_no_dialog() {
+    if !pdfcraft_engine::ocr::available() {
+        eprintln!("skipped: OCR models not installed");
+        return;
+    }
+    let mut h = edit_harness(scan());
+    let id = h.state().active_ids().unwrap().1;
+    let undo = |h: &Harness<'static, PdfCraftApp>| -> Option<String> { h.state().session.get(id).unwrap().can_undo().map(String::from) };
+    // Read mode with the Edit tool still picked.
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.state_mut().set_option("mode", "read").unwrap();
+    h.run_steps(5);
+    assert_eq!(undo(&h), None, "not in Read mode");
+    // A dialog over the window.
+    h.state_mut().set_option("mode", "edit").unwrap();
+    h.state_mut().dialog = Some(pdfcraft_ui_egui::Dialog::JsConsole);
+    h.run_steps(5);
+    assert_eq!(undo(&h), None, "not beneath a dialog");
+    // Both gone: it is read now.
+    h.state_mut().dialog = None;
+    h.run_steps(5);
+    assert_eq!(undo(&h).as_deref(), Some("Recognize text"));
+}
+
 #[test]
 fn editing_a_page_that_has_text_does_not_recognize_anything() {
     let mut h = edit_harness(text_page());

@@ -184,7 +184,10 @@ impl PdfCraftApp {
         // the same test the page view uses for editing content.
         let editing = (self.left_open && self.left == crate::LeftPanel::Tool("edit"))
             || matches!(self.quick_tool, crate::QuickTool::EditText | crate::QuickTool::AddText);
-        if !editing || self.ocr_run.is_some() || self.ocr_batch.is_some() {
+        // Not in Read mode (which leaves the Edit tool picked but is not editing) and not beneath a
+        // dialog or prompt: nothing may change the document under those. It is tried again once
+        // they are gone.
+        if !editing || self.mode == crate::Mode::Read || self.modal_open() || self.ocr_run.is_some() || self.ocr_batch.is_some() {
             return;
         }
         let Some((vi, id)) = self.active_ids() else { return };
