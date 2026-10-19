@@ -876,12 +876,13 @@ fn is_placeholder_title(title: &str) -> bool {
     address || t == "untitled"
 }
 
-/// The working file plus appearances for comments that have none. Signature artwork
-/// is preserved; validation badges belong to the viewer and never enter these bytes,
-/// which image/text exports and Print as Image also consume.
+/// The working file plus appearances for comments that have none, and for form fields the file
+/// leaves to the viewer (#3470). Signature artwork is preserved; validation badges belong to the
+/// viewer and never enter these bytes, which image/text exports and Print as Image also consume.
 fn display_bytes(editor: Option<&mut Editor>, bytes: &Arc<Vec<u8>>) -> Arc<Vec<u8>> {
     let Some(e) = editor else { return bytes.clone() };
-    let Some(display) = pdfcraft_annot::with_missing_appearances_cached(&e.cos, &mut e.appearances) else {
+    let comments = pdfcraft_annot::with_missing_appearances_cached(&e.cos, &mut e.appearances);
+    let Some(display) = with_field_appearances(comments, &e.cos) else {
         return bytes.clone();
     };
     match write_incremental(&display, &SaveOptions::default()) {
@@ -893,6 +894,12 @@ fn display_bytes(editor: Option<&mut Editor>, bytes: &Arc<Vec<u8>>) -> Arc<Vec<u
     }
 }
 
+/// `comments` (the display copy with comment appearances, if it needed any; else the document
+/// itself) with its form fields drawn from their values where the file leaves that to the viewer.
+fn with_field_appearances(comments: Option<pdfcraft_cos::Document>, doc: &pdfcraft_cos::Document) -> Option<pdfcraft_cos::Document> {
+    pdfcraft_forms::with_field_appearances(comments.as_ref().unwrap_or(doc)).or(comments)
+}
+
 /// The reader shows the same pages in `a` and `b`: count, displayed size and rotation.
 fn same_pages(a: &[pdfcraft_render::PageInfo], b: &[pdfcraft_render::PageInfo]) -> bool {
     a.len() == b.len()
@@ -900,14 +907,14 @@ fn same_pages(a: &[pdfcraft_render::PageInfo], b: &[pdfcraft_render::PageInfo]) 
 }
 
 /// The copy PDFCraft displays when opening `bytes`: with appearances drawn, in memory only, for
-/// comments that have none. Render paths outside the app, such as the CLI, use this so their page
+/// comments that have none and form fields the file leaves to the viewer. Render paths outside the app, such as the CLI, use this so their page
 /// images agree with the app and independent viewers. It never changes the source document, and an
 /// unparseable file, a write failure or a parser panic falls back to the original bytes.
 pub fn display_bytes_for(bytes: Arc<Vec<u8>>, password: Option<&str>) -> Arc<Vec<u8>> {
     guard(|| {
         pdfcraft_cos::Document::open_with_password(bytes.clone(), password)
             .ok()
-            .and_then(|cos| pdfcraft_annot::with_missing_appearances(&cos))
+            .and_then(|cos| with_field_appearances(pdfcraft_annot::with_missing_appearances(&cos), &cos))
             .and_then(|display| write_incremental(&display, &SaveOptions::default()).ok())
             .map(Arc::new)
     })

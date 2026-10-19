@@ -6106,3 +6106,63 @@ fn undo_never_makes_an_unsaved_document_clean() {
     s.undo(new).unwrap();
     assert!(!s.get(new).unwrap().dirty, "once saved, undo back to the saved state is clean");
 }
+
+/// #3470: a filled form whose writer left the appearances to the viewer (`/NeedAppearances`):
+/// field A has an empty appearance, B none. The page as displayed (and printed) shows both
+/// values, and a comment without an appearance beside them still gets its own; the file itself
+/// is not changed, so saving writes it as it was.
+#[test]
+fn fields_left_to_the_viewer_are_displayed_from_their_values() {
+    let pdf = |need: bool| {
+        let flag = if need { "/NeedAppearances true " } else { "" };
+        format!(
+            "%PDF-1.7\n\
+             1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >> endobj\n\
+             2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+             3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 400 200] /Annots [6 0 R 7 0 R 10 0 R] >> endobj\n\
+             10 0 obj << /Type /Annot /Subtype /Square /Rect [360 20 390 50] /C [1 0 0] /BS << /W 4 >> >> endobj\n\
+             5 0 obj << /Fields [6 0 R 7 0 R] {flag}/DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 8 0 R >> >> >> endobj\n\
+             6 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (a) /V (MMMMMMMM) /DA (/Helv 12 Tf 0 g) /Rect [50 120 350 140] /F 4 /P 3 0 R /AP << /N 9 0 R >> >> endobj\n\
+             7 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (b) /V (MMMMMMMM) /DA (/Helv 12 Tf 0 g) /Rect [50 60 350 80] /F 4 /P 3 0 R >> endobj\n\
+             8 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> endobj\n\
+             9 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 20] /Length 4 >> stream\nq\nQ\nendstream endobj\n\
+             trailer << /Root 1 0 R >>\n%%EOF"
+        )
+        .into_bytes()
+    };
+    let red = |s: &Session, id: DocId| {
+        let doc = s.get(id).unwrap();
+        let mut r = pdfcraft_render::PageRenderer::new(doc.display.clone(), doc.config.clone());
+        let page = r.render(pdfcraft_render::RenderRequest { page: 0, scale: 1.0, ..Default::default() });
+        page.rgba.as_chunks::<4>().0.iter().filter(|p| p[0] > 200 && p[1] < 80 && p[2] < 80).count()
+    };
+    // Dark pixels inside a field's box (user-space rectangle, page drawn at scale 1).
+    let ink = |s: &Session, id: DocId, y0: u32, y1: u32| {
+        let doc = s.get(id).unwrap();
+        let mut r = pdfcraft_render::PageRenderer::new(doc.display.clone(), doc.config.clone());
+        let page = r.render(pdfcraft_render::RenderRequest { page: 0, scale: 1.0, ..Default::default() });
+        let (px, _) = page.rgba.as_chunks::<4>();
+        (200 - y1..200 - y0)
+            .flat_map(|y| (55..345).map(move |x| (x, y)))
+            .filter(|&(x, y)| px.get((y * page.width + x) as usize).is_some_and(|p| p[0] < 128))
+            .count()
+    };
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, Arc::new(pdf(true)), None).unwrap();
+    let (a, b) = (ink(&s, id, 122, 138), ink(&s, id, 62, 78));
+    assert!(a > 100 && b > 100, "both values are shown: a {a}, b {b}");
+    assert!(red(&s, id) > 100, "the comment is drawn too");
+    // The file is saved as it was: B still has no appearance, A its empty one.
+    let saved = pdfcraft_cos::Document::open(s.save_bytes(id).unwrap()).unwrap();
+    let fields = pdfcraft_forms::fields(&saved);
+    let widget = |name: &str| saved.get(fields.iter().find(|f| f.name == name).unwrap().widgets[0].obj);
+    assert!(widget("b").as_dict().is_some_and(|d| !d.contains(b"AP")), "B has no appearance");
+    let n = widget("a").as_dict().and_then(|d| d.get(b"AP").and_then(|ap| saved.resolve(ap).as_dict().and_then(|ap| ap.reference(b"N")))).unwrap();
+    let pdfcraft_cos::Object::Stream(n) = &*saved.get(n) else { panic!("A's appearance is a stream") };
+    assert_eq!(n.decoded().unwrap().trim_ascii_end(), b"q\nQ", "A keeps its empty appearance");
+
+    // Without the flag, the empty appearance is the file's own, and only B is drawn.
+    let id = s.open("form.pdf", None, Arc::new(pdf(false)), None).unwrap();
+    let (a, b) = (ink(&s, id, 122, 138), ink(&s, id, 62, 78));
+    assert!(a == 0 && b > 100, "a {a}, b {b}");
+}

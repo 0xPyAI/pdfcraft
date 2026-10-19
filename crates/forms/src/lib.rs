@@ -1232,6 +1232,34 @@ pub fn need_appearances(doc: &Document) -> bool {
     acroform(doc).is_some_and(|af| matches!(af.get(b"NeedAppearances").map(|o| doc.resolve(o)).as_deref(), Some(Object::Bool(true))))
 }
 
+/// A copy of `doc` in which text and choice fields are drawn from their values, for displaying
+/// the document (`None` when no widget needs it): every such widget when the form sets
+/// `/NeedAppearances` (ISO 32000-2 Table 224: the writer left the appearances to the viewer),
+/// and otherwise each widget without a normal appearance (`/AP /N`). Drawn as typing the value
+/// would draw it (#3470). `doc` is not changed: saving writes the file as it was.
+pub fn with_field_appearances(doc: &Document) -> Option<Document> {
+    let all = need_appearances(doc);
+    let mut copy: Option<Document> = None;
+    for f in fields(doc).iter().filter(|f| matches!(f.kind, FieldKind::Text | FieldKind::Combo | FieldKind::List)) {
+        for w in &f.widgets {
+            let widget = doc.get(w.obj);
+            let drawn = widget.as_dict().and_then(|d| d.get(b"AP")).is_some_and(|ap| doc.resolve(ap).as_dict().is_some_and(|ap| ap.contains(b"N")));
+            if drawn && !all {
+                continue;
+            }
+            let (stream, _) = appearance::field_appearance_drawn(doc, f, w, &f.value, true);
+            let target = copy.get_or_insert_with(|| doc.clone());
+            let ap = target.add(Object::Stream(stream));
+            let mut fresh = Dict::new();
+            fresh.set(b"N".to_vec(), Object::Ref(ap));
+            let apd = merged_appearance(target, w.obj, &fresh);
+            // Fails only when the widget isn't a dictionary; that widget then keeps its own look.
+            target.update_dict(w.obj, |d| d.set(b"AP".to_vec(), Object::Dict(apd))).ok();
+        }
+    }
+    copy
+}
+
 /// Whether the document's XMP metadata declares PDF/A conformance (`pdfaid:part`).
 pub fn declares_pdfa(doc: &Document) -> bool {
     let Some(root) = doc.root() else { return false };
