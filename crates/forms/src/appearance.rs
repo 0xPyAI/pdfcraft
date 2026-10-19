@@ -191,12 +191,6 @@ impl FontText {
 
     fn width(&self, s: &str, size: f64) -> f64 {
         match self {
-            // A simple font's own widths (its /Widths, or a standard font's published ones: a
-            // bold face is wider than Helvetica), one byte per code.
-            Self::Simple(m) if !m.composite => match m.encode(&s.replace('\t', " ")) {
-                Some(codes) => codes.iter().map(|&c| m.width(u32::from(c))).sum::<f64>() * size,
-                None => helvetica_width(s, size),
-            },
             Self::WinAnsi | Self::Simple(_) => helvetica_width(s, size),
             Self::Unicode(_) => cjk_width(s, size),
         }
