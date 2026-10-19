@@ -1496,6 +1496,24 @@ mod tests {
     }
 
     #[test]
+    fn save_applies_the_paragraph_open_in_the_editor() {
+        // Save wrote the file without the paragraph still open in the editor (#3496).
+        let (mut app, mut ed) = preview_app();
+        ed.text = "Text preview".into();
+        app.views[0].line_editor = Some(ed);
+        let dir = std::env::temp_dir().join(format!("pdfcraft-ui-open-paragraph-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        app.save_override = Some(dir.join("out.pdf").to_string_lossy().into_owned());
+
+        assert!(app.save_active(crate::SaveTarget::InPlace));
+        assert!(app.views[0].line_editor.is_none());
+        let doc = app.session.get(app.views[0].id).unwrap();
+        assert_eq!(doc.text_lines(0).iter().map(|l| l.text.as_str()).collect::<String>(), "Text preview");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn text_background_is_cached_without_editing_and_released_on_cancel() {
         let (app, ed) = preview_app();
         let doc = app.session.get(app.views[0].id).unwrap();
