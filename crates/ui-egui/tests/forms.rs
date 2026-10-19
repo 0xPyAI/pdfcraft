@@ -185,6 +185,39 @@ fn date_fields_offer_a_calendar() {
     assert_eq!(value(&h, "due"), vec![format!("{nm:02}/15/{ny}")], "picked in the field's format");
 }
 
+/// The calendar used to keep the month it opened on, so a date typed while it was open showed
+/// only after leaving the field and coming back.
+#[test]
+fn the_calendar_follows_a_complete_date_typed_while_it_is_open() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = harness();
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField {
+        page: 0,
+        rect: [50.0, 40.0, 200.0, 60.0],
+        kind: pdfcraft_engine::NewField::Date,
+        name: Some("due".into()),
+    });
+    h.run_steps(4);
+    click_field(&mut h, "due", 0);
+    let (y, m, _) = h.state().session.today();
+    let month =
+        ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][(m - 1) as usize];
+    h.get_by_label(&format!("{month} {y}"));
+    // Half a date leaves the calendar where it is.
+    h.event(egui::Event::Text("03/1".into()));
+    h.run_steps(2);
+    h.get_by_label(&format!("{month} {y}"));
+    // The whole date moves it there.
+    h.event(egui::Event::Text("4/2025".into()));
+    h.run_steps(2);
+    h.get_by_label("March 2025");
+    // The arrows still turn the months, and the calendar stays on their month while the text
+    // doesn't change.
+    h.get_by_label("›").click();
+    h.run_steps(3);
+    h.get_by_label("April 2025");
+}
+
 #[test]
 fn lithuanian_calendar_localizes_months_and_weekdays_without_changing_field_values() {
     use egui_kittest::kittest::Queryable;

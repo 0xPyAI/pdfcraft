@@ -4620,8 +4620,8 @@ milestone = "M6"
 status = "shipped"
 commands = []
 tools = ["form_fill"]
-evidence = ["crates/ui-egui/tests/forms.rs::date_fields_offer_a_calendar"]
-notes = "a month calendar under date fields; the pick is written in the field's own date format"
+evidence = ["crates/ui-egui/tests/forms.rs::date_fields_offer_a_calendar", "crates/ui-egui/tests/forms.rs::the_calendar_follows_a_complete_date_typed_while_it_is_open"]
+notes = "a month calendar under date fields; the pick is written in the field's own date format; it opens on the field's date and moves to a whole date typed while it is open, staying on the month its arrows turned to otherwise"
 
 [[feature]]
 id = "form.auto-complete"
