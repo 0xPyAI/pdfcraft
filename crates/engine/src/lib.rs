@@ -34,6 +34,7 @@ mod scan_colours;
 mod scan_fields;
 pub mod signature_image;
 pub mod signature_scan;
+mod stamp_preview;
 pub mod text_fonts;
 mod text_preview;
 pub mod word_count;
@@ -41,6 +42,7 @@ pub mod xfa;
 
 pub use signature_image::{ImageSignaturePreview, SignatureImage};
 pub use signature_scan::{PhotoRect, ScanError, SignaturePhoto, Turn};
+pub use stamp_preview::StampPreview;
 pub use text_preview::TextEditPreview;
 
 pub use pdfcraft_organize::{BoxSpec, FieldConflicts, PageBox, SplitBy, Transition, TransitionSpec, split_ranges};

@@ -1242,6 +1242,74 @@ fn drawn_signatures_resize_from_their_corners() {
     assert_rect(rects(&h)[0], now);
 }
 
+/// Whether black ink is drawn within 3 pixels of `p`.
+fn ink_near(pixels: &image::RgbaImage, p: Pos2) -> bool {
+    (-3..=3).any(|dy| (-3..=3).any(|dx| pixels.get_pixel((p.x as i32 + dx) as u32, (p.y as i32 + dy) as u32).0[..3].iter().all(|v| *v < 60)))
+}
+
+/// A Fill & Sign line, like every stamp, is stretched with its frame while a handle is dragged:
+/// it grows and shrinks with the pointer instead of keeping its old length until the release.
+#[test]
+fn lines_grow_and_shrink_with_their_handles_before_release() {
+    let _gpu = gpu();
+    for (document_rotation, view_rotation) in [(0, 0), (90, 0), (0, 90), (90, 270)] {
+        let rot = (document_rotation, view_rotation);
+        let mut h = harness();
+        if document_rotation != 0 {
+            h.state_mut().apply_edit(pdfcraft_engine::Edit::RotatePages { pages: vec![0], degrees: document_rotation });
+        }
+        while h.state().views[0].rotation != view_rotation {
+            h.state_mut().views[0].rotate_view(true);
+        }
+        h.run_steps(3);
+        assert!(h.state_mut().execute("sign.fill.line"));
+        click(&mut h, 100.0, 250.0);
+        assert_rect(rects(&h)[0], [82.0, 248.0, 118.0, 252.0]);
+        // In line mode a click on the line picks it up, with its handles.
+        click(&mut h, 100.0, 250.0);
+        assert_eq!(h.state().views[0].comments.selected, Some((0, 0)), "{rot:?}");
+        let generation = h.state().session.get(h.state().views[0].id).unwrap().edit_generation();
+
+        // The handle at the line's end, dragged out to 160.
+        h.drag_at(at(&h, 118.0, 250.0));
+        h.run_steps(1);
+        h.hover_at(at(&h, 160.0, 250.0));
+        // Wait only for the one-time layers. Later pointer frames are immediate.
+        let mut grown = h.render().unwrap();
+        for _ in 0..50 {
+            if ink_near(&grown, at(&h, 150.0, 250.0)) {
+                break;
+            }
+            h.run_steps(2);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            grown = h.render().unwrap();
+        }
+        assert!(ink_near(&grown, at(&h, 150.0, 250.0)), "{rot:?}: the line grows with the handle before release");
+        assert!(ink_near(&grown, at(&h, 90.0, 250.0)), "{rot:?}: from where it starts");
+
+        // Back in, shorter than it was, still without letting go.
+        h.hover_at(at(&h, 100.0, 250.0));
+        h.run_steps(2);
+        let shrunk = h.render().unwrap();
+        assert!(ink_near(&shrunk, at(&h, 90.0, 250.0)), "{rot:?}: the line still starts where it did");
+        for x in [110.0, 150.0] {
+            assert!(!ink_near(&shrunk, at(&h, x, 250.0)), "{rot:?}: the line shrinks with the handle before release (ink at {x})");
+        }
+        let doc = h.state().session.get(h.state().views[0].id).unwrap();
+        assert_eq!((doc.edit_generation(), doc.can_undo()), (generation, Some("Add line")), "{rot:?}: pointer frames never edit the document");
+        if let Ok(dir) = std::env::var("PDFCRAFT_SHOTS") {
+            grown.save(format!("{dir}/line-live-grow-{document_rotation}-{view_rotation}.png")).unwrap();
+            shrunk.save(format!("{dir}/line-live-shrink-{document_rotation}-{view_rotation}.png")).unwrap();
+        }
+        h.drop_at(at(&h, 100.0, 250.0));
+        h.run_steps(3);
+        let doc = h.state().session.get(h.state().views[0].id).unwrap();
+        assert_eq!(doc.can_undo(), Some("Resize comment"), "{rot:?}");
+        let [now] = rects(&h)[..] else { panic!("{rot:?}: still one line: {:?}", rects(&h)) };
+        assert!(now.iter().zip([82.0, 248.0, 100.0, 252.0]).all(|(a, b)| (a - b).abs() < 0.01), "{rot:?}: {now:?}");
+    }
+}
+
 /// A signature placed over a form field is picked up by the Select tool: the field under it
 /// doesn't take the press. Away from the signature, a click still fills the field.
 #[test]

@@ -26,7 +26,7 @@ use hayro::hayro_interpret::hayro_cmap::CidFamily;
 use hayro::hayro_interpret::{InterpreterSettings, InterpreterWarning};
 use hayro::hayro_syntax::Pdf;
 use hayro::vello_cpu::color::AlphaColor;
-use hayro::vello_cpu::color::palette::css::WHITE;
+use hayro::vello_cpu::color::palette::css::{TRANSPARENT, WHITE};
 use hayro::{RenderCache, RenderSettings, render_into, render_size};
 
 use crate::{Pixels, ReadingColors};
@@ -65,6 +65,9 @@ pub struct RenderConfig {
     /// View ▸ Reading colours: solid text and line-art paints are remapped for readability and
     /// the page clears to the setting's background. Display only; the document never changes.
     pub reading_colors: ReadingColors,
+    /// The page clears to transparent instead of white (or the reading background): for a page
+    /// holding only what is laid over another raster, such as a comment while it is dragged.
+    pub transparent: bool,
 }
 
 impl RenderConfig {
@@ -300,10 +303,10 @@ fn render_page<'a>(
     pdf: &'a Pdf,
     cache: &RenderCache<'a>,
     settings: &InterpreterSettings,
-    reject_oversize: bool,
-    reading: ReadingColors,
+    config: &RenderConfig,
     req: RenderRequest,
 ) -> Result<Output, (String, bool)> {
+    let reading = request_reading(config, &req);
     if req.kind == RequestKind::Text {
         return match catch_unwind(AssertUnwindSafe(|| crate::text::extract_page(pdf, req.page, settings))) {
             Ok(Some(t)) => Ok((0, 0, Pixels::default(), Some(Arc::new(t)))),
@@ -324,6 +327,7 @@ fn render_page<'a>(
             Some(p) => (AlphaColor::from_rgb8(p.background[0], p.background[1], p.background[2]), Some(hayro::ColorReplacement::from(p))),
             None => (WHITE, None),
         };
+        let bg_color = if config.transparent { TRANSPARENT } else { bg_color };
         let rs = match req.tile {
             // Tiles are bounded by construction, so the page itself may be arbitrarily large.
             Some(t) => {
@@ -342,7 +346,7 @@ fn render_page<'a>(
             }
             None => {
                 let scale = effective_scale(w, h, req.scale);
-                if reject_oversize && (!(req.scale.is_finite() && req.scale > 0.0) || req.scale > scale) {
+                if config.reject_oversize && (!(req.scale.is_finite() && req.scale > 0.0) || req.scale > scale) {
                     return Err(format!(
                         "requested page {} raster scale {req_scale} exceeds renderer limits (maximum scale {scale})",
                         req.page + 1,
@@ -463,7 +467,7 @@ impl PageRenderer {
         let cache = RenderCache::new();
         let warnings = Arc::new(Mutex::new(Vec::new()));
         let settings = warning_settings(&self.settings, warnings.clone());
-        let r = render_page(pdf, &cache, &settings, self.config.reject_oversize, request_reading(&self.config, &req), req);
+        let r = render_page(pdf, &cache, &settings, &self.config, req);
         let warnings = take_warnings(&warnings);
         if matches!(r, Err((_, true))) {
             self.pdf = parse(&self.bytes, self.config.password.as_deref());
@@ -1193,7 +1197,7 @@ fn worker(
                         panic!("injected page panic");
                     }
                     match pdf {
-                        Some(pdf) => render_page(pdf, cache, &settings, config.reject_oversize, request_reading(&config, &req), req),
+                        Some(pdf) => render_page(pdf, cache, &settings, &config, req),
                         None => Err(("the document could not be parsed".into(), false)),
                     }
                 }))
@@ -6075,6 +6079,46 @@ trailer << /Root 1 0 R >>
         assert_eq!(pixel(&on, 150, 55), &[255, 255, 255, 255], "the image's white quadrant stays white");
     }
 
+    /// A transparent page leaves what nothing paints see-through, so it can be laid over another
+    /// raster: with reading colours on, and in a tile, too. Painted pixels stay premultiplied.
+    #[test]
+    fn transparent_pages_paint_only_their_content() {
+        let content = "0 0 1 rg 10 10 30 20 re f /GS gs 0.5 g 60 10 30 20 re f";
+        let pdf = format!(
+            "%PDF-1.4\n\
+             1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+             2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+             3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 100 50] /Contents 4 0 R /Resources << /ExtGState << /GS << /ca 0.5 >> >> >> >> endobj\n\
+             4 0 obj << /Length {} >> stream\n{content}\nendstream endobj\n\
+             trailer << /Root 1 0 R >>\n%%EOF",
+            content.len()
+        )
+        .into_bytes();
+        let pixel = |page: &RenderedPage, x: u32, y: u32| page.rgba[((y * page.width + x) * 4) as usize..][..4].to_vec();
+        for reading_colors in [ReadingColors::default(), ReadingColors::WHITE_ON_BLACK] {
+            let config = RenderConfig { transparent: true, reading_colors, ..Default::default() };
+            let mut r = PageRenderer::new(Arc::new(pdf.clone()), config.clone());
+            let page = r.render(RenderRequest { page: 0, scale: 2.0, ..Default::default() });
+            assert!(page.error.is_none(), "{:?}", page.error);
+            assert_eq!(pixel(&page, 5, 5), [0, 0, 0, 0], "{reading_colors:?}: nothing painted, nothing shown");
+            assert_eq!(pixel(&page, 50, 60)[3], 255, "{reading_colors:?}: the opaque rectangle covers");
+            assert_eq!(pixel(&page, 150, 60), [64, 64, 64, 128], "{reading_colors:?}: half-transparent grey, premultiplied");
+            let tile = r.render(RenderRequest { page: 0, scale: 2.0, tile: Some(Tile { x: 0, y: 40, w: 100, h: 60 }), ..Default::default() });
+            assert_eq!((pixel(&tile, 5, 5), pixel(&tile, 50, 20)), (pixel(&page, 5, 45), pixel(&page, 50, 60)), "{reading_colors:?}");
+            let pool = RenderPool::new(Arc::new(pdf.clone()), 1, config);
+            pool.set_queue(vec![RenderRequest { page: 0, scale: 2.0, ..Default::default() }]);
+            let pooled = loop {
+                if let Some(p) = pool.try_recv() {
+                    break p;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            };
+            assert_eq!(pooled.rgba, page.rgba, "{reading_colors:?}: the pool renders the same");
+        }
+        let opaque = PageRenderer::new(Arc::new(pdf), RenderConfig::default()).render(RenderRequest { page: 0, scale: 2.0, ..Default::default() });
+        assert_eq!(pixel(&opaque, 5, 5), [255, 255, 255, 255], "pages are still white by default");
+    }
+
     /// Reading colours replace *document* colours, never annotation colours (issue #1548): a
     /// highlight keeps its `/C`, so on a dark background the content under it shows through the
     /// Multiply blend in the highlight's colour instead of being darkened into invisibility.
@@ -6411,9 +6455,9 @@ endstream endobj
         let pdf = parse(&Arc::new(pdf), None).expect("parses");
         let cache = RenderCache::new();
         let settings = InterpreterSettings::default();
-        let preview = render_page(&pdf, &cache, &settings, false, ReadingColors::default(), req(true)).expect("preview renders");
-        let fin = render_page(&pdf, &cache, &settings, false, ReadingColors::default(), req(false)).expect("final renders");
-        let fresh = render_page(&pdf, &RenderCache::new(), &settings, false, ReadingColors::default(), req(false)).expect("final renders");
+        let preview = render_page(&pdf, &cache, &settings, &RenderConfig::default(), req(true)).expect("preview renders");
+        let fin = render_page(&pdf, &cache, &settings, &RenderConfig::default(), req(false)).expect("final renders");
+        let fresh = render_page(&pdf, &RenderCache::new(), &settings, &RenderConfig::default(), req(false)).expect("final renders");
         assert_eq!(rgb_at(&preview.2, w, 35, 35), [0, 0, 255]);
         assert_eq!(&fin.2[..], &fresh.2[..], "a final render after a preview matches one with a fresh cache");
     }

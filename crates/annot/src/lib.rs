@@ -803,6 +803,27 @@ pub fn picture_rotation(doc: &Document, page: usize, index: usize) -> Result<i64
     Ok(doc.resolve(entry).as_dict().map_or(0, appearance::picture_turn))
 }
 
+/// Leave page `page` of (a copy of) a document showing only its annotation at `index`, without
+/// the page's content or other annotations, so a render draws that annotation alone: to lay it
+/// over the page while it is dragged. `false`, with `doc` unchanged, when the annotation has no
+/// normal appearance (`/AP /N`) for that render to draw.
+pub fn isolate_annotation(doc: &mut Document, page: usize, index: usize) -> Result<bool, AnnotError> {
+    let p = page_ref(doc, page)?;
+    let entry = annots(doc, p).get(index).cloned().ok_or(AnnotError::NoSuchAnnotation { page, index })?;
+    let has_normal = {
+        let obj = doc.resolve(&entry);
+        obj.as_dict().and_then(|d| d.get(b"AP")).is_some_and(|ap| doc.resolve(ap).as_dict().is_some_and(|ap| ap.contains(b"N")))
+    };
+    if !has_normal {
+        return Ok(false);
+    }
+    set_annots(doc, p, vec![entry])?;
+    doc.update_dict(p, |d| {
+        d.remove(b"Contents");
+    })?;
+    Ok(true)
+}
+
 // ── building ────────────────────────────────────────────────────────────────────────────────
 
 /// Annotation flags (§12.5.3).

@@ -2460,6 +2460,60 @@ fn comment_text(s: &Session, id: DocId) -> Vec<String> {
     t
 }
 
+/// A dragged stamp's layers: the page without it (its text and other comments kept) and the
+/// stamp alone on a transparent page. Preparing them changes nothing in the document.
+#[test]
+fn stamp_preview_layers_split_the_stamp_from_its_page() {
+    let (mut s, id) = session_with(1);
+    s.apply(id, fill_item(Shape::Mark { rect: [30.0, 60.0, 130.0, 66.0], mark: FillMark::Line }, "")).unwrap();
+    s.apply(id, rect_comment(0, [140.0, 40.0, 190.0, 90.0])).unwrap();
+    let doc = s.get(id).unwrap();
+    let (generation, dirty) = (doc.edit_generation(), doc.dirty);
+    let preview = doc.stamp_preview(0, 0).unwrap().expect("the line is a stamp");
+    let (stamp, background) = (preview.render_stamp(1.0).unwrap(), preview.render_background(1.0).unwrap());
+    let px = |p: &pdfcraft_render::RenderedPage, x: u32, y: u32| -> [u8; 4] {
+        p.rgba[(((300 - y) * p.width + x) * 4) as usize..][..4].try_into().unwrap()
+    };
+    let line = |x: u32, y: u32| (30..=130).contains(&x) && (59..=67).contains(&y);
+    let (mut drawn, mut stray) = (0, Vec::new());
+    for y in 1..300 {
+        for x in 0..200 {
+            match (line(x, y), px(&stamp, x, y)) {
+                (true, [.., 255]) => drawn += 1,
+                (false, v) if v != [0, 0, 0, 0] => stray.push((x, y)),
+                _ => {}
+            }
+        }
+    }
+    assert!(drawn > 100, "the line is drawn opaque: {drawn} pixels");
+    assert!(stray.is_empty(), "only the line is drawn on its layer: {:?}", &stray[..stray.len().min(8)]);
+    assert!((30..=130).all(|x| px(&background, x, 63) == [255, 255, 255, 255]), "the page beneath has no line");
+    assert!((138..=142).any(|x| px(&background, x, 65) != [255, 255, 255, 255]), "other comments stay");
+    assert!((20..120).any(|x| (150..170).any(|y| px(&background, x, y)[0] < 128)), "the page text stays");
+    assert!(doc.stamp_preview(0, 1).unwrap().is_none(), "a rectangle isn't a stamp");
+    assert!(doc.stamp_preview(0, 9).unwrap().is_none());
+    let doc = s.get(id).unwrap();
+    assert_eq!((doc.edit_generation(), doc.dirty, doc.can_undo()), (generation, dirty, Some("Add rectangle")), "the document is unchanged");
+
+    // Another app's comments without appearances: beneath a dragged stamp they are drawn as on
+    // screen, and such a stamp has nothing to lay over the page.
+    let bare = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R] >> endobj
+4 0 obj << /Type /Annot /Subtype /Square /Rect [140 40 190 90] /C [1 0 0] >> endobj
+5 0 obj << /Type /Annot /Subtype /Stamp /Rect [20 20 80 40] /Name /Draft >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+    let mut s = Session::new();
+    let id = s.open("bare.pdf", None, Arc::new(bare.to_vec()), None).unwrap();
+    s.apply(id, fill_item(Shape::Mark { rect: [30.0, 60.0, 130.0, 66.0], mark: FillMark::Line }, "")).unwrap();
+    let doc = s.get(id).unwrap();
+    let background = doc.stamp_preview(0, 2).unwrap().expect("the line is a stamp").render_background(1.0).unwrap();
+    assert!((138..=142).any(|x| px(&background, x, 65)[..3] == [255, 0, 0]), "the square without an appearance is drawn beneath");
+    assert!(doc.stamp_preview(0, 1).unwrap().is_none(), "a stamp without an appearance");
+}
+
 #[test]
 fn flattening_fill_and_sign_keeps_other_comments_fields_and_undoes() {
     let (mut s, id) = session_with(1);
