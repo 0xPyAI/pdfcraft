@@ -46,8 +46,12 @@ when the image dictionary has no `/ColorSpace`, since the colour then comes from
 (ISO 32000-2 §7.4.9). With a `/ColorSpace` the raw indices are kept, as an `/Indexed` space needs.
 A `/ColorSpace` that does not resolve counts as none: the JP2 colours are then the only ones.
 Without the patch a palette image with no `/ColorSpace` was drawn as its indices, in gray.
-Covered by `filter::jpx::tests::jpx_palette_is_applied_without_a_color_space` and
-`filter::jpx::tests::jpx_palette_indices_stay_raw_for_an_indexed_color_space`.
+The resolved colours are 8-bit samples whatever the precision of the indices (a 1-bit index no
+longer rescales its colours to 0 or 255 per channel); an image without a palette keeps its own.
+Covered by `filter::jpx::tests::jpx_palette_is_applied_without_a_color_space`,
+`filter::jpx::tests::jpx_palette_indices_stay_raw_for_an_indexed_color_space`,
+`filter::jpx::tests::palette_colours_are_eight_bit_and_other_samples_keep_their_precision` and
+`raster::tests::a_jp2_palette_keeps_its_colours_whatever_the_index_precision`.
 
 Text extraction: hayro-interpret exposes `OutlineGlyph::is_vertical` from a Type0 font’s CMap writing mode. PdfCraft follows negative glyph-space y for WMode 1 so upright vertical columns can be searched (#126).
 

@@ -3703,6 +3703,62 @@ trailer << /Root 1 0 R >>
         pdf
     }
 
+    /// Review on #3184: a palette image whose indices are 1-bit samples (`ihdr` BPC 0, `Ssiz` 0)
+    /// and whose palette holds 8-bit colours. Its colours are decoded to 8 bits; rescaling them
+    /// to the indices' 1-bit precision kept only 0 or 255 per channel. Contributor-original:
+    /// one 1×1 tile with an empty packet, so its one sample is the 1-bit midpoint (index 1).
+    #[test]
+    fn a_jp2_palette_keeps_its_colours_whatever_the_index_precision() {
+        let mut codestream = vec![0xff, 0x4f, 0xff, 0x51, 0, 41, 0, 0]; // SOC, SIZ (Lsiz 41), Rsiz.
+        for value in [1_u32, 1, 0, 0, 1, 1, 0, 0] {
+            codestream.extend_from_slice(&value.to_be_bytes());
+        }
+        codestream.extend_from_slice(&[0, 1, 0, 1, 1]); // One component: 1 bit, no subsampling.
+        codestream.extend_from_slice(&[0xff, 0x52, 0, 12, 0, 0, 0, 1, 0, 0, 4, 4, 0, 1]);
+        codestream.extend_from_slice(&[0xff, 0x5c, 0, 4, 0x40, 0x40]);
+        codestream.extend_from_slice(&[0xff, 0x90, 0, 10, 0, 0, 0, 0, 0, 15, 0, 1, 0xff, 0x93, 0]);
+        codestream.extend_from_slice(&[0xff, 0xd9]);
+        let jp2_box = |kind: &[u8], body: &[u8]| [&((8 + body.len()) as u32).to_be_bytes()[..], kind, body].concat();
+        let ihdr = [&1_u32.to_be_bytes()[..], &1_u32.to_be_bytes(), &[0, 1, 0, 7, 0, 0]].concat();
+        let colr = [&[1, 0, 0][..], &16_u32.to_be_bytes()].concat(); // sRGB
+        // pclr: two entries, three 8-bit columns: red, then (64, 128, 192).
+        let pclr = [0, 2, 3, 7, 7, 7, 255, 0, 0, 64, 128, 192];
+        // cmap: channels 0..2 come from component 0 through palette columns 0..2.
+        let cmap = [0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 2];
+        let jp2 = [
+            vec![0, 0, 0, 12, b'j', b'P', b' ', b' ', 0x0d, 0x0a, 0x87, 0x0a],
+            jp2_box(b"ftyp", b"jp2 \0\0\0\0jp2 "),
+            jp2_box(b"jp2h", &[jp2_box(b"ihdr", &ihdr), jp2_box(b"colr", &colr), jp2_box(b"pclr", &pclr), jp2_box(b"cmap", &cmap)].concat()),
+            jp2_box(b"jp2c", &codestream),
+        ]
+        .concat();
+        let content = "q 20 0 0 20 5 5 cm /Im1 Do Q";
+        // No /ColorSpace (and no /BitsPerComponent): the JP2 header gives the colours, through its
+        // palette (ISO 32000-2 §7.4.9). With an /Indexed space the image holds raw indices at
+        // their own precision, so index 1 picks the space's entry 1, not entry 255.
+        let lut = format!("FF00004080C0{}00FF00", "000000".repeat(253));
+        for colour_space in [String::new(), format!("/ColorSpace [/Indexed /DeviceRGB 255 <{lut}>] ")] {
+            let mut pdf = format!(
+                "%PDF-1.7\n\
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 40 40] /Contents 4 0 R /Resources << /XObject << /Im1 5 0 R >> >> >> endobj\n\
+4 0 obj << /Length {} >> stream\n{content}\nendstream endobj\n\
+5 0 obj << /Type /XObject /Subtype /Image /Width 1 /Height 1 {colour_space}/Filter /JPXDecode /Length {} >> stream\n",
+                content.len(),
+                jp2.len()
+            )
+            .into_bytes();
+            pdf.extend_from_slice(&jp2);
+            pdf.extend_from_slice(b"\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF");
+            let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+            let page = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(page.error.is_none(), "{:?}", page.error);
+            let px = &page.rgba[((40 - 15) * 40 + 15) * 4..][..3];
+            assert!(px.iter().zip([64u8, 128, 192]).all(|(a, b)| a.abs_diff(b) <= 2), "{colour_space:.30}: entry 1: {px:?}");
+        }
+    }
+
     /// #3306: a JP2 image whose colour specification names an enumerated colour space the
     /// decoder refuses (CIEJab in a veraPDF fixture, or YPbPr, or bilevel for one component) is
     /// drawn as if it had none, by its component count, as MuPDF and Poppler draw it: the
