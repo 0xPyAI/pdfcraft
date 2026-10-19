@@ -2058,6 +2058,14 @@ fn annotation_hover_text(a: &pdfcraft_render::Annotation) -> Option<String> {
     Some(if body.is_empty() { who } else { format!("{who}\n{body}") })
 }
 
+/// The scroll offset that puts `point` (content coordinates) at `rel` in the viewport, kept within
+/// the content as egui keeps it. egui clamps only after drawing, so an offset past the end showed
+/// the page misplaced for a frame and then jumped (zooming out beside a page that fits).
+fn anchored_scroll(point: Pos2, rel: Vec2, content: Vec2, viewport: Vec2) -> Vec2 {
+    let max = vec2((content.x - viewport.x).max(0.0), (content.y - viewport.y).max(0.0));
+    vec2((point.x - rel.x).clamp(0.0, max.x), (point.y - rel.y).clamp(0.0, max.y))
+}
+
 /// The request tag for a raster at `scale`: equal tags mean the same scale (to 1/65536).
 fn scale_tag(scale: f32) -> u64 {
     (f64::from(scale) * 65536.0).round() as u64
@@ -2345,6 +2353,17 @@ const KEY_SCROLL_LINE: f32 = 40.0;
 const SUPPRESS_SECS: f64 = 0.25;
 /// Short rolling extension while egui still has an unprocessed wheel tail.
 const SUPPRESS_TAIL_SECS: f64 = 0.05;
+
+// The viewer moves between docking and the central panel as modes change; keep its scroll
+// identity tied to the document instead of either parent UI.
+fn page_scroll<R>(
+    ui: &mut egui::Ui,
+    scroll: egui::ScrollArea,
+    id: egui::Id,
+    draw: impl FnOnce(&mut egui::Ui, egui::Rect) -> R,
+) -> egui::scroll_area::ScrollAreaOutput<R> {
+    ui.scope_builder(egui::UiBuilder::new().id(id), |ui| scroll.show_viewport(ui, draw)).inner
+}
 
 pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
@@ -2676,7 +2695,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if let Some((page, fx, fy, rel)) = view.zoom_anchor.take() {
         let r = rects[page.min(rects.len() - 1)];
         let point = pos2(r.left() + fx * r.width(), r.top() - y_shift + fy * r.height());
-        scroll = scroll.scroll_offset(vec2((point.x - rel.x).max(0.0), (point.y - rel.y).max(0.0)));
+        scroll = scroll.scroll_offset(anchored_scroll(point, rel, vec2(content_w, content_h), avail.size()));
     } else if let Some((page, frac)) = view.goto.take() {
         let page = page.min(rects.len() - 1);
         let r = rects[page];
@@ -2812,7 +2831,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         }
     }
     let selection_wheel = view.selection_drag && navigation_enabled && unobstructed && !single_paging && ui.rect_contains_pointer(avail);
-    let out = scroll.show_viewport(ui, |ui, viewport| {
+    let out = page_scroll(ui, scroll, egui::Id::new(("page-view-scope", view.id)), |ui, viewport| {
         // egui's drag responses accept every pointer button. Keep a wheel gesture from also
         // selecting text, drawing a mark, or panning with the Hand tool.
         if middle_gesture {
@@ -5285,6 +5304,19 @@ fn grayscale(mut img: egui::ColorImage) -> egui::ColorImage {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn zoom_anchor_scroll_stays_within_the_content() {
+        let (content, viewport) = (vec2(1000.0, 2000.0), vec2(800.0, 600.0));
+        // Past the end: clamped to the maximum (200, 1400), not left for egui to snap back.
+        assert_eq!(anchored_scroll(pos2(900.0, 1900.0), vec2(0.0, 0.0), content, viewport), vec2(200.0, 1400.0));
+        // Before the start.
+        assert_eq!(anchored_scroll(pos2(10.0, 10.0), vec2(300.0, 300.0), content, viewport), Vec2::ZERO);
+        // Inside: unchanged.
+        assert_eq!(anchored_scroll(pos2(150.0, 800.0), vec2(100.0, 100.0), content, viewport), vec2(50.0, 700.0));
+        // Content smaller than the viewport: no scrolling.
+        assert_eq!(anchored_scroll(pos2(400.0, 400.0), Vec2::ZERO, vec2(500.0, 500.0), viewport), vec2(0.0, 0.0));
+    }
+
     #[test]
     fn page_size_hint_zone_is_the_bottom_left_quadrant() {
         let area = Rect::from_min_max(pos2(100.0, 50.0), pos2(500.0, 450.0));
