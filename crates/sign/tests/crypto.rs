@@ -239,6 +239,65 @@ fn certificates_load_from_pem_and_der_and_export_as_pem() {
     assert!(pdfcraft_sign::x509::load_certificates(b"hello").is_err());
 }
 
+/// A PKCS #7 certificate bundle (degenerate SignedData, RFC 5652 §5.2) holding `certs`, laid out
+/// as `openssl crl2pkcs7 -nocrl` writes it.
+/// Base64 in 64-column lines, for PEM armour.
+fn encode_base64(der: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::new();
+    for c in der.chunks(3) {
+        let n = u32::from(c[0]) << 16 | u32::from(*c.get(1).unwrap_or(&0)) << 8 | u32::from(*c.get(2).unwrap_or(&0));
+        for i in 0..4 {
+            s.push(if i <= c.len() { T[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    let lines: Vec<&str> = s.as_bytes().chunks(64).map(|l| std::str::from_utf8(l).unwrap()).collect();
+    lines.join("\n")
+}
+
+fn p7b(certs: &[&[u8]]) -> Vec<u8> {
+    use pdfcraft_sign::der::{explicit, int, oid, seq, set_of, tlv};
+    let encap = seq(&[&oid(cms::DATA)]);
+    let mut sd = vec![int(1), set_of(&[]), encap];
+    if !certs.is_empty() {
+        sd.push(tlv(0xA0, &certs.concat()));
+    }
+    sd.push(set_of(&[]));
+    let refs: Vec<&[u8]> = sd.iter().map(Vec::as_slice).collect();
+    seq(&[&oid(cms::SIGNED_DATA), &explicit(0, &seq(&refs))])
+}
+
+#[test]
+fn certificates_load_from_pkcs7_bundles() {
+    use pdfcraft_sign::x509::{load_certificates, to_pem};
+    let leaf = load_certificates(&data("rsa.crt.pem")).unwrap().remove(0);
+    let root = load_certificates(&data("ca.crt.pem")).unwrap().remove(0);
+    let bundle = p7b(&[&leaf.raw, &root.raw]);
+    // .p7b / .p7c in DER, the way Windows and Acrobat export a chain.
+    assert_eq!(load_certificates(&bundle).unwrap(), vec![leaf.clone(), root.clone()]);
+    // The same bundle as PEM `PKCS7` and `CMS` blocks, after a key and a plain certificate.
+    let b64 = encode_base64(&bundle);
+    for label in ["PKCS7", "CMS"] {
+        let text = format!(
+            "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n{}-----BEGIN {label}-----\n{}\n-----END {label}-----\n",
+            to_pem(&leaf),
+            b64
+        );
+        assert_eq!(load_certificates(text.as_bytes()).unwrap(), vec![leaf.clone(), leaf.clone(), root.clone()], "{label}");
+    }
+    // An END that closes a different block ends nothing.
+    let mismatched = format!("-----BEGIN PKCS7-----\n{b64}\n-----END CERTIFICATE-----\n");
+    assert!(load_certificates(mismatched.as_bytes()).is_err());
+    // A bundle with no certificate, and a SignedData that isn't one, are errors, not empty lists.
+    assert!(load_certificates(&p7b(&[])).is_err());
+    let not_signed_data = pdfcraft_sign::der::seq(&[&pdfcraft_sign::der::oid(cms::DATA), &pdfcraft_sign::der::explicit(0, &[])]);
+    assert!(load_certificates(&not_signed_data).is_err());
+    // Truncated anywhere: an error, never a panic.
+    for n in 0..bundle.len() {
+        let _ = load_certificates(&bundle[..n]);
+    }
+}
+
 // ── CRL and OCSP verification (RFC 5280, RFC 6960) ─────────────────────────────────────────
 
 use pdfcraft_sign::der::{self, tag};

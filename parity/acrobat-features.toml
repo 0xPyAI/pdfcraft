@@ -6273,7 +6273,7 @@ status = "partial"
 commands = []
 tools = ["sign_trust"]
 evidence = ["crates/automation/tests/automation.rs::digital_ids_signing_and_validation_through_tools"]
-notes = "import .cer/.pem/.der/.p12 through the tool; per-certificate trust settings not yet"
+notes = "import .cer/.pem/.der/.p7b/.p7c/.p12 through the tool; per-certificate trust settings not yet"
 
 [[feature]]
 id = "sign.eutl"
