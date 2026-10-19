@@ -109,6 +109,10 @@ fn a_button_caption_is_drawn_in_its_fields_font_size_and_color() {
     assert!(menu.contains("/HeBo 9.00 Tf") && menu.contains("0 0 1 rg"), "{menu}");
     let auto = ap(&doc, &field(&all, "auto").widgets[0]);
     assert!(auto.contains("/Helv 14.00 Tf") && auto.contains(" 0 g"), "{auto}");
+    // Centered by the bold face's own widths (wider than regular Helvetica's).
+    let bold: f64 = "Menu".bytes().map(|c| pdfcraft_fonts::Std14::HelveticaBold.width(c)).sum::<f64>() / 1000.0 * 9.0;
+    let x = (90.0 - bold) / 2.0;
+    assert!(menu.contains(&format!("1 0 0 1 {x:.3} ")), "centered at {x:.3}: {menu}");
 }
 
 #[test]
