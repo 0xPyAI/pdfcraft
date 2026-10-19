@@ -313,6 +313,45 @@ pub fn fields_template(data: &str) -> String {
     )
 }
 
+/// A form of `sections` sections of `rows` rows, each row with a calculated total (half in
+/// JavaScript, half in FormCalc) and a section sum over its rows: 2 × sections × rows + sections
+/// calculate scripts, every one reading values the earlier ones settled.
+pub fn many_calculations_template(sections: usize, rows: usize) -> String {
+    let mut body = String::new();
+    for sct in 0..sections {
+        body.push_str(&format!("<subform name=\"s{sct}\" layout=\"tb\"><subform name=\"table\" layout=\"table\" columnWidths=\"1in 1in 1in\">"));
+        for r in 0..rows {
+            let calc = if (sct + r) % 2 == 0 {
+                "<script contentType=\"application/x-javascript\">qty.rawValue * price.rawValue</script>"
+            } else {
+                "<script>qty * price</script>"
+            };
+            body.push_str(&format!(
+                "<subform name=\"r{r}\" layout=\"row\"><field name=\"qty\" h=\"0.2in\"><ui><numericEdit/></ui><value><integer>{}</integer></value></field><field name=\"price\" h=\"0.2in\"><ui><numericEdit/></ui><value><integer>2</integer></value></field><field name=\"total\" h=\"0.2in\"><ui><numericEdit/></ui><calculate>{calc}</calculate></field></subform>",
+                r + 1
+            ));
+        }
+        body.push_str("</subform>");
+        let terms: Vec<String> = (0..rows).map(|r| format!("table.r{r}.total")).collect();
+        body.push_str(&format!(
+            "<field name=\"sum\" w=\"2in\" h=\"0.2in\"><ui><numericEdit/></ui><calculate><script>Sum({})</script></calculate></field></subform>",
+            terms.join(", ")
+        ));
+    }
+    format!(
+        r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><occur max="-1"/><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ {body}
+</subform>
+</template>
+</xdp:xdp>
+"##
+    )
+}
+
 /// A PDF shell around `xdp`: one placeholder page, `/NeedsRendering true`, no fields.
 pub fn shell(xdp: &str) -> Vec<u8> {
     let objs: Vec<Vec<u8>> = vec![

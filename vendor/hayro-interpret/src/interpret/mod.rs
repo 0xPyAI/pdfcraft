@@ -18,7 +18,7 @@ use crate::x_object::{
 use hayro_syntax::content::TypedIter;
 use hayro_syntax::content::ops::TypedInstruction;
 use hayro_syntax::object::dict::keys::{
-    ANNOTS, AP, AS, C, CA, F, MCID, N, OC, QUADPOINTS, RECT, SUBTYPE,
+    ACTUAL_TEXT, ANNOTS, AP, AS, C, CA, F, MCID, N, OC, QUADPOINTS, RECT, SUBTYPE,
 };
 use hayro_syntax::object::{Array, Dict, Object, Rect, Stream, dict_or_stream};
 use hayro_syntax::page::{ContentReader, Page, Resources};
@@ -115,6 +115,11 @@ pub struct InterpreterSettings {
     /// operator. What was drawn is then incomplete, so only set it when the output will be
     /// thrown away (a viewer's render whose result nobody can receive any more).
     pub cancelled: Option<Arc<AtomicBool>>,
+    /// PdfCraft patch: a low-detail render for previews (page backdrops, thumbnails). Images
+    /// that would cover only a few device pixels are skipped: redrawing them at full detail
+    /// costs a decode and a resample each for pixels nobody can see. Never set it for a final
+    /// render (tiles, whole pages, print, export).
+    pub preview: bool,
 }
 
 impl Default for InterpreterSettings {
@@ -136,6 +141,7 @@ impl Default for InterpreterSettings {
             hide_comments: false,
             ocg_overrides: Arc::new(Vec::new()),
             cancelled: None,
+            preview: false,
         }
     }
 }
@@ -169,6 +175,9 @@ pub fn interpret_page<'a>(
     if context.settings.render_annotations
         && let Some(annot_arr) = page.raw().get::<Array<'_>>(ANNOTS)
     {
+        // PdfCraft patch (29): bracket the annotations so devices can tell their paints from
+        // the document's own (the reading-colours setting recolours the document, not comments).
+        device.begin_annotations();
         for annot in annot_arr.iter::<Dict<'_>>() {
             let flags = annot.get::<u32>(F).unwrap_or(0);
 
@@ -269,6 +278,7 @@ pub fn interpret_page<'a>(
                 draw_highlight_without_appearance(&annot, context, device);
             }
         }
+        device.end_annotations();
     }
 }
 
@@ -609,6 +619,19 @@ fn interpret_window<'a>(
                 }
 
                 device.begin_marked_content(bdc.0, mcid);
+
+                // PdfCraft patch (25): hand the device the sequence's `/ActualText`, from an inline
+                // property list or one named in the resources' `/Properties`.
+                let actual = dict_or_stream(bdc.1)
+                    .map(|(props, _)| props.clone())
+                    .or_else(|| {
+                        let name = bdc.1.clone().into_name()?;
+                        resources.properties.get::<Dict<'_>>(name)
+                    })
+                    .and_then(|props| props.get::<hayro_syntax::object::String<'_>>(ACTUAL_TEXT));
+                if let Some(text) = actual {
+                    device.actual_text(text.as_bytes());
+                }
             }
             TypedInstruction::MarkedContentPointWithProperties(_) => {}
             TypedInstruction::EndMarkedContent(_) => {
@@ -758,12 +781,18 @@ fn interpret_window<'a>(
             TypedInstruction::ShapeGlyph(_) => {}
             TypedInstruction::XObject(x) => {
                 let cache = context.interpreter_cache.object_cache.clone();
+                // PdfCraft patch: decoded images are cached per quality (preview or final).
+                let decoded_cache = context
+                    .interpreter_cache
+                    .decoded_cache
+                    .for_render(context.settings.preview);
                 let transfer_function = context.get().graphics_state.transfer_function.clone();
                 if let Some(x_object) = resources.get_x_object(x.0).and_then(|s| {
                     XObject::new(
                         &s,
                         &context.settings.warning_sink,
                         &cache,
+                        Some(&decoded_cache),
                         transfer_function.clone(),
                     )
                 }) {
@@ -774,11 +803,13 @@ fn interpret_window<'a>(
                 let warning_sink = context.settings.warning_sink.clone();
                 let transfer_function = context.get().graphics_state.transfer_function.clone();
                 let cache = context.interpreter_cache.object_cache.clone();
+                // PdfCraft patch: inline images are not cached (see `DecodedImageKey`).
                 if let Some(x_object) = ImageXObject::new(
                     i.0,
                     |name| context.get_color_space(resources, name),
                     &warning_sink,
                     &cache,
+                    None,
                     false,
                     transfer_function,
                 ) {

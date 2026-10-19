@@ -1373,7 +1373,7 @@ pub fn run_xfa_within(script: &str, event: &XfaEvent, doc: &XfaDoc, root: XfaNod
 /// for the first script in a process the engine's own set-up) before the script is abandoned.
 /// It doesn't count against the script's time: on a busy machine the start alone can take
 /// longer than the tightest limit, and abandoning a script turns the form's scripts off.
-const ENGINE_START_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+pub(crate) const ENGINE_START_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Run `script` on its own thread (with the script stack) and wait at most `timeout` for its
 /// outcome, counted from when it calls `started` (once the engine is ready); past that the
@@ -1445,7 +1445,7 @@ pub(crate) fn run_within_limits(
 
 /// The first script in a process sets the engine up (its built-ins, parser and compiler come
 /// into use): a trivial script takes that on, so a form's script is never timed with it.
-fn warm_up() {
+pub(crate) fn warm_up() {
     static WARM: std::sync::Once = std::sync::Once::new();
     // `call_once_force`: a poisoned `Once` (a panic while warming up) only means warming up again.
     WARM.call_once_force(|_| {
@@ -1455,10 +1455,9 @@ fn warm_up() {
 }
 
 /// `started` is called once the engine is ready: a time limit on the script runs from then.
-fn run_here(script: &str, event: &XfaEvent, doc: &XfaDoc, root: XfaNode, limits: Limits, started: &dyn Fn()) -> XfaOutcome {
+pub(crate) fn run_here(script: &str, event: &XfaEvent, doc: &XfaDoc, root: XfaNode, limits: Limits, started: &dyn Fn()) -> XfaOutcome {
     warm_up();
     let mut ctx = Context::default();
-    started();
     ctx.runtime_limits_mut().set_loop_iteration_limit(limits.loop_iterations);
     ctx.runtime_limits_mut().set_recursion_limit(limits.recursion);
     let host_state = XHost::new(root, &event.target, doc);
@@ -1467,6 +1466,8 @@ fn run_here(script: &str, event: &XfaEvent, doc: &XfaDoc, root: XfaNode, limits:
     let mut out = XfaOutcome::default();
     let result = (|| -> JsResult<()> {
         install(&mut ctx, event, doc, current)?;
+        // Ready for the script: its time starts now, the set-up above not charged to it.
+        started();
         ctx.register_global_property(js_string!("__xfa_src"), s(script), Attribute::CONFIGURABLE)?;
         // Direct eval inside a function called on the node: `this` is the node and the
         // completion value is the script's last expression (what a calculate script yields).

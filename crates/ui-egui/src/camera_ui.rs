@@ -6,11 +6,14 @@ use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Shape, Stroke, vec2};
 
 use crate::canvas::{DocView, PageXform, ViewAction};
 use crate::theme::Tokens;
+pub use pdfcraft_engine::camera_clean::Look;
 
 /// How far in from the page's edges the corners start, as a share of its size.
 const INSET: f32 = 0.05;
 /// How close (screen points) the pointer must be to pick up a corner.
 const GRAB: f32 = 12.0;
+/// The slider's top.
+pub const MAX_LEVEL: u8 = pdfcraft_engine::camera_clean::MAX_LEVEL;
 const BLUE: Color32 = Color32::from_rgb(0x14, 0x73, 0xE6);
 
 /// The quadrilateral being placed: its page, its corners in view space (points, y down) and the
@@ -28,6 +31,26 @@ impl CameraQuad {
         let (dx, dy) = (w * INSET, h * INSET);
         Self { page, corners: [[dx, dy], [w - dx, dy], [w - dx, h - dy], [dx, h - dy]], grab: None }
     }
+}
+
+/// The clean-up level a page is enhanced at before the slider is touched.
+pub const DEFAULT_LEVEL: u8 = 50;
+
+/// A page just enhanced: what the bar's slider needs to enhance it again at another level
+/// (from the straightened photo, keeping the turns made since).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CameraDone {
+    pub page: usize,
+    /// The corners it was straightened from, in PDF user space.
+    pub corners: [[f64; 2]; 4],
+    /// The look and slider level chosen, and the ones the page shows.
+    pub look: Look,
+    pub level: u8,
+    pub applied: (Look, u8),
+    /// Quarter turns made since, in degrees (clockwise positive).
+    pub turns: i64,
+    /// The undo steps the enhancement and the turns took.
+    pub steps: usize,
 }
 
 fn screen(xf: &PageXform, c: [f32; 2]) -> Pos2 {
@@ -115,7 +138,8 @@ pub(crate) fn paint(painter: &egui::Painter, xf: &PageXform, page: usize, view: 
 
 /// The floating bar at the top right of the document area (where the find bar goes, clear of a
 /// centred page's corners): Enhance page and Cancel; once the page is enhanced, rotate it either
-/// way, Crop pages, Organize pages, or Done. The instructions are a notice (`ocr.enhance_camera`).
+/// way, choose its look (original, colour, greyscale, black and white) and clean-up level,
+/// Crop pages, Organize pages, or Done. The instructions are a notice (`ocr.enhance_camera`).
 pub(crate) fn bar(ctx: &egui::Context, view: &mut DocView, area: Rect, t: &Tokens, allowed: bool) {
     egui::Area::new(egui::Id::new("camera-bar"))
         .order(egui::Order::Middle)
@@ -131,7 +155,31 @@ pub(crate) fn bar(ctx: &egui::Context, view: &mut DocView, area: Rect, t: &Token
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         // After Enhance page: put the page the right way up, trim it, or move on.
-                        if view.camera_done.is_some() {
+                        if let Some(done) = view.camera_done.as_mut() {
+                            let mut again = false;
+                            for (look, label) in [
+                                (Look::Original, tl!("Original")),
+                                (Look::Colour, tl!("Colour")),
+                                (Look::Greyscale, tl!("Greyscale")),
+                                (Look::BlackWhite, tl!("Black and white")),
+                            ] {
+                                if ui.add_enabled(allowed, egui::Button::selectable(done.look == look, label)).clicked() && done.look != look {
+                                    done.look = look;
+                                    again = true;
+                                }
+                            }
+                            ui.separator();
+                            ui.label(tl!("Clean-up"));
+                            let slider = ui.add_enabled(
+                                allowed && done.look != Look::Original,
+                                egui::Slider::new(&mut done.level, 0..=crate::camera_ui::MAX_LEVEL).show_value(false),
+                            );
+                            // Enhance again once the slider is let go (or moved with the keys).
+                            again |= slider.drag_stopped() || (slider.changed() && !slider.dragged());
+                            if again && (done.look, done.level) != done.applied {
+                                view.pending_action = Some(ViewAction::CameraLevel);
+                            }
+                            ui.separator();
                             let icon = |ui: &mut egui::Ui, name: &str, tip: &str| {
                                 let r = ui.add_enabled(allowed, egui::Button::image(crate::icons::image(name, 18.0, t.text)).frame(false));
                                 // Named for screen readers (and tests), not only on hover.
