@@ -400,6 +400,17 @@ fn node_at<'a>(live: &'a crate::script::FormNode, som: &str) -> Option<&'a crate
 }
 
 #[test]
+fn a_date_its_data_picture_cant_hold_is_written_as_iso() {
+    use crate::data::{data_to_iso, iso_to_data};
+    assert_eq!(iso_to_data("2026-01-02".into(), Some("yymmdd")), "260102");
+    // A two-digit year reads back as 1950 to 2049: 2050 and 1949 keep ISO, and read back as written.
+    for iso in ["2050-01-02", "1949-12-31"] {
+        assert_eq!(iso_to_data(iso.into(), Some("yymmdd")), iso);
+        assert_eq!(data_to_iso(iso, Some("yymmdd")), iso);
+    }
+}
+
+#[test]
 fn data_fills_the_fields_and_adds_rows() {
     let form = layout_xml(&template_with_data(1, DATA)).unwrap();
     let all: Vec<&Widget> = form.pages.iter().flat_map(widgets).collect();

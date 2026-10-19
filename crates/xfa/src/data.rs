@@ -192,10 +192,14 @@ pub(crate) fn data_to_iso(value: &str, data_pattern: Option<&str>) -> String {
     data_pattern.and_then(|p| pattern_to_iso(value, p)).unwrap_or_else(|| value.to_string())
 }
 
-/// An ISO date as the data should hold it: in `data_pattern` when the field has one.
-fn iso_to_data(iso: String, data_pattern: Option<&str>) -> String {
+/// An ISO date as the data should hold it: in `data_pattern` when the field has one and the
+/// date reads back from it unchanged (a two-digit year holds only 1950 to 2049), else as ISO.
+pub(crate) fn iso_to_data(iso: String, data_pattern: Option<&str>) -> String {
     match data_pattern {
-        Some(p) => iso_to_pattern(&iso, p),
+        Some(p) => {
+            let written = iso_to_pattern(&iso, p);
+            if pattern_to_iso(&written, p).as_deref() == Some(iso.as_str()) { written } else { iso }
+        }
         None => iso,
     }
 }
