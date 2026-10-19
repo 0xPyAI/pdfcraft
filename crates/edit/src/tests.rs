@@ -5235,3 +5235,21 @@ fn a_clipping_copy_on_the_same_baseline_is_refused() {
     assert!(matches!(&block, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{block:?}");
     assert_eq!(text::text_lines(&doc, 0).unwrap().len(), 2, "refused means untouched");
 }
+
+/// Two genuinely stacked rows of ordinary body text must not join into one row just because the
+/// first is narrow enough to put the second's start within the #3252 tolerance band: here the
+/// second row starts 1.4pt to the left of where the first ends (so the two overlap a little,
+/// as compressed text or a tight column can) and 5pt below its baseline — inside the widened 50%
+/// tolerance but outside the original 20% one. They stay two rows (and two paragraphs).
+#[test]
+fn stacked_rows_that_merely_overlap_do_not_join_into_one_row() {
+    let doc = text_page("BT /F1 12 Tf 72 700 Td (A compressed line of body text here) Tj 190 -5 Td (Second stacked line of body text) Tj ET");
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 2);
+    let gap = lines[1].rect[0] - lines[0].rect[2];
+    assert!((-2.4..0.0).contains(&gap), "the rows overlap a little, within the old tolerance band: {gap}");
+    let baseline_shift = lines[0].rect[3] - lines[1].rect[3];
+    assert!((2.4..6.0).contains(&baseline_shift), "between the old and new vertical tolerance: {baseline_shift}");
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 2, "two separate rows stay two paragraphs, not one: {blocks:?}");
+}
