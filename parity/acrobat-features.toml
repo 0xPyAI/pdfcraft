@@ -7088,8 +7088,8 @@ milestone = "M10"
 status = "partial"
 commands = ["export.html"]
 tools = ["doc_export_office"]
-evidence = ["crates/export/src/lib.rs::html_has_headings_paragraphs_and_images_in_order", "crates/export/src/lib.rs::text_colour_survives_every_format", "crates/export/src/lib.rs::grid_text_becomes_a_real_table_in_every_format", "crates/automation/tests/automation.rs::exporting_to_word_html_and_rtf", "crates/ui-egui/tests/compare.rs::export_to_word_html_and_rtf"]
-notes = "Single HTML file with headings, paragraphs (with text colour), inline images, and detected tables with spans/empty cells. Not yet: multi-page folder output, CSS from fonts."
+evidence = ["crates/export/src/lib.rs::html_has_headings_paragraphs_and_images_in_order", "crates/export/src/lib.rs::text_colour_survives_every_format", "crates/export/src/lib.rs::grid_text_becomes_a_real_table_in_every_format", "crates/automation/tests/automation.rs::exporting_to_word_html_and_rtf", "crates/ui-egui/tests/compare.rs::export_to_word_html_and_rtf", "crates/automation/tests/automation.rs::exporting_office_files_says_which_pages_left_form_text_out", "crates/edit/src/tests.rs::reading_follows_forms_as_far_as_the_renderer_and_says_where_it_stops"]
+notes = "Single HTML file with headings, paragraphs (with text colour), inline images, and detected tables with spans/empty cells. Text and images in form XObjects are read 50 levels deep, as the renderer does, and up to 50 000 forms a page; the tool lists pages past that in truncated_pages, with a warning (#3120). Not yet: multi-page folder output, CSS from fonts."
 
 [[feature]]
 id = "create.export-text"

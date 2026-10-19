@@ -1271,13 +1271,27 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
     *last = Some(Pen::after(&s));
 }
 
-/// How deep form XObjects nest before reading stops (they may also refer to themselves).
-pub(crate) const MAX_FORM_DEPTH: usize = 12;
+/// How deep form XObjects nest before reading stops (they may also refer to themselves). The
+/// renderer stops at the same depth, so export reads the text the page shows (#3120).
+pub const MAX_FORM_DEPTH: usize = 50;
 
 /// The most form XObjects one page's walk enters, at any depth. The depth cap alone still lets
-/// a form that draws another form many times fan out exponentially (100 `Do`s on each of 12
-/// levels), which would hang export on a hostile PDF.
-pub(crate) const MAX_FORM_VISITS: usize = 4096;
+/// a form that draws another form many times fan out exponentially (100 `Do`s on each of 50
+/// levels), which would hang export on a hostile PDF. The renderer paints as many forms nested
+/// in forms; this budget also counts the forms the page draws itself, so a page that draws one
+/// a million times stays bounded too. A label or table cell drawn as a form a few thousand
+/// times is read in full (#3120).
+pub const MAX_FORM_VISITS: usize = 50_000;
+
+/// One page's walk through the form XObjects it draws: how many it entered (the page's
+/// [`MAX_FORM_VISITS`]), and whether a limit left a form unread.
+#[derive(Default)]
+pub(crate) struct FormBudget {
+    visits: usize,
+    /// A form was left unread because it nests deeper than [`MAX_FORM_DEPTH`] or comes past
+    /// [`MAX_FORM_VISITS`]: what it draws is missing from the walk.
+    pub(crate) truncated: bool,
+}
 
 /// A form XObject a page draws: its object, content, resources and its matrix composed with the
 /// CTM at the `Do`.
@@ -1289,17 +1303,19 @@ pub(crate) struct FormCall {
 }
 
 /// The form XObject `name` in `resources`, drawn with `ctm`. `None` for images, missing names
-/// and forms already being read (`path`), nested too deep, or past the page's `visits` budget
-/// ([`MAX_FORM_VISITS`]); each form entered counts one visit.
+/// and forms already being read (`path`), and for forms nested too deep or past the page's
+/// budget, which `budget` records as truncated; each form entered counts one visit.
 pub(crate) fn form_call(
     doc: &Document,
     resources: &Dict,
     name: &[u8],
     ctm: Matrix,
     path: &[pdfcraft_cos::ObjRef],
-    visits: &mut usize,
+    budget: &mut FormBudget,
 ) -> Option<FormCall> {
-    if path.len() >= MAX_FORM_DEPTH || *visits >= MAX_FORM_VISITS {
+    let limited = path.len() >= MAX_FORM_DEPTH || budget.visits >= MAX_FORM_VISITS;
+    // Once a limit has cut the page short, refusing the rest costs nothing more.
+    if limited && budget.truncated {
         return None;
     }
     let xobjects = resources.get(b"XObject").map(|x| doc.resolve(x)).and_then(|x| x.as_dict().cloned())?;
@@ -1312,6 +1328,11 @@ pub(crate) fn form_call(
     if s.dict.name(b"Subtype") != Some(b"Form") {
         return None;
     }
+    // Only a form left unread loses content; an image at the limit is still read by its caller.
+    if limited {
+        budget.truncated = true;
+        return None;
+    }
     let m = s.dict.get(b"Matrix").map(|m| doc.resolve(m)).and_then(|m| {
         let a = m.as_array()?;
         let v: Vec<f64> = a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect();
@@ -1319,7 +1340,7 @@ pub(crate) fn form_call(
     });
     // A form without its own resources uses the ones it was drawn with (PDF 1.1 files).
     let own = s.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned());
-    *visits = visits.saturating_add(1);
+    budget.visits = budget.visits.saturating_add(1);
     Some(FormCall {
         obj,
         data: s.decoded().unwrap_or_default(),
@@ -1330,14 +1351,15 @@ pub(crate) fn form_call(
 
 /// The lines a page shows as it reads, including text drawn by form XObjects (which
 /// [`text_lines`] leaves out because it can only rewrite the page's own streams). Lines from a
-/// form carry a stream number past the page's streams, one per form drawn.
-fn reading_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError> {
+/// form carry a stream number past the page's streams, one per form drawn. The flag is `true`
+/// when forms past [`MAX_FORM_DEPTH`] or [`MAX_FORM_VISITS`] were left unread.
+fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), EditError> {
     struct Walk<'a> {
         doc: &'a Document,
         lines: Vec<TextLine>,
         next_stream: usize,
         path: Vec<pdfcraft_cos::ObjRef>,
-        visits: usize,
+        budget: FormBudget,
     }
     /// `stream` gives the stream number of the operator at an index of `ops`.
     fn walk(w: &mut Walk, ops: &[Op], resources: &Dict, carry: &mut Carry, stream: &dyn Fn(usize) -> usize) {
@@ -1367,7 +1389,7 @@ fn reading_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError
         }
     }
     fn enter(w: &mut Walk, resources: &Dict, name: &[u8], ts: Ts) {
-        let Some(form) = form_call(w.doc, resources, name, ts.ctm, &w.path, &mut w.visits) else { return };
+        let Some(form) = form_call(w.doc, resources, name, ts.ctm, &w.path, &mut w.budget) else { return };
         let ops = parse(&form.data).ops;
         // The form starts with the graphics state at its `Do`, its own matrix applied.
         let mut carry = Carry { ts: Ts { ctm: form.ctm, ..ts }, stack: Vec::new(), marked: Vec::new() };
@@ -1384,7 +1406,7 @@ fn reading_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError
     let p = page_dict(doc, page)?;
     let res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
     let streams = content_streams(doc, &p.dict);
-    let mut w = Walk { doc, lines: Vec::new(), next_stream: streams.len(), path: Vec::new(), visits: 0 };
+    let mut w = Walk { doc, lines: Vec::new(), next_stream: streams.len(), path: Vec::new(), budget: FormBudget::default() };
     let mut carry = Carry::new();
     // Read the page's streams as the one stream they are, in one pass, as rendering and editing
     // do: a comment, an operator's operands or a marked-content sequence (its /ActualText too)
@@ -1400,7 +1422,7 @@ fn reading_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError
         l.text = crate::indic::to_logical(&l.text);
     }
     lines.retain(|l| !l.text.trim().is_empty());
-    Ok(lines)
+    Ok((lines, w.budget.truncated))
 }
 
 /// Text → the runs that show it: each run's font resource name and the bytes shown in that font.
@@ -2016,9 +2038,27 @@ pub fn clear_block(doc: &mut Document, page: usize, block: usize) -> Result<(), 
 /// The paragraphs on a page as a reader sees them, including text drawn by form XObjects
 /// (Export to Word, HTML and RTF). Read-only: indexes into this list are not
 /// [`text_blocks`] indexes, so they can't be passed to [`replace_block`] or [`rewrite_block`].
+/// [`reading_blocks_checked`] also says whether text was left out.
 pub fn reading_blocks(doc: &Document, page: usize) -> Result<Vec<TextBlock>, EditError> {
-    let lines = reading_lines(doc, page)?;
-    Ok(regions::group_reading_blocks(&lines))
+    reading_blocks_checked(doc, page).map(|r| r.blocks)
+}
+
+/// A page's paragraphs as a reader sees them ([`reading_blocks_checked`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ReadingBlocks {
+    /// The paragraphs, as [`reading_blocks`] returns them.
+    pub blocks: Vec<TextBlock>,
+    /// The page draws forms nested deeper than [`MAX_FORM_DEPTH`], or more of them than
+    /// [`MAX_FORM_VISITS`]. Reading leaves those out to stay bounded on hostile files, so their
+    /// text is missing from `blocks`; [`crate::reading_images`] walks the same forms and misses
+    /// their images too.
+    pub truncated: bool,
+}
+
+/// [`reading_blocks`], saying whether the limits that bound reading left text out.
+pub fn reading_blocks_checked(doc: &Document, page: usize) -> Result<ReadingBlocks, EditError> {
+    let (lines, truncated) = reading_lines(doc, page)?;
+    Ok(ReadingBlocks { blocks: regions::group_reading_blocks(&lines), truncated })
 }
 
 // An ideographic space carries intentional Japanese spacing, including paragraph indentation.

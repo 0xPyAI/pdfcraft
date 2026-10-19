@@ -2982,6 +2982,88 @@ fn form_xobjects_that_fan_out_stop_at_the_visit_budget() {
     assert!(start.elapsed() < std::time::Duration::from_secs(30), "took {:?}", start.elapsed());
 }
 
+/// #3120: a one-page document whose page draws "Secret", then `content`. `forms` are (name,
+/// content) form XObjects, which the page and every form can draw, as they can a 1×1 image `/Im`.
+fn page_with_forms(content: &str, forms: &[(String, String)]) -> Document {
+    let xobjects: String = forms.iter().enumerate().map(|(i, (name, _))| format!("/{name} {} 0 R ", 7 + i)).collect();
+    let resources = format!("<< /Font << /F1 5 0 R >> /XObject << /Im 6 0 R {xobjects}>> >>");
+    let mut objs = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources {resources} /Contents 4 0 R >>"),
+        stream("", &format!("BT /F1 24 Tf 72 700 Td (Secret) Tj ET\n{content}")),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        stream("/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", "A"),
+    ];
+    objs.extend(forms.iter().map(|(_, body)| stream(&format!("/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources {resources}"), body)));
+    build(&objs.iter().map(String::as_str).collect::<Vec<_>>())
+}
+
+/// #3120: export reads text from forms as deep and as often as the renderer draws them, and says
+/// when a limit left some out: a text form drawn 5 000 times (past the old budget of 4 096) or
+/// forms nested 13 deep (past the old 12) lost the form drawn after them, silently.
+#[test]
+fn reading_follows_forms_as_far_as_the_renderer_and_says_where_it_stops() {
+    // Covers "Secret" with a black box and writes "TAIL": drawn last, so a reader that stops
+    // early misses it.
+    const TAIL: &str = "0 g 70 692 90 30 re f BT /F1 24 Tf 72 600 Td (TAIL) Tj ET";
+    let tail = |doc: &Document| {
+        let read = text::reading_blocks_checked(doc, 0).unwrap();
+        (read.blocks.iter().any(|b| b.text.contains("TAIL")), read.truncated)
+    };
+    let form = |name: &str, body: &str| (name.to_string(), body.to_string());
+
+    let rows =
+        |n: usize| page_with_forms(&format!("{}/C Do", "/R Do ".repeat(n)), &[form("R", "BT /F1 6 Tf 300 100 Td (row) Tj ET"), form("C", TAIL)]);
+    assert_eq!(tail(&rows(5_000)), (true, false));
+
+    // The innermost form also draws an image: an image at the depth limit is read, and leaves
+    // nothing out.
+    let chain = |depth: usize| {
+        let mut forms: Vec<_> = (1..depth).map(|i| form(&format!("D{i}"), &format!("/D{} Do", i + 1))).collect();
+        forms.push(form(&format!("D{depth}"), &format!("{TAIL} q 20 0 0 10 5 5 cm /Im Do Q")));
+        page_with_forms("/D1 Do", &forms)
+    };
+    assert_eq!(tail(&chain(13)), (true, false));
+    // The renderer's limit, written out so the test does not move with the constant.
+    assert_eq!(tail(&chain(50)), (true, false));
+    assert_eq!(tail(&chain(51)), (false, true));
+    let deepest = chain(text::MAX_FORM_DEPTH);
+    assert_eq!(tail(&deepest), (true, false));
+    assert_eq!(images::reading_images(&deepest, 0).unwrap().len(), 1);
+    let deep = chain(text::MAX_FORM_DEPTH + 1);
+    assert_eq!(tail(&deep), (false, true));
+    assert!(images::reading_images(&deep, 0).unwrap().is_empty());
+
+    // A wrapper form A draws a dot form B `n` times, then C. A, the dots and C use the page's
+    // budget up exactly; one dot more leaves C unread.
+    let fanout =
+        |n: usize| page_with_forms("/A Do", &[form("A", &format!("{}/C Do", "/B Do ".repeat(n))), form("B", "0 g 10 10 1 1 re f"), form("C", TAIL)]);
+    assert_eq!(tail(&fanout(text::MAX_FORM_VISITS - 2)), (true, false));
+    let many = fanout(text::MAX_FORM_VISITS - 1);
+    assert_eq!(tail(&many), (false, true));
+    assert!(images::reading_images(&many, 0).unwrap().is_empty());
+    // Without the flag, reading is unchanged.
+    let blocks: Vec<String> = text::reading_blocks(&many, 0).unwrap().into_iter().map(|b| b.text).collect();
+    assert_eq!(blocks, ["Secret"]);
+}
+
+/// #3120: with the renderer's limits, forms that each draw the next a hundred times, 12 levels
+/// deep (100^11 forms) or past the depth cap, still stop at the page's budget quickly, and say
+/// that text was left out.
+#[test]
+fn forms_that_fan_out_a_hundred_ways_stop_quickly_and_say_so() {
+    for levels in [12, text::MAX_FORM_DEPTH + 1] {
+        let mut forms: Vec<(String, String)> = (1..levels).map(|i| (format!("N{i}"), format!("/N{} Do ", i + 1).repeat(100))).collect();
+        forms.push((format!("N{levels}"), "BT /F1 10 Tf 10 10 Td (leaf) Tj ET".to_string()));
+        let doc = page_with_forms("/N1 Do", &forms);
+        let start = std::time::Instant::now();
+        assert!(text::reading_blocks_checked(&doc, 0).unwrap().truncated, "{levels} levels");
+        assert!(images::reading_images(&doc, 0).unwrap().is_empty());
+        assert!(start.elapsed() < std::time::Duration::from_secs(30), "{levels} levels took {:?}", start.elapsed());
+    }
+}
+
 /// Forms that draw themselves or each other, have no resources, a malformed matrix, or are
 /// missing are read once (or skipped) without panicking or looping.
 #[test]
