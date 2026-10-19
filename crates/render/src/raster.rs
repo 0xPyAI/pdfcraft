@@ -3665,6 +3665,60 @@ trailer << /Root 1 0 R >>
         pdf
     }
 
+    /// [`jpx_midpoint_pdf`]'s codestream (every sample 128) wrapped in a JP2 file whose header
+    /// has a colour specification naming enumerated colour space `enumerated`.
+    fn jp2_midpoint_pdf(components: u16, enumerated: u32) -> Vec<u8> {
+        let raw = jpx_midpoint_pdf(8, components);
+        let start = raw.windows(4).position(|w| w == [0xff, 0x4f, 0xff, 0x51]).unwrap();
+        let end = raw.windows(2).rposition(|w| w == [0xff, 0xd9]).unwrap() + 2;
+        let codestream = &raw[start..end];
+        let jp2_box = |kind: &[u8], body: &[u8]| [&((8 + body.len()) as u32).to_be_bytes()[..], kind, body].concat();
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&1_u32.to_be_bytes()); // height
+        ihdr.extend_from_slice(&1_u32.to_be_bytes()); // width
+        ihdr.extend_from_slice(&components.to_be_bytes());
+        ihdr.extend_from_slice(&[7, 7, 0, 0]); // 8 bits, wavelet, colour known, no IPR
+        let colr = [&[1, 0, 0][..], &enumerated.to_be_bytes()].concat();
+        let jp2 = [
+            vec![0, 0, 0, 12, b'j', b'P', b' ', b' ', 0x0d, 0x0a, 0x87, 0x0a],
+            jp2_box(b"ftyp", b"jp2 \0\0\0\0jp2 "),
+            jp2_box(b"jp2h", &[jp2_box(b"ihdr", &ihdr), jp2_box(b"colr", &colr)].concat()),
+            jp2_box(b"jp2c", codestream),
+        ]
+        .concat();
+        let content = "q 20 0 0 20 5 5 cm /Im1 Do Q";
+        let mut pdf = format!(
+            "%PDF-1.7\n\
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 40 40] /Contents 4 0 R /Resources << /XObject << /Im1 5 0 R >> >> >> endobj\n\
+4 0 obj << /Length {} >> stream\n{content}\nendstream endobj\n\
+5 0 obj << /Type /XObject /Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /Filter /JPXDecode /Length {} >> stream\n",
+            content.len(),
+            jp2.len()
+        )
+        .into_bytes();
+        pdf.extend_from_slice(&jp2);
+        pdf.extend_from_slice(b"\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF");
+        pdf
+    }
+
+    /// #3306: a JP2 image whose colour specification names an enumerated colour space the
+    /// decoder refuses (CIEJab in a veraPDF fixture, or YPbPr, or bilevel for one component) is
+    /// drawn as if it had none, by its component count, as MuPDF and Poppler draw it: the
+    /// midpoint image shows mid-grey instead of nothing. A space the decoder knows (sRGB) is
+    /// drawn as before.
+    #[test]
+    fn a_jp2_image_in_a_refused_enumerated_colour_space_is_drawn() {
+        for (components, enumerated) in [(3, 19), (3, 22), (1, 15), (3, 16)] {
+            let mut r = PageRenderer::new(Arc::new(jp2_midpoint_pdf(components, enumerated)), RenderConfig::default());
+            let page = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(page.error.is_none(), "{enumerated}: {:?}", page.error);
+            let px = &page.rgba[((40 - 15) * 40 + 15) * 4..][..3];
+            assert!(px.iter().all(|&v| (120..=136).contains(&v)), "enum {enumerated}, {components} component(s): {px:?}");
+        }
+    }
+
     #[test]
     fn jpx_stream_bit_depth_boundaries_do_not_panic() {
         use hayro::hayro_syntax::bit_reader::BitReader;
