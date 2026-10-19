@@ -431,6 +431,7 @@
 	Current page	Dabartinis puslapis
 	Current page ({n})	Dabartinis puslapis ({n})
 	Current page — type a page number or label (such as iv) and press Enter	Dabartinis puslapis — įveskite puslapio numerį arba žymą (pvz., iv) ir paspauskite „Enter“
+	Zoom — type a percentage and press Enter	Mastelis – įveskite procentus ir paspauskite Enter
 	Custom	Pasirinktinis
 	Custom scale:	Pasirinktinis mastelis:
 	Custom text:	Pasirinktinis tekstas:
@@ -1965,6 +1966,7 @@ comment menu	Edit	Redaguoti
 	Couldn't use the photo: {e}	Nepavyko panaudoti nuotraukos: {e}
 	Couldn't use {name}: {e}	Nepavyko panaudoti {name}: {e}
 	Couldn't write {name}: {e}	Nepavyko įrašyti {name}: {e}
+	the name is not a plain file name	vardas nėra paprastas failo vardas
 	Couldn't write {path}: {e}	Nepavyko įrašyti {path}: {e}
 	Create link	Kurti saitą
 	Created 1 link	Sukurtas 1 saitas
@@ -2624,6 +2626,10 @@ key	Space	Tarpas
 	This document is trying to open a local file:	Šis dokumentas bando atverti vietinį failą:
 	Move tag earlier	Perkelti žymą anksčiau
 	Move tag later	Perkelti žymą vėliau
+
+# Historical snapshot notice bar (View signed version / View revision).
+	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	Jūs peržiūrite pasirašytą „{from}“ versiją ({rev} versija). Tai momentinė kopija: čia atlikti pakeitimai originalo nepaveiks.
+	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.	Jūs peržiūrite „{from}“ {rev} versiją. Tai momentinė kopija: čia atlikti pakeitimai originalo nepaveiks.
 	Turn upside down (180°)	Apversti aukštyn kojomis (180°)
 	4 x 6 in label (101.6 x 152.4 mm)	4 × 6 col. etiketė (101,6 × 152,4 mm)
 	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Apkerpa kiekvieną puslapį iki spausdinamos srities, pasuka tiesiai ir pritaiko lapui neiškraipydama. Viena etiketė lape.
@@ -2672,3 +2678,10 @@ key	Space	Tarpas
 	Make properties default	Nustatyti ypatybes kaip numatytąsias
 	Pages selected	Pasirinkti puslapiai
 	Page properties	Puslapio ypatybės
+
+# AI-assisted additions for concurrently merged UI features (2026-10-15).
+# These additions have not had separate native-speaker review.
+	Mouse wheel scroll speed	Pelės ratuko slinkimo greitis
+	The password must have at least 6 characters.	Slaptažodį turi sudaryti bent 6 simboliai.
+	This file changed on disk. Reload it to see the new version; your unsaved changes will be lost.	Šis failas diske pasikeitė. Įkelkite jį iš naujo, kad pamatytumėte naują versiją; neįrašyti pakeitimai bus prarasti.
+theme	Appearance	Išvaizda

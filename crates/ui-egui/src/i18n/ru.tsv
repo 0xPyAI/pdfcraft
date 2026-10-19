@@ -155,6 +155,7 @@
 	Next page	Следующая страница
 	Previous page	Предыдущая страница
 	Current page — type a page number or label (such as iv) and press Enter	Текущая страница — введите номер или метку страницы (например, iv) и нажмите Enter
+	Zoom — type a percentage and press Enter	Масштаб — введите процент и нажмите Enter
 	Welcome to PdfCraft	Добро пожаловать в PdfCraft
 	An open-source PDF workbench — local, private, and scriptable.	Открытый PDF-редактор — локальный, приватный и программируемый.
 	Join the ArtCraft community	Присоединяйтесь к сообществу ArtCraft
@@ -1704,6 +1705,7 @@
 	Couldn't use {name}: {e}	Не удалось использовать {name}: {e}
 	Couldn't extract pages: {e}	Не удалось извлечь страницы: {e}
 	Couldn't write {name}: {e}	Не удалось записать {name}: {e}
+	the name is not a plain file name	имя не является простым именем файла
 	Wrote 1 file to {dir}	Записан 1 файл в {dir}
 	Wrote {n} files to {dir}	Записано {n} файлов в {dir}
 	No pages match those choices	Страницы не соответствуют этим выбору
@@ -2293,6 +2295,10 @@ animation effects	Off	Выкл
 	This document is trying to open a local file:	Этот документ пытается открыть локальный файл:
 	Move tag earlier	Переместить тег раньше
 	Move tag later	Переместить тег позже
+
+# Historical snapshot notice bar (View signed version / View revision).
+	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	Вы просматриваете подписанную версию документа «{from}» (ревизия {rev}). Это снимок: изменения здесь не затронут оригинал.
+	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.	Вы просматриваете ревизию {rev} документа «{from}». Это снимок: изменения здесь не затронут оригинал.
 	Turn upside down (180°)	Перевернуть (180°)
 	4 x 6 in label (101.6 x 152.4 mm)	Этикетка 4 × 6 дюйма (101,6 × 152,4 мм)
 	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Обрезает каждую страницу по напечатанной области, разворачивает её прямо и вписывает в лист без искажений. Одна этикетка на лист.

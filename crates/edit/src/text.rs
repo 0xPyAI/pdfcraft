@@ -50,6 +50,10 @@ pub struct TextLine {
     pub visual_order: bool,
     /// The Japanese or Hebrew fallback face the font subsets, when the line is in one (see [`same_font`]).
     face: Option<String>,
+    /// Its box along and across its baseline, `[along0, across0, along1, across1]` (see
+    /// [`TextLine::frame_rect`]). Upright text has `rect`; turned text has its own box, which is
+    /// narrower than `rect` turned into the same frame.
+    frame: [f64; 4],
     /// The content stream piece the line starts in, and its operators (indices into the page's
     /// streams parsed joined).
     stream: usize,
@@ -470,12 +474,7 @@ impl TextLine {
 
     /// Its box in the same frame, `[along0, across0, along1, across1]` (for upright text, `rect`).
     fn frame_rect(&self) -> [f64; 4] {
-        let dir = self.direction();
-        let r = self.rect;
-        [(r[0], r[1]), (r[2], r[1]), (r[0], r[3]), (r[2], r[3])]
-            .into_iter()
-            .map(|p| to_frame(dir, p))
-            .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)])
+        self.frame
     }
 }
 
@@ -491,6 +490,11 @@ fn direction(m: &Matrix) -> (f64, f64) {
 /// same way (#1443).
 fn to_frame(dir: (f64, f64), p: (f64, f64)) -> (f64, f64) {
     (p.0 * dir.0 + p.1 * dir.1, p.1 * dir.0 - p.0 * dir.1)
+}
+
+/// The box covering both `[x0, y0, x1, y1]` boxes.
+fn union(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
+    [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]
 }
 
 /// What replacing a line did.
@@ -639,6 +643,8 @@ struct Shown {
     bt_state: Ts,
     text: String,
     rect: [f64; 4],
+    /// Its box along and across its baseline (see [`TextLine::frame`]).
+    frame: [f64; 4],
     /// The boxes of its words (see [`TextLine::ink`]).
     ink: Vec<[f64; 4]>,
     baseline: f64,
@@ -734,7 +740,8 @@ fn interpret(
     cache: &mut HashMap<Vec<u8>, (Rc<Metrics>, Option<String>)>,
     carry: &mut Carry,
     mut invoked: Option<&mut Vec<Invocation>>,
-    logical_text: bool,
+    // `Some(properties)`: read `/ActualText`, looking named property lists up in `properties`.
+    logical_text: Option<&Dict>,
 ) -> Vec<Shown> {
     let mut out: Vec<Shown> = Vec::new();
     let mut ts = carry.ts.clone();
@@ -751,11 +758,16 @@ fn interpret(
                 // artifacts and inner spans, which inherit their enclosing region.
                 let region = matches!(op.name(0), Some(b"P" | b"H" | b"H1" | b"H2" | b"H3" | b"H4" | b"H5" | b"H6" | b"LI" | b"TD" | b"TH"));
                 marked.push(if region { Some(i) } else { marked.last().copied().flatten() });
-                let logical = op.operands.get(1).and_then(Object::as_dict).and_then(|d| d.get(b"ActualText")).and_then(|s| match s {
+                // The property list is inline or named in the resources' /Properties (§14.6.2).
+                let list = logical_text.and_then(|properties| match op.operands.get(1) {
+                    Some(Object::Name(n)) => properties.get(n).and_then(|o| doc.dict(o)),
+                    other => other.and_then(Object::as_dict).cloned(),
+                });
+                let logical = list.as_ref().and_then(|d| d.get(b"ActualText")).and_then(|s| match s {
                     Object::String(s) if s.bytes.len() <= 4_000_000 => Some(s.to_text()),
                     _ => None,
                 });
-                actual.push(if logical_text { logical.map(|s| (out.len(), i, s)) } else { None });
+                actual.push(logical.map(|s| (out.len(), i, s)));
             }
             b"EMC" => {
                 marked.pop();
@@ -773,6 +785,7 @@ fn interpret(
                                 first.rect[2].max(shown.rect[2]),
                                 first.rect[3].max(shown.rect[3]),
                             ];
+                            first.frame = union(first.frame, shown.frame);
                             first.ink.extend(shown.ink);
                         }
                         first.extra_ops.extend([open, i]);
@@ -936,6 +949,13 @@ fn interpret(
                 let rect = corners
                     .iter()
                     .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)]);
+                // The same corners along and across the baseline: the run's own box, not its
+                // upright bounding box turned (which is wider by the box's height on a slant).
+                let dir = direction(&trm0);
+                let frame = corners
+                    .iter()
+                    .map(|&p| to_frame(dir, p))
+                    .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)]);
                 let ink = words
                     .iter()
                     .map(|&(a, b)| {
@@ -963,6 +983,7 @@ fn interpret(
                     bt_state: at_bt.1.clone(),
                     text,
                     rect,
+                    frame,
                     ink,
                     baseline: start.1,
                     start_x: start.0,
@@ -1003,7 +1024,8 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
     // joined, so an operator whose operands end one piece still has them.
     let pieces = Pieces::join(&content_streams(doc, &p.dict).into_iter().map(|(_, d)| d).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
-    let shown = interpret(doc, &ops, &fonts_res, &mut cache, &mut carry, None, true);
+    let properties = res.get(b"Properties").and_then(|o| doc.dict(o)).unwrap_or_default();
+    let shown = interpret(doc, &ops, &fonts_res, &mut cache, &mut carry, None, Some(&properties));
     let mut last: Option<(usize, Pen)> = None; // the stream piece and where its last run ended
     for mut s in shown {
         // A single RTL glyph's ActualText (e.g. lam-alef) is an inline ligature, not a
@@ -1040,6 +1062,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
             }
             l.text.push_str(&s.text);
             l.rect = [l.rect[0].min(s.rect[0]), l.rect[1].min(s.rect[1]), l.rect[2].max(s.rect[2]), l.rect[3].max(s.rect[3])];
+            l.frame = union(l.frame, s.frame);
             l.ink.extend(s.ink.iter().copied());
             l.ops.push(s.op);
             l.ops.extend(s.extra_ops.iter().copied());
@@ -1051,6 +1074,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
             lines.push(TextLine {
                 text: s.text.clone(),
                 rect: s.rect,
+                frame: s.frame,
                 ink: s.ink.clone(),
                 font: String::from_utf8_lossy(&s.font).into_owned(),
                 base_font: s.base_font.clone(),
@@ -1128,6 +1152,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
         }
         l.text.push_str(&s.text);
         l.rect = [l.rect[0].min(s.rect[0]), l.rect[1].min(s.rect[1]), l.rect[2].max(s.rect[2]), l.rect[3].max(s.rect[3])];
+        l.frame = union(l.frame, s.frame);
         l.ink.extend(s.ink.iter().copied());
         l.ops.push(s.op);
         l.ops.extend(s.extra_ops.iter().copied());
@@ -1138,6 +1163,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
         lines.push(TextLine {
             text: s.text.clone(),
             rect: s.rect,
+            frame: s.frame,
             ink: s.ink.clone(),
             font: String::from_utf8_lossy(&s.font).into_owned(),
             base_font: s.base_font.clone(),
@@ -1237,12 +1263,15 @@ fn reading_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError
         path: Vec<pdfcraft_cos::ObjRef>,
         visits: usize,
     }
-    fn walk(w: &mut Walk, ops: &[Op], resources: &Dict, carry: &mut Carry, stream: usize) {
+    /// `stream` gives the stream number of the operator at an index of `ops`.
+    fn walk(w: &mut Walk, ops: &[Op], resources: &Dict, carry: &mut Carry, stream: &dyn Fn(usize) -> usize) {
         let fonts_res = resources.get(b"Font").map(|f| w.doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
         let mut cache = HashMap::new();
         let mut invoked = Vec::new();
-        let shown = interpret(w.doc, ops, &fonts_res, &mut cache, carry, Some(&mut invoked), true);
+        let properties = resources.get(b"Properties").and_then(|o| w.doc.dict(o)).unwrap_or_default();
+        let shown = interpret(w.doc, ops, &fonts_res, &mut cache, carry, Some(&mut invoked), Some(&properties));
         let mut last = None;
+        let mut last_stream = None;
         let mut forms = invoked.into_iter().peekable();
         for s in shown {
             while let Some((_, name, ts)) = forms.next_if(|f| f.0 < s.op) {
@@ -1250,7 +1279,12 @@ fn reading_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError
                 // Text after a form starts a new line.
                 last = None;
             }
-            add_shown(&mut w.lines, &mut last, s, stream);
+            let si = stream(s.op);
+            // Text from another stream starts a new line, as when each stream was read alone.
+            if last_stream.replace(si).is_some_and(|prev| prev != si) {
+                last = None;
+            }
+            add_shown(&mut w.lines, &mut last, s, si);
         }
         for (_, name, ts) in forms {
             enter(w, resources, &name, ts);
@@ -1266,7 +1300,7 @@ fn reading_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError
         if let Some(r) = form.obj {
             w.path.push(r);
         }
-        walk(w, &ops, &form.resources, &mut carry, stream);
+        walk(w, &ops, &form.resources, &mut carry, &|_| stream);
         if form.obj.is_some() {
             w.path.pop();
         }
@@ -1276,9 +1310,14 @@ fn reading_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError
     let streams = content_streams(doc, &p.dict);
     let mut w = Walk { doc, lines: Vec::new(), next_stream: streams.len(), path: Vec::new(), visits: 0 };
     let mut carry = Carry::new();
-    for (si, (_, data)) in streams.into_iter().enumerate() {
-        walk(&mut w, &parse(&data).ops, &res, &mut carry, si);
-    }
+    // Read the page's streams as the one stream they are, in one pass, as rendering and editing
+    // do: a comment, an operator's operands or a marked-content sequence (its /ActualText too)
+    // can run on from one stream into the next. Text still counts as the stream its operator
+    // starts in, which keeps lines from different streams apart.
+    let pieces = Pieces::join(&streams.into_iter().map(|(_, data)| data).collect::<Vec<_>>());
+    let ops = pieces.parse().ops;
+    let stream_of = |i: usize| ops.get(i).map_or(0, |op| pieces.pieces_of(op).0);
+    walk(&mut w, &ops, &res, &mut carry, &stream_of);
     let mut lines = w.lines;
     // A visual-order Indic font draws pre-base vowel signs before their consonant.
     for l in lines.iter_mut().filter(|l| l.visual_order && !l.actual_text) {
@@ -1630,7 +1669,15 @@ fn source_encodes(metrics: &Metrics, text: &str) -> bool {
     text.split(' ').all(|word| metrics.encode(word).is_some())
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How often [`source_space`] ran on this thread, for the test that pins it out of per-character loops.
+    pub(crate) static SOURCE_SPACE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn source_space(doc: &Document, fonts: &Dict, metrics: &Metrics) -> f64 {
+    #[cfg(test)]
+    SOURCE_SPACE_CALLS.with(|c| c.set(c.get().saturating_add(1)));
     let width = |m: &Metrics| m.encode(" ").map(|b| m.codes(&b).iter().map(|(c, _)| m.width(*c)).sum::<f64>());
     if let Some(w) = width(metrics) {
         return w;
@@ -1772,7 +1819,8 @@ pub(crate) fn replace_line_with_limit(doc: &mut Document, page: usize, line: usi
     }
     // Rebuild: the line's first operator becomes the replacement, its others go. Copies of the
     // line drawn on the same baseline go too, so the replacement is all that shows.
-    let drops = coincident_ops(&lines, &[&target]);
+    let mut drops = coincident_ops(&lines, &[&target]);
+    drops.extend(target.ops.iter().copied());
     let new_data = splice(&pieces, &ops, |i| if i == first { (std::mem::take(&mut replacement), false) } else { (Vec::new(), !drops.contains(&i)) });
     let contents = rewritten_contents(doc, &streams, new_data);
     let page_ref = p.obj;
@@ -1804,7 +1852,10 @@ fn coincident_ops(lines: &[TextLine], targets: &[&TextLine]) -> std::collections
     let area = |r: [f64; 4]| ((r[2] - r[0]) * (r[3] - r[1])).max(0.0);
     let mut drop = std::collections::HashSet::new();
     for line in lines {
-        let copy = targets.iter().any(|target| overlaps_half(line.rect, target.rect, area) && on_same_baseline(line, target));
+        let copy = targets.iter().any(|target| {
+            let same_text = line.text.trim() == target.text.trim() || (line.origin.state.render_mode == 3) != (target.origin.state.render_mode == 3);
+            same_text && overlaps_half(line.rect, target.rect, area) && on_same_baseline(line, target)
+        });
         if copy {
             drop.extend(line.ops.iter().copied());
         }
@@ -1822,13 +1873,16 @@ fn overlaps_half(a: [f64; 4], b: [f64; 4], area: impl Fn([f64; 4]) -> f64) -> bo
 /// Perpendicular distance between baselines, in user space. Horizontal text compares height;
 /// turned text compares the distance across the writing direction.
 fn on_same_baseline(line: &TextLine, target: &TextLine) -> bool {
+    let (dir, target_dir) = (line.direction(), target.direction());
+    let same_dir = (dir.0 - target_dir.0).abs() < 1e-3 && (dir.1 - target_dir.1).abs() < 1e-3;
+    let same_size = line.size.min(target.size) >= line.size.max(target.size) * 0.8;
     let angle = target.rotation().to_radians();
     let (sin, cos) = if angle.is_finite() { angle.sin_cos() } else { (0.0, 1.0) };
     let dx = line.origin.x - target.origin.x;
     let dy = line.origin.baseline - target.origin.baseline;
     let offset = dx.mul_add(-sin, dy * cos).abs();
     let size = line.size.min(target.size).max(1.0);
-    offset.is_finite() && offset < size * 0.3
+    same_dir && same_size && offset.is_finite() && offset < size * 0.3
 }
 
 /// The paragraphs on a page (0-based).
@@ -1853,7 +1907,7 @@ pub fn clear_block(doc: &mut Document, page: usize, block: usize) -> Result<(), 
     let streams = content_streams(doc, &p.dict);
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
-    let shown = interpret(doc, &ops, &fonts, &mut HashMap::new(), &mut Carry::new(), None, false);
+    let shown = interpret(doc, &ops, &fonts, &mut HashMap::new(), &mut Carry::new(), None, None);
     let mut patches = HashMap::new();
     for s in shown.into_iter().filter(|s| drops.contains(&s.op)) {
         if s.state.render_mode >= 4 {
@@ -2060,6 +2114,8 @@ fn rewrite_block_from(
     // The characters to show, for choosing fonts: the breaks are moves, not glyphs.
     let flat = text.replace('\n', " ");
     let o = &first.origin;
+    let last = members.last().copied().unwrap_or(first);
+    let emit = &last.origin;
     let (font_name, old_size) = o.state.font.clone().ok_or_else(|| EditError::Invalid("the paragraph has no font".into()))?;
     let k = o.k.max(1e-6);
     // The size in text space: points ÷ the text-to-user scale.
@@ -2120,13 +2176,19 @@ fn rewrite_block_from(
     // paragraph leaves the document as it was. The move is in page space, so it is taken back through
     // the CTM's linear part into the space the paragraph is drawn in.
     let movement = if dx != 0.0 || dy != 0.0 {
-        let c = o.ctm;
+        let c = emit.ctm;
         let back = Matrix([c[0], c[1], c[2], c[3], 0.0, 0.0])
             .invert()
             .ok_or_else(|| EditError::Invalid("the paragraph is drawn in a space it can't be moved in".into()))?;
         Some(back.apply(dx, dy))
     } else {
         None
+    };
+    let tm = if o.ctm == emit.ctm {
+        o.tm
+    } else {
+        let emit_inv = Matrix(emit.ctm).invert().ok_or_else(|| EditError::Invalid("the paragraph has a singular transform".into()))?;
+        Matrix(o.tm).then(&Matrix(o.ctm)).then(&emit_inv).0
     };
     let type3 = if !reuse && needs_type3(&flat) { Some(type3_font(doc, &mut fonts_res, &flat, family, bold, max_glyphs)?) } else { None };
     let advance = |s: &str| -> f64 {
@@ -2149,9 +2211,27 @@ fn rewrite_block_from(
         };
         t * o_state.scale * k
     };
-    // A turned single line grows to fit, as far as the largest page PDF allows.
+    // A turned single line grows to fit, up to where its baseline reaches the page's margin.
     let width = if !upright && style.width.is_none() && members.len() == 1 {
-        text.split('\n').map(&advance).fold(width, f64::max).min(14_400.0)
+        let crop = p.crop(doc);
+        let (x0, y0) = (first.origin.x + dx, first.origin.baseline + dy);
+        let (ux, uy) = first.direction();
+        let tx = if ux > 1e-6 {
+            (crop[2] - 36.0 - x0) / ux
+        } else if ux < -1e-6 {
+            (crop[0] + 36.0 - x0) / ux
+        } else {
+            f64::INFINITY
+        };
+        let ty = if uy > 1e-6 {
+            (crop[3] - 36.0 - y0) / uy
+        } else if uy < -1e-6 {
+            (crop[1] + 36.0 - y0) / uy
+        } else {
+            f64::INFINITY
+        };
+        let cap = width.max(tx.min(ty)).min(14_400.0);
+        text.split('\n').map(&advance).fold(width, f64::max).min(cap)
     } else {
         width
     };
@@ -2205,7 +2285,7 @@ fn rewrite_block_from(
     let n = pdfcraft_content::num;
     // In its own graphics state, so a new colour (or anything else) stops at the paragraph.
     let mut block_ops = vec![Op::new("q", vec![])];
-    block_ops.extend(reveal_ops(&b, &lines, style, o.ctm)?);
+    block_ops.extend(reveal_ops(&b, &lines, style, emit.ctm)?);
     // Moved: a translation inside that state.
     if let Some((ax, ay)) = movement {
         block_ops.push(Op::new("cm", vec![n(1.0), n(0.0), n(0.0), n(1.0), n(ax), n(ay)]));
@@ -2220,7 +2300,7 @@ fn rewrite_block_from(
         state.fill = vec![Op::new("rg", vec![n(r), n(g), n(bl)])];
     }
     block_ops.extend(state.ops());
-    block_ops.push(Op::new("Tm", o.tm.iter().map(|v| n(*v)).collect()));
+    block_ops.push(Op::new("Tm", tm.iter().map(|v| n(*v)).collect()));
     // Alignment: each line's offset from the left edge, in text space.
     let offset = |line: &str| -> f64 {
         let free = (width - advance(line)).max(0.0) / k;
@@ -2303,7 +2383,7 @@ fn rewrite_block_from(
             })
             .collect();
         block_ops.push(Op::new("q", vec![]));
-        block_ops.push(Op::new("cm", o.tm.iter().map(|v| n(*v)).collect()));
+        block_ops.push(Op::new("cm", tm.iter().map(|v| n(*v)).collect()));
         block_ops.extend(colour);
         block_ops.push(Op::new("w", vec![n(size * 0.06)]));
         for (x0, x1, y) in underlines {
@@ -2318,24 +2398,24 @@ fn rewrite_block_from(
     // second copy, an invisible text layer): the new text is all that may show.
     let mut drop = coincident_ops(&lines, &members);
     drop.extend(members.iter().flat_map(|l| l.ops.iter().copied()));
-    // Text shown earlier in the same text object stays first: the paragraph then goes where it
-    // was, between two halves of the text object, so it keeps its place in reading order.
-    let start = first.ops.first().copied().unwrap_or(o.bt_op);
+    // Text shown earlier in the same text object stays first: the paragraph then goes where its
+    // last row was, after any backgrounds between the rows, or between two halves of the text object.
+    let start = last.ops.first().copied().unwrap_or(emit.bt_op);
     let split = ops
-        .get(o.bt_op..start)
+        .get(emit.bt_op..start)
         .unwrap_or_default()
         .iter()
         .enumerate()
-        .any(|(i, op)| matches!(op.op.as_slice(), b"Tj" | b"TJ" | b"'" | b"\"") && !drop.contains(&(o.bt_op + i)));
+        .any(|(i, op)| matches!(op.op.as_slice(), b"Tj" | b"TJ" | b"'" | b"\"") && !drop.contains(&(emit.bt_op + i)));
     // What the text after the paragraph expects: the state at its BT (or where it was split).
-    let after = if split { &o.state } else { &o.bt_state };
+    let after = if split { &emit.state } else { &emit.bt_state };
     block_ops.extend(after.ops().into_iter().filter(|op| !op.is("Tf") || after.font.is_some()));
     if split {
         block_ops.insert(0, Op::new("ET", vec![]));
         block_ops.push(Op::new("BT", vec![]));
-        block_ops.push(Op::new("Tm", o.tlm.iter().map(|v| n(*v)).collect()));
+        block_ops.push(Op::new("Tm", emit.tlm.iter().map(|v| n(*v)).collect()));
     }
-    let at = if split { start } else { o.bt_op };
+    let at = if split { start } else { emit.bt_op };
     let new_data = splice(&pieces, &ops, |i| {
         let insert = if i == at { std::mem::take(&mut block_ops) } else { Vec::new() };
         (insert, !drop.contains(&i))
@@ -2484,7 +2564,7 @@ pub(crate) fn translate_blocks(doc: &mut Document, page: usize, indexes: &[usize
     let fonts = res.get(b"Font").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
-    let shown = interpret(doc, &ops, &fonts, &mut HashMap::new(), &mut Carry::new(), None, false);
+    let shown = interpret(doc, &ops, &fonts, &mut HashMap::new(), &mut Carry::new(), None, None);
     let mut patches = HashMap::new();
     // Keep full precision: a tiny rounded text-space change can be magnified by a CTM,
     // and restoring rise/spacing must not alter following unselected text.

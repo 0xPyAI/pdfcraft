@@ -49,7 +49,8 @@ The PDF object graph *is* the model (`crates/engine/README.md` §The editing mod
 3. After every edit an incremental write produces the working file (original bytes plus one
    revision); the view is refreshed from those bytes, so what you see is what Save writes.
 4. Saves are incremental and atomic. A full rewrite happens only where it must: redaction, PDF/A
-   conversion, print imposition, a changed password, Save As with garbage collection.
+   conversion, print imposition, a changed password, Save As to another file (garbage-collected,
+   unless the document is signed).
 5. Autosave and crash recovery keep encrypted documents encrypted. Signed documents are protected
    from rewrites.
 
@@ -101,7 +102,7 @@ Every user-facing feature is reachable headlessly (`AGENTS.md` §3):
 `cargo xtask ci` runs fmt, clippy (`-D warnings`), tests, the layering check, the WASM check,
 `xtask assets` (asset licences and hashes), `xtask parity` (checklist claims must cite real commands,
 tools and tests) and `xtask deny` (dependency licences). Other tasks: `xtask fuzz`, `xtask corpus` and `xtask check` (robustness
-sweep over the pinned pdf.js corpus), `xtask text-oracle` (word F1 against `pdftotext`),
+sweep over the pinned pdf.js corpus), `xtask text-oracle` (word F1 and reading order against `pdftotext`),
 `xtask demo-pdf`, `xtask screenshots`, `xtask models` (OCR models), `xtask version`. Releases are
 built by `.github/workflows/release.yml` ([releasing.md](releasing.md)).
 
