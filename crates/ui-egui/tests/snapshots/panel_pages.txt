@@ -1,0 +1,7 @@
+Label = "Pages"
+Label = "2"
+Button "Close" [off]
+Button "Page 1" [off]
+Label = "1"
+Button "Page 2" [off]
+Label = "2"

@@ -1,0 +1,4 @@
+Label = "Layers"
+Label = "1"
+Button "Close" [off]
+CheckBox "Draft notes" [on]
