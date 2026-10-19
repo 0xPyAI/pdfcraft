@@ -5828,11 +5828,14 @@ fn marking_a_figure_decorative_keeps_other_page_streams() {
     let page = &pdfcraft_model::pages(&doc)[0];
     let contents = page.dict.get(b"Contents").and_then(|c| c.as_array()).unwrap();
     assert_eq!(contents.len(), 3, "the other streams stay in the page's content list");
+    let figure_ref = contents[0].as_ref().unwrap();
+    assert_eq!(contents[1].as_ref(), Some(pdfcraft_cos::ObjRef::new(5, 0)));
+    assert_eq!(contents[2].as_ref(), Some(pdfcraft_cos::ObjRef::new(6, 0)));
     let stream = |doc: &pdfcraft_cos::Document, n: u32| match &*doc.get(pdfcraft_cos::ObjRef::new(n, 0)) {
         pdfcraft_cos::Object::Stream(s) => s.clone(),
         other => panic!("object {n} is {other:?}"),
     };
-    let figure = stream(&doc, 4);
+    let figure = stream(&doc, figure_ref.num);
     assert_eq!(figure.dict.get(b"VendorKey").and_then(pdfcraft_cos::Object::as_int), Some(7));
     let drawn = String::from_utf8(figure.decoded().unwrap()).unwrap();
     assert!(drawn.contains("/Artifact BMC") && !drawn.contains("/MCID 0"), "{drawn}");
@@ -5855,7 +5858,7 @@ fn marking_a_figure_decorative_keeps_other_page_streams() {
         .collect();
     assert!(!text.contains("HeaderSample"));
     assert_eq!(pdfcraft_edit::scan_markers(&doc).added[0].content, before.added[0].content);
-    assert_eq!(stream(&doc, 4).dict.get(b"VendorKey").and_then(pdfcraft_cos::Object::as_int), Some(7));
+    assert_eq!(stream(&doc, figure_ref.num).dict.get(b"VendorKey").and_then(pdfcraft_cos::Object::as_int), Some(7));
 }
 
 /// Print as image (Acrobat's Advanced Print Setup): the print-ready PDF carries each page as a
