@@ -1292,8 +1292,7 @@ impl DocView {
         let last = self.page_count.saturating_sub(1);
         let (target, first) = match self.layout {
             PageLayout::TwoUp => {
-                // Spreads are [0, 1], [2, 3], … or, with a cover page, [0], [1, 2], [3, 4], ….
-                let first = if self.cover { c.saturating_sub((c + 1) % 2) } else { c - c % 2 };
+                let first = self.spread_first(c);
                 let target = match (forward, self.cover && c == 0) {
                     (true, true) => 1,
                     (true, false) => first.saturating_add(2),
@@ -1989,14 +1988,30 @@ impl DocView {
         }
     }
 
+    /// The first page of the two-page spread page `c` is in: spreads are [0, 1], [2, 3], … or,
+    /// with a cover page, [0], [1, 2], [3, 4], ….
+    fn spread_first(&self, c: usize) -> usize {
+        if self.cover { c.saturating_sub((c + 1) % 2) } else { c - c % 2 }
+    }
+
     fn fit_zoom(&mut self, info: &DocInfo) {
         let largest = |side: fn((f32, f32)) -> f32| info.pages.iter().map(|p| side(self.display_size(p))).fold(1.0, f32::max);
         let max_w = largest(|s| s.0);
-        // A single page shown on its own fits that page. Every other display (scrolling, or a
-        // two-page spread) fits its largest page, so the zoom holds still while pages of other
-        // sizes scroll or page past.
+        // A single page shown on its own fits that page, and full screen in two-page view fits
+        // the spread it shows (review on #2070). Every other display (scrolling, or two-page
+        // view in the window) fits its largest page, so the zoom holds still while pages of
+        // other sizes scroll or page past.
         let (w, h) = if self.layout == PageLayout::Single && !self.continuous {
             info.pages.get(self.current).map_or_else(|| (max_w, largest(|s| s.1)), |p| self.display_size(p))
+        } else if self.presentation.is_some() && self.layout == PageLayout::TwoUp && !self.continuous {
+            let first = self.spread_first(self.current);
+            let last = if self.cover && first == 0 { 0 } else { first.saturating_add(1) };
+            let spread: Vec<(f32, f32)> = info.pages.iter().skip(first).take(last - first + 1).map(|p| self.display_size(p)).collect();
+            if spread.is_empty() {
+                (max_w, largest(|s| s.1))
+            } else {
+                (spread.iter().map(|s| s.0).fold(1.0, f32::max), spread.iter().map(|s| s.1).fold(1.0, f32::max))
+            }
         } else {
             (max_w, largest(|s| s.1))
         };
@@ -6430,6 +6445,55 @@ trailer << /Root 1 0 R >>
             v.fit_zoom(&info);
             assert!(v.zoom > big, "{fit:?}: single-page view fits the page it shows");
         }
+    }
+
+    /// Review on #2070: full screen in two-page view fits the spread it shows, the cover page
+    /// on its own included; two-page view in the window keeps one zoom for the document.
+    #[test]
+    fn full_screen_two_page_view_fits_the_spread_it_shows() {
+        let page =
+            |width: f32, height: f32| pdfcraft_render::PageInfo { width, height, label: String::new(), crop: [0.0, 0.0, width, height], rotation: 0 };
+        // Spreads [0, 1] small, [2, 3] large; with a cover page [0], [1, 2] mixed, [3].
+        let info = DocInfo { pages: vec![page(300.0, 400.0), page(300.0, 400.0), page(600.0, 800.0), page(600.0, 800.0)], ..Default::default() };
+        let mut v = DocView::new(DocId(1), &info, ViewDefaults::default());
+        (v.layout, v.continuous, v.viewport_w, v.viewport_h) = (PageLayout::TwoUp, false, 1000.0, 800.0);
+        v.fit = Fit::Page;
+        v.fit_zoom(&info);
+        let windowed = v.zoom;
+        v.enter_presentation();
+        v.fit_zoom(&info);
+        let small = v.zoom;
+        assert!(small > windowed * 1.9, "the small spread fills the screen: {small} vs {windowed}");
+        v.current = 3;
+        v.fit_zoom(&info);
+        assert!((v.zoom - windowed).abs() < 1e-4, "the large spread fits as before");
+        v.current = 1;
+        v.fit_zoom(&info);
+        assert_eq!(v.zoom, small, "page 2 is in the first spread");
+        // With a cover page: [0] alone, then [1, 2] (the large page decides), then [3].
+        v.cover = true;
+        v.current = 0;
+        v.fit_zoom(&info);
+        assert_eq!(v.zoom, small, "the cover page alone");
+        v.current = 1;
+        v.fit_zoom(&info);
+        assert!((v.zoom - windowed).abs() < 1e-4, "page 2 shares a spread with the large page 3");
+        // Scrolling while in full screen fits the document, as scrolling does in the window.
+        (v.continuous, v.current) = (true, 0);
+        v.fit_zoom(&info);
+        assert!((v.zoom - windowed).abs() < 1e-4, "continuous full screen keeps one zoom");
+        v.continuous = false;
+        // The cover page is a spread of its own even when the next page is larger.
+        let mixed = DocInfo { pages: vec![page(300.0, 400.0), page(600.0, 800.0), page(600.0, 800.0)], ..Default::default() };
+        v.current = 0;
+        v.fit_zoom(&mixed);
+        assert_eq!(v.zoom, small, "the small cover alone, not with page 2");
+        // Leaving full screen brings the document-wide fit back.
+        v.leave_presentation();
+        (v.fit, v.current) = (Fit::Page, 0);
+        (v.layout, v.continuous) = (PageLayout::TwoUp, false);
+        v.fit_zoom(&info);
+        assert!((v.zoom - windowed).abs() < 1e-4, "in the window, one zoom for the document");
     }
 
     #[test]
