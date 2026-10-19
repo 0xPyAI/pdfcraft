@@ -4072,6 +4072,32 @@ fn measurement_edits_are_transactional_and_honour_annotation_permissions() {
 }
 
 #[test]
+fn a_dynamic_xfa_form_is_saved_without_the_usage_rights_its_layout_voided() {
+    let xdp = pdfcraft_xfa::fixtures::template(3);
+    let original = Arc::new(pdfcraft_xfa::fixtures::usage_rights_shell(&xdp, "", false));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("form.pdf", None, original.clone(), None).expect("opens");
+    let doc = s.get(id).unwrap();
+    let warnings = &doc.xfa.as_ref().expect("laid out from the template").warnings;
+    assert!(warnings.iter().any(|w| w.contains("usage rights")), "the user is told: {warnings:?}");
+    assert!(!doc.dirty, "laying out is still not an edit");
+    s.apply(id, Edit::SetFieldValue { name: "familyName".into(), value: FieldValue::Text("Singh".into()) }).unwrap();
+    let incremental = s.save_bytes(id).unwrap();
+    assert!(incremental.starts_with(&original[..]), "still an incremental save");
+    // Saved either way, the file no longer carries them, and keeps what was filled in.
+    for saved in [incremental, s.save_full_bytes(id).unwrap()] {
+        let cos = pdfcraft_cos::Document::open(saved.clone()).unwrap();
+        let catalog = cos.get(cos.root().unwrap()).as_dict().cloned().unwrap();
+        assert!(!catalog.contains(b"Perms"), "{catalog:?}");
+        let again = s.open("saved.pdf", None, saved, None).unwrap();
+        let d2 = s.get(again).unwrap();
+        assert_eq!(d2.form.iter().find(|f| f.name == "familyName").unwrap().value, vec!["Singh".to_string()]);
+        let warnings = &d2.xfa.as_ref().expect("the layout is remembered").warnings;
+        assert!(!warnings.iter().any(|w| w.contains("usage rights")), "nothing left to say: {warnings:?}");
+    }
+}
+
+#[test]
 fn dynamic_xfa_forms_are_laid_out_on_open_filled_and_saved_incrementally() {
     let original = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::template(3)));
     let mut s = Session::new().with_clock(|| 1_700_000_000);

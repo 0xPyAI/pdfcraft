@@ -1962,6 +1962,37 @@ fn an_anchor_type_places_the_named_point_of_the_box_at_its_x_and_y() {
 }
 
 #[test]
+fn laying_a_form_out_takes_off_the_usage_rights_it_voids() {
+    use crate::fixtures::usage_rights_shell;
+    let xdp = fields_template("<form><page1><country>JP</country></page1></form>");
+    // What `/Perms` holds once the layout is saved and the file read again.
+    let laid_out = |bytes: Vec<u8>| {
+        let mut doc = Document::open(Arc::new(bytes)).unwrap();
+        let report = render_into(&mut doc).unwrap();
+        let doc = Document::open(Arc::new(write_incremental(&doc, &SaveOptions::default()).unwrap())).unwrap();
+        let catalog = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+        let indirect = catalog.get(b"Perms").and_then(Object::as_ref).is_some();
+        let perms = catalog.get(b"Perms").map(|p| doc.resolve(p)).and_then(|p| p.as_dict().cloned());
+        let said = report.warnings.iter().any(|w| w.contains("usage rights"));
+        (perms, indirect, said, report.warnings)
+    };
+    // Usage rights alone: `/Perms` goes, and the user is told.
+    let (perms, _, said, warnings) = laid_out(usage_rights_shell(&xdp, "", false));
+    assert!(perms.is_none(), "{perms:?}");
+    assert!(said, "{warnings:?}");
+    // Beside a certification, in an object of its own: only the usage rights go, and the
+    // object is rewritten where it is.
+    let (perms, indirect, said, warnings) = laid_out(usage_rights_shell(&xdp, "/DocMDP 6 0 R", true));
+    let perms = perms.expect("the certification stays");
+    assert!(perms.contains(b"DocMDP") && !perms.contains(b"UR3"), "{perms:?}");
+    assert!(indirect, "/Perms is still its own object");
+    assert!(said, "{warnings:?}");
+    // A form without usage rights says nothing about them.
+    let (perms, _, said, warnings) = laid_out(shell(&xdp));
+    assert!(perms.is_none() && !said, "{perms:?} {warnings:?}");
+}
+
+#[test]
 fn stripping_takes_the_xfa_out_and_leaves_an_ordinary_document() {
     use crate::pdf::strip;
     let mut doc = Document::open(Arc::new(shell(&fields_template("<form><page1><country>JP</country></page1></form>")))).unwrap();

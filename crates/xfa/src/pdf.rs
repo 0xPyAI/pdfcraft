@@ -150,10 +150,16 @@ fn js_action(js: &str) -> Object {
     Object::Dict(a)
 }
 
+/// What laying a form out says when it took the usage rights off (see [`drop_usage_rights`]).
+pub(crate) const USAGE_RIGHTS_REMOVED: &str =
+    "the form's usage rights were removed: laying it out voids them, and a form with void usage rights can open with every field locked";
+
 pub struct Written {
     pub pages: usize,
     pub fields: usize,
     pub warnings: Vec<String>,
+    /// Usage rights were taken off the catalog (laying the form out voided them).
+    pub usage_rights: bool,
 }
 
 /// On a push button generated for an XFA image field: clicking it picks a picture (the forms
@@ -774,10 +780,12 @@ pub fn write_form(doc: &mut Document, form: &Form) -> Result<Written, XfaError> 
             catalog_changed = true;
         }
     }
-    if catalog_changed {
+    // The pages and fields are new: usage rights signed over the form as it was are void now.
+    let usage_rights = drop_usage_rights(doc, &mut catalog);
+    if catalog_changed || usage_rights {
         doc.set(catalog_ref, Object::Dict(catalog));
     }
-    Ok(Written { pages: count, fields: field_count, warnings })
+    Ok(Written { pages: count, fields: field_count, warnings, usage_rights })
 }
 
 /// What [`strip`] took out, for the user to be told (the packets held more than the fields).
@@ -963,21 +971,7 @@ pub fn strip(doc: &mut Document) -> Result<Stripped, XfaError> {
         None => catalog.set(b"AcroForm".to_vec(), Object::Dict(acro)),
     }
     catalog.remove(b"NeedsRendering");
-    // Reader usage rights are void once the form changed: Reader says so on opening the file
-    // and drops them, so they go now, with a note.
-    if let Some(perms) = catalog.get(b"Perms").map(|p| doc.resolve(p))
-        && let Some(mut perms) = perms.as_dict().cloned()
-        && (perms.contains(b"UR3") || perms.contains(b"UR"))
-    {
-        perms.remove(b"UR3");
-        perms.remove(b"UR");
-        out.usage_rights = true;
-        if perms.is_empty() {
-            catalog.remove(b"Perms");
-        } else {
-            catalog.set(b"Perms".to_vec(), Object::Dict(perms));
-        }
-    }
+    out.usage_rights = drop_usage_rights(doc, &mut catalog);
     doc.set(root, Object::Dict(catalog));
     // The packet streams are referenced from nowhere else: freed, so an incremental save
     // doesn't carry an unreachable copy of the data.
@@ -1022,6 +1016,28 @@ fn unbound_data(doc: &Document) -> Option<usize> {
     let mut count = 0;
     walk(&data, &mut Vec::new(), &bound, &mut count, 0);
     Some(count)
+}
+
+/// Take the usage rights (`/Perms /UR3`, or the older `/UR`) off a catalog, keeping the rest of
+/// `/Perms` (a certification's `/DocMDP`). They are signed over the form as it was: once its
+/// pages or fields change they are void, and a viewer may lock every field of a form whose
+/// usage rights are void, so they go, and the caller says so. Whether there were any.
+fn drop_usage_rights(doc: &mut Document, catalog: &mut Dict) -> bool {
+    let Some(entry) = catalog.get(b"Perms").cloned() else { return false };
+    let Some(mut perms) = doc.resolve(&entry).as_dict().cloned() else { return false };
+    if !perms.contains(b"UR3") && !perms.contains(b"UR") {
+        return false;
+    }
+    perms.remove(b"UR3");
+    perms.remove(b"UR");
+    match entry.as_ref() {
+        _ if perms.is_empty() => {
+            catalog.remove(b"Perms");
+        }
+        Some(r) => doc.set(r, Object::Dict(perms)),
+        None => catalog.set(b"Perms".to_vec(), Object::Dict(perms)),
+    }
+    true
 }
 
 /// The layout a document already carries from an earlier pass, if any.

@@ -364,6 +364,27 @@ pub fn shell(xdp: &str) -> Vec<u8> {
     assemble(objs)
 }
 
+/// [`shell`] with usage rights: the catalog's `/Perms` holds a `/UR3` signature (a stand-in
+/// dictionary, nothing verifies it), beside `others` (`/DocMDP 6 0 R`, say: object 6 is a
+/// signature dictionary too). `indirect` puts `/Perms` in an object of its own.
+pub fn usage_rights_shell(xdp: &str, others: &str, indirect: bool) -> Vec<u8> {
+    let perms = format!("<< /UR3 6 0 R {others} >>");
+    let entry = if indirect { "7 0 R".to_string() } else { perms.clone() };
+    let catalog = format!("<< /Type /Catalog /Pages 2 0 R /NeedsRendering true /AcroForm << /XFA 5 0 R /Fields [] >> /Perms {entry} >>");
+    let mut objs: Vec<Vec<u8>> = vec![
+        catalog.into_bytes(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>".to_vec(),
+        b"<< /Length 44 >>\nstream\nBT /F1 12 Tf 72 700 Td (Please wait...) Tj ET\nendstream".to_vec(),
+        format!("<< /Length {} >>\nstream\n{xdp}\nendstream", xdp.len()).into_bytes(),
+        b"<< /Type /Sig /Reference [<< /Type /SigRef /TransformMethod /UR3 >>] >>".to_vec(),
+    ];
+    if indirect {
+        objs.push(perms.into_bytes());
+    }
+    assemble(objs)
+}
+
 /// A dynamic form with two signature boxes of which `sign` has been signed: the file holds the
 /// field a signing application leaves (named by its SOM path, its value a signature dictionary)
 /// and the picture drawn in the box, a solid blue rectangle.
