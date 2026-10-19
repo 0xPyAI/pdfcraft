@@ -3103,11 +3103,66 @@ fn dotted_field_names_are_made_with_parent_fields() {
     let city = field(&fields(&doc), "address.city").clone();
     assert!(city.read_only() && city.value == ["Springfield"]);
     set_props(&mut doc, "address.city", &FieldProps { name: Some("billing.city".into()), ..FieldProps::default() }).unwrap();
-    add_field(&mut doc, 0, [300.0, 300.0, 450.0, 320.0], &text, Some("address.street")).unwrap();
-    let all = fields(&doc);
-    let moved = field(&all, "billing.city");
+    let moved = field(&fields(&doc), "billing.city").clone();
     assert!(moved.read_only() && moved.value == ["Springfield"], "the moved field keeps what it inherited");
-    assert!(!field(&all, "address.street").read_only(), "a new field doesn't take its parent's flags");
+    // A parent's value, reset value or length limit would pass to a new field under it (review
+    // on #2957), and a field can't turn them off: such a parent takes no new field.
+    let street = |doc: &mut Document| add_field(doc, 0, [300.0, 300.0, 450.0, 320.0], &text, Some("address.street"));
+    for (key, value) in [
+        (&b"V"[..], Object::String(PdfString::literal(b"x".to_vec()))),
+        (b"DV", Object::String(PdfString::literal(b"x".to_vec()))),
+        (b"MaxLen", Object::Int(3)),
+    ] {
+        doc.update_dict(address, |d| {
+            for k in [&b"V"[..], b"DV", b"MaxLen"] {
+                d.remove(k);
+            }
+            d.set(key.to_vec(), value);
+        })
+        .unwrap();
+        let mut copy = doc.clone();
+        assert!(street(&mut copy).is_err(), "address holds /{}", String::from_utf8_lossy(key));
+    }
+    doc.update_dict(address, |d| {
+        d.remove(b"MaxLen");
+    })
+    .unwrap();
+    street(&mut doc).unwrap();
+    let new = field(&fields(&doc), "address.street").clone();
+    assert!(!new.read_only(), "a new field doesn't take its parent's flags");
+    assert!(new.value.iter().all(|v| v.is_empty()) && new.max_len.is_none(), "nor a value or length limit: {:?} {:?}", new.value, new.max_len);
+
+    // A parent left empty by a move isn't a terminal field, but its name is still taken.
+    add_field(&mut doc, 0, [300.0, 340.0, 450.0, 360.0], &text, Some("box.only")).unwrap();
+    set_props(&mut doc, "box.only", &FieldProps { name: Some("elsewhere.only".into()), ..FieldProps::default() }).unwrap();
+    assert!(fields(&doc).iter().all(|f| !f.name.starts_with("box")), "box holds no field now");
+    let mut copy = doc.clone();
+    assert!(add_field(&mut copy, 0, [300.0, 380.0, 450.0, 400.0], &text, Some("box")).is_err(), "a new field named box");
+    let mut copy = doc.clone();
+    assert!(set_props(&mut copy, "name", &FieldProps { name: Some("box".into()), ..FieldProps::default() }).is_err(), "a rename to box");
+    // Under it, the name is free: the empty parent takes a field again.
+    add_field(&mut doc, 0, [300.0, 380.0, 450.0, 400.0], &text, Some("box.again")).unwrap();
+    // Only a whole path that exists can be taken: under box.sub, made new, "again" is free.
+    add_field(&mut doc, 0, [300.0, 420.0, 450.0, 440.0], &text, Some("box.sub.again")).unwrap();
+    // A field holding its own value may join a parent holding one; and the parents a new path
+    // makes are new, even where an existing field has the name of a later part.
+    doc.update_dict(address, |d| d.set(b"V".to_vec(), Object::String(PdfString::literal(b"x".to_vec())))).unwrap();
+    set_props(&mut doc, "billing.city", &FieldProps { name: Some("address.city".into()), ..FieldProps::default() }).unwrap();
+    assert_eq!(field(&fields(&doc), "address.city").value, ["Springfield"]);
+    add_field(&mut doc, 0, [300.0, 460.0, 450.0, 480.0], &text, Some("nope.address.x")).unwrap();
+    // Renaming the last part: to its own name is no change; to an empty parent's name beside it
+    // is taken.
+    assert_eq!(set_props(&mut doc, "address.city", &FieldProps { name: Some("city".into()), ..FieldProps::default() }).unwrap(), "address.city");
+    doc.update_dict(address, |d| {
+        d.remove(b"V");
+    })
+    .unwrap();
+    add_field(&mut doc, 0, [300.0, 500.0, 450.0, 520.0], &text, Some("address.grp.x")).unwrap();
+    set_props(&mut doc, "address.grp.x", &FieldProps { name: Some("elsewhere.x".into()), ..FieldProps::default() }).unwrap();
+    assert!(
+        set_props(&mut doc.clone(), "address.city", &FieldProps { name: Some("grp".into()), ..FieldProps::default() }).is_err(),
+        "address.grp is taken"
+    );
 
     for bad in ["MASTER", "MASTER.street1.x", "MASTER..x", ".x", "x.", "MASTER. "] {
         assert!(add_field(&mut doc, 0, [300.0, 200.0, 450.0, 220.0], &text, Some(bad)).is_err(), "{bad:?}");

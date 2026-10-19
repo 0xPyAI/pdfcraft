@@ -530,22 +530,51 @@ fn link(doc: &mut Document, af: ObjRef, parent: Option<ObjRef>, field: ObjRef) -
     Ok(())
 }
 
+/// The node named `name` (its own `/T`) directly under `parent`, or at the top of the form.
+fn child_named(doc: &Document, af: ObjRef, parent: Option<ObjRef>, name: &str) -> Option<ObjRef> {
+    let list = match parent {
+        Some(p) => list_of(doc, p, b"Kids"),
+        None => list_of(doc, af, b"Fields"),
+    };
+    list.iter()
+        .filter_map(|o| o.as_ref())
+        .find(|r| doc.get(*r).as_dict().and_then(|d| d.get(b"T").cloned()).and_then(|t| crate::text_of(&doc.resolve(&t))).as_deref() == Some(name))
+}
+
+/// The values a parent field passes to the fields under it that can't be turned off by giving
+/// the field a neutral one of its own, as `/Ff` and `/Q` can.
+const PASSED_VALUES: [&[u8]; 3] = [b"V", b"DV", b"MaxLen"];
+
 /// Put `field` in the field tree under the full name `parts`: its own `/T` is the last part,
 /// and the parts before it name parent fields, reused where the tree has them and made where
 /// not (Acrobat makes `a.b` a field `b` under a field `a`).
 fn attach(doc: &mut Document, af: ObjRef, field: ObjRef, parts: &[&str]) -> Result<(), FormError> {
     let Some((own, parents)) = parts.split_last() else { return invalid("field names can't be empty") };
+    // First check the place, changing nothing. The field list holds only terminal fields, so a
+    // parent left empty by a move isn't in it: a node of the same name there is found here.
+    let owned = doc.get(field).as_dict().cloned().unwrap_or_default();
+    let mut at: Option<ObjRef> = None;
+    let mut whole_path = true;
+    for part in parents {
+        let Some(r) = child_named(doc, af, at, part) else {
+            whole_path = false;
+            break;
+        };
+        // A value, reset value or length limit held by a parent would pass to this field.
+        let held = doc.get(r).as_dict().is_some_and(|d| PASSED_VALUES.iter().any(|k| d.contains(k) && !owned.contains(k)));
+        if held {
+            return invalid(format!("{part:?} holds a value for the fields under it, so {:?} can't be put there", parts.join(".")));
+        }
+        at = Some(r);
+    }
+    // `field` is new or already out of the tree, so a node found is another.
+    if whole_path && child_named(doc, af, at, own).is_some() {
+        return invalid(format!("a field named {:?} already exists", parts.join(".")));
+    }
     let mut parent: Option<ObjRef> = None;
     let mut inherits = false;
     for part in parents {
-        let list = match parent {
-            Some(p) => list_of(doc, p, b"Kids"),
-            None => list_of(doc, af, b"Fields"),
-        };
-        let found = list.iter().filter_map(|o| o.as_ref()).find(|r| {
-            doc.get(*r).as_dict().and_then(|d| d.get(b"T").cloned()).and_then(|t| crate::text_of(&doc.resolve(&t))).as_deref() == Some(*part)
-        });
-        let next = match found {
+        let next = match child_named(doc, af, parent, part) {
             Some(r) => {
                 inherits |= doc.get(r).as_dict().is_some_and(|d| d.contains(b"Ff") || d.contains(b"Q"));
                 r
@@ -1092,6 +1121,13 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
             new_name = format!("{prefix}{n}");
             if let Some(why) = all.iter().filter(|x| x.obj != f.obj).find_map(|x| clash(&new_name, &x.name)) {
                 return invalid(why);
+            }
+            // A node of that name beside it that isn't a terminal field, such as a parent
+            // field left empty by a move.
+            let af = ensure_form(doc)?;
+            let parent = doc.get(f.obj).as_dict().and_then(|d| d.reference(b"Parent"));
+            if child_named(doc, af, parent, n).is_some_and(|r| r != f.obj) {
+                return invalid(format!("a field named {new_name:?} already exists"));
             }
             doc.update_dict(f.obj, |d| d.set(b"T".to_vec(), PdfString::text(n)))?;
         }
