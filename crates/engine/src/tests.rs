@@ -870,7 +870,7 @@ fn form_with_field(name: &str) -> Vec<u8> {
 fn duplicating_a_page_with_a_field_keeps_the_field_name() {
     let mut s = Session::new().with_clock(|| 1_700_000_000);
     let id = s.open("a.pdf", None, Arc::new(form_with_field("Text1")), None).unwrap();
-    s.apply(id, Edit::DuplicatePages { pages: vec![0] }).unwrap();
+    s.apply(id, Edit::DuplicatePages { pages: vec![0], at: None }).unwrap();
     let doc = s.get(id).unwrap();
     assert_eq!(doc.info.pages.len(), 2);
     assert!(doc.form.iter().all(|f| f.name == "Text1"), "{:?}", doc.form.iter().map(|f| &f.name).collect::<Vec<_>>());
@@ -2183,7 +2183,7 @@ fn crop_and_duplicate_pages_show_in_the_viewer() {
     assert_eq!(d.info.pages[0].crop, [10.0, 20.0, 170.0, 260.0]);
     assert_eq!((d.info.pages[0].width, d.info.pages[0].height), (160.0, 240.0), "the viewer shows the cropped size");
     assert_eq!(d.page_boxes()[1][1], [0.0, 0.0, 200.0, 300.0]);
-    s.apply(id, Edit::DuplicatePages { pages: vec![1] }).unwrap();
+    s.apply(id, Edit::DuplicatePages { pages: vec![1], at: None }).unwrap();
     assert_eq!(page_texts(&s, id), ["Page 1", "Page 2", "Page 2"]);
     assert_eq!(s.get(id).unwrap().can_undo(), Some("Duplicate page"));
 }
@@ -2574,6 +2574,48 @@ fn pages_export_as_png_jpeg_and_tiff() {
     let tif = ex.image(0, 144.0, ImageFormat::Tiff).unwrap();
     let decoded = image::load_from_memory_with_format(&tif, image::ImageFormat::Tiff).unwrap();
     assert_eq!((decoded.width(), decoded.height()), (400, 600));
+    let mut tags = tiff::decoder::Decoder::new(std::io::Cursor::new(&tif)).unwrap();
+    let compression = tags.get_tag_u32(tiff::tags::Tag::Compression).unwrap();
+    let predictor = tags.get_tag_u32(tiff::tags::Tag::Predictor).unwrap();
+    assert_eq!((compression, predictor), (5, 1), "LZW, without a predictor");
+}
+
+/// A TIFF's resolution unit (2 = inch) and its horizontal and vertical resolution.
+fn tiff_resolution(bytes: &[u8]) -> (u32, f64, f64) {
+    use tiff::{decoder::ifd::Value, tags::Tag};
+    let mut d = tiff::decoder::Decoder::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut res = |tag| match d.get_tag(tag).unwrap() {
+        Value::Rational(n, d) => f64::from(n) / f64::from(d),
+        v => panic!("{tag:?} is {v:?}"),
+    };
+    let (x, y) = (res(Tag::XResolution), res(Tag::YResolution));
+    (d.get_tag_u32(Tag::ResolutionUnit).unwrap(), x, y)
+}
+
+/// An exported TIFF or JPEG says the resolution it was drawn at, so other programs show and print it
+/// at the page's size. A TIFF said 1 × 1 with no unit, and a JPEG said nothing.
+#[test]
+fn exported_pages_record_the_resolution_they_were_drawn_at() {
+    use crate::export::{Exporter, ImageFormat};
+    let (s, id) = session_with(1);
+    let mut ex = Exporter::new(s.get(id).unwrap());
+    assert_eq!(tiff_resolution(&ex.image(0, 144.0, ImageFormat::Tiff).unwrap()), (2, 144.0, 144.0));
+    let jpg = ex.image(0, 144.0, ImageFormat::Jpeg { quality: 85 }).unwrap();
+    assert_eq!(&jpg[6..11], b"JFIF\0");
+    assert_eq!(jpg[13..18], [1, 0, 144, 0, 144], "JFIF density in dots per inch");
+    // pHYs counts pixels per metre: 72 dpi would read back as 72.009, and a page made from the PNG
+    // (doc_create from images) would come out 0.01% small.
+    let png = ex.image(0, 72.0, ImageFormat::Png).unwrap();
+    assert!(png::Decoder::new(std::io::Cursor::new(png)).read_info().unwrap().info().pixel_dims.is_none(), "a PNG states no resolution");
+
+    // A page too large for the renderer at the asked resolution says the one it was drawn at.
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let bytes = s.create_blank(14_400.0, 792.0, 1).unwrap();
+    let id = s.open("wide.pdf", None, bytes, None).unwrap();
+    let mut ex = Exporter::new(s.get(id).unwrap());
+    let used = ex.dpi_used(0, 600.0);
+    let (unit, x, y) = tiff_resolution(&ex.image(0, 600.0, ImageFormat::Tiff).unwrap());
+    assert!(unit == 2 && (x - used).abs() < 0.01 && (y - used).abs() < 0.01, "{x} × {y}, drawn at {used}");
 }
 
 #[test]
