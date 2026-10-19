@@ -186,6 +186,53 @@ fn single_page_layout_shows_one_page_at_a_time() {
 }
 
 #[test]
+fn single_page_view_prefetches_the_next_page() {
+    // Only the shown page is drawn, but the next one renders ahead of the turn: otherwise
+    // turning forward shows blank paper until it arrives.
+    let mut h = harness(&[("layout", "single"), ("zoom", "50")]);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while h.state().render_pending() {
+        assert!(std::time::Instant::now() < deadline, "renders settle");
+        h.run_steps(2);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(rect(&h, 1).is_none(), "page 2 is not shown");
+    assert!(h.state().views[0].raster_memory().page_count >= 2, "page 2 is rendered ahead of the turn");
+}
+
+#[test]
+fn single_page_wheel_turn_draws_the_new_page_at_once() {
+    // The frame that turns the page draws the new one. Its jump used to be measured from the
+    // old page's place, which scrolled both out of view: a blank frame on every turn forward.
+    let mut h = harness_stepping(1.0 / 60.0, &[("layout", "single")]);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num0); // fit page
+    h.run_steps(4);
+    let vp = h.state().views[0].viewport_rect();
+    h.hover_at(vp.center());
+    h.run_steps(2);
+    h.event(wheel(MouseWheelUnit::Line, -1.0, TouchPhase::Move));
+    h.step();
+    assert_eq!(h.state().views[0].current, 1, "one notch turns one page");
+    let r = rect(&h, 1).expect("page 2 drawn in the frame that turns to it");
+    assert!(r.min.y >= vp.min.y && r.max.y <= vp.max.y, "page 2 fits on screen: {r:?} in {vp:?}");
+}
+
+#[test]
+fn single_page_jump_draws_a_fitting_page_where_it_stays() {
+    // A page that fits has nothing to scroll, but the jump to it asked for the gap above it:
+    // drawn that much too high for a frame, it then hopped into place.
+    let mut h = harness_stepping(1.0 / 60.0, &[("layout", "single")]);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num0); // fit page
+    h.run_steps(4);
+    h.state_mut().set_option("page", "2").unwrap();
+    h.step();
+    let first = rect(&h, 1).expect("page 2 drawn in the frame after the jump");
+    h.run_steps(4);
+    let settled = rect(&h, 1).expect("page 2");
+    assert!((first.min.y - settled.min.y).abs() < 0.5, "page 2 drawn where it settles: {first:?} then {settled:?}");
+}
+
+#[test]
 fn single_page_wheel_pans_instead_when_zoomed_in() {
     // The zoomed-in guard: with room to pan, the wheel pans and must not turn pages.
     let mut h = harness(&[("layout", "single"), ("zoom", "200")]);
@@ -345,10 +392,78 @@ fn precise_touchpad_wheel_scrolls_one_to_one() {
     assert!(drift.abs() < 2.0, "no easing tail after the swipe: drifted {drift}");
 }
 
+#[test]
+fn rapid_wheel_notches_accelerate_and_follow_touchpad_input() {
+    use pdfcraft_ui_egui::scroll_speed::ScrollSpeed;
+
+    let mut h = harness_stepping(1.0 / 60.0, &[("layout", "continuous"), ("zoom", "300")]);
+    h.state_mut().set_option("animation_effects", "off").unwrap();
+    let at = h.state().views[0].viewport_rect().center();
+    h.hover_at(at);
+    h.run_steps(2);
+
+    h.event(wheel(MouseWheelUnit::Line, -1.0, TouchPhase::Move));
+    let single = scroll_over(&mut h, 2);
+    let base = ScrollSpeed::default().line_points();
+    assert!((single - base).abs() < 1.0, "one notch keeps the configured base: moved {single}, base {base}");
+
+    // Let the isolated notch expire, then spin five notches one frame apart. The burst must move
+    // farther than five base steps without adding work on idle frames.
+    h.run_steps(30);
+    let mut burst = 0.0;
+    for _ in 0..5 {
+        h.event(wheel(MouseWheelUnit::Line, -1.0, TouchPhase::Move));
+        burst += scroll_over(&mut h, 2);
+    }
+    assert!(burst > 7.0 * base, "a rapid five-notch spin accelerates: moved {burst}, base {base}");
+
+    // A line notch inside the precise path's suppression window keeps its base share (#1072):
+    // suppressing egui's touchpad tail must not swallow mixed-device input.
+    h.run_steps(30);
+    h.event(wheel(MouseWheelUnit::Point, -20.0, TouchPhase::Move));
+    scroll_over(&mut h, 2);
+    // Arrive near the old suppression deadline: the line's new easing tail must extend it.
+    h.run_steps(11);
+    h.event(wheel(MouseWheelUnit::Line, -1.0, TouchPhase::Move));
+    let after_touchpad = scroll_over(&mut h, 2);
+    assert!(after_touchpad >= base, "a notch after point input is not dropped: moved {after_touchpad}, base {base}");
+    let delayed = scroll_over(&mut h, 20);
+    assert!(delayed.abs() < 2.0, "the reconstructed notch has no delayed easing copy: moved {delayed}");
+
+    h.event(wheel(MouseWheelUnit::Point, -20.0, TouchPhase::Move));
+    scroll_over(&mut h, 2);
+    h.event(wheel(MouseWheelUnit::Page, -1.0, TouchPhase::Move));
+    let page_after_touchpad = scroll_over(&mut h, 2);
+    assert!(page_after_touchpad > base, "a page event after point input is preserved: moved {page_after_touchpad}");
+    let delayed_page = scroll_over(&mut h, 20);
+    assert!(delayed_page.abs() < 2.0, "the reconstructed page has no delayed easing copy: moved {delayed_page}");
+}
+
+#[test]
+fn changing_continuous_layout_resets_wheel_acceleration() {
+    use pdfcraft_ui_egui::scroll_speed::ScrollSpeed;
+
+    let mut h = harness_stepping(1.0 / 60.0, &[("layout", "continuous"), ("zoom", "300")]);
+    h.state_mut().set_option("animation_effects", "off").unwrap();
+    let at = h.state().views[0].viewport_rect().center();
+    h.hover_at(at);
+    h.run_steps(2);
+    for _ in 0..5 {
+        h.event(wheel(MouseWheelUnit::Line, -1.0, TouchPhase::Move));
+        scroll_over(&mut h, 2);
+    }
+
+    h.state_mut().views[0].set_continuous(false);
+    h.run_steps(3);
+    h.event(wheel(MouseWheelUnit::Line, -1.0, TouchPhase::Move));
+    let moved = scroll_over(&mut h, 2);
+    let base = ScrollSpeed::default().line_points();
+    assert!((moved - base).abs() < 1.0, "a layout jump clears the old burst: moved {moved}, base {base}");
+}
+
 /// Steps `frames` frames and returns how far the document scrolled down over them, from the
 /// pages on screen in each pair of consecutive frames (a page can leave the screen on the way).
-/// Only the non-macOS glide tests below use it, hence the matching gate.
-#[cfg(not(target_os = "macos"))]
+/// Used by wheel and non-macOS glide tests below.
 fn scroll_over(h: &mut Harness<'static, PdfCraftApp>, frames: usize) -> f32 {
     let tops = |h: &Harness<'static, PdfCraftApp>| (0..3).map(|p| rect(h, p).map(|r| r.min.y)).collect::<Vec<_>>();
     let mut moved = 0.0;

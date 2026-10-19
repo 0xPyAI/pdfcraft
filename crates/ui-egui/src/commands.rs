@@ -627,7 +627,7 @@ impl PdfCraftApp {
             "create.clipboard" => self.create_from_clipboard(),
             "optimize.reduce" => self.reduce_file_size(),
             "page.duplicate" => {
-                self.apply_edit(Edit::DuplicatePages { pages: targets });
+                self.apply_edit(Edit::DuplicatePages { pages: targets, at: None });
             }
             // Two or more selected pages reverse among themselves; otherwise the whole document.
             "page.reverse" => {

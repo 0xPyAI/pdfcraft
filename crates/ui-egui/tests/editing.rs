@@ -2390,6 +2390,81 @@ fn dragging_thumbnails_reorders_pages() {
     assert_eq!(sel, vec![2], "the moved page stays selected");
 }
 
+/// A page drag with the copy modifier held — Ctrl (Option on macOS) — instead of none.
+/// Modifiers are input state: `ModifiersChanged` once, as the column-select drag does.
+fn copy_drag(h: &mut Harness<'static, PdfCraftApp>, from: egui::Pos2, to: egui::Pos2) {
+    page_drag(h, from, to, copy_modifiers(h));
+}
+
+/// The copy modifier of the OS the app reports: Option on macOS, Ctrl elsewhere. That is the OS
+/// the gesture itself reads, so a Mac browser — a wasm build, where `cfg!(target_os = "macos")` is
+/// false — is covered by asking the context rather than the target.
+fn copy_modifiers(h: &Harness<'static, PdfCraftApp>) -> Modifiers {
+    if h.ctx.os() == egui::os::OperatingSystem::Mac { Modifiers::ALT } else { Modifiers::CTRL }
+}
+
+/// Drag the page under `from` to `to` with `modifiers` held for the whole gesture.
+fn page_drag(h: &mut Harness<'static, PdfCraftApp>, from: egui::Pos2, to: egui::Pos2, modifiers: Modifiers) {
+    h.event(egui::Event::ModifiersChanged(modifiers));
+    h.run_steps(1);
+    h.hover_at(from);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers });
+    h.run_steps(1);
+    for k in 1..=5 {
+        h.hover_at(from + (to - from) * (k as f32 / 5.0));
+        h.run_steps(1);
+    }
+    h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers });
+    h.run_steps(4);
+    h.event(egui::Event::ModifiersChanged(Modifiers::NONE));
+    h.run_steps(1);
+}
+
+#[test]
+fn dragging_with_the_copy_modifier_copies_the_pages_into_the_gap() {
+    let mut h = organize(3);
+    let before = page_texts(h.state());
+    let grab = |h: &Harness<'static, PdfCraftApp>, label: &str| h.get_by_label(label).rect();
+    let (from, to) = (grab(&h, "Page 1").center(), grab(&h, "Page 3").right_center() - egui::vec2(10.0, 0.0));
+    copy_drag(&mut h, from, to);
+    // The original stays first; a copy of page 1 lands after page 3 (#2997).
+    let after = page_texts(h.state());
+    assert_eq!(after, vec![before[0].clone(), before[1].clone(), before[2].clone(), before[0].clone()], "{after:?}");
+    assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Duplicate page"));
+    let sel: Vec<usize> = h.state().views[0].selected.iter().copied().collect();
+    assert_eq!(sel, vec![3], "the copy is selected");
+}
+
+/// macOS is not only `cfg!(target_os = "macos")`: the wasm build runs in a Mac browser, where the
+/// cfg is false but the context says Mac. The gesture must follow the context, or Option-drag
+/// there moves the pages instead of copying them (#3092 review).
+#[test]
+fn option_copies_and_ctrl_moves_when_the_context_reports_macos() {
+    let grab = |h: &Harness<'static, PdfCraftApp>, label: &str| h.get_by_label(label).rect();
+    let points = |h: &Harness<'static, PdfCraftApp>| (grab(h, "Page 1").center(), grab(h, "Page 3").right_center() - egui::vec2(10.0, 0.0));
+
+    // Ctrl is not the copy modifier on macOS, so that drag moves the page.
+    let mut h = organize(3);
+    h.ctx.set_os(egui::os::OperatingSystem::Mac);
+    let before = page_texts(h.state());
+    let (from, to) = points(&h);
+    page_drag(&mut h, from, to, Modifiers::CTRL);
+    assert_eq!(page_texts(h.state()), vec![before[1].clone(), before[2].clone(), before[0].clone()], "Ctrl moves on macOS");
+    assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Move page"));
+
+    // Option is, so the same drag drops a copy at the gap.
+    let mut h = organize(3);
+    h.ctx.set_os(egui::os::OperatingSystem::Mac);
+    let before = page_texts(h.state());
+    let (from, to) = points(&h);
+    page_drag(&mut h, from, to, Modifiers::ALT);
+    assert_eq!(page_texts(h.state()), vec![before[0].clone(), before[1].clone(), before[2].clone(), before[0].clone()], "Option copies on macOS");
+    assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Duplicate page"));
+    let sel: Vec<usize> = h.state().views[0].selected.iter().copied().collect();
+    assert_eq!(sel, vec![3], "the copy is selected");
+}
+
 #[test]
 fn copying_cutting_and_pasting_pages() {
     let mut h = organize(4);
@@ -4776,4 +4851,33 @@ fn leaving_organize_goes_back_to_the_workspace_panel() {
     h.state_mut().views[0].organize = false;
     h.run_steps(3);
     assert_eq!(h.state().left, LeftPanel::AllTools);
+}
+
+/// The Read mode command (not the mode bar) applies a paragraph still open in the editor, as
+/// putting the Edit text tool down does; left open, it would stay drawn in Read mode with no tool.
+#[test]
+fn read_mode_shortcut_applies_the_open_paragraph() {
+    use pdfcraft_ui_egui::{Mode, QuickTool};
+    let mut h = harness(1, |_| {});
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    // The line "Page 1" sits at (20, 150) on a 200 × 300 page, 24 pt.
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - 158.0) / 300.0 * r.height());
+    h.hover_at(at);
+    h.run_steps(1);
+    h.drag_at(at);
+    h.run_steps(1);
+    h.drop_at(at);
+    h.run_steps(3);
+    assert!(h.state().views[0].line_editor.is_some(), "the line opens for editing");
+    h.state_mut().views[0].line_editor.as_mut().unwrap().text = "Chapter One".into();
+    h.run_steps(1);
+    h.state_mut().run_command("view.read_mode");
+    h.run_steps(3);
+    let s = h.state();
+    assert_eq!(s.mode, Mode::Read);
+    assert_eq!(s.quick_tool, QuickTool::Select);
+    assert!(s.views[0].line_editor.is_none(), "no editor stays open in Read mode");
+    assert_eq!(s.session.get(s.views[0].id).unwrap().text_lines(0)[0].text, "Chapter One", "the edit is applied");
 }

@@ -53,6 +53,12 @@ impl PdfCraftApp {
                 let Some(doc) = self.session.get(id) else { return true };
                 let info = &doc.info;
                 let view = &mut self.views[i];
+                // A picture picked with the Select tool may be the one this edit removed or moved:
+                // drop its highlight now, not on the next frame (which only comes with the next input).
+                view.picked_image = None;
+                if let Some(ctx) = &self.ctx {
+                    ctx.request_repaint();
+                }
                 if matches!(edit, Edit::AddAnnotation(_)) {
                     // A released drawing's raster can come now: it will have the annotation.
                     view.comments.drawings_committed();
@@ -126,6 +132,11 @@ impl PdfCraftApp {
                         let n = pages.iter().collect::<std::collections::BTreeSet<_>>().len();
                         let to = to.min(info.pages.len() - n);
                         view.select_pages(&(to..to + n).collect::<Vec<_>>());
+                    }
+                    Edit::DuplicatePages { pages, at: Some(at) } => {
+                        let n = pages.iter().collect::<std::collections::BTreeSet<_>>().len();
+                        let at = at.min(info.pages.len().saturating_sub(n));
+                        view.select_pages(&(at..at + n).collect::<Vec<_>>());
                     }
                     Edit::InsertBlankPage { at, .. } => view.select_pages(&[at.min(info.pages.len() - 1)]),
                     Edit::DeletePages { .. } => view.select_pages(&[]),
@@ -990,13 +1001,15 @@ fn is_form_edit(edit: &Edit) -> bool {
 /// classic Outlook (`Temporary Internet Files\Content.Outlook\` on older Windows), and the
 /// `Microsoft.OutlookForWindows` package folder for the new Outlook. Saving there either fails,
 /// because Outlook can still hold the file, or appears to work while the edits stay out of the
-/// email and are deleted with the cache. Matched on either separator and in any case, so it can
-/// be tested on every platform.
+/// email and are deleted with the cache. Apple Mail opens one from `Mail Downloads/<UUID>/` in
+/// its sandbox container, where other apps can't write, so saving there fails (#2751). Matched on
+/// either separator and in any case, so it can be tested on every platform.
 pub(crate) fn is_mail_temp_copy(path: &str) -> bool {
     let p = path.replace('\\', "/").to_ascii_lowercase();
     p.contains("/inetcache/content.outlook/")
         || p.contains("/temporary internet files/content.outlook/")
         || p.contains("/microsoft.outlookforwindows")
+        || p.contains("/library/containers/com.apple.mail/data/library/mail downloads/")
 }
 
 /// Write via a temporary file in the same directory and rename over the target, so a crash or
@@ -1244,8 +1257,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Windows refuses to replace a read-only file, so the rename fails: the staging file must not
-    /// be left behind.
+    /// A read-only target is refused before anything is staged, so no staging file is left
+    /// behind.
     #[cfg(windows)]
     #[test]
     fn a_failed_save_removes_the_staging_file() {
@@ -1256,7 +1269,7 @@ mod tests {
         perms.set_readonly(true);
         std::fs::set_permissions(&target, perms.clone()).unwrap();
         let e = write_atomically_with(&target.to_string_lossy(), b"NEW", [7]).unwrap_err();
-        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "the rename failed: {e}");
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "a read-only target is refused: {e}");
         assert_eq!(read(&target), "OLD");
         assert_eq!(listing(&dir), ["out.pdf"], "the staging file was removed");
         #[allow(clippy::permissions_set_readonly_false)]
@@ -1315,12 +1328,24 @@ mod tests {
     }
 
     #[test]
+    fn apple_mail_attachment_copies_are_recognised() {
+        for p in [
+            "/Users/me/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/6F1C2A9E-3B4D-4E5F-8A7B-9C0D1E2F3A4B/booking.pdf",
+            "/Users/me/library/containers/COM.APPLE.MAIL/data/library/mail downloads/6F1C2A9E/Booking (2).pdf",
+        ] {
+            assert!(is_mail_temp_copy(p), "{p}");
+        }
+    }
+
+    #[test]
     fn ordinary_paths_are_not_mail_copies() {
         for p in [
             r"C:\Users\me\Documents\Quote.pdf",
             r"C:\Users\me\OneDrive - Contoso\Content.Outlook notes\Quote.pdf",
             r"C:\Users\me\AppData\Local\Microsoft\Windows\INetCache\IE\Quote.pdf",
             "/home/me/Documents/Quote.pdf",
+            "/Users/me/Downloads/Mail Downloads/booking.pdf",
+            "/Users/me/Library/Containers/com.apple.Notes/Data/Library/Mail Downloads/booking.pdf",
             "Quote.pdf",
         ] {
             assert!(!is_mail_temp_copy(p), "{p}");
