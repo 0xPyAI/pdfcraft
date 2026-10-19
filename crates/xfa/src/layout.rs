@@ -13,7 +13,7 @@ use std::sync::Arc;
 use base64::Engine;
 
 use crate::XfaError;
-use crate::data::{DataNode, data_path, is_on, iso_to_pattern};
+use crate::data::{DataNode, data_path, data_to_iso, date_letters, is_on, iso_to_pattern};
 use crate::model::*;
 use crate::text::{self, Block, Face, Span};
 
@@ -396,13 +396,7 @@ fn is_row(node: &Node) -> bool {
 
 /// The Acrobat date pattern for an XFA picture clause such as `date{YYYY-MM-DD}`.
 fn date_pattern(picture: Option<&str>) -> String {
-    let p = picture.unwrap_or("");
-    let inner = p.find('{').and_then(|a| p[a + 1..].find('}').map(|b| &p[a + 1..a + 1 + b])).unwrap_or(p);
-    let inner = inner.trim();
-    if inner.is_empty() || inner.chars().any(|c| !"YMDEJ-/., :".contains(c)) {
-        return "yyyy-mm-dd".into();
-    }
-    inner.replace('E', "d").to_ascii_lowercase()
+    picture.and_then(date_letters).unwrap_or_else(|| "yyyy-mm-dd".into())
 }
 
 fn button_action(scripts: &[Script]) -> Option<Action> {
@@ -1642,8 +1636,12 @@ impl Layouter<'_> {
             }
             Ui::DateTimeEdit => {
                 let pattern = date_pattern(f.picture.as_deref());
-                // Data holds ISO dates; the field shows them in its pattern.
-                let shown = plain_value.as_ref().map(|v| if data_value.is_some() { iso_to_pattern(v, &pattern) } else { v.clone() });
+                // The data holds the date in the field's data picture, or else as an ISO date; the
+                // field shows it in its own pattern.
+                let data_pattern = f.data_picture.as_deref().and_then(date_letters);
+                let shown = plain_value
+                    .as_ref()
+                    .map(|v| if data_value.is_some() { iso_to_pattern(&data_to_iso(v, data_pattern.as_deref()), &pattern) } else { v.clone() });
                 (WidgetKind::Date(pattern), ui, widget_border(f.ui_border.as_ref(), false), shown, f.tooltip.clone())
             }
             Ui::ChoiceList => {

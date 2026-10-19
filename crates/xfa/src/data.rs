@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, Stream};
 
 use crate::XfaError;
-use crate::model::{Node, Template};
+use crate::model::{Field, Node, Template};
 use crate::packets::{Encoding, encode};
 
 const XFA_DATA_NS: &str = "http://www.xfa.org/schema/xfa-data/1.0/";
@@ -155,6 +155,67 @@ fn named<'a>(nodes: &'a [Node], name: &str, depth: usize) -> Option<&'a Node> {
             _ => None,
         })
     })
+}
+
+/// The date letters (`yyyy-mm-dd`, `yyyymmdd`) of an XFA date picture clause such as
+/// `date{YYYY-MM-DD}`, or `None` when it has none this reads (empty, or with symbols beyond
+/// years, months, days and separators).
+pub(crate) fn date_letters(picture: &str) -> Option<String> {
+    let inner = picture
+        .find('{')
+        .and_then(|a| {
+            let rest = picture.get(a + 1..)?;
+            rest.find('}').and_then(|b| rest.get(..b))
+        })
+        .unwrap_or(picture)
+        .trim();
+    if inner.is_empty() || inner.chars().any(|c| !"YMDEJ-/., :".contains(c)) {
+        return None;
+    }
+    Some(inner.replace('E', "d").to_ascii_lowercase())
+}
+
+/// A date as the data holds it, written in `data_pattern` (the field's data picture), read as
+/// an ISO date. A value that doesn't match, or a field without a data picture, is taken as it
+/// is: the data holds ISO dates by default.
+pub(crate) fn data_to_iso(value: &str, data_pattern: Option<&str>) -> String {
+    data_pattern.and_then(|p| pattern_to_iso(value, p)).unwrap_or_else(|| value.to_string())
+}
+
+/// An ISO date as the data should hold it: in `data_pattern` when the field has one.
+fn iso_to_data(iso: String, data_pattern: Option<&str>) -> String {
+    match data_pattern {
+        Some(p) => iso_to_pattern(&iso, p),
+        None => iso,
+    }
+}
+
+/// The template field a SOM path names (instance numbers aside), looking through unnamed
+/// subforms and areas as [`data_path`] does; `None` when the template has no such field.
+fn template_field<'a>(tpl: &'a Template, som: &str) -> Option<&'a Field> {
+    let path = som_to_path(som);
+    let ((root, _), rest) = path.split_first()?;
+    if tpl.root.common.name.as_deref() != Some(root.as_str()) {
+        return None;
+    }
+    let ((last, _), inner) = rest.split_last()?;
+    let mut children: &[Node] = &tpl.root.children;
+    for (name, _) in inner {
+        children = match named(children, name, 0)? {
+            Node::Subform(sf) => &sf.children,
+            Node::Area(a) => &a.children,
+            _ => return None,
+        };
+    }
+    match named(children, last, 0)? {
+        Node::Field(f) => Some(f),
+        _ => None,
+    }
+}
+
+/// The date letters of the data picture of the field `som` names, when it has one.
+fn data_date_pattern(tpl: Option<&Template>, som: &str) -> Option<String> {
+    tpl.and_then(|t| template_field(t, som)).and_then(|f| f.data_picture.as_deref()).and_then(date_letters)
 }
 
 /// What a field holds, for writing the datasets.
@@ -456,7 +517,11 @@ fn wanted(doc: &Document, fields: &[FieldDatum], tpl: Option<&Template>) -> Vec<
         }
         let text = match &f.data {
             FieldData::Text(t) => match date_pattern_of(doc, f) {
-                Some(p) => pattern_to_iso(t, &p).unwrap_or_else(|| t.clone()),
+                Some(p) => match pattern_to_iso(t, &p) {
+                    // The date goes into the data in the field's data picture, or as an ISO date.
+                    Some(iso) => iso_to_data(iso, data_date_pattern(tpl, &som).as_deref()),
+                    None => t.clone(),
+                },
                 None => t.clone(),
             },
             FieldData::Check(on) => {
@@ -1530,12 +1595,13 @@ fn values_at(doc: &Document, tpl: Option<&Template>, fields: &[FieldDatum]) -> V
     let Some(data) = parse_datasets(&p.xdp) else { return Vec::new() };
     let mut out = Vec::new();
     for f in fields {
-        let path = path_of(tpl, &som_of(doc, f));
+        let som = som_of(doc, f);
+        let path = path_of(tpl, &som);
         let Some(text) = data.value_at(&path) else { continue };
         let text = text.as_str();
         let value = match &f.data {
             FieldData::Text(_) => FieldData::Text(match date_pattern_of(doc, f) {
-                Some(pat) => iso_to_pattern(text, &pat),
+                Some(pat) => iso_to_pattern(&data_to_iso(text, data_date_pattern(tpl, &som).as_deref()), &pat),
                 None => text.to_string(),
             }),
             FieldData::Check(_) => {

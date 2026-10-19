@@ -4184,6 +4184,28 @@ fn static_xfa_forms_take_their_values_from_the_datasets_and_write_them_back() {
     assert!(!d2.info.warnings.iter().any(|w| w.contains("taken from this form's XFA data")), "nothing was rewritten");
 }
 
+/// A date goes into the XFA data in the field's data picture (`<bind><picture>`), as other
+/// viewers write and read it, and comes back from there when the form is opened again. It used
+/// to be written as an ISO date whatever the picture said.
+#[test]
+fn xfa_dates_are_written_and_read_back_in_their_data_picture() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::bound_date_template("")));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("form.pdf", None, bytes, None).expect("opens");
+    s.apply(id, Edit::SetFieldValue { name: "due".into(), value: FieldValue::Text("10/18/2026".into()) }).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "when".into(), value: FieldValue::Text("10/18/2026".into()) }).unwrap();
+    let saved = s.save_bytes(id).unwrap();
+    let cos = pdfcraft_cos::Document::open(saved.clone()).unwrap();
+    let data = pdfcraft_xfa::parse_datasets(&pdfcraft_xfa::read_packets(&cos).unwrap().unwrap().xdp).unwrap();
+    assert_eq!(data.text_at(&pdfcraft_xfa::som_to_path("form[0].page[0].due[0]")), Some("20261018"), "in the field's data picture");
+    assert_eq!(data.text_at(&pdfcraft_xfa::som_to_path("form[0].page[0].when[0]")), Some("2026-10-18"), "ISO without one");
+    let id2 = s.open("again.pdf", None, saved, None).unwrap();
+    let d2 = s.get(id2).unwrap();
+    let value = |n: &str| d2.form.iter().find(|f| f.name == n).unwrap_or_else(|| panic!("no field {n}")).value.clone();
+    assert_eq!(value("due"), vec!["10/18/2026".to_string()]);
+    assert_eq!(value("when"), vec!["10/18/2026".to_string()]);
+}
+
 #[test]
 fn xfa_data_no_field_binds_to_survives_an_edit_and_save() {
     // Regression: editing a field replaced the whole data element with the fields' values.

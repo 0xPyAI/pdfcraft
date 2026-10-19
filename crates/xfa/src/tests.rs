@@ -7,7 +7,9 @@ use crate::data::{
     DatasetsWrite, FieldData, FieldDatum, build_data, iso_to_pattern, parse_datasets, pattern_to_iso, read_values, som_to_path, write_datasets,
 };
 use crate::data::{add_data_instances, remove_data_instance, write_data_value};
-use crate::fixtures::{TINY_GIF, fields_template, scripted_template, shell, static_shell, template, template_with_data, tiny_png};
+use crate::fixtures::{
+    TINY_GIF, bound_date_template, fields_template, scripted_template, shell, static_shell, template, template_with_data, tiny_png,
+};
 use crate::layout::Item;
 use crate::layout::WidgetKind;
 use crate::model::*;
@@ -334,6 +336,18 @@ fn dates_convert_between_iso_and_acrobat_patterns() {
     assert_eq!(pattern_to_iso("2001-02-03", "yyyy-mm-dd").as_deref(), Some("2001-02-03"));
     assert_eq!(pattern_to_iso("13/40/2001", "mm/dd/yyyy"), None);
     assert_eq!(pattern_to_iso("hello", "mm/dd/yyyy"), None);
+}
+
+/// A date field's data picture (`<bind><picture>`) is how its value is written in the data:
+/// `due` keeps `20261018` there and shows `10/18/2026`. The stored text used to be shown as it
+/// was, because the data was taken to hold ISO dates only.
+#[test]
+fn a_date_is_read_from_the_data_in_its_data_picture() {
+    let form = layout_xml(&bound_date_template("<form><page><due>20261018</due><when>2026-10-18</when></page></form>")).unwrap();
+    let all: Vec<&Widget> = form.pages.iter().flat_map(widgets).collect();
+    let by = |n: &str| all.iter().find(|w| w.name == n).unwrap_or_else(|| panic!("no widget {n}"));
+    assert_eq!(by("due").value.as_deref(), Some("10/18/2026"));
+    assert_eq!(by("when").value.as_deref(), Some("10/18/2026"), "no data picture: the data holds ISO");
 }
 
 #[test]

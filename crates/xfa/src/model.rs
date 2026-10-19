@@ -493,6 +493,9 @@ pub struct Field {
     pub access: Access,
     /// The edit picture clause (`<ui>…<picture>`), e.g. `date{YYYY-MM-DD}`.
     pub picture: Option<String>,
+    /// The data picture clause (`<bind>…<picture>`), e.g. `date{YYYYMMDD}`: how the value is
+    /// written in the data. Without one, dates there are ISO.
+    pub data_picture: Option<String>,
     /// `<event activity="…"><script>`: click, change, exit, initialize, …
     pub scripts: Vec<Script>,
     /// `<calculate><script>`: the value is the script's result.
