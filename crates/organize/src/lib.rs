@@ -216,6 +216,12 @@ pub fn rotate_pages(doc: &mut Document, indices: &[usize], degrees: i64) -> Resu
 }
 
 /// Delete pages. Refuses to delete every page.
+///
+/// # Errors
+///
+/// This operation is not transactional: an error can leave `doc` partially modified. Callers
+/// that need atomic edits (including replacement) must use a working clone and keep it only on
+/// success; discard the working clone on error. The engine does this for its history boundary.
 pub fn delete_pages(doc: &mut Document, indices: &[usize]) -> Result<(), OrganizeError> {
     let all = walk(doc)?;
     check(indices, all.len())?;
@@ -366,7 +372,6 @@ fn prune_legacy(doc: &Document, dests: &mut Dict, gone: &[ObjRef], dead: &mut Ve
 /// updated in place and yields `None`; an inline dictionary that changed is handed back.
 fn prune_tree_slot(doc: &mut Document, slot: &Object, gone: &[ObjRef], dead: &mut Vec<Vec<u8>>) -> Result<Option<Dict>, OrganizeError> {
     let mut stack = Vec::new();
-    let mut left = MAX_DESTINATION_TREE_WORK;
     let inline = match slot {
         Object::Ref(r) => {
             stack.push(*r);
@@ -374,51 +379,34 @@ fn prune_tree_slot(doc: &mut Document, slot: &Object, gone: &[ObjRef], dead: &mu
         }
         Object::Dict(d) => {
             let mut node = d.clone();
-            prune_tree_node(doc, &mut node, gone, dead, &mut stack, &mut left)?.then_some(node)
+            prune_tree_node(doc, &mut node, gone, dead, &mut stack).then_some(node)
         }
         _ => None,
     };
-    // Name trees consist of shallow indirect nodes. Their graph depth must not become
-    // call-stack depth; the shared budget also bounds wide trees and repeated edges.
+    // Name trees consist of shallow indirect nodes: graph depth must not become call-stack
+    // depth. Visit each indirect node once, even when cyclic or shared. Unlike the depth-limited
+    // outline::name_tree lookup, deletion must inspect every reachable node to remove references
+    // to freed pages. Both walks use seen sets to stop cycles.
     let mut seen = std::collections::HashSet::new();
     while let Some(r) = stack.pop() {
         if !seen.insert(r) {
             continue;
         }
         let Some(mut node) = doc.get(r).as_dict().cloned() else { continue };
-        if prune_tree_node(doc, &mut node, gone, dead, &mut stack, &mut left)? {
+        if prune_tree_node(doc, &mut node, gone, dead, &mut stack) {
             doc.update_dict(r, |d| *d = node)?;
         }
     }
     Ok(inline)
 }
 
-/// Count nodes and the entries in their /Names and /Kids arrays, including repeated edges.
-const MAX_DESTINATION_TREE_WORK: usize = 100_000;
-
-fn destination_tree_work(left: &mut usize, count: usize) -> Result<(), OrganizeError> {
-    *left = left
-        .checked_sub(count)
-        .ok_or_else(|| OrganizeError::Invalid(format!("the named destination tree exceeds the {MAX_DESTINATION_TREE_WORK}-entry work limit")))?;
-    Ok(())
-}
-
 /// Drop the /Names pairs going to a `gone` page, and queue /Kids for the iterative walk.
 /// True when `node` itself changed; child nodes are written back by the caller.
-fn prune_tree_node(
-    doc: &Document,
-    node: &mut Dict,
-    gone: &[ObjRef],
-    dead: &mut Vec<Vec<u8>>,
-    stack: &mut Vec<ObjRef>,
-    left: &mut usize,
-) -> Result<bool, OrganizeError> {
-    destination_tree_work(left, 1)?;
+fn prune_tree_node(doc: &Document, node: &mut Dict, gone: &[ObjRef], dead: &mut Vec<Vec<u8>>, stack: &mut Vec<ObjRef>) -> bool {
     let mut changed = false;
     if let Some(names) = node.get(b"Names").map(|n| doc.resolve(n))
         && let Some(pairs) = names.as_array()
     {
-        destination_tree_work(left, pairs.len())?;
         let mut kept = Vec::with_capacity(pairs.len());
         for pair in pairs.chunks(2) {
             match pair {
@@ -438,14 +426,13 @@ fn prune_tree_node(
     if let Some(children) = node.get(b"Kids").map(|k| doc.resolve(k))
         && let Some(kids) = children.as_array()
     {
-        destination_tree_work(left, kids.len())?;
         for kid in kids.iter().rev() {
             if let Some(r) = kid.as_ref() {
                 stack.push(r);
             }
         }
     }
-    Ok(changed)
+    changed
 }
 
 /// Take widgets out of the form: out of their field's /Kids, or out of /AcroForm /Fields when

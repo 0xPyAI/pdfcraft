@@ -779,32 +779,24 @@ fn edit_undo_redo_and_save_round_trip() {
     assert_eq!(after.windows(5).filter(|w| w == b"%%EOF").count(), 2);
 }
 
-/// A shallow-object destination graph: a deep chain, or a wide repeated-child array.
-fn destination_graph_fixture(depth: usize, wide: bool) -> Vec<u8> {
+/// A shallow-object destination tree: `depth` single-child nodes above `count` names.
+fn destination_graph_fixture(depth: usize, count: usize) -> Vec<u8> {
     use pdfcraft_cos::{Dict, Document, Object, PdfString, SaveOptions};
     let mut doc = Document::open(std::sync::Arc::new(fixture(3))).unwrap();
     let pages = pdfcraft_organize::pages(&doc).unwrap();
+    let pairs = (0..count)
+        .flat_map(|i| {
+            let page = if i % 2 == 0 { pages[0].obj } else { pages[2].obj };
+            [Object::String(PdfString::text(&format!("dest-{i:05}"))), Object::Array(vec![Object::Ref(page), Object::name("Fit")])]
+        })
+        .collect();
     let mut leaf = Dict::new();
-    leaf.set(
-        b"Names".to_vec(),
-        Object::Array(vec![
-            Object::String(PdfString::text("gone")),
-            Object::Array(vec![Object::Ref(pages[0].obj), Object::name("Fit")]),
-            Object::String(PdfString::text("kept")),
-            Object::Array(vec![Object::Ref(pages[2].obj), Object::name("Fit")]),
-        ]),
-    );
+    leaf.set(b"Names".to_vec(), Object::Array(pairs));
     let mut tree = doc.add(leaf);
-    if wide {
+    for _ in 0..depth {
         let mut node = Dict::new();
-        node.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(tree); 100_000]));
+        node.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(tree)]));
         tree = doc.add(node);
-    } else {
-        for _ in 0..depth {
-            let mut node = Dict::new();
-            node.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(tree)]));
-            tree = doc.add(node);
-        }
     }
     let mut names = Dict::new();
     names.set(b"Dests".to_vec(), Object::Ref(tree));
@@ -812,63 +804,90 @@ fn destination_graph_fixture(depth: usize, wide: bool) -> Vec<u8> {
     pdfcraft_cos::write_incremental(&doc, &SaveOptions::default()).unwrap()
 }
 
-#[test]
-fn page_delete_handles_deep_destination_trees_with_history_and_reopen() {
-    let dir = workdir("deep-destinations");
-    let original = destination_graph_fixture(16_384, false);
-    std::fs::write(dir.join("deep.pdf"), &original).unwrap();
+/// Inspect the actual working bytes, not just page counts or history labels. The fixture has
+/// exactly `depth` single-child nodes, so this checks its leaf without a second general walker.
+fn assert_destination_state(a: &Automation, doc: u64, depth: usize, count: usize, deleted: bool) {
+    use pdfcraft_cos::{Document, Object};
+    let bytes = a.session().get(pdfcraft_engine::DocId(doc)).unwrap().bytes.clone();
+    let parsed = Document::open(bytes).unwrap();
+    let pages = pdfcraft_organize::pages(&parsed).unwrap();
+    assert_eq!(pages.len(), if deleted { 2 } else { 3 });
+    let catalog = parsed.get(parsed.root().unwrap());
+    let names = parsed.resolve(catalog.as_dict().unwrap().get(b"Names").unwrap());
+    let mut node = parsed.resolve(names.as_dict().unwrap().get(b"Dests").unwrap());
+    for _ in 0..depth {
+        let kids = node.as_dict().unwrap().get(b"Kids").unwrap().as_array().unwrap();
+        assert_eq!(kids.len(), 1);
+        let child = kids[0].clone();
+        node = parsed.resolve(&child);
+    }
+    let pairs = node.as_dict().unwrap().get(b"Names").and_then(Object::as_array).unwrap();
+    assert_eq!(pairs.len(), if deleted { count / 2 * 2 } else { count * 2 });
+    let expected = (0..count).filter(|i| !deleted || i % 2 == 1);
+    for (pair, i) in pairs.chunks_exact(2).zip(expected) {
+        assert_eq!(pair[0].as_string().unwrap().to_text(), format!("dest-{i:05}"));
+        let target = if i % 2 == 0 { pages[0].obj } else { pages.last().unwrap().obj };
+        assert_eq!(pair[1].as_array().unwrap()[0].as_ref(), Some(target), "destination {i}");
+    }
+}
+
+/// Exercise the real tools, including named destinations after undo and redo, and check both
+/// kinds of save explicitly: a full copy, followed by an incremental update of that copy.
+fn delete_destination_tree_through_tools(depth: usize, count: usize, label: &str) {
+    let dir = workdir(label);
+    let original = destination_graph_fixture(depth, count);
+    std::fs::write(dir.join("source.pdf"), &original).unwrap();
     let mut a = auto(&dir);
-    let doc = ok(&mut a, "doc_open", json!({"path":"deep.pdf"}))["doc"].as_u64().unwrap();
+    let doc = ok(&mut a, "doc_open", json!({"path":"source.pdf"}))["doc"].as_u64().unwrap();
+    assert_destination_state(&a, doc, depth, count, false);
     let render = a.call("page_render", &json!({"doc":doc,"page":2,"dpi":72})).unwrap();
+    ok(&mut a, "doc_set_info", json!({"doc":doc,"key":"Title","value":"Unsaved work"}));
     ok(&mut a, "page_delete", json!({"doc":doc,"pages":[1]}));
+    assert_destination_state(&a, doc, depth, count, true);
     assert_eq!(page_text(&mut a, doc), ["Page 2", "Page 3"]);
     assert_eq!(a.call("page_render", &json!({"doc":doc,"page":1,"dpi":72})).unwrap(), render);
     ok(&mut a, "edit_undo", json!({"doc":doc}));
+    assert_destination_state(&a, doc, depth, count, false);
     assert_eq!(page_text(&mut a, doc), ["Page 1", "Page 2", "Page 3"]);
+    assert_eq!(ok(&mut a, "doc_info", json!({"doc":doc}))["title"], "Unsaved work");
     ok(&mut a, "edit_redo", json!({"doc":doc}));
-    for full in [false, true] {
-        let path = format!("saved-{full}.pdf");
-        ok(&mut a, "doc_save", json!({"doc":doc,"path":path,"full":full}));
-        let reopened = ok(&mut a, "doc_open", json!({"path":path}))["doc"].as_u64().unwrap();
-        assert_eq!(page_text(&mut a, reopened), ["Page 2", "Page 3"]);
-        assert_eq!(a.call("page_render", &json!({"doc":reopened,"page":1,"dpi":72})).unwrap(), render);
-    }
-    assert_eq!(std::fs::read(dir.join("deep.pdf")).unwrap(), original);
+    assert_destination_state(&a, doc, depth, count, true);
+    assert_eq!(page_text(&mut a, doc), ["Page 2", "Page 3"]);
+    assert_eq!(ok(&mut a, "doc_info", json!({"doc":doc}))["title"], "Unsaved work");
+
+    let saved = ok(&mut a, "doc_save", json!({"doc":doc,"path":"saved.pdf","full":true}));
+    assert_eq!(saved["incremental"], false);
+    let full = std::fs::read(dir.join("saved.pdf")).unwrap();
+    let mut b = auto(&dir);
+    let reopened = ok(&mut b, "doc_open", json!({"path":"saved.pdf"}))["doc"].as_u64().unwrap();
+    assert_destination_state(&b, reopened, depth, count, true);
+    assert_eq!(b.call("page_render", &json!({"doc":reopened,"page":1,"dpi":72})).unwrap(), render);
+
+    assert_eq!(ok(&mut b, "doc_info", json!({"doc":reopened}))["title"], "Unsaved work");
+    ok(&mut b, "doc_set_info", json!({"doc":reopened,"key":"Author","value":"Incremental probe"}));
+    let saved = ok(&mut b, "doc_save", json!({"doc":reopened}));
+    assert_eq!(saved["incremental"], true);
+    let incremental = std::fs::read(dir.join("saved.pdf")).unwrap();
+    assert!(incremental.len() > full.len() && incremental.starts_with(&full));
+    let mut b = auto(&dir);
+    let reopened = ok(&mut b, "doc_open", json!({"path":"saved.pdf"}))["doc"].as_u64().unwrap();
+    assert_destination_state(&b, reopened, depth, count, true);
+    assert_eq!(page_text(&mut b, reopened), ["Page 2", "Page 3"]);
+    assert_eq!(b.call("page_render", &json!({"doc":reopened,"page":1,"dpi":72})).unwrap(), render);
+    let info = ok(&mut b, "doc_info", json!({"doc":reopened}));
+    assert_eq!(info["title"], "Unsaved work");
+    assert_eq!(info["author"], "Incremental probe");
+    assert_eq!(std::fs::read(dir.join("source.pdf")).unwrap(), original);
 }
 
 #[test]
-fn page_delete_destination_budget_preserves_unsaved_work_and_history() {
-    let dir = workdir("wide-destinations");
-    let original = destination_graph_fixture(0, true);
-    std::fs::write(dir.join("wide.pdf"), &original).unwrap();
-    let mut a = auto(&dir);
-    let doc = ok(&mut a, "doc_open", json!({"path":"wide.pdf"}))["doc"].as_u64().unwrap();
-    ok(&mut a, "doc_set_info", json!({"doc":doc,"key":"Title","value":"Unsaved work"}));
-    ok(&mut a, "doc_set_info", json!({"doc":doc,"key":"Author","value":"Redo probe"}));
-    ok(&mut a, "edit_undo", json!({"doc":doc}));
-    let info = ok(&mut a, "doc_info", json!({"doc":doc}));
-    let before = a.session().get(pdfcraft_engine::DocId(doc)).unwrap();
-    let bytes = before.bytes.clone();
-    let generation = before.edit_generation();
-    let undo = before.can_undo().map(str::to_owned);
-    let redo = before.can_redo().map(str::to_owned);
-    assert!(redo.is_some(), "the refusal must preserve an existing redo step");
-    assert!(
-        matches!(err(&mut a, "page_delete", json!({"doc":doc,"pages":[1]})), ToolError::Failed(message) if message.contains("named destination tree") && message.contains("100000-entry work limit"))
-    );
-    let after = a.session().get(pdfcraft_engine::DocId(doc)).unwrap();
-    assert!(std::sync::Arc::ptr_eq(&after.bytes, &bytes));
-    assert_eq!(after.edit_generation(), generation);
-    assert_eq!(after.can_undo(), undo.as_deref());
-    assert_eq!(after.can_redo(), redo.as_deref());
-    assert_eq!(ok(&mut a, "doc_info", json!({"doc":doc})), info);
-    assert_eq!(page_text(&mut a, doc), ["Page 1", "Page 2", "Page 3"]);
-    ok(&mut a, "edit_redo", json!({"doc":doc}));
-    assert_eq!(ok(&mut a, "doc_info", json!({"doc":doc}))["author"], "Redo probe");
-    ok(&mut a, "edit_undo", json!({"doc":doc}));
-    ok(&mut a, "edit_undo", json!({"doc":doc}));
-    assert_eq!(a.session().get(pdfcraft_engine::DocId(doc)).unwrap().can_undo(), None);
-    assert_eq!(std::fs::read(dir.join("wide.pdf")).unwrap(), original);
+fn page_delete_handles_deep_destination_trees_with_history_and_reopen() {
+    delete_destination_tree_through_tools(16_384, 2, "deep-destinations");
+}
+
+#[test]
+fn page_delete_handles_sixty_thousand_destinations_with_history_and_reopen() {
+    delete_destination_tree_through_tools(0, 60_000, "many-destinations");
 }
 
 /// Issue #1329: an in-place save says it was incremental only when it kept the file it was
@@ -5374,6 +5393,74 @@ fn exporting_to_word_html_and_rtf() {
     assert!(a.call("doc_export_office", &json!({ "doc": doc, "path": "a.xyz" })).is_err());
 }
 
+/// #3120: a PDF whose pages draw "Head", then a chain of `depths[page]` nested forms whose
+/// innermost writes "TAIL".
+fn nested_forms_pdf(depths: &[usize]) -> Vec<u8> {
+    let mut objs: Vec<String> =
+        vec!["<< /Type /Catalog /Pages 2 0 R >>".into(), String::new(), "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into()];
+    let mut kids = Vec::new();
+    for &depth in depths {
+        // The object number of D1, D2 and so on.
+        let first = objs.len() + 1;
+        let xobjects: String = (1..=depth).map(|i| format!("/D{i} {} 0 R ", first + i - 1)).collect();
+        let resources = format!("<< /Font << /F1 3 0 R >> /XObject << {xobjects}>> >>");
+        for i in 1..=depth {
+            let body = if i == depth { "BT /F1 24 Tf 20 150 Td (TAIL) Tj ET".to_string() } else { format!("/D{} Do", i + 1) };
+            objs.push(format!(
+                "<< /Type /XObject /Subtype /Form /BBox [0 0 200 300] /Resources {resources} /Length {} >>\nstream\n{body}\nendstream",
+                body.len()
+            ));
+        }
+        let body = "BT /F1 24 Tf 20 250 Td (Head) Tj ET /D1 Do";
+        objs.push(format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()));
+        objs.push(format!("<< /Type /Page /Parent 2 0 R /Contents {} 0 R /Resources {resources} >>", objs.len()));
+        kids.push(format!("{} 0 R", objs.len()));
+    }
+    objs[1] = format!("<< /Type /Pages /Kids [{}] /Count {} /MediaBox [0 0 200 300] >>", kids.join(" "), kids.len());
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+/// #3120: export reads forms as deeply nested as the renderer draws them (13 used to lose their
+/// text), and its result says which pages draw forms past that, whose text is missing.
+#[test]
+fn exporting_office_files_says_which_pages_left_form_text_out() {
+    use pdfcraft_engine::compare::{MAX_FORM_DEPTH, MAX_FORM_VISITS};
+    let dir = workdir("office-forms");
+    std::fs::write(dir.join("deep.pdf"), nested_forms_pdf(&[13, MAX_FORM_DEPTH + 1, MAX_FORM_DEPTH])).unwrap();
+    std::fs::write(dir.join("fine.pdf"), nested_forms_pdf(&[13])).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "deep.pdf" }))["doc"].as_u64().unwrap();
+    for ext in ["html", "docx"] {
+        let r = ok(&mut a, "doc_export_office", json!({ "doc": doc, "path": format!("deep.{ext}") }));
+        assert_eq!((&r["truncated"], &r["truncated_pages"]), (&json!(true), &json!([2])), "{r}");
+        let warning = r["warnings"][0].as_str().unwrap();
+        assert!(warning.contains(&format!("{MAX_FORM_DEPTH} deep")) && warning.contains(&MAX_FORM_VISITS.to_string()), "{warning}");
+        assert!(warning.contains("truncated_pages"), "{warning}");
+    }
+    let html = std::fs::read_to_string(dir.join("deep.html")).unwrap();
+    let tails: Vec<usize> = html.split("<hr>").map(|page| page.matches("TAIL").count()).collect();
+    assert_eq!(tails, [1, 0, 1], "{html}");
+    assert_eq!(html.matches("Head").count(), 3, "{html}");
+
+    let fine = ok(&mut a, "doc_open", json!({ "path": "fine.pdf" }))["doc"].as_u64().unwrap();
+    let r = ok(&mut a, "doc_export_office", json!({ "doc": fine, "path": "fine.html" }));
+    assert_eq!((&r["truncated"], &r["truncated_pages"]), (&json!(false), &json!([])), "{r}");
+    assert!(r.get("warnings").is_none(), "{r}");
+    assert!(std::fs::read_to_string(dir.join("fine.html")).unwrap().contains("TAIL"));
+}
+
 /// #773: a diagonal watermark must not enter the body flow or move invoice fields.
 #[test]
 fn exporting_an_invoice_to_word_keeps_the_watermark_out_of_flow() {
@@ -6788,4 +6875,94 @@ fn a_root_less_write_output_is_atomic_too() {
     let e = free.write_output(&dir.join("new").to_string_lossy(), &[4]).unwrap_err();
     assert!(matches!(&e, ToolError::Failed(m) if m.contains("is a folder")), "{e:?}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn fdf_nested_comment_values_survive_export_import_and_save_through_tools() {
+    use pdfcraft_cos::{Dict, Document, Object, PdfString, SaveOptions, write_full};
+    use std::sync::Arc;
+    let dir = workdir("fdf-nested-values");
+    let mut source = Document::open(Arc::new(fixture(1))).unwrap();
+    let page = pdfcraft_model::pages(&source)[0].obj;
+    let mut note = Dict::new();
+    note.set(b"Type".to_vec(), Object::name("Annot"));
+    note.set(b"Subtype".to_vec(), Object::name("Square"));
+    note.set(b"NM".to_vec(), PdfString::text("nested-values"));
+    note.set(b"Rect".to_vec(), Object::Array([10, 20, 30, 40].map(|value| Object::Ref(source.add(Object::Int(value)))).into()));
+    note.set(b"C".to_vec(), Object::Array([0.25, 0.5, 0.75].map(|value| Object::Ref(source.add(Object::Real(value)))).into()));
+    let note = source.add(note);
+    source.update_dict(page, |dict| dict.set(b"Annots".to_vec(), Object::Array(vec![Object::Ref(note)]))).unwrap();
+    std::fs::write(dir.join("source.pdf"), write_full(&source, &SaveOptions::default()).unwrap()).unwrap();
+    let mut a = auto(&dir);
+    let source = ok(&mut a, "doc_open", json!({ "path": "source.pdf" }))["doc"].as_u64().unwrap();
+
+    ok(&mut a, "doc_export_data", json!({ "doc": source, "path": "notes.fdf", "what": "comments" }));
+    let target = ok(&mut a, "doc_open", json!({ "path": "b.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_import_data", json!({ "doc": target, "path": "notes.fdf" }));
+    ok(&mut a, "doc_save", json!({ "doc": target, "path": "restored.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "restored.pdf" }))["doc"].as_u64().unwrap();
+    let after = ok(&mut a, "comment_list", json!({ "doc": reopened }));
+    // The saved input has legal indirect scalar numbers. The engine's source inspection
+    // currently reads those as defaults, so compare the restored data to the fixture's
+    // known values (converted from PDF bottom-left to the tool's top-left coordinates).
+    assert_eq!(after["comments"][0]["rect"], json!([10.0, 260.0, 30.0, 280.0]));
+    assert_eq!(after["comments"][0]["color"], "#4080BF");
+}
+
+#[test]
+fn refused_fdf_export_keeps_the_destination_and_source_through_tools() {
+    use pdfcraft_cos::{Dict, Document, Object, SaveOptions, write_full};
+    use std::sync::Arc;
+    let dir = workdir("fdf-export-limit");
+    let mut source = Document::open(Arc::new(fixture(1))).unwrap();
+    let page = pdfcraft_model::pages(&source)[0].obj;
+    let mut note = Dict::new();
+    note.set(b"Type".to_vec(), Object::name("Annot"));
+    note.set(b"Subtype".to_vec(), Object::name("Square"));
+    note.set(b"Rect".to_vec(), Object::Array(vec![10.into(), 20.into(), 30.into(), 40.into()]));
+    note.set(b"PCData".to_vec(), Object::Array(vec![Object::Null; 100_001]));
+    let note = source.add(note);
+    source.update_dict(page, |dict| dict.set(b"Annots".to_vec(), Object::Array(vec![Object::Ref(note)]))).unwrap();
+    let bytes = write_full(&source, &SaveOptions::default()).unwrap();
+    std::fs::write(dir.join("source.pdf"), &bytes).unwrap();
+    std::fs::write(dir.join("notes.fdf"), b"existing destination").unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "source.pdf" }))["doc"].as_u64().unwrap();
+    let before = ok(&mut a, "comment_list", json!({ "doc": doc }));
+    let error = a.call("doc_export_data", &json!({ "doc": doc, "path": "notes.fdf", "what": "comments" })).unwrap_err();
+    assert!(error.to_string().contains("100,000 values"), "{error}");
+    assert_eq!(std::fs::read(dir.join("notes.fdf")).unwrap(), b"existing destination");
+    assert_eq!(std::fs::read(dir.join("source.pdf")).unwrap(), bytes);
+    assert_eq!(ok(&mut a, "comment_list", json!({ "doc": doc })), before);
+}
+
+#[test]
+fn text_box_and_callout_fill_and_border_through_tools() {
+    let dir = workdir("textbox-fill");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    for kind in ["textbox", "callout"] {
+        let mut args = json!({ "doc": doc, "page": 1, "type": kind, "rect": [80, 40, 180, 100], "contents": "Example" });
+        if kind == "callout" {
+            args["to"] = json!([20, 120]);
+        }
+        let added = ok(&mut a, "comment_add", args);
+        let comment = &added["comment"];
+        ok(&mut a, "comment_edit", json!({ "doc": doc, "page": 1, "index": comment["index"], "fill": "white", "width": 3 }));
+    }
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "filled.pdf" }));
+    let mut session = pdfcraft_engine::Session::new();
+    let bytes = std::sync::Arc::new(std::fs::read(dir.join("filled.pdf")).unwrap());
+    let saved = session.open("filled.pdf", None, bytes, None).unwrap();
+    for index in 0..2 {
+        let props = session.get(saved).unwrap().comment_props(0, index).unwrap();
+        assert_eq!((props.fill, props.width), (Some([1.0; 3]), Some(3.0)));
+        ok(&mut a, "comment_edit", json!({ "doc": doc, "page": 1, "index": index + 1, "fill": "none" }));
+    }
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "transparent.pdf" }));
+    let bytes = std::sync::Arc::new(std::fs::read(dir.join("transparent.pdf")).unwrap());
+    let saved = session.open("transparent.pdf", None, bytes, None).unwrap();
+    for index in 0..2 {
+        assert_eq!(session.get(saved).unwrap().comment_props(0, index).unwrap().fill, None);
+    }
 }

@@ -203,6 +203,119 @@ fn delete_keeps_inherited_attributes_on_survivors() {
 }
 
 #[test]
+fn deleting_a_page_prunes_deep_named_destination_trees() {
+    let mut doc = doc_a();
+    let original_pages = pages(&doc).unwrap();
+    let mut leaf = Dict::new();
+    leaf.set(
+        b"Names".to_vec(),
+        Object::Array(vec![
+            Object::String(PdfString::text("gone")),
+            Object::Array(vec![Object::Ref(original_pages[0].obj), Object::name("Fit")]),
+            Object::String(PdfString::text("kept")),
+            Object::Array(vec![Object::Ref(original_pages[2].obj), Object::name("Fit")]),
+        ]),
+    );
+    let leaf = doc.add(leaf);
+    let mut tree = leaf;
+    for _ in 0..16_384 {
+        let mut node = Dict::new();
+        node.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(tree)]));
+        tree = doc.add(node);
+    }
+    let mut names = Dict::new();
+    names.set(b"Dests".to_vec(), Object::Ref(tree));
+    doc.update_dict(doc.root().unwrap(), |d| d.set(b"Names".to_vec(), Object::Dict(names))).unwrap();
+
+    // Every node is a shallow indirect object: the page operation must not turn the
+    // document's graph depth into call-stack depth.
+    delete_pages(&mut doc, &[0]).unwrap();
+    for bytes in [write_incremental(&doc, &SaveOptions::default()).unwrap(), write_full(&doc, &SaveOptions::default()).unwrap()] {
+        let reopened = open(bytes);
+        assert_eq!(labels(&reopened), ["A2", "A3"]);
+        let catalog = reopened.get(reopened.root().unwrap());
+        let names = reopened.resolve(catalog.as_dict().unwrap().get(b"Names").unwrap());
+        let mut node = reopened.resolve(names.as_dict().unwrap().get(b"Dests").unwrap());
+        for _ in 0..16_384 {
+            let child = node.as_dict().unwrap().get(b"Kids").unwrap().as_array().unwrap()[0].clone();
+            node = reopened.resolve(&child);
+        }
+        let pairs = node.as_dict().unwrap().get(b"Names").and_then(Object::as_array).cloned().unwrap();
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0].as_string().unwrap().to_text(), "kept");
+        assert_eq!(pairs[1].as_array().unwrap()[0].as_ref(), Some(pages(&reopened).unwrap()[1].obj));
+    }
+}
+
+#[test]
+fn destination_pruning_visits_shared_and_cyclic_nodes_once() {
+    for inline_names in [false, true] {
+        for inline_tree in [false, true] {
+            let mut doc = doc_a();
+            let gone = pages(&doc).unwrap()[0].obj;
+            let mut leaf = Dict::new();
+            leaf.set(
+                b"Names".to_vec(),
+                Object::Array(vec![Object::String(PdfString::text("gone")), Object::Array(vec![Object::Ref(gone), Object::name("Fit")])]),
+            );
+            leaf.set(b"Unknown".to_vec(), Object::Int(42));
+            let leaf = doc.add(leaf);
+            let cycle = doc.add(Object::Null);
+            let mut node = Dict::new();
+            node.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(cycle), Object::Ref(leaf), Object::Ref(leaf)]));
+            doc.set(cycle, Object::Dict(node.clone()));
+            let mut names = Dict::new();
+            names.set(b"Dests".to_vec(), if inline_tree { Object::Dict(node) } else { Object::Ref(cycle) });
+            let names = if inline_names { Object::Dict(names) } else { Object::Ref(doc.add(names)) };
+            doc.update_dict(doc.root().unwrap(), |d| d.set(b"Names".to_vec(), names)).unwrap();
+
+            assert_eq!(drop_named_destinations(&mut doc, &[gone]).unwrap(), [b"gone".to_vec()]);
+            let leaf = doc.get(leaf);
+            assert_eq!(leaf.as_dict().unwrap().get(b"Names").and_then(Object::as_array).unwrap().len(), 0);
+            assert_eq!(leaf.as_dict().unwrap().int(b"Unknown"), Some(42));
+        }
+    }
+}
+
+#[test]
+fn deleting_a_page_keeps_sixty_thousand_named_destinations_usable() {
+    let mut doc = doc_a();
+    let original_pages = pages(&doc).unwrap();
+    let pairs: Vec<Object> = (0..60_000)
+        .flat_map(|i| {
+            let page = if i % 2 == 0 { original_pages[0].obj } else { original_pages[2].obj };
+            [Object::String(PdfString::text(&format!("dest-{i:05}"))), Object::Array(vec![Object::Ref(page), Object::name("Fit")])]
+        })
+        .collect();
+    let mut leaf = Dict::new();
+    leaf.set(b"Names".to_vec(), Object::Array(pairs));
+    leaf.set(b"Unknown".to_vec(), Object::Int(42));
+    let leaf = doc.add(leaf);
+    let mut names = Dict::new();
+    names.set(b"Dests".to_vec(), Object::Ref(leaf));
+    doc.update_dict(doc.root().unwrap(), |d| d.set(b"Names".to_vec(), Object::Dict(names))).unwrap();
+
+    // A valid large book exceeds the former 100,000-entry budget (two entries per name).
+    delete_pages(&mut doc, &[0]).unwrap();
+    for bytes in [write_incremental(&doc, &SaveOptions::default()).unwrap(), write_full(&doc, &SaveOptions::default()).unwrap()] {
+        let reopened = open(bytes);
+        assert_eq!(labels(&reopened), ["A2", "A3"]);
+        let catalog = reopened.get(reopened.root().unwrap());
+        let names = reopened.resolve(catalog.as_dict().unwrap().get(b"Names").unwrap());
+        let leaf = reopened.resolve(names.as_dict().unwrap().get(b"Dests").unwrap());
+        let leaf = leaf.as_dict().unwrap();
+        assert_eq!(leaf.int(b"Unknown"), Some(42));
+        let pairs = leaf.get(b"Names").unwrap().as_array().unwrap();
+        assert_eq!(pairs.len(), 60_000, "30,000 surviving name/value pairs");
+        let page = pages(&reopened).unwrap()[1].obj;
+        for (pair, i) in pairs.chunks_exact(2).zip((1..60_000).step_by(2)) {
+            assert_eq!(pair[0].as_string().unwrap().to_text(), format!("dest-{i:05}"));
+            assert_eq!(pair[1].as_array().unwrap()[0].as_ref(), Some(page));
+        }
+    }
+}
+
+#[test]
 fn deleted_pages_are_not_kept_by_what_points_at_them() {
     // A1 links to A3, a bookmark goes to A3, and A2 holds the form's only field. After deleting
     // A2 and A3 neither page, its content nor the field may stay in the saved file.
@@ -594,102 +707,6 @@ fn deleting_a_page_drops_the_named_destinations_to_it() {
 }
 
 // ── Combine / extract / split ──────────────────────────────────────────────────────────────────
-
-#[test]
-fn deleting_a_page_prunes_deep_named_destination_trees() {
-    let mut doc = doc_a();
-    let original_pages = pages(&doc).unwrap();
-    let mut leaf = Dict::new();
-    leaf.set(
-        b"Names".to_vec(),
-        Object::Array(vec![
-            Object::String(PdfString::text("gone")),
-            Object::Array(vec![Object::Ref(original_pages[0].obj), Object::name("Fit")]),
-            Object::String(PdfString::text("kept")),
-            Object::Array(vec![Object::Ref(original_pages[2].obj), Object::name("Fit")]),
-        ]),
-    );
-    let leaf = doc.add(leaf);
-    let mut tree = leaf;
-    for _ in 0..16_384 {
-        let mut node = Dict::new();
-        node.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(tree)]));
-        tree = doc.add(node);
-    }
-    let mut names = Dict::new();
-    names.set(b"Dests".to_vec(), Object::Ref(tree));
-    doc.update_dict(doc.root().unwrap(), |d| d.set(b"Names".to_vec(), Object::Dict(names))).unwrap();
-
-    // Every node is a shallow indirect object: the page operation must not turn the
-    // document's graph depth into call-stack depth.
-    delete_pages(&mut doc, &[0]).unwrap();
-    for bytes in [write_incremental(&doc, &SaveOptions::default()).unwrap(), write_full(&doc, &SaveOptions::default()).unwrap()] {
-        let reopened = open(bytes);
-        assert_eq!(labels(&reopened), ["A2", "A3"]);
-        let catalog = reopened.get(reopened.root().unwrap());
-        let names = reopened.resolve(catalog.as_dict().unwrap().get(b"Names").unwrap());
-        let mut node = reopened.resolve(names.as_dict().unwrap().get(b"Dests").unwrap());
-        for _ in 0..16_384 {
-            let child = node.as_dict().unwrap().get(b"Kids").unwrap().as_array().unwrap()[0].clone();
-            node = reopened.resolve(&child);
-        }
-        let pairs = node.as_dict().unwrap().get(b"Names").and_then(Object::as_array).cloned().unwrap();
-        assert_eq!(pairs.len(), 2);
-        assert_eq!(pairs[0].as_string().unwrap().to_text(), "kept");
-        assert_eq!(pairs[1].as_array().unwrap()[0].as_ref(), Some(pages(&reopened).unwrap()[1].obj));
-    }
-}
-
-#[test]
-fn destination_pruning_visits_shared_and_cyclic_nodes_once() {
-    for inline_names in [false, true] {
-        for inline_tree in [false, true] {
-            let mut doc = doc_a();
-            let gone = pages(&doc).unwrap()[0].obj;
-            let mut leaf = Dict::new();
-            leaf.set(
-                b"Names".to_vec(),
-                Object::Array(vec![Object::String(PdfString::text("gone")), Object::Array(vec![Object::Ref(gone), Object::name("Fit")])]),
-            );
-            leaf.set(b"Unknown".to_vec(), Object::Int(42));
-            let leaf = doc.add(leaf);
-            let cycle = doc.add(Object::Null);
-            let mut node = Dict::new();
-            node.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(cycle), Object::Ref(leaf), Object::Ref(leaf)]));
-            doc.set(cycle, Object::Dict(node.clone()));
-            let mut names = Dict::new();
-            names.set(b"Dests".to_vec(), if inline_tree { Object::Dict(node) } else { Object::Ref(cycle) });
-            let names = if inline_names { Object::Dict(names) } else { Object::Ref(doc.add(names)) };
-            doc.update_dict(doc.root().unwrap(), |d| d.set(b"Names".to_vec(), names)).unwrap();
-
-            assert_eq!(drop_named_destinations(&mut doc, &[gone]).unwrap(), [b"gone".to_vec()]);
-            let leaf = doc.get(leaf);
-            assert_eq!(leaf.as_dict().unwrap().get(b"Names").and_then(Object::as_array).unwrap().len(), 0);
-            assert_eq!(leaf.as_dict().unwrap().int(b"Unknown"), Some(42));
-        }
-    }
-}
-
-#[test]
-fn destination_pruning_counts_repeated_edges_in_its_work_limit() {
-    for extra in [0, 1] {
-        let mut doc = doc_a();
-        let leaf = doc.add(Dict::new());
-        let mut node = Dict::new();
-        node.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(leaf); MAX_DESTINATION_TREE_WORK - 2 + extra]));
-        let mut names = Dict::new();
-        names.set(b"Dests".to_vec(), Object::Dict(node));
-        doc.update_dict(doc.root().unwrap(), |d| d.set(b"Names".to_vec(), Object::Dict(names))).unwrap();
-        let result = delete_pages(&mut doc, &[0]);
-        if extra == 0 {
-            result.unwrap();
-        } else {
-            assert!(
-                matches!(result, Err(OrganizeError::Invalid(message)) if message.contains("named destination tree") && message.contains("100000-entry work limit"))
-            );
-        }
-    }
-}
 
 /// Build a classic-xref PDF from object bodies (object i+1 = bodies[i]).
 fn build(bodies: &[String], trailer: &str) -> Vec<u8> {

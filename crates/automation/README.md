@@ -208,13 +208,6 @@ unapplied with a warning.
 folders. The CLI also exposes it as `pdfcraft-cli batch`. See the
 [batch guide](../../docs/cli-batch.md) for examples, output protection, errors and limits.
 
-## Page deletion limits
-
-`page_delete` prunes named destinations iteratively. Its shared traversal budget is 100,000
-nodes and `/Names` and `/Kids` array entries, counting repeated child edges. Exceeding it
-returns a named-destination work-limit error; the engine keeps the PDF, unsaved edits and
-undo/redo history unchanged. Deep trees within the budget do not consume recursive stack space.
-
 ## Viewer navigation history
 
 A running PdfCraft instance launched with `--control FILE` exposes its per-tab history through
