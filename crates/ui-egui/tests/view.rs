@@ -1618,3 +1618,30 @@ fn switching_modes_keeps_the_current_page_at_fixed_zoom() {
     h.run_steps(8);
     assert_eq!(h.state().views[1].current, 9, "the second tab keeps its own position");
 }
+
+#[test]
+fn long_view_menu_fits_a_short_window() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = Harness::builder().with_size(egui::vec2(1000.0, 400.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("pages.pdf", None, PAGES.to_vec()).unwrap();
+        app
+    });
+    h.run_steps(8);
+    h.get_by_label("Menu").click();
+    h.run_steps(2);
+    h.get_by_label("View ⏵").hover();
+    h.run_steps(4);
+    let before = h.get_by_label("Side panels ⏵").rect().bottom();
+    h.get_by_label("Fit to height ").hover();
+    h.event(wheel(MouseWheelUnit::Point, -1000.0, TouchPhase::Move));
+    h.run_steps(6);
+    let after = h.get_by_label("Side panels ⏵").rect().bottom();
+    assert!(after < before && after <= 400.0, "menu did not scroll into view: {before} -> {after}");
+    h.get_by_label("Side panels ⏵").hover();
+    h.run_steps(4);
+    h.get_all_by_label("Bookmarks").last().unwrap().click();
+    h.run_steps(4);
+    assert_eq!(h.state().right, Some(pdfcraft_ui_egui::RightPanel::Bookmarks));
+}
