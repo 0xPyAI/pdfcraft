@@ -228,7 +228,6 @@ fn scale(
 #[cfg(test)]
 mod tests {
     use super::{decode, scale, without_refused_enumerated_colour};
-
     use crate::bit_reader::{BitReader, bit_mask};
     use crate::object::stream::{ImageColorSpace, ImageDecodeParams};
     use alloc::vec::Vec;
@@ -365,6 +364,7 @@ mod tests {
             data[at..at + 4].copy_from_slice(&bad.to_be_bytes());
             assert_eq!(without_refused_enumerated_colour(&data), None, "{bad:#x}");
         }
+    }
 
     /// A 4x2 JP2 written for this test: one 8-bit component whose samples (0, 1) index a
     /// two-entry sRGB palette (`pclr` + `cmap`): red, then blue. Rows: 0 1 0 1 / 1 0 1 0.
