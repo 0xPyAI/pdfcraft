@@ -874,7 +874,9 @@ fn opening_a_file_whose_copy_vanished_from_disk_focuses_its_tab() {
     let a = pdfs.file("a.pdf", 1);
     let mut h = session_harness(|_| {});
     h.state_mut().open_path(&a);
-    h.run_steps(2);
+    // A live window opens through the background worker; the tab has to exist before the file
+    // is deleted, or the worker itself fails to read what this test is about to remove.
+    support::wait_until(&mut h, "the vanished file's tab", |app| app.views.len() == 1);
     std::fs::remove_file(&a).unwrap();
     h.state_mut().open_path(&a);
     h.run_steps(2);
