@@ -132,107 +132,53 @@ fn describe(node: &Node<'_>, depth: usize, out: &mut String) {
 }
 
 /// Compares the panel with `tests/snapshots/panel_<name>.txt`, or writes it with `UPDATE_SNAPSHOTS`.
-fn check(h: &Harness<'static, PdfCraftApp>, name: &str) {
+fn check(h: &Harness<'static, PdfCraftApp>, name: &str) -> Result<(), String> {
     let mut got = String::new();
     describe(&panel(h), 0, &mut got);
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots").join(format!("panel_{name}.txt"));
     if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, &got).unwrap();
-        return;
+        return Ok(());
     }
-    let want = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}; run with UPDATE_SNAPSHOTS=1 to create it.\n{got}", path.display()));
-    assert!(want == got, "{name} panel differs from {} (UPDATE_SNAPSHOTS=1 rewrites it)\n--- want\n{want}\n--- got\n{got}", path.display());
+    match std::fs::read_to_string(&path) {
+        Ok(want) if want == got => Ok(()),
+        Ok(want) => Err(format!(
+            "{name} panel differs from {}
+--- want
+{want}
+--- got
+{got}",
+            path.display()
+        )),
+        Err(e) => Err(format!(
+            "{}: {e}
+--- got
+{got}",
+            path.display()
+        )),
+    }
 }
 
-#[test]
-fn comments_panel() {
-    check(&harness("comments"), "comments");
-}
+/// Every panel, in the order of the rail.
+const ALL: [RightPanel; 11] = [
+    RightPanel::Comments,
+    RightPanel::Bookmarks,
+    RightPanel::Pages,
+    RightPanel::Fields,
+    RightPanel::Layers,
+    RightPanel::Attachments,
+    RightPanel::Signatures,
+    RightPanel::Accessibility,
+    RightPanel::Tags,
+    RightPanel::Search,
+    RightPanel::Compare,
+];
 
-#[test]
-fn bookmarks_panel() {
-    check(&harness("bookmarks"), "bookmarks");
-}
-
-#[test]
-fn pages_panel() {
-    check(&harness("pages"), "pages");
-}
-
-#[test]
-fn fields_panel() {
-    check(&harness("fields"), "fields");
-}
-
-#[test]
-fn layers_panel() {
-    check(&harness("layers"), "layers");
-}
-
-#[test]
-fn attachments_panel() {
-    check(&harness("attachments"), "attachments");
-}
-
-#[test]
-fn signatures_panel() {
-    check(&harness("signatures"), "signatures");
-}
-
-#[test]
-fn tags_panel() {
-    check(&harness("tags"), "tags");
-}
-
-#[test]
-fn accessibility_panel() {
-    let mut h = harness("none");
-    assert!(h.state_mut().execute("a11y.check"));
-    h.run_steps(2);
-    h.get_by_label("Start Checking").click();
-    h.run_steps(3);
-    assert_eq!(h.state().right, Some(RightPanel::Accessibility));
-    check(&h, "accessibility");
-}
-
-#[test]
-fn search_panel() {
-    let mut h = harness("none");
-    assert!(h.state_mut().execute("edit.advanced_search"));
-    h.run_steps(2);
-    h.state_mut().views[0].find.as_mut().expect("Advanced Search opens a search").query = "sample".into();
-    support::wait_until(&mut h, "both pages searched", |app| app.views[0].find.as_ref().is_some_and(|f| f.matches.len() == 2));
-    h.run_steps(2);
-    check(&h, "search");
-}
-
-#[test]
-fn compare_panel() {
-    let s = Session::new();
-    let old = s.create_from_text("t", "Delivery within five days. Returns accepted.").unwrap().to_vec();
-    let new = s.create_from_text("t", "Delivery within three days. Returns accepted for a week.").unwrap().to_vec();
-    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
-        let mut app = PdfCraftApp::new();
-        app.set_option("language", "en").unwrap();
-        app.open_bytes("old.pdf", None, old.clone()).unwrap();
-        app.open_bytes("new.pdf", None, new.clone()).unwrap();
-        app
-    });
-    h.run_steps(4);
-    assert!(h.state_mut().execute("doc.compare"));
-    h.run_steps(2);
-    h.get_by_label("Compare").click();
-    h.run_steps(3);
-    assert_eq!(h.state().right, Some(RightPanel::Compare));
-    check(&h, "compare");
-}
-
-/// Every panel has a snapshot test above. The match has no wildcard on purpose: a new
-/// `RightPanel` stops this file compiling until it gets a test and is listed here.
-#[test]
-fn every_panel_has_a_snapshot() {
-    let tested = |p: RightPanel| match p {
+/// Opens `p` with something in it and names its snapshot. No wildcard on purpose: a new
+/// `RightPanel` stops this file compiling until it is set up here (and listed in [`ALL`]).
+fn open(p: RightPanel) -> (Harness<'static, PdfCraftApp>, &'static str) {
+    let name = match p {
         RightPanel::Comments => "comments",
         RightPanel::Bookmarks => "bookmarks",
         RightPanel::Pages => "pages",
@@ -240,29 +186,69 @@ fn every_panel_has_a_snapshot() {
         RightPanel::Layers => "layers",
         RightPanel::Attachments => "attachments",
         RightPanel::Signatures => "signatures",
-        RightPanel::Accessibility => "accessibility",
         RightPanel::Tags => "tags",
-        RightPanel::Search => "search",
-        RightPanel::Compare => "compare",
+        RightPanel::Accessibility => {
+            let mut h = harness("none");
+            assert!(h.state_mut().execute("a11y.check"));
+            h.run_steps(2);
+            h.get_by_label("Start Checking").click();
+            h.run_steps(3);
+            return (h, "accessibility");
+        }
+        RightPanel::Search => {
+            let mut h = harness("none");
+            assert!(h.state_mut().execute("edit.advanced_search"));
+            h.run_steps(2);
+            h.state_mut().views[0].find.as_mut().expect("Advanced Search opens a search").query = "sample".into();
+            support::wait_until(&mut h, "both pages searched", |app| app.views[0].find.as_ref().is_some_and(|f| f.matches.len() == 2));
+            h.run_steps(2);
+            return (h, "search");
+        }
+        RightPanel::Compare => {
+            let s = Session::new();
+            let old = s.create_from_text("t", "Delivery within five days. Returns accepted.").unwrap().to_vec();
+            let new = s.create_from_text("t", "Delivery within three days. Returns accepted for a week.").unwrap().to_vec();
+            let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+                let mut app = PdfCraftApp::new();
+                app.set_option("language", "en").unwrap();
+                app.open_bytes("old.pdf", None, old.clone()).unwrap();
+                app.open_bytes("new.pdf", None, new.clone()).unwrap();
+                app
+            });
+            h.run_steps(4);
+            assert!(h.state_mut().execute("doc.compare"));
+            h.run_steps(2);
+            h.get_by_label("Compare").click();
+            h.run_steps(3);
+            return (h, "compare");
+        }
     };
-    let mut app = PdfCraftApp::new();
-    for p in [
-        RightPanel::Comments,
-        RightPanel::Bookmarks,
-        RightPanel::Pages,
-        RightPanel::Fields,
-        RightPanel::Layers,
-        RightPanel::Attachments,
-        RightPanel::Signatures,
-        RightPanel::Accessibility,
-        RightPanel::Tags,
-        RightPanel::Search,
-        RightPanel::Compare,
-    ] {
-        let name = tested(p);
-        app.set_option("panel", name).unwrap_or_else(|e| panic!("{name}: {e}"));
-        assert_eq!(app.right, Some(p), "{name} opens its own panel");
-        let snapshot = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/snapshots/panel_{name}.txt"));
-        assert!(snapshot.exists() || std::env::var_os("UPDATE_SNAPSHOTS").is_some(), "{} is missing", snapshot.display());
+    (harness(name), name)
+}
+
+/// Every panel matches its snapshot. All of them are checked before failing, so one run shows
+/// every panel a change touched.
+#[test]
+fn every_panel_matches_its_snapshot() {
+    let mut failures = Vec::new();
+    for p in ALL {
+        let (h, name) = open(p);
+        assert_eq!(h.state().right, Some(p), "{name} opens its own panel");
+        if let Err(e) = check(&h, name) {
+            failures.push(e);
+        }
     }
+    assert!(
+        failures.is_empty(),
+        "{} of {} panels differ (UPDATE_SNAPSHOTS=1 rewrites them)
+
+{}",
+        failures.len(),
+        ALL.len(),
+        failures.join(
+            "
+
+"
+        )
+    );
 }
