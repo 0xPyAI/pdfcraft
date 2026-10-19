@@ -80,6 +80,7 @@ impl SignedData {
         let _version = it.next();
         let _digest_algs = it.next();
         let encap = it.next().ok_or_else(|| bad("encapContentInfo"))?.children()?;
+        let encap_type = encap.first().and_then(|t| t.oid().ok());
         let content = match encap.get(1) {
             Some(c) if c.tag == tag::ctx(0) => {
                 // BER signers may split the content into a constructed OCTET STRING.
@@ -111,7 +112,16 @@ impl SignedData {
         }
         let infos = signer_infos.ok_or_else(|| bad("no signerInfos"))?.children()?;
         let si = infos.first().ok_or_else(|| bad("no signer"))?;
-        Ok(SignedData { certificates, signer: parse_signer(si)?, content, quirks })
+        let signer = parse_signer(si)?;
+        // RFC 5652 §11.1: the content-type attribute names the type of the encapsulated content.
+        // The signature covers the attribute but not `eContentType`, so when they differ, one of
+        // them was written wrong or changed after signing.
+        if let (Some(signed), Some(encap)) = (&signer.content_type, &encap_type)
+            && signed != encap
+        {
+            return Err(bad("the signed content type is not the encapsulated content type"));
+        }
+        Ok(SignedData { certificates, signer, content, quirks })
     }
 
     /// The signer's certificate among those carried.
@@ -204,10 +214,24 @@ fn parse_signer(si: &Tlv<'_>) -> Result<SignerInfo, SignError> {
         if let Some(t) = set.first_mut() {
             *t = tag::SET;
         }
+        let (mut seen_type, mut seen_digest) = (false, false);
         for a in next.children()? {
             let p = a.children()?;
             let Some(o) = p.first().and_then(|o| o.oid().ok()) else { continue };
-            let value = p.get(1).and_then(|v| v.children().ok()).and_then(|v| v.into_iter().next());
+            let values = p.get(1).and_then(|v| v.children().ok()).unwrap_or_default();
+            // RFC 5652 §11.1 and §11.2: one content-type and one message-digest attribute, each
+            // with one value. With a second one, two readers could each take a different value.
+            let (seen, what) = match o.as_str() {
+                CONTENT_TYPE => (Some(&mut seen_type), "content type"),
+                MESSAGE_DIGEST => (Some(&mut seen_digest), "message digest"),
+                _ => (None, ""),
+            };
+            if let Some(seen) = seen
+                && (std::mem::replace(seen, true) || values.len() != 1)
+            {
+                return Err(bad(&format!("the signed attributes must hold one {what} with one value")));
+            }
+            let value = values.into_iter().next();
             match (o.as_str(), value) {
                 (MESSAGE_DIGEST, Some(v)) => message_digest = Some(v.value.to_vec()),
                 (CONTENT_TYPE, Some(v)) => content_type = v.oid().ok(),
