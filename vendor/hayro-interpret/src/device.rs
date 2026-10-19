@@ -89,6 +89,12 @@ pub trait Device<'a> {
     fn in_knockout_group(&mut self) -> bool {
         false
     }
+    /// PdfCraft patch (39): `image`, an unmasked raster image, is about to be drawn with
+    /// `transform` in a knockout group. A device that will draw it (it isn't skipped and it
+    /// decodes) clears what the group drew under its placement rectangle first, so the image
+    /// replaces it. Decided by the device, at the size it draws the image, so the draw reuses
+    /// that decode.
+    fn knockout_image(&mut self, _image: &crate::RasterImage<'_>, _transform: Affine) {}
     /// PdfCraft patch (39): whether a transparency group drawn now is an element of a knockout
     /// group that the device wants cleared under the group's shape first. If so the
     /// interpreter draws the group's content once between `begin_knockout_erase` and

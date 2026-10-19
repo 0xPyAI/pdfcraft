@@ -753,6 +753,40 @@ impl Renderer {
         }
     }
 
+    /// The size an image of `width` x `height` samples is decoded at to be drawn with
+    /// `transform`, or `None` if `draw_image` skips it: off the canvas (PdfCraft patch: see
+    /// `may_paint_rect`; checked before decoding, so a tile no longer decodes every image on its
+    /// page), or, in a preview, covering only a few device pixels (PdfCraft patch; final renders
+    /// always draw them). The tiny-image test measures axis lengths: the size returned maps a
+    /// point, so it includes the translation and only suits the decode hint.
+    fn image_draw_size(&self, width: u32, height: u32, transform: Affine) -> Option<(u32, u32)> {
+        if !may_paint_rect(
+            Rect::new(0.0, 0.0, f64::from(width), f64::from(height)),
+            transform,
+            self.ctx.width(),
+            self.ctx.height(),
+        ) {
+            return None;
+        }
+        let target_width = (transform * Point::new(width as f64, 0.0))
+            .to_vec2()
+            .length()
+            .ceil() as u32;
+        let target_height = (transform * Point::new(0.0, height as f64))
+            .to_vec2()
+            .length()
+            .ceil() as u32;
+        if self.preview {
+            let c = transform.as_coeffs();
+            let tiny_w = (f64::from(width) * (c[0] * c[0] + c[1] * c[1]).sqrt()).ceil() as u32;
+            let tiny_h = (f64::from(height) * (c[2] * c[2] + c[3] * c[3]).sqrt()).ceil() as u32;
+            if tiny_w.saturating_mul(tiny_h) < PREVIEW_MIN_IMAGE_AREA {
+                return None;
+            }
+        }
+        Some((target_width, target_height))
+    }
+
     fn draw_image(&mut self, image_data: ImageData, alpha_data: Option<LumaData>) {
         let cur_transform = *self.ctx.transform();
         let (x_scale, y_scale) = {
@@ -1453,39 +1487,13 @@ impl<'a> Device<'a> for Renderer {
         if self.erasing {
             return;
         }
-        // PdfCraft patch: see `may_paint_rect`. Checked before decoding: off-canvas images
-        // cost nothing, so a tile no longer decodes every image on its page.
-        if !may_paint_rect(
-            Rect::new(0.0, 0.0, f64::from(image.width()), f64::from(image.height())),
-            transform,
-            self.ctx.width(),
-            self.ctx.height(),
-        ) {
+        let Some((target_width, target_height)) =
+            self.image_draw_size(image.width(), image.height(), transform)
+        else {
             return;
-        }
+        };
         self.ctx.set_paint_transform(Affine::IDENTITY);
         self.ctx.set_aliasing_threshold(Some(1));
-
-        let target_width = (transform * Point::new(image.width() as f64, 0.0))
-            .to_vec2()
-            .length()
-            .ceil() as u32;
-        let target_height = (transform * Point::new(0.0, image.height() as f64))
-            .to_vec2()
-            .length()
-            .ceil() as u32;
-
-        // PdfCraft patch: previews skip images that would cover only a few device pixels.
-        // Final renders always draw them. (Measured as axis lengths: the `target_*` above
-        // map a point, so they include the translation and only suit the decode hint.)
-        if self.preview {
-            let c = transform.as_coeffs();
-            let tiny_w = (f64::from(image.width()) * (c[0] * c[0] + c[1] * c[1]).sqrt()).ceil() as u32;
-            let tiny_h = (f64::from(image.height()) * (c[2] * c[2] + c[3] * c[3]).sqrt()).ceil() as u32;
-            if tiny_w.saturating_mul(tiny_h) < PREVIEW_MIN_IMAGE_AREA {
-                return;
-            }
-        }
 
         match image {
             hayro_interpret::Image::Stencil(s) => {
@@ -1736,6 +1744,23 @@ impl<'a> Device<'a> for Renderer {
 
     fn in_knockout_group(&mut self) -> bool {
         self.in_knockout()
+    }
+
+    fn knockout_image(&mut self, image: &hayro_interpret::RasterImage<'_>, transform: Affine) {
+        if !self.in_knockout() {
+            return;
+        }
+        // Only an image `draw_image` will draw, decoded at the size it draws it (the same
+        // decode, so a cached decode serves both).
+        let Some(size) = self.image_draw_size(image.width(), image.height(), transform) else {
+            return;
+        };
+        let mut decodes = false;
+        image.with_rgba(|_, _| decodes = true, Some(size));
+        if decodes {
+            let rect = Rect::new(0.0, 0.0, f64::from(image.width()), f64::from(image.height()));
+            self.knockout_shape(&(transform * rect.to_path(0.1)));
+        }
     }
 
     fn knockout_shape(&mut self, shape: &BezPath) {

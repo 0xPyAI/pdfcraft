@@ -6047,7 +6047,7 @@ trailer << /Root 1 0 R >>
     /// shapes, while its own elements still blend with each other).
     #[test]
     fn knockout_groups_replace_what_their_elements_cover() {
-        let render = |group: &str, form: &str| {
+        let render_as = |group: &str, form: &str, preview: bool| {
             let pdf = format!(
                 "%PDF-1.7
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
@@ -6103,11 +6103,12 @@ trailer << /Root 1 0 R >>
                 tile: None,
                 scale: 1.0,
                 tag: 0,
-                ..Default::default()
+                preview,
             });
             assert!(p.error.is_none(), "{group} {form}: {:?}", p.error);
             p
         };
+        let render = |group: &str, form: &str| render_as(group, form, false);
         // Pixel rows run top down: PDF (x, y) is pixel (x, 200 - y).
         let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((200 - y) * p.width + x) as usize * 4..][..3].to_vec();
         let check = |p: &RenderedPage, x: u32, y: u32, want: [u8; 3], what: &str| {
@@ -6176,6 +6177,11 @@ trailer << /Root 1 0 R >>
         // must not clear what is under its rectangle either (review on #2974).
         let undecoded = render(ko, &format!("{red}q 160 0 0 100 60 50 cm /Big Do Q"));
         check(&undecoded, 100, 100, [255, 128, 128], "red under an image that isn't drawn");
+        // Nor one a preview skips for covering only a few device pixels (review on #2974): the
+        // red under a 3 x 3 image stays in a preview, and a final render knocks it out.
+        let tiny = format!("{red}q 3 0 0 3 100 100 cm /Img Do Q");
+        check(&render_as(ko, &tiny, true), 101, 101, [255, 128, 128], "red under a preview's skipped image");
+        check(&render_as(ko, &tiny, false), 101, 101, [128, 128, 255], "the tiny image in a final render");
     }
 
     /// Reading colours replace *document* colours, never annotation colours (issue #1548): a
