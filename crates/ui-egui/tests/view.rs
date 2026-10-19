@@ -1759,3 +1759,26 @@ fn full_screen_keeps_two_page_view_as_spreads() {
     let v = &h.state().views[0];
     assert!(v.continuous() && v.layout == PageLayout::TwoUp, "two-page continuous view comes back");
 }
+
+/// Review on #2070: full screen hides the tools and a click turns the page only with Select, so
+/// entering it from another tool selects Select, and leaving gives the tool back.
+#[test]
+fn full_screen_clicks_turn_pages_whatever_tool_was_on() {
+    use pdfcraft_ui_egui::QuickTool;
+    let mut h = harness(&[]);
+    h.run_steps(4);
+    h.state_mut().quick_tool = QuickTool::Hand;
+    h.key_press_modifiers(Modifiers::COMMAND, Key::L);
+    h.run_steps(6);
+    assert!(h.state().full_screen);
+    assert_eq!(h.state().quick_tool, QuickTool::Select, "Select in full screen");
+    // Entering again (a second document asking for it) keeps the tool to give back.
+    h.state_mut().apply_full_screen(true);
+    let r = rect(&h, 0).expect("page 1 on screen");
+    click_with(&mut h, r.center(), Modifiers::NONE);
+    assert_eq!(h.state().views[0].current, 1, "a click goes forward");
+    h.key_press(Key::Escape);
+    h.run_steps(4);
+    assert!(!h.state().full_screen);
+    assert_eq!(h.state().quick_tool, QuickTool::Hand, "the tool from before is back");
+}

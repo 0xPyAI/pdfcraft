@@ -544,3 +544,50 @@ fn coalesced_primary_clicks_select_line_then_spaced_click_clears() {
         assert_eq!(doc.saved_bytes(), saved);
     }
 }
+
+/// Review on #2070: in full screen a click goes forward a page, but a double-click selects the
+/// word and stays: the click waits out the double-click time before turning. Turning on the first
+/// click's release had sent the second click to the next page. Leaving full screen meanwhile
+/// drops the pending turn.
+#[test]
+fn full_screen_double_click_selects_a_word_and_stays_on_the_page() {
+    // The same page twice.
+    let two_pages = String::from_utf8(two_lines())
+        .unwrap()
+        .replace("/Kids [3 0 R] /Count 1", "/Kids [3 0 R 6 0 R] /Count 2")
+        .replace(
+            "trailer",
+            "6 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\ntrailer",
+        )
+        .into_bytes();
+    let (mut h, _) = harness_with(two_pages, |_| {});
+    h.state_mut().apply_full_screen(true);
+    crate::support::wait_until(&mut h, "the page in full screen", |app| app.views[0].glyph_screen_pos(0, 5).is_some() && !app.render_pending());
+    let at = h.state().views[0].glyph_screen_pos(0, 5).expect("text layer");
+    h.hover_at(at);
+    h.run_steps(1);
+
+    // A double-click selects "quick" and stays on page 1, also once the double-click time is over.
+    click(&mut h, at);
+    click(&mut h, at);
+    assert_eq!(h.state().views[0].selected_text().as_deref(), Some("quick"));
+    h.run_steps(30);
+    assert_eq!(h.state().views[0].current, 0, "the double-click didn't turn the page");
+
+    // A single click turns it once the double-click time is over.
+    // Entering full screen again clears the selection.
+    h.state_mut().apply_full_screen(false);
+    h.state_mut().apply_full_screen(true);
+    h.run_steps(30);
+    click(&mut h, at);
+    h.run_steps(30);
+    assert_eq!(h.state().views[0].current, 1, "a click goes forward");
+
+    // A click right before leaving full screen doesn't turn the page after it.
+    h.state_mut().views[0].go_to_page(0);
+    h.run_steps(30);
+    click(&mut h, at);
+    h.state_mut().apply_full_screen(false);
+    h.run_steps(30);
+    assert_eq!(h.state().views[0].current, 0, "no page turn after leaving");
+}

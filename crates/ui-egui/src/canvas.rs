@@ -470,6 +470,9 @@ pub struct DocView {
     clicks: u32,
     last_press_time: f64,
     last_press_pos: Option<Pos2>,
+    /// Full screen: a click's page turn, when it falls due (input time) and which way. It waits
+    /// out the double-click time, as the click may be the first of a double-click selecting a word.
+    present_turn: Option<(f64, bool)>,
     last_queue: Vec<RenderRequest>,
     /// Finished renders wait in the pool instead of reaching the view (tests): what the view
     /// shows before a raster arrives can be looked at however fast the renderer is.
@@ -761,6 +764,7 @@ impl DocView {
             clicks: 0,
             last_press_time: 0.0,
             last_press_pos: None,
+            present_turn: None,
             last_queue: Vec::new(),
             hold_rasters: false,
             viewport_w: 800.0,
@@ -4042,9 +4046,24 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         Some(comments::CanvasAction::CopyImageFile(p, i)) => image_action = Some(crate::edit_text_ui::ImageAction::CopyFile(p, i)),
         None => {}
     }
-    // Full screen: the click turned the page unless it did something else first.
+    // Full screen: the click turns the page unless it did something else first. It waits out the
+    // double-click time: turning on the first click's release sent a double-click's second click,
+    // meant to select a word, to the next page (review on #2070). A selection cancels it, and so
+    // does leaving full screen; a double-click elsewhere still turns once.
+    let now = ui.input(|i| i.time);
     if present_click && clicked_link.is_none() && view.selection.is_none() && view.clicks < 2 {
-        view.step_page(!present_back);
+        let delay = ui.ctx().options(|o| o.input_options.max_double_click_delay);
+        view.present_turn = Some((now + delay, !present_back));
+    }
+    if let Some((due, forward)) = view.present_turn {
+        if view.selection.is_some() || view.presentation.is_none() {
+            view.present_turn = None;
+        } else if now >= due {
+            view.present_turn = None;
+            view.step_page(forward);
+        } else {
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64((due - now).max(0.0)));
+        }
     }
     match clicked_link {
         Some(LinkTarget::Page(p, dest)) => view.go_to_dest(p, dest, info),
