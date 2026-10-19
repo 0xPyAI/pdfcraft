@@ -308,7 +308,7 @@ fn deleting_a_page_keeps_sixty_thousand_named_destinations_usable() {
         let pairs = leaf.get(b"Names").unwrap().as_array().unwrap();
         assert_eq!(pairs.len(), 60_000, "30,000 surviving name/value pairs");
         let page = pages(&reopened).unwrap()[1].obj;
-        for (pair, i) in pairs.chunks_exact(2).zip((1..60_000).step_by(2)) {
+        for (pair, i) in pairs.as_chunks::<2>().0.iter().zip((1..60_000).step_by(2)) {
             assert_eq!(pair[0].as_string().unwrap().to_text(), format!("dest-{i:05}"));
             assert_eq!(pair[1].as_array().unwrap()[0].as_ref(), Some(page));
         }

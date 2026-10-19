@@ -824,7 +824,7 @@ fn assert_destination_state(a: &Automation, doc: u64, depth: usize, count: usize
     let pairs = node.as_dict().unwrap().get(b"Names").and_then(Object::as_array).unwrap();
     assert_eq!(pairs.len(), if deleted { count / 2 * 2 } else { count * 2 });
     let expected = (0..count).filter(|i| !deleted || i % 2 == 1);
-    for (pair, i) in pairs.chunks_exact(2).zip(expected) {
+    for (pair, i) in pairs.as_chunks::<2>().0.iter().zip(expected) {
         assert_eq!(pair[0].as_string().unwrap().to_text(), format!("dest-{i:05}"));
         let target = if i % 2 == 0 { pages[0].obj } else { pages.last().unwrap().obj };
         assert_eq!(pair[1].as_array().unwrap()[0].as_ref(), Some(target), "destination {i}");
