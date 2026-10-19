@@ -6160,6 +6160,11 @@ fn fields_left_to_the_viewer_are_displayed_from_their_values() {
     let n = widget("a").as_dict().and_then(|d| d.get(b"AP").and_then(|ap| saved.resolve(ap).as_dict().and_then(|ap| ap.reference(b"N")))).unwrap();
     let pdfcraft_cos::Object::Stream(n) = &*saved.get(n) else { panic!("A's appearance is a stream") };
     assert_eq!(n.decoded().unwrap().trim_ascii_end(), b"q\nQ", "A keeps its empty appearance");
+    // Typing in one field redraws that field only, not the whole form, on each keystroke.
+    let builds = |s: &Session| s.get(id).unwrap().editor.as_ref().unwrap().field_appearances.builds();
+    let before = builds(&s);
+    s.apply(id, Edit::SetFieldValue { name: "a".into(), value: pdfcraft_forms::FieldValue::Text("Typed".into()) }).unwrap();
+    assert_eq!(builds(&s), before + 1);
 
     // Without the flag, the empty appearance is the file's own, and only B is drawn.
     let id = s.open("form.pdf", None, Arc::new(pdf(false)), None).unwrap();

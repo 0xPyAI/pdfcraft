@@ -316,6 +316,10 @@ struct Editor {
     /// runs (content edits leave every annotation dictionary alone). Cleared on any refresh
     /// that may change annotations; see [`AppearanceCache`].
     appearances: AppearanceCache,
+    /// Display appearances drawn for form fields the file leaves to the viewer (#3470), reused
+    /// for each widget while the objects it was drawn from are unchanged; see
+    /// [`pdfcraft_forms::FieldAppearanceCache`].
+    field_appearances: pdfcraft_forms::FieldAppearanceCache,
     /// The text blocks last computed for one page, reused while the document is unchanged.
     text_blocks: TextBlocksCache,
 }
@@ -882,13 +886,14 @@ fn is_placeholder_title(title: &str) -> bool {
 fn display_bytes(editor: Option<&mut Editor>, bytes: &Arc<Vec<u8>>) -> Arc<Vec<u8>> {
     let Some(e) = editor else { return bytes.clone() };
     let comments = pdfcraft_annot::with_missing_appearances_cached(&e.cos, &mut e.appearances);
-    let Some(display) = with_field_appearances(comments, &e.cos) else {
+    let fields = pdfcraft_forms::with_field_appearances_cached(comments.as_ref().unwrap_or(&e.cos), &mut e.field_appearances);
+    let Some(display) = fields.or(comments) else {
         return bytes.clone();
     };
     match write_incremental(&display, &SaveOptions::default()) {
         Ok(written) => Arc::new(written),
         Err(err) => {
-            e.cos.note_repair(format!("missing comment appearances could not be drawn ({err})"));
+            e.cos.note_repair(format!("missing comment or field appearances could not be drawn ({err})"));
             bytes.clone()
         }
     }
@@ -3576,6 +3581,7 @@ impl Session {
                         redo: Vec::new(),
                         keys,
                         appearances: AppearanceCache::default(),
+                        field_appearances: pdfcraft_forms::FieldAppearanceCache::default(),
                         text_blocks: TextBlocksCache::default(),
                     }),
                     None,
