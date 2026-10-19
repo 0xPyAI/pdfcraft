@@ -671,6 +671,8 @@ fn startup_files_wait_for_absolute_link_consent_and_preparation() {
     let _ = std::fs::remove_file(path);
 }
 
+/// #1928: a new file handed over by the OS (Finder, or another launch) raises the window at once,
+/// before it is prepared, and is the selected tab once it opens.
 #[test]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 fn a_new_file_from_the_os_brings_the_window_forward_before_it_is_prepared() {
