@@ -3392,6 +3392,36 @@ fn rotating_a_field_through_tools() {
 }
 
 #[test]
+fn redact_mark_respects_single_page_and_rejects_conflicting_selectors() {
+    let dir = workdir("redact-single-page");
+    std::fs::write(dir.join("memo.txt"), "Private 123-45-6789").unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "text", "path": "memo.txt" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_duplicate", json!({ "doc": doc, "pages": [1] }));
+    for selector in [json!({ "find": "Private" }), json!({ "words": ["Private"] }), json!({ "pattern": "ssn" }), json!({ "whole_pages": true })] {
+        let mut args = selector;
+        args["doc"] = json!(doc);
+        args["page"] = json!(1);
+        let result = ok(&mut a, "redact_mark", args);
+        assert_eq!(result["marked"], 1);
+        ok(&mut a, "redact_clear", json!({ "doc": doc }));
+    }
+    for args in [
+        json!({ "doc": doc, "find": "Private", "page": 1, "pages": [2] }),
+        json!({ "doc": doc, "rect": [1, 1, 10, 10], "pages": [2] }),
+        json!({ "doc": doc, "find": "Private", "page": 3 }),
+    ] {
+        assert!(matches!(a.call("redact_mark", &args), Err(ToolError::InvalidArgs(_))));
+    }
+    let result = ok(&mut a, "redact_mark", json!({ "doc": doc, "find": "Private", "page": 1 }));
+    assert_eq!(result["marks_pending"], 1, "invalid selections must not add marks");
+    ok(&mut a, "redact_apply", json!({ "doc": doc }));
+    let text = page_text(&mut a, doc);
+    assert!(!text[0].contains("Private"));
+    assert!(text[1].contains("Private"));
+}
+
+#[test]
 fn redacting_through_tools() {
     let dir = workdir("redact");
     std::fs::write(dir.join("memo.txt"), "Call 555-123-4567 today\nSSN 123-45-6789 is private\nPublic line").unwrap();
