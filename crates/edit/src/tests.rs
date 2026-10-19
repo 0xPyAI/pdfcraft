@@ -5143,3 +5143,78 @@ fn flattening_comments_keeps_annotations_that_are_not_comments() {
     let without_widget: Vec<&str> = all.iter().copied().filter(|s| *s != "Widget").collect();
     assert_eq!(left(&reopen(&doc)), without_widget, "flattening fields touches no annotation that isn't a widget");
 }
+
+/// A page whose text is a clipping mask (`mode` Tr) with a fill painted through it.
+fn clipping_text_page(mode: i64) -> Document {
+    text_page(&format!("q\nBT {mode} Tr /F1 48 Tf 40 60 Td (MASK) Tj ET\n1 0 0 rg 0 0 300 150 re f\nQ\n"))
+}
+
+/// Rewriting text that is a clipping path destroyed the artwork it masked: the glyphs went, the
+/// mask with them, and the fill behind flooded its own rectangle, in a file that still opened
+/// without a warning (#3429). Photoshop exports draw every text object this way. The rewrite is
+/// refused instead, as `clear_block` already refuses a preview.
+#[test]
+fn rewriting_clipping_path_text_is_refused_for_every_clipping_mode() {
+    for mode in [4, 5, 6, 7] {
+        let before = text::text_lines(&clipping_text_page(mode), 0).unwrap();
+        assert_eq!(before.len(), 1, "mode {mode}: the mask is one line");
+
+        let mut doc = clipping_text_page(mode);
+        let line = text::replace_line(&mut doc, 0, 0, "EDITED");
+        assert!(matches!(&line, Err(EditError::Invalid(m)) if m.contains("clipping path")), "mode {mode}: {line:?}");
+
+        let mut doc = clipping_text_page(mode);
+        let block = text::rewrite_block(&mut doc, 0, 0, Some("EDITED"), &BlockStyle::default());
+        assert!(matches!(&block, Err(EditError::Invalid(m)) if m.contains("clipping path")), "mode {mode}: {block:?}");
+
+        // Refused means untouched: the mask is still there to shape what is painted through it.
+        let after = text::text_lines(&doc, 0).unwrap();
+        assert_eq!(after.len(), 1, "mode {mode}");
+        assert_eq!(after[0].text, "MASK", "mode {mode}");
+    }
+}
+
+/// The modes that paint ink are still editable: only 4 to 7 add to the clip path.
+#[test]
+fn painting_modes_are_still_rewritten() {
+    for mode in [0, 1, 2] {
+        let mut doc = clipping_text_page(mode);
+        assert!(text::replace_line(&mut doc, 0, 0, "EDITED").is_ok(), "mode {mode}");
+        assert_eq!(text::text_lines(&doc, 0).unwrap()[0].text, "EDITED", "mode {mode}");
+    }
+}
+
+/// A line's runs need not share a rendering mode: nothing in the join requires it, so a line that
+/// starts as ink can continue as a mask. The refusal reads the whole line, not the mode its first
+/// run set -- otherwise the rewrite passed the guard and took the mask away with the ink.
+#[test]
+fn a_line_that_starts_as_ink_and_continues_as_a_mask_is_refused() {
+    let content = "q\nBT /F1 48 Tf 40 60 Td 0 Tr (TITLE) Tj 7 Tr (MASK) Tj ET\n1 0 0 rg 0 0 300 150 re f\nQ\n";
+    let before = text::text_lines(&text_page(content), 0).unwrap();
+    assert_eq!(before.len(), 1, "the two runs are one line: {:?}", before.iter().map(|l| &l.text).collect::<Vec<_>>());
+    assert_eq!(before[0].text, "TITLEMASK", "and the mask is the second half of it");
+
+    let mut doc = text_page(content);
+    let line = text::replace_line(&mut doc, 0, 0, "EDITED");
+    assert!(matches!(&line, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{line:?}");
+    let block = text::rewrite_block(&mut doc, 0, 0, Some("EDITED"), &BlockStyle::default());
+    assert!(matches!(&block, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{block:?}");
+    assert_eq!(text::text_lines(&doc, 0).unwrap()[0].text, "TITLEMASK", "refused means untouched");
+}
+
+/// Another drawing of the line on the same baseline goes with it, so that the replacement is all
+/// that shows -- and that copy can be the mask while the line being replaced is ink. Dropping it
+/// destroys the artwork as surely as rewriting the mask itself, so this is refused too.
+#[test]
+fn a_clipping_copy_on_the_same_baseline_is_refused() {
+    let content = "q\nBT 0 Tr /F1 48 Tf 40 60 Td (MASK) Tj ET\nBT 7 Tr /F1 48 Tf 40 60 Td (MASK) Tj ET\n1 0 0 rg 0 0 300 150 re f\nQ\n";
+    let before = text::text_lines(&text_page(content), 0).unwrap();
+    assert_eq!(before.len(), 2, "two drawings of the same line");
+
+    let mut doc = text_page(content);
+    let line = text::replace_line(&mut doc, 0, 0, "EDITED");
+    assert!(matches!(&line, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{line:?}");
+    let block = text::rewrite_block(&mut doc, 0, 0, Some("EDITED"), &BlockStyle::default());
+    assert!(matches!(&block, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{block:?}");
+    assert_eq!(text::text_lines(&doc, 0).unwrap().len(), 2, "refused means untouched");
+}

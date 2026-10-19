@@ -68,6 +68,10 @@ pub struct TextLine {
     /// Some of the line's text is `/ActualText`, which is already in logical order: visual-order
     /// Indic recovery would scramble it.
     actual_text: bool,
+    /// Whether any of the line's runs draws in a clipping mode (`4 Tr` to `7 Tr`). The join below
+    /// does not require one rendering mode, so a line that starts as ink can continue as a mask;
+    /// [`refuse_clipping_text`] reads this rather than the origin's mode alone.
+    clips: bool,
 }
 
 impl TextLine {
@@ -1145,6 +1149,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
             l.decodable &= s.decodable;
             l.visual_order |= s.visual_order;
             l.actual_text |= s.actual_text;
+            l.clips |= s.state.render_mode >= 4;
             // Spaces may use a separate subset font; they do not change the visible style.
         } else {
             lines.push(TextLine {
@@ -1165,6 +1170,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
                 scope: s.scope,
                 logical_order: s.logical_order,
                 actual_text: s.actual_text,
+                clips: s.state.render_mode >= 4,
                 ops: std::iter::once(s.op).chain(s.extra_ops.iter().copied()).collect(),
                 origin: Origin {
                     tm: s.tm.0,
@@ -1235,6 +1241,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
         l.decodable &= s.decodable;
         l.visual_order |= s.visual_order;
         l.actual_text |= s.actual_text;
+        l.clips |= s.state.render_mode >= 4;
     } else {
         lines.push(TextLine {
             text: s.text.clone(),
@@ -1254,6 +1261,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
             scope: s.scope,
             logical_order: s.logical_order,
             actual_text: s.actual_text,
+            clips: s.state.render_mode >= 4,
             ops: std::iter::once(s.op).chain(s.extra_ops.iter().copied()).collect(),
             origin: Origin {
                 tm: s.tm.0,
@@ -1837,11 +1845,33 @@ pub fn replace_line(doc: &mut Document, page: usize, line: usize, text: &str) ->
     replace_line_with_limit(doc, page, line, text, MAX_TYPE3_GLYPHS)
 }
 
+/// Refuses a rewrite that would remove text drawn as a clipping path (`4 Tr` to `7 Tr`). Such
+/// glyphs are not ink but a mask, and whatever is painted through them takes their shape.
+/// Removing the glyphs removes the mask, and the fill or image behind floods its own rectangle
+/// instead -- the artwork is destroyed, in a file that still opens without a warning (#3429).
+/// `clear_block` already refuses these for the same reason.
+///
+/// Every line the rewrite drops is checked, not only the one being replaced: a line's runs need
+/// not share a rendering mode (see [`TextLine::clips`]), and [`coincident_ops`] drops a whole
+/// overlapping line without regard to its mode -- so a mask could go with text that is ink.
+fn refuse_clipping_text(lines: &[TextLine], dropped: &std::collections::HashSet<usize>) -> Result<(), EditError> {
+    if lines.iter().any(|l| l.clips && l.ops.iter().any(|op| dropped.contains(op))) {
+        return Err(EditError::Invalid("text used as a clipping path cannot be edited: its glyphs mask the artwork behind them".into()));
+    }
+    Ok(())
+}
+
 /// [`replace_line`] with the most unique characters one generated font may hold (tests lower it).
 pub(crate) fn replace_line_with_limit(doc: &mut Document, page: usize, line: usize, text: &str, max_glyphs: usize) -> Result<LineEdit, EditError> {
     let text = text.replace(['\n', '\r'], " ");
     let lines = text_lines(doc, page)?;
     let target = lines.get(line).cloned().ok_or_else(|| EditError::Invalid(format!("page {} has no line {}", page + 1, line + 1)))?;
+    // Copies of the line drawn on the same baseline go with it, so the replacement is all that
+    // shows. Which operators go is settled here, before any font is generated, so that a refusal
+    // leaves the document untouched.
+    let mut drops = coincident_ops(&lines, &[&target]);
+    drops.extend(target.ops.iter().copied());
+    refuse_clipping_text(&lines, &drops)?;
     let p = page_dict(doc, page)?;
     let mut res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
     let mut fonts_res = res.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
@@ -1915,10 +1945,7 @@ pub(crate) fn replace_line_with_limit(doc: &mut Document, page: usize, line: usi
             }
         }
     }
-    // Rebuild: the line's first operator becomes the replacement, its others go. Copies of the
-    // line drawn on the same baseline go too, so the replacement is all that shows.
-    let mut drops = coincident_ops(&lines, &[&target]);
-    drops.extend(target.ops.iter().copied());
+    // Rebuild: the line's first operator becomes the replacement, its others go.
     let new_data = splice(&pieces, &ops, |i| if i == first { (std::mem::take(&mut replacement), false) } else { (Vec::new(), !drops.contains(&i)) });
     let contents = rewritten_contents(doc, &streams, new_data);
     let page_ref = p.obj;
@@ -2179,6 +2206,10 @@ fn rewrite_block_from(
     let blocks = group_blocks(&lines);
     let b = blocks.get(block).cloned().ok_or_else(|| EditError::Invalid(format!("page {} has no paragraph {}", page + 1, block + 1)))?;
     let members: Vec<&TextLine> = b.lines.iter().map(|i| &lines[*i]).collect();
+    // One clipping run is enough: rewriting the paragraph would drop its mask with the rest.
+    let mut dropped = coincident_ops(&lines, &members);
+    dropped.extend(members.iter().flat_map(|l| l.ops.iter().copied()));
+    refuse_clipping_text(&lines, &dropped)?;
     let first = members.first().copied().ok_or_else(|| EditError::Invalid("the paragraph has no source runs".into()))?;
     let p = page_dict(doc, page)?;
     let mut res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
