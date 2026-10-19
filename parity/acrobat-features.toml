@@ -854,8 +854,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["view.continuous"]
 tools = []
-evidence = ["crates/ui-egui/tests/view.rs::continuous_layout_stacks_pages_vertically", "crates/ui-egui/tests/view.rs::page_display_commands_switch_layouts", "crates/ui-egui/tests/view.rs::default_page_display_is_used_for_new_documents", "crates/ui-egui/src/canvas.rs::fit_page_and_height_hold_still_while_mixed_page_sizes_scroll_past", "crates/ui-egui/tests/view.rs::touchpad_swipe_glides_on_after_the_fingers_lift_and_stops", "crates/ui-egui/tests/view.rs::touching_the_touchpad_again_or_turning_animations_off_stops_the_glide"]
-notes = "the default for PDFs that don't ask for a layout (Preferences ▸ Default page display); pages stack with no snapping. Fit page and Fit height fit the largest page, so the zoom holds still across mixed page sizes. A touchpad swipe glides on after the fingers lift on Wayland (#531; macOS glides by itself; Windows and X11 report no lift through winit), unless Animation effects is off; a click, key, zoom or new scroll catches it. Not yet: fingers resting on the touchpad don't catch it (needs Wayland hold gestures, which the vendored winit doesn't bind)"
+evidence = ["crates/ui-egui/tests/view.rs::continuous_layout_stacks_pages_vertically", "crates/ui-egui/tests/view.rs::page_display_commands_switch_layouts", "crates/ui-egui/tests/view.rs::default_page_display_is_used_for_new_documents", "crates/ui-egui/src/canvas.rs::fit_page_and_height_hold_still_while_mixed_page_sizes_scroll_past", "crates/ui-egui/tests/view.rs::touchpad_swipe_glides_on_after_the_fingers_lift_and_stops", "crates/ui-egui/tests/view.rs::touching_the_touchpad_again_or_turning_animations_off_stops_the_glide", "crates/ui-egui/tests/view.rs::rapid_wheel_notches_accelerate_and_follow_touchpad_input", "crates/ui-egui/tests/view.rs::changing_continuous_layout_resets_wheel_acceleration"]
+notes = "the default for PDFs that don't ask for a layout (Preferences ▸ Default page display); pages stack with no snapping. Fit page and Fit height fit the largest page, so the zoom holds still across mixed page sizes. Rapid line-wheel notches gain a bounded, constant-space arrival-rate boost (#1072); isolated notches still use the chosen Scroll speed, and page units stay unboosted. A touchpad swipe glides on after the fingers lift on Wayland (#531; macOS glides by itself; Windows and X11 report no lift through winit), unless Animation effects is off; a click, key, zoom or new scroll catches it. Not yet: fingers resting on the touchpad don't catch it (needs Wayland hold gestures, which the vendored winit doesn't bind)"
 
 [[feature]]
 id = "view.layout-single-page"
@@ -1094,8 +1094,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["view.read_mode"]
 tools = []
-evidence = ["crates/ui-egui/tests/control.rs::inspect_and_click_by_label_and_id", "crates/ui-egui/tests/commands.rs::every_registered_command_is_implemented"]
-notes = ""
+evidence = ["crates/ui-egui/tests/control.rs::inspect_and_click_by_label_and_id", "crates/ui-egui/tests/commands.rs::every_registered_command_is_implemented", "crates/ui-egui/tests/view.rs::switching_modes_keeps_the_current_page_at_fixed_zoom"]
+notes = "Switching between Read and the docking workspace preserves the document’s current scroll position at fixed zoom; each tab keeps its own position"
 
 [[feature]]
 id = "view.full-screen"
@@ -5704,8 +5704,8 @@ milestone = "M8"
 status = "shipped"
 commands = ["redact.apply"]
 tools = ["redact_apply"]
-evidence = ["crates/redact/src/tests.rs::images_are_removed_or_have_their_pixels_cleared"]
-notes = "covered pixels cleared in a copy; DCT/JPX/JBIG2/CCITT images removed whole"
+evidence = ["crates/redact/src/tests.rs::images_are_removed_or_have_their_pixels_cleared", "crates/redact/src/tests.rs::redaction_clears_pixels_intersected_without_covering_their_centres"]
+notes = "intersected pixel footprints are cleared conservatively in a copy; DCT/JPX/JBIG2/CCITT images removed whole"
 
 [[feature]]
 id = "protect.redact-vectors"
@@ -5912,8 +5912,8 @@ milestone = "M9"
 status = "shipped"
 commands = ["sign.digital", "sign.certify"]
 tools = ["sign_windows_ids", "sign_document"]
-evidence = ["crates/sign/tests/pdf.rs::signing_with_windows_store_identities", "crates/sign/tests/pdf.rs::a_windows_store_identity_signs_with_its_issuers", "crates/sign/tests/pdf.rs::windows_store_enumeration_and_missing_identity", "crates/automation/tests/automation.rs::digital_ids_signing_and_validation_through_tools", "crates/ui-egui/tests/signing.rs::windows_store_identity_does_not_ask_for_a_file_password", "crates/ui-egui/tests/signing.rs::an_unusable_id_is_shown_with_its_reason_and_cannot_be_chosen"]
-notes = "Current User Personal (My) CNG identities: RSA PKCS #1 v1.5 and DER-encoded ECDSA P-256/P-384. Keys never leave Windows; windows:<fingerprint|common name> for agents and Windows store labels in the desktop ID picker. The signature embeds the issuers Windows chains the certificate to. Store certificates that can't sign (no private key, another key type, a key CNG can't open) are reported with the reason and Windows error code (greyed in the picker, `unusable` in sign_windows_ids) rather than left out; keys that need a prompt to open are listed and prompt at signing. Tested with throwaway software-backed RSA-2048, P-256 and P-384 certificates and a key-less certificate (run with --ignored). Smart cards and tokens whose driver registers a CNG key storage provider sign with the provider's own PIN dialog (checked by hand with a SafeNet token only; no hardware in CI); still missing: the Local Machine store, legacy CryptoAPI-only providers, P-521/Brainpool/Ed25519 keys, direct PKCS #11."
+evidence = ["crates/sign/tests/pdf.rs::signing_with_windows_store_identities", "crates/sign/tests/pdf.rs::a_windows_store_identity_signs_with_its_issuers", "crates/sign/tests/pdf.rs::windows_store_enumeration_and_missing_identity", "crates/automation/tests/automation.rs::digital_ids_signing_and_validation_through_tools", "crates/ui-egui/tests/signing.rs::windows_store_identity_does_not_ask_for_a_file_password", "crates/ui-egui/tests/signing.rs::an_unusable_id_is_shown_with_its_reason_and_cannot_be_chosen", "crates/sign/tests/chain.rs::a_smart_cards_certificates_that_may_not_sign_say_why_in_id_lists"]
+notes = "Current User Personal (My) CNG identities: RSA PKCS #1 v1.5 and DER-encoded ECDSA P-256/P-384. Keys never leave Windows; windows:<fingerprint|common name> for agents and Windows store labels in the desktop ID picker. The signature embeds the issuers Windows chains the certificate to. Store certificates that can't sign (no private key, another key type, a key CNG can't open, or a key usage or extended key usage that doesn't allow signing documents, like a CAC's encryption and logon certificates) are reported with the reason and Windows error code (greyed in the picker, `unusable` in sign_windows_ids) rather than left out; keys that need a prompt to open are listed and prompt at signing. Tested with throwaway software-backed RSA-2048, P-256 and P-384 certificates and a key-less certificate (run with --ignored). Smart cards and tokens whose driver registers a CNG key storage provider sign with the provider's own PIN dialog (checked by hand with a SafeNet token only; no hardware in CI); still missing: the Local Machine store, legacy CryptoAPI-only providers, P-521/Brainpool/Ed25519 keys, direct PKCS #11."
 
 [[feature]]
 id = "sign.encrypted-documents"
@@ -7776,7 +7776,7 @@ milestone = "M11"
 status = "partial"
 commands = ["standards.pdfa"]
 tools = ["pdfa_verify"]
-evidence = ["crates/preflight/src/tests.rs::verify_reports_what_breaks_pdfa", "crates/preflight/src/tests.rs::convert_fixes_all_but_fonts", "crates/preflight/src/tests.rs::verify_reports_an_output_intent_that_does_not_match_device_colour", "crates/automation/tests/automation.rs::pdfa_through_tools", "crates/ui-egui/tests/compare.rs::pdfa_dialog_verifies_and_converts"]
+evidence = ["crates/preflight/src/tests.rs::verify_reports_what_breaks_pdfa", "crates/preflight/src/tests.rs::standards_identification_uses_namespace_not_prefix", "crates/preflight/src/tests.rs::convert_fixes_all_but_fonts", "crates/preflight/src/tests.rs::verify_reports_an_output_intent_that_does_not_match_device_colour", "crates/automation/tests/automation.rs::pdfa_through_tools", "crates/ui-egui/tests/compare.rs::pdfa_dialog_verifies_and_converts"]
 notes = "PDF/A-2b/3b structural rules: identification, encryption, output intent (present, and RGB/CMYK to match DeviceRGB/DeviceCMYK use), fonts embedded, annotations, actions, images, embedded files. Not yet: content-stream operator checks, transparency details, PDF/A-1 and -4, a veraPDF comparison."
 
 [[feature]]
