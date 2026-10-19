@@ -6571,3 +6571,110 @@ fn a_flatten_refused_on_a_later_page_changes_nothing() {
     assert!(matches!(flatten(&mut doc, &[0, 1], true, false), Err(EditError::Invalid(_))));
     assert_eq!((*doc.get(first)).clone(), before, "the first page keeps its comment and content");
 }
+
+/// How each glyph-showing operator on page 0 is painted, read the way a renderer reads the page:
+/// its text, `Tr`, stroke colour operators, line width and the ExtGStates selected before it,
+/// following `q`/`Q`.
+#[derive(Clone, Debug, PartialEq)]
+struct Painted {
+    text: String,
+    render_mode: i64,
+    stroke: Vec<String>,
+    line_width: f64,
+    gs: Vec<String>,
+}
+
+fn painted_shows(doc: &Document) -> Vec<Painted> {
+    let (_, ops) = joined_ops(doc);
+    let mut state = Painted { text: String::new(), render_mode: 0, stroke: Vec::new(), line_width: 1.0, gs: Vec::new() };
+    let mut stack = Vec::new();
+    let mut out = Vec::new();
+    let show = |op: &pdfcraft_content::Op| String::from_utf8_lossy(&pdfcraft_content::serialize_ops(std::slice::from_ref(op))).trim().to_string();
+    for op in ops {
+        match op.op.as_slice() {
+            b"q" => stack.push(state.clone()),
+            b"Q" => state = stack.pop().unwrap(),
+            b"Tr" => state.render_mode = op.operands[0].as_int().unwrap(),
+            b"G" | b"RG" | b"K" | b"CS" => state.stroke = vec![show(&op)],
+            b"SC" | b"SCN" => state.stroke.push(show(&op)),
+            b"w" => state.line_width = op.num(0).unwrap(),
+            b"gs" => state.gs.push(String::from_utf8_lossy(op.name(0).unwrap()).into_owned()),
+            b"Tj" => {
+                let Some(Object::String(s)) = op.operands.last() else { continue };
+                if !s.bytes.is_empty() {
+                    out.push(Painted { text: String::from_utf8_lossy(&s.bytes).into_owned(), ..state.clone() });
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A page with Helvetica as /F1 and /GS1, an ExtGState that paints at 20 % opacity.
+fn faint_page(content: &str) -> Document {
+    build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> /ExtGState << /GS1 6 0 R >> >> >>",
+        &format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        "<< /Type /ExtGState /ca 0.2 >>",
+    ])
+}
+
+/// Rewriting a paragraph drew it before its text object, restating only the font, spacing and
+/// fill: a `1 Tr 1 0 0 RG 2 w` set inside `BT` was lost, and red outline text came back filled
+/// black, even with the text unchanged (#3508). Set before `BT` (the control), it already worked.
+#[test]
+fn a_rewritten_paragraph_keeps_the_rendering_mode_stroke_and_width_set_inside_its_text_object() {
+    let outline = |text: &str| Painted { text: text.into(), render_mode: 1, stroke: vec!["1 0 0 RG".into()], line_width: 2.0, gs: Vec::new() };
+    for content in ["BT /F1 72 Tf 1 Tr 1 0 0 RG 2 w 40 400 Td (OUTLINE) Tj ET\n", "1 Tr 1 0 0 RG 2 w BT /F1 72 Tf 40 400 Td (OUTLINE) Tj ET\n"] {
+        assert_eq!(painted_shows(&text_page(content)), [outline("OUTLINE")], "the fixture: {content}");
+        for new in ["OUTLINE", "OUTLINED"] {
+            let mut doc = text_page(content);
+            text::rewrite_block(&mut doc, 0, 0, Some(new), &BlockStyle::default()).unwrap();
+            let doc = reopen(&doc);
+            assert_eq!(painted_shows(&doc), [outline(new)], "{content} -> {new}: {}", streams(&doc, 0).join("\n"));
+        }
+    }
+}
+
+/// The same for transparency: `/GS1 gs` (`/ca 0.2`) inside `BT` was not in force for the
+/// rewritten paragraph, so 20 % blue text came back opaque (#3509).
+#[test]
+fn a_rewritten_paragraph_keeps_the_extgstate_selected_inside_its_text_object() {
+    for content in ["BT /GS1 gs /F1 72 Tf 0 0 1 rg 40 400 Td (FAINT) Tj ET\n", "/GS1 gs BT /F1 72 Tf 0 0 1 rg 40 400 Td (FAINT) Tj ET\n"] {
+        for new in ["FAINT", "FAINTER"] {
+            let mut doc = faint_page(content);
+            text::rewrite_block(&mut doc, 0, 0, Some(new), &BlockStyle::default()).unwrap();
+            let doc = reopen(&doc);
+            let shows = painted_shows(&doc);
+            assert_eq!(shows.len(), 1, "{content} -> {new}: {shows:?}");
+            assert_eq!(
+                (shows[0].text.as_str(), shows[0].gs.as_slice()),
+                (new, ["GS1".to_string()].as_slice()),
+                "{content} -> {new}: {}",
+                streams(&doc, 0).join("\n")
+            );
+        }
+    }
+}
+
+/// A paragraph of differently coloured runs goes through the styled rewrite, which draws each
+/// run in its own text object: each keeps the state its source set inside `BT`.
+#[test]
+fn a_styled_rewrite_keeps_the_paint_state_set_inside_the_text_object() {
+    let content = "BT /GS1 gs 1 Tr 1 0 0 RG 2 w /F1 72 Tf 40 400 Td (FAI) Tj 0 0 1 rg (NT) Tj ET\n";
+    let mut doc = faint_page(content);
+    assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].rows[0].len(), 2, "two runs on one row");
+    text::rewrite_block(&mut doc, 0, 0, Some("FAINTS"), &BlockStyle::default()).unwrap();
+    let doc = reopen(&doc);
+    let shows = painted_shows(&doc);
+    let joined = streams(&doc, 0).join("\n");
+    assert_eq!(shows.iter().map(|s| s.text.as_str()).collect::<String>(), "FAINTS", "{joined}");
+    for s in &shows {
+        assert_eq!((s.render_mode, s.stroke.as_slice(), s.line_width), (1, ["1 0 0 RG".to_string()].as_slice(), 2.0), "{s:?}: {joined}");
+        assert_eq!(s.gs, ["GS1"], "{s:?}: {joined}");
+    }
+}
