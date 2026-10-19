@@ -54,9 +54,13 @@ const ZH_DAYS: [&str; 7] = ["星期日", "星期一", "星期二", "星期三", 
 const AR_MONTHS: [&str; 12] = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
 const AR_DAYS: [&str; 7] = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
 
+const CKB_MONTHS: [&str; 12] =
+    ["کانوونی دووەم", "شوبات", "ئازار", "نیسان", "ئایار", "حوزەیران", "تەممووز", "ئاب", "ئەیلوول", "تشرینی یەکەم", "تشرینی دووەم", "کانوونی یەکەم"];
+const CKB_DAYS: [&str; 7] = ["یەکشەممە", "دووشەممە", "سێشەممە", "چوارشەممە", "پێنجشەممە", "هەینی", "شەممە"];
+
 /// The languages month and weekday names can be written in (Preferences ▸ Date format ▸ Language):
 /// the interface languages, in the same order and with the same names.
-pub static DATE_LANGUAGES: [DateLanguage; 23] = [
+pub static DATE_LANGUAGES: [DateLanguage; 24] = [
     DateLanguage {
         code: "en",
         name: "English",
@@ -249,6 +253,16 @@ pub static DATE_LANGUAGES: [DateLanguage; 23] = [
         months_short: AR_MONTHS,
         days: AR_DAYS,
         days_short: AR_DAYS,
+    },
+    // Central Kurdish (Sorani) has no shorter written forms of its month and weekday names either.
+    DateLanguage {
+        code: "ckb",
+        name: "کوردیی ناوەندی",
+        months: CKB_MONTHS,
+        months_with_day: None,
+        months_short: CKB_MONTHS,
+        days: CKB_DAYS,
+        days_short: CKB_DAYS,
     },
     DateLanguage {
         code: "pl",

@@ -209,6 +209,17 @@ usage = "Arabic UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
 sha256 = "889a0d0a9ea53ca0a818c2ba672c053c232d2cca140f8d63127353e6f36505fe"
 
 [[asset]]
+path = "crates/ui-egui/src/i18n/ckb.tsv"
+title = "Central Kurdish (Sorani) interface translation catalog"
+author = "PdfCraft contributors"
+source = "Contributor-original: clean-room translations of PdfCraft's English UI labels, no proprietary localisation resources"
+licence = "MIT OR Apache-2.0"
+licence_file = "LICENSE-MIT"
+kind = "translation"
+usage = "Central Kurdish UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
+sha256 = "2479d8f164612c4e8d3944df9a6b2ae345be0b26ee87511b17a4a56bc41988d3"
+
+[[asset]]
 path = "crates/ui-egui/src/i18n/tr.tsv"
 title = "Turkish interface translation catalog"
 author = "PdfCraft contributors"
