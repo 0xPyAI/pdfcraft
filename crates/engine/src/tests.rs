@@ -2709,6 +2709,47 @@ fn reload_reads_the_new_file_into_the_same_document() {
     assert_eq!(s.docs().len(), 2);
 }
 
+/// #3443: reloading the file (it changed on disk) keeps how the reader shows it. Reading colours
+/// reached the new renderer, not just the setting; hidden comments stay hidden. Each setting is
+/// checked alone, so neither one rides on the other being changed.
+#[test]
+fn reload_keeps_reading_colours_and_hidden_comments() {
+    let dark_share = |s: &Session, id: DocId| {
+        let doc = s.get(id).unwrap();
+        doc.renderer.set_queue(vec![pdfcraft_render::RenderRequest {
+            page: 0,
+            kind: pdfcraft_render::RequestKind::Pixels,
+            scale: 1.0,
+            ..Default::default()
+        }]);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let page = loop {
+            if let Some(page) = doc.renderer.try_recv() {
+                break page;
+            }
+            assert!(std::time::Instant::now() < deadline, "page render did not finish");
+            std::thread::yield_now();
+        };
+        let (px, _) = page.rgba.as_chunks::<4>();
+        px.iter().filter(|p| p[0] < 64 && p[1] < 64 && p[2] < 64).count() as f64 / px.len() as f64
+    };
+    let (mut s, id) = session_with(1);
+    assert!(dark_share(&s, id) < 0.1, "a white page as the file draws it");
+    assert!(s.set_reading_colors(id, ReadingColors::WHITE_ON_BLACK));
+    assert!(dark_share(&s, id) > 0.9, "white on black");
+    s.reload(id, Arc::new(fixture(2))).unwrap();
+    assert_eq!(s.reading_colors(id), Some(ReadingColors::WHITE_ON_BLACK));
+    assert!(dark_share(&s, id) > 0.9, "the reloaded page is drawn white on black too");
+    assert!(!s.get(id).unwrap().comments_hidden());
+
+    let (mut s, id) = session_with(1);
+    assert!(s.set_hide_comments(id, true));
+    s.reload(id, Arc::new(fixture(2))).unwrap();
+    assert!(s.get(id).unwrap().comments_hidden(), "hidden comments stay hidden");
+    assert_eq!(s.reading_colors(id), Some(ReadingColors::default()));
+    assert!(dark_share(&s, id) < 0.1);
+}
+
 #[test]
 fn revert_goes_back_to_the_saved_version() {
     let (mut s, id) = session_with(2);
