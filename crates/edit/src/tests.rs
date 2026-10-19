@@ -904,6 +904,92 @@ fn text_page(content: &str) -> Document {
     Document::open(Arc::new(out)).unwrap()
 }
 
+#[test]
+fn tracked_text_keeps_words_in_paragraphs_and_objects() {
+    let expected = "TRACKED SAMPLE TEXT";
+    for spacing in [1.5, 2.0001, 3.0] {
+        for scale in [50.0, 100.0, 150.0] {
+            for positioned in [false, true] {
+                let mut show = String::new();
+                if !positioned {
+                    show.push('[');
+                }
+                for (i, c) in expected.chars().enumerate() {
+                    if positioned {
+                        show.push_str(&format!("({c}) Tj "));
+                        if i + 1 < expected.len() {
+                            show.push_str(&format!("[{}] TJ ", -spacing * 100.0));
+                        }
+                    } else {
+                        show.push_str(&format!("({c}) "));
+                        if i + 1 < expected.len() {
+                            show.push_str(&format!("{} ", -spacing * 100.0));
+                        }
+                    }
+                }
+                if !positioned {
+                    show.push_str("] TJ");
+                }
+                let doc = text_page(&format!("BT /F1 10 Tf {scale} Tz 72 700 Td {show} ET"));
+                assert_eq!(text::text_lines(&doc, 0).unwrap()[0].text, expected, "{spacing}, {scale}, {positioned}");
+                assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].text, expected);
+                assert_eq!(crate::objects::editable_objects(&doc, 0).unwrap()[0].text.as_deref(), Some(expected));
+            }
+        }
+        let doc = text_page(&format!("BT /F1 10 Tf {spacing} Tc 72 700 Td ({expected}) Tj ET"));
+        assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].text, expected);
+    }
+}
+
+#[test]
+fn single_glyph_words_and_cells_are_not_tracking() {
+    for (content, expected) in [
+        ("BT /F1 10 Tf 72 700 Td [(a) -1000 (b) -1000 (c) -1000 (d)] TJ ET", "a b c d"),
+        ("BT /F1 10 Tf 72 700 Td [(1) -2500 (2) -2500 (3) -2500 (4) -2500 (5)] TJ ET", "1 2 3 4 5"),
+        ("BT /F1 10 Tf 72 700 Td [(A) -300 (B) -1200 (C) -1200 (D) -1200 (E) -300 (F) -1200 (G)] TJ ET", "A B C D E F G"),
+    ] {
+        assert_eq!(text::text_blocks(&text_page(content), 0).unwrap()[0].text, expected, "{content}");
+    }
+    let mut s = String::from("BT /F1 10 Tf ");
+    for (i, c) in "12345".chars().enumerate() {
+        s.push_str(&format!("1 0 0 1 {} 700 Tm ({c}) Tj ", 72 + i * 12));
+    }
+    s.push_str("ET");
+    assert_eq!(text::text_blocks(&text_page(&s), 0).unwrap()[0].text, "1 2 3 4 5");
+}
+
+#[test]
+fn tracked_text_preserves_larger_word_gaps() {
+    for show in [
+        "[(T) -300 (E) -300 (S) -300 (T) -600 (W) -300 (O) -300 (R) -300 (D)] TJ",
+        "(T) Tj [-300] TJ (E) Tj [-300] TJ (S) Tj [-300] TJ (T) Tj [-600] TJ (W) Tj [-300] TJ (O) Tj [-300] TJ (R) Tj [-300] TJ (D) Tj",
+        "[(TEST) -300 (WORD)] TJ",
+        "(TEST) Tj [-300] TJ (W) Tj [-300] TJ (O) Tj [-300] TJ (R) Tj [-300] TJ (D) Tj",
+    ] {
+        let doc = text_page(&format!("BT /F1 10 Tf 72 700 Td {show} ET"));
+        assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].text, "TEST WORD", "{show}");
+    }
+}
+
+#[test]
+fn tracked_text_positions_do_not_count_character_spacing_twice() {
+    let expected = "TRACKED SAMPLE TEXT";
+    for char_spacing in [0.0, 2.0] {
+        for transform in ["1 0 0 1 0 0", "0 1 -1 0 800 0"] {
+            let mut content = format!("q {transform} cm BT /F1 10 Tf {char_spacing} Tc ");
+            let mut x = 72.0;
+            for c in expected.chars() {
+                content.push_str(&format!("1 0 0 1 {x:.4} 700 Tm ({c}) Tj "));
+                x += pdfcraft_fonts::helvetica_width(&c.to_string(), 10.0) + 2.0001;
+            }
+            content.push_str("ET Q");
+            let doc = text_page(&content);
+            assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].text, expected);
+            assert_eq!(crate::objects::editable_objects(&doc, 0).unwrap()[0].text.as_deref(), Some(expected));
+        }
+    }
+}
+
 fn descriptor_text_page() -> Document {
     let content = "BT /F1 12 Tf 72 700 Td (ab) Tj ET";
     let objs: Vec<String> = vec![

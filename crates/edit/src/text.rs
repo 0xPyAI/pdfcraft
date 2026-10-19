@@ -635,6 +635,7 @@ struct Shown {
     glyph_count: usize,
     /// Advance in text space, including spacing and TJ adjustments.
     advance: f64,
+    tracking: f64,
     /// The text matrix where it starts (text space), and the state there and at its `BT`.
     tm: Matrix,
     tlm: Matrix,
@@ -699,6 +700,77 @@ impl Pen {
         let gap = start - self.end;
         let same_dir = (dir.0 - self.dir.0).abs() < 1e-3 && (dir.1 - self.dir.1).abs() < 1e-3;
         (same_dir && (across - self.across).abs() < self.size * 0.3 && gap > -self.size && gap < self.size * reach, gap)
+    }
+}
+
+/// Use the lower third of letter gaps, not word gaps. A pair of isolated labels is not
+/// evidence of tracking; unadjusted neighbours inside a string contribute zero too.
+/// The tracking a run of glyphs was set with: the lower third of its gaps, when that is at
+/// most half an em (`limit`). A wider "tracking" is word or cell spacing between one-glyph
+/// words (`a b c`, a column of digits or Y/N ticks), which must keep its spaces.
+fn typical_tracking(gaps: &mut [f64], limit: f64) -> f64 {
+    if gaps.len() < 3 {
+        return 0.0;
+    }
+    let at = gaps.len() / 3;
+    gaps.select_nth_unstable_by(at, f64::total_cmp);
+    gaps.get(at).copied().filter(|n| n.is_finite() && *n <= limit).unwrap_or(0.0).max(0.0)
+}
+
+fn tj_tracking(pieces: &[Object], metrics: &Metrics, size: f64, scale: f64) -> f64 {
+    let mut gaps = Vec::new();
+    let mut previous = false;
+    let mut gap = 0.0;
+    for piece in pieces {
+        if let Object::String(s) = piece {
+            for (code, len) in metrics.codes(&s.bytes) {
+                let blank = metrics.is_space(code, len) || metrics.text_of(code).is_some_and(|t| !t.is_empty() && t.chars().all(char::is_whitespace));
+                if previous && !blank {
+                    gaps.push(gap);
+                }
+                previous = !blank;
+                gap = 0.0;
+            }
+        } else if let Some(n) = piece.as_f64() {
+            gap += -n / 1000.0 * size * scale;
+        }
+    }
+    typical_tracking(&mut gaps, size * scale.abs() * 0.5)
+}
+
+fn positioned_tracking(shown: &mut [Shown]) {
+    let mut start = 0;
+    while start < shown.len() {
+        let mut end = start.saturating_add(1);
+        while let (Some(prev), Some(next)) = (shown.get(end.saturating_sub(1)), shown.get(end)) {
+            if prev.glyph_count != 1
+                || next.glyph_count != 1
+                || prev.font != next.font
+                || prev.scope != next.scope
+                || (prev.size - next.size).abs() > 0.01
+                || prev.state.char_spacing != next.state.char_spacing
+                || prev.state.scale != next.state.scale
+                || !Pen::after(prev).continues(next, 1.5).0
+            {
+                break;
+            }
+            end = end.saturating_add(1);
+        }
+        if let Some(run) = shown.get_mut(start..end) {
+            let mut gaps: Vec<f64> = run
+                .windows(2)
+                .filter_map(|pair| {
+                    let [prev, next] = pair else { return None };
+                    (!prev.text.trim().is_empty() && !next.text.trim().is_empty()).then(|| Pen::after(prev).continues(next, 0.0).1)
+                })
+                .collect();
+            let limit = run.first().map_or(0.0, |s| s.size * s.state.scale.abs() * 0.5);
+            let tracking = typical_tracking(&mut gaps, limit);
+            for s in run.iter_mut().skip(1) {
+                s.tracking = tracking;
+            }
+        }
+        start = end;
     }
 }
 
@@ -883,6 +955,8 @@ fn interpret(
                     b"TJ" => op.operands.first().and_then(Object::as_array).cloned().unwrap_or_default(),
                     _ => op.operands.last().cloned().into_iter().collect(),
                 };
+                // Tc is already included in the pen advance; TJ may encode tracking instead.
+                let tracking = if op.is("TJ") { tj_tracking(&pieces, &m, ts.size, ts.scale) } else { 0.0 };
                 let trm0 = tm.then(&ts.ctm);
                 let start = trm0.apply(0.0, ts.rise);
                 let mut text = String::new();
@@ -924,12 +998,12 @@ fn interpret(
                             if let Some(n) = other.as_f64() {
                                 let dx = -n / 1000.0 * ts.size * ts.scale;
                                 // A large gap inside TJ reads as a space.
-                                if dx > ts.size * 0.2 && !text.ends_with(' ') {
+                                if dx - tracking > (ts.size * ts.scale).abs() * 0.2 && !text.ends_with(' ') {
                                     text.push(' ');
                                 }
-                                // Kerning keeps a word together; a jump either way of more
-                                // than 0.2 em ends it (whatever the sign of the size or `Tz`).
-                                if dx.abs() > (ts.size * ts.scale).abs() * 0.2 {
+                                // Tracking and kerning keep a word together; a larger jump
+                                // ends it (whatever the sign of the size or `Tz`).
+                                if dx - tracking > (ts.size * ts.scale).abs() * 0.2 || dx < -(ts.size * ts.scale).abs() * 0.2 {
                                     in_word = false;
                                 }
                                 x_text += dx;
@@ -976,6 +1050,7 @@ fn interpret(
                     extra_ops: Vec::new(),
                     glyph_count,
                     advance: x_text,
+                    tracking: 0.0,
                     tm: Matrix([tm.0[0], tm.0[1], tm.0[2], tm.0[3], tm.0[4] - x_text * tm.0[0], tm.0[5] - x_text * tm.0[1]]),
                     state: ts.clone(),
                     tlm,
@@ -1009,6 +1084,7 @@ fn interpret(
     carry.ts = ts;
     carry.stack = stack;
     carry.marked = marked;
+    positioned_tracking(&mut out);
     out
 }
 
@@ -1057,7 +1133,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
         });
         if joins && let Some(l) = lines.last_mut() {
             let gap = last.map_or(0.0, |(_, pen)| pen.continues(&s, 0.0).1);
-            if gap > l.size * 0.2 && !l.text.ends_with(' ') && !s.text.starts_with(' ') {
+            if gap - s.tracking > l.size * s.state.scale.abs() * 0.2 && !l.text.ends_with(' ') && !s.text.starts_with(' ') {
                 l.text.push(' ');
             }
             l.text.push_str(&s.text);
@@ -1147,7 +1223,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
     });
     if joins && let Some(l) = lines.last_mut() {
         let gap = last.map_or(0.0, |pen| pen.continues(&s, 0.0).1);
-        if gap > l.size * 0.2 && !l.text.ends_with(' ') && !s.text.starts_with(' ') {
+        if gap - s.tracking > l.size * s.state.scale.abs() * 0.2 && !l.text.ends_with(' ') && !s.text.starts_with(' ') {
             l.text.push(' ');
         }
         l.text.push_str(&s.text);
