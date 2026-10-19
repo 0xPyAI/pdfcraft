@@ -814,6 +814,13 @@ fn validate_into(doc: &Document, bytes: &[u8], trust: &TrustStore, v: &Dict, inf
             );
         }
     }
+    // A PDF signature signs data: the document, or (adbe.pkcs7.sha1) its digest. A content-type
+    // attribute was checked above, and `SignedData::parse` refuses one that differs from
+    // `eContentType`; without that attribute, `eContentType` is the only place that says so.
+    if sd.econtent_type != crate::cms::DATA {
+        let why = SignError::Malformed("CMS: the encapsulated content is not data".into());
+        return invalid(info, Detail::of("The signature could not be read ({}).", Fill::Reason(why.to_string())));
+    }
     if let Some(md) = &s.message_digest
         && *md != content_digest
     {

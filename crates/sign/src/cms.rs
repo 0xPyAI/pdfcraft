@@ -50,6 +50,9 @@ pub struct SignedData {
     pub signer: SignerInfo,
     /// Encapsulated content (`adbe.pkcs7.sha1` carries the document digest here).
     pub content: Option<Vec<u8>>,
+    /// `eContentType`, the type of the encapsulated content: data for a PDF signature, TSTInfo
+    /// for an RFC 3161 token. The signature does not cover it.
+    pub econtent_type: String,
     /// Encoding irregularities that were tolerated (BER instead of DER, …), for the details.
     pub quirks: Vec<&'static str>,
 }
@@ -80,7 +83,7 @@ impl SignedData {
         let _version = it.next();
         let _digest_algs = it.next();
         let encap = it.next().ok_or_else(|| bad("encapContentInfo"))?.children()?;
-        let encap_type = encap.first().and_then(|t| t.oid().ok());
+        let econtent_type = encap.first().ok_or_else(|| bad("eContentType"))?.oid()?;
         let content = match encap.get(1) {
             Some(c) if c.tag == tag::ctx(0) => {
                 // BER signers may split the content into a constructed OCTET STRING.
@@ -116,12 +119,12 @@ impl SignedData {
         // RFC 5652 §11.1: the content-type attribute names the type of the encapsulated content.
         // The signature covers the attribute but not `eContentType`, so when they differ, one of
         // them was written wrong or changed after signing.
-        if let (Some(signed), Some(encap)) = (&signer.content_type, &encap_type)
-            && signed != encap
+        if let Some(signed) = &signer.content_type
+            && *signed != econtent_type
         {
             return Err(bad("the signed content type is not the encapsulated content type"));
         }
-        Ok(SignedData { certificates, signer, content, quirks })
+        Ok(SignedData { certificates, signer, content, econtent_type, quirks })
     }
 
     /// The signer's certificate among those carried.
@@ -234,7 +237,8 @@ fn parse_signer(si: &Tlv<'_>) -> Result<SignerInfo, SignError> {
             let value = values.into_iter().next();
             match (o.as_str(), value) {
                 (MESSAGE_DIGEST, Some(v)) => message_digest = Some(v.value.to_vec()),
-                (CONTENT_TYPE, Some(v)) => content_type = v.oid().ok(),
+                // A value that is not an OID would skip every content-type check after this.
+                (CONTENT_TYPE, Some(v)) => content_type = Some(v.oid()?),
                 (SIGNING_TIME, Some(v)) => signing_time = v.time().ok(),
                 (SIGNING_CERT_V2 | SIGNING_CERT, _) => signing_certificate = true,
                 _ => {}

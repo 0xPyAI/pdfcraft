@@ -1,6 +1,6 @@
 //! What a CMS's signed attributes may hold. RFC 5652 allows one content-type and one
 //! message-digest attribute, each with one value, and the content type must be the type of the
-//! encapsulated content.
+//! encapsulated content. Both content types are object identifiers.
 //!
 //! These go through `SignedData::parse`, the way a PDF's signature reaches it. Each CMS is built
 //! here as the signer builds it, so a case differs from a valid one only where it says.
@@ -29,6 +29,12 @@ fn attribute(oid: &str, values: &[&[u8]]) -> Vec<u8> {
 /// A SignedData whose encapsulated content has the type `encap_type` and whose one signer
 /// signed the attributes `attrs`.
 fn signed_data(id: &pkcs12::DigitalId, encap_type: &str, attrs: &[Vec<u8>]) -> Vec<u8> {
+    signed_data_with_encap(id, &der::seq(&[&der::oid(encap_type)]), attrs)
+}
+
+/// A SignedData with the encapContentInfo `encap`, as it stands, and whose one signer signed the
+/// attributes `attrs`.
+fn signed_data_with_encap(id: &pkcs12::DigitalId, encap: &[u8], attrs: &[Vec<u8>]) -> Vec<u8> {
     let alg = DigestAlg::Sha256;
     let refs: Vec<&[u8]> = attrs.iter().map(Vec::as_slice).collect();
     let set = der::set_of(&refs);
@@ -38,9 +44,8 @@ fn signed_data(id: &pkcs12::DigitalId, encap_type: &str, attrs: &[Vec<u8>]) -> V
     let cert = &id.certificate;
     let sid = der::seq(&[&cert.issuer.raw, &der::uint(&cert.serial)]);
     let signer = der::seq(&[&der::int(1), &sid, &alg.algorithm(), &signed_attrs, &id.key.signature_algorithm(alg), &der::octets(&signature)]);
-    let encap = der::seq(&[&der::oid(encap_type)]);
     let signed_data =
-        der::seq(&[&der::int(1), &der::set_of(&[&alg.algorithm()]), &encap, &der::tlv(tag::ctx(0), &cert.raw), &der::set_of(&[&signer])]);
+        der::seq(&[&der::int(1), &der::set_of(&[&alg.algorithm()]), encap, &der::tlv(tag::ctx(0), &cert.raw), &der::set_of(&[&signer])]);
     der::seq(&[&der::oid(SIGNED_DATA), &der::explicit(0, &signed_data)])
 }
 
@@ -99,6 +104,27 @@ fn the_signed_content_type_is_the_type_of_the_encapsulated_content() {
     let why = refused(&signed_data(&id, SIGNED_DATA, &[signed_as(DATA), message_digest.clone()]));
     assert!(why.contains("not the encapsulated content type"), "{why}");
 
-    // Without a content-type attribute there is nothing to compare here.
-    SignedData::parse(&signed_data(&id, SIGNED_DATA, std::slice::from_ref(&message_digest))).unwrap();
+    // Without a content-type attribute there is nothing to compare here. The type is kept, and a
+    // PDF signature's validation refuses one that is not data (tests/pdf.rs).
+    let sd = SignedData::parse(&signed_data(&id, SIGNED_DATA, std::slice::from_ref(&message_digest))).unwrap();
+    assert_eq!(sd.econtent_type, SIGNED_DATA);
+}
+
+#[test]
+fn content_types_are_object_identifiers() {
+    let id = identity();
+    let digest = DigestAlg::Sha256.digest(&[b"document"]);
+    let message_digest = attribute(MESSAGE_DIGEST, &[&der::octets(&digest)]);
+    let content_type = attribute(CONTENT_TYPE, &[&der::oid(DATA)]);
+    let not_an_oid = der::octets(DATA.as_bytes());
+
+    // A content-type value that is not an OID would leave nothing to compare.
+    let why = refused(&signed_data(&id, DATA, &[attribute(CONTENT_TYPE, &[&not_an_oid]), message_digest.clone()]));
+    assert!(why.contains("expected an OID"), "{why}");
+
+    // eContentType is required (RFC 5652 §5.2) and is an OID.
+    let why = refused(&signed_data_with_encap(&id, &der::seq(&[&not_an_oid]), &[content_type.clone(), message_digest.clone()]));
+    assert!(why.contains("expected an OID"), "{why}");
+    let why = refused(&signed_data_with_encap(&id, &der::seq(&[]), &[content_type, message_digest]));
+    assert!(why.contains("eContentType"), "{why}");
 }
