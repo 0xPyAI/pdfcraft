@@ -758,8 +758,9 @@ pub fn right_rail(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 if widgets::text_width(ui, &position, &font) > ui.available_width() {
                     position = page_count.to_string();
                 }
-                let of =
-                    crate::i18n::fmt(tl!("Page {p} of {n}"), &[("p", &view.current.saturating_add(1).to_string()), ("n", &page_count.to_string())]);
+                // Out of range (an empty document), like `page_position`: "Page 0 of 0", never past the end.
+                let shown = if view.current < page_count { view.current + 1 } else { page_count };
+                let of = crate::i18n::fmt(tl!("Page {p} of {n}"), &[("p", &shown.to_string()), ("n", &page_count.to_string())]);
                 ui.label(egui::RichText::new(position).font(font).color(t.text_muted)).on_hover_text(of);
                 let page_input_id = view.page_input_id();
                 // Consume replacement selection once, including when the editor has lost focus.
