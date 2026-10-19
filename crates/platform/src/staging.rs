@@ -99,7 +99,8 @@ pub fn staging_suffixes() -> impl Iterator<Item = u64> {
 /// a folder at the target is refused by the rename. Flushing is the staging file's own
 /// (`sync_all`); parent-directory durability after a power loss is not promised. On Unix a file
 /// that is replaced keeps its permissions, so a private file stays private; a new file gets the
-/// usual mode for a new file.
+/// usual mode for a new file. On Windows and macOS a replaced file keeps its creation date, where
+/// the volume stores one.
 /// On macOS, accessible extended attributes of an existing regular destination are copied
 /// before flushing; a copy failure refuses the save rather than losing metadata (#2658).
 pub fn write_atomically(path: &Path, bytes: &[u8], form: StagingName) -> std::io::Result<()> {
@@ -130,6 +131,9 @@ pub fn write_atomically_with(
     let keep = std::fs::metadata(path).ok().map(|m| m.permissions());
     #[cfg(not(unix))]
     let keep = None;
+    // A saved file is the same document: it keeps its creation date (#2658).
+    #[cfg(any(windows, target_os = "macos"))]
+    let created = std::fs::metadata(path).ok().filter(|m| m.is_file()).and_then(|m| m.created().ok());
     let (tmp, file) = create_staging_as(dir, name, form, suffixes, keep.as_ref())?;
     let result = (|| {
         // Closed at the end of the block, before the rename (required on Windows).
@@ -140,6 +144,8 @@ pub fn write_atomically_with(
             preserve_target_xattrs(path, &file).map_err(|e| {
                 std::io::Error::new(e.kind(), format!("could not preserve the file's extended attributes; save a copy with Save As: {e}"))
             })?;
+            #[cfg(any(windows, target_os = "macos"))]
+            keep_created(&file, created);
             sync_staged(&file, sync_all)?;
         }
         std::fs::rename(&tmp, path)
@@ -215,6 +221,20 @@ fn read_xattr_value(size: usize, mut read: impl FnMut(&mut [u8]) -> std::io::Res
     }
     value.truncate(len);
     Ok(value)
+}
+
+/// Give the staging file the creation date of the file it replaces, where the system keeps one
+/// that a program can set (Windows, macOS). Best effort: a volume that can't store it leaves the
+/// new file's own date, as before.
+#[cfg(any(windows, target_os = "macos"))]
+fn keep_created(file: &std::fs::File, created: Option<std::time::SystemTime>) {
+    if let Some(created) = created {
+        #[cfg(target_os = "macos")]
+        use std::os::macos::fs::FileTimesExt as _;
+        #[cfg(windows)]
+        use std::os::windows::fs::FileTimesExt as _;
+        let _ = file.set_times(std::fs::FileTimes::new().set_created(created));
+    }
 }
 
 /// Flush the staging file to the disk before it replaces the target. On macOS `sync_all` asks
@@ -361,6 +381,7 @@ mod tests {
     #[test]
     fn atomic_saves_keep_finder_tags_and_binary_extended_attributes() {
         use rustix::fs::{XattrFlags, fgetxattr, setxattr};
+        use std::os::macos::fs::FileTimesExt as _;
         let dir = test_dir("xattrs");
         let target = dir.join("out.pdf");
         let attributes: &[(&str, &[u8])] = &[
@@ -372,9 +393,15 @@ mod tests {
         for (name, value) in attributes {
             setxattr(&target, *name, value, XattrFlags::empty()).unwrap();
         }
+        let created = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_577_934_245);
+        let original = std::fs::OpenOptions::new().write(true).open(&target).unwrap();
+        original.set_times(std::fs::FileTimes::new().set_created(created)).unwrap();
+        assert_eq!(original.metadata().unwrap().created().unwrap(), created);
+        drop(original);
         // Both desktop and automation name forms, including a second save of the replacement.
         for form in [StagingName::TagThenSuffix, StagingName::SuffixThenTag] {
             write_atomically_with(&target, b"NEW", form, [7], |staged| {
+                assert_eq!(staged.metadata().unwrap().created().unwrap(), created, "creation date must survive attribute copying before flush");
                 for (name, value) in attributes {
                     let mut bytes = [0u8; 256];
                     let len = fgetxattr(staged, *name, &mut bytes[..]).unwrap();
@@ -384,6 +411,7 @@ mod tests {
             })
             .unwrap();
             let saved = std::fs::File::open(&target).unwrap();
+            assert_eq!(saved.metadata().unwrap().created().unwrap(), created);
             for (name, value) in attributes {
                 let mut bytes = [0u8; 256];
                 let len = fgetxattr(&saved, *name, &mut bytes[..]).unwrap();
@@ -552,6 +580,34 @@ mod tests {
         let plain = dir.join("plain");
         std::fs::write(&plain, b"").unwrap();
         assert_eq!(mode(&fresh), mode(&plain), "a new file is not made private");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #2658: a save replaces the file, but the document is the same one: it keeps its creation
+    /// date where the system lets a program set it.
+    #[cfg(any(windows, target_os = "macos"))]
+    #[test]
+    fn a_replaced_file_keeps_its_creation_date() {
+        #[cfg(target_os = "macos")]
+        use std::os::macos::fs::FileTimesExt as _;
+        #[cfg(windows)]
+        use std::os::windows::fs::FileTimesExt as _;
+        let dir = test_dir("created");
+        let target = dir.join("doc.pdf");
+        std::fs::write(&target, b"OLD").unwrap();
+        // 2020-01-02 03:04:05 UTC.
+        let then = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_577_934_245);
+        let file = std::fs::OpenOptions::new().write(true).open(&target).unwrap();
+        file.set_times(std::fs::FileTimes::new().set_created(then)).unwrap();
+        drop(file);
+        assert_eq!(std::fs::metadata(&target).unwrap().created().unwrap(), then, "the fixture's date is set");
+        write_atomically(&target, b"NEW", StagingName::SuffixThenTag).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"NEW");
+        assert_eq!(std::fs::metadata(&target).unwrap().created().unwrap(), then, "the saved file keeps its creation date");
+        // A new file gets a date of its own.
+        let fresh = dir.join("new.pdf");
+        write_atomically(&fresh, b"NEW", StagingName::SuffixThenTag).unwrap();
+        assert!(std::fs::metadata(&fresh).unwrap().created().unwrap() > then);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
