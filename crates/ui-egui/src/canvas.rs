@@ -4049,14 +4049,15 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // Full screen: the click turns the page unless it did something else first. It waits out the
     // double-click time: turning on the first click's release sent a double-click's second click,
     // meant to select a word, to the next page (review on #2070). A selection cancels it, and so
-    // does leaving full screen; a double-click elsewhere still turns once.
+    // do a link followed meanwhile and leaving full screen; a double-click elsewhere still turns
+    // once.
     let now = ui.input(|i| i.time);
     if present_click && clicked_link.is_none() && view.selection.is_none() && view.clicks < 2 {
         let delay = ui.ctx().options(|o| o.input_options.max_double_click_delay);
         view.present_turn = Some((now + delay, !present_back));
     }
     if let Some((due, forward)) = view.present_turn {
-        if view.selection.is_some() || view.presentation.is_none() {
+        if clicked_link.is_some() || view.selection.is_some() || view.presentation.is_none() {
             view.present_turn = None;
         } else if now >= due {
             view.present_turn = None;

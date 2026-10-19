@@ -545,6 +545,40 @@ fn coalesced_primary_clicks_select_line_then_spaced_click_clears() {
     }
 }
 
+/// Review on #2070: a click on the page in full screen waits out the double-click time before
+/// it turns the page, and a link clicked meanwhile used to leave that turn pending: the link
+/// jumped to page 3, then the page moved on to page 4.
+#[test]
+fn full_screen_link_click_cancels_the_pending_page_turn() {
+    let page = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>";
+    let four_pages = String::from_utf8(two_lines())
+        .unwrap()
+        .replace("/Kids [3 0 R] /Count 1", "/Kids [3 0 R 6 0 R 7 0 R 8 0 R] /Count 4")
+        .replace("/Contents 4 0 R /Resources", "/Annots [9 0 R] /Contents 4 0 R /Resources")
+        .replace(
+            "trailer",
+            &format!(
+                "6 0 obj {page} endobj\n7 0 obj {page} endobj\n8 0 obj {page} endobj\n9 0 obj << /Type /Annot /Subtype /Link /Rect [200 20 280 60] /Border [0 0 0] /Dest [7 0 R /Fit] >> endobj\ntrailer"
+            ),
+        )
+        .into_bytes();
+    let (mut h, _) = harness_with(four_pages, |_| {});
+    h.state_mut().apply_full_screen(true);
+    crate::support::wait_until(&mut h, "the page in full screen", |app| app.views[0].glyph_screen_pos(0, 5).is_some() && !app.render_pending());
+    let r = h.state().views[0].page_screen_rect(0).expect("page 1 on screen");
+    let at = |x: f32, y: f32| egui::pos2(r.left() + x / 300.0 * r.width(), r.top() + (200.0 - y) / 200.0 * r.height());
+    // A click on blank page area, then, within the double-click time, a click on the link.
+    h.hover_at(at(150.0, 90.0));
+    h.run_steps(1);
+    click(&mut h, at(150.0, 90.0));
+    h.run_steps(3);
+    h.hover_at(at(240.0, 40.0));
+    h.run_steps(1);
+    click(&mut h, at(240.0, 40.0));
+    h.run_steps(30);
+    assert_eq!(h.state().views[0].current, 2, "the link's page, and no turn after it");
+}
+
 /// Review on #2070: in full screen a click goes forward a page, but a double-click selects the
 /// word and stays: the click waits out the double-click time before turning. Turning on the first
 /// click's release had sent the second click to the next page. Leaving full screen meanwhile
