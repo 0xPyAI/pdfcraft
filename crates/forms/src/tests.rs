@@ -3292,3 +3292,52 @@ fn every_shape_of_form_fonts_ends_as_objects() {
     }
     assert_eq!(cases, 1 + 2 * (2 + 2 * 6 * 3), "every shape was tried");
 }
+
+/// #3441 (review follow-up): filling a field converts the form's inline `/DR` fonts, so a form
+/// an earlier PdfCraft made works in Acrobat once it has been filled here. Nothing is added. A
+/// form a signature covers keeps `/DR` as the signer saw it, and a form whose fonts are objects
+/// already leaves its `/DR` object unwritten.
+#[test]
+fn filling_a_field_makes_inline_form_fonts_objects_unless_the_form_is_signed() {
+    let inline = "/Helv << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>";
+    let form = |signed: bool, dr: &str| {
+        let sig = if signed { "<< /Type /Annot /Subtype /Widget /FT /Sig /T (sig) /V 7 0 R /Rect [0 0 0 0] /P 3 0 R >>" } else { "null" };
+        let fields = if signed { "[5 0 R 6 0 R]" } else { "[5 0 R]" };
+        document(&[
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+            "<< /Type /Page /Parent 2 0 R /Annots [5 0 R] >>".into(),
+            format!("<< /Fields {fields} /DA (/Helv 0 Tf 0 g) /DR {dr} >>"),
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /DA (/Helv 12 Tf 0 g) /Rect [50 700 300 720] /P 3 0 R >>".into(),
+            sig.into(),
+            "<< /Type /Sig /Filter /Adobe.PPKLite /Contents <00> >>".into(),
+            "<< /Font << /Helv 9 0 R >> >>".into(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        ])
+    };
+    let mut doc = form(false, &format!("<< /Font << {inline} >> >>"));
+    set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
+    let doc = reopen(&doc);
+    let fonts = dr_fonts(&doc);
+    assert!(fonts.reference(b"Helv").is_some(), "Helv became an object: {fonts:?}");
+    assert_eq!(fonts.len(), 1, "nothing added: {fonts:?}");
+    assert_eq!(field(&fields(&doc), "name").value, ["Ada"]);
+
+    let mut doc = form(true, &format!("<< /Font << {inline} >> >>"));
+    set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
+    let doc = reopen(&doc);
+    assert!(dr_fonts(&doc).get(b"Helv").is_some_and(|h| h.as_dict().is_some()), "a signed form keeps /DR as it was");
+
+    // An empty signature field signs nothing: the form is converted as an unsigned one.
+    let mut doc = form(true, &format!("<< /Font << {inline} >> >>"));
+    doc.update_dict(pdfcraft_cos::ObjRef::new(6, 0), |d| {
+        d.remove(b"V");
+    })
+    .unwrap();
+    set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
+    assert!(dr_fonts(&reopen(&doc)).reference(b"Helv").is_some(), "an unsigned signature field doesn't hold /DR back");
+
+    let mut doc = form(false, "8 0 R");
+    set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
+    assert!(!doc.modified_objects().contains(&8), "/DR unchanged: {:?}", doc.modified_objects());
+}
