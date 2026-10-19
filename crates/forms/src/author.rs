@@ -136,8 +136,17 @@ pub(crate) fn ensure_form(doc: &mut Document) -> Result<ObjRef, FormError> {
     }
     let mut dr = af.get(b"DR").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
     let mut fonts = dr.get(b"Font").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
-    // Acrobat's resource names for the standard fonts its Appearance tab offers.
+    // Each /DR font is its own object: Acrobat, redrawing a text field after it is typed in,
+    // shows nothing when the font is a dictionary written inline in /DR (#3441). Fonts an
+    // earlier save wrote inline become objects too; what they say is unchanged.
     let mut added = false;
+    let inline: Vec<(Vec<u8>, Dict)> = fonts.iter().filter_map(|(k, v)| Some((k.clone(), v.as_dict()?.clone()))).collect();
+    for (name, font) in inline {
+        let r = doc.add(Object::Dict(font));
+        fonts.set(name, Object::Ref(r));
+        added = true;
+    }
+    // Acrobat's resource names for the standard fonts its Appearance tab offers.
     for (name, base) in [("Helv", "Helvetica"), ("TiRo", "Times-Roman"), ("Cour", "Courier")] {
         if fonts.contains(name.as_bytes()) {
             continue;
@@ -147,12 +156,20 @@ pub(crate) fn ensure_form(doc: &mut Document) -> Result<ObjRef, FormError> {
         f.set(b"Subtype".to_vec(), Object::name("Type1"));
         f.set(b"BaseFont".to_vec(), Object::name(base));
         f.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
-        fonts.set(name.as_bytes().to_vec(), Object::Dict(f));
+        let r = doc.add(Object::Dict(f));
+        fonts.set(name.as_bytes().to_vec(), Object::Ref(r));
         added = true;
     }
     if added {
-        dr.set(b"Font".to_vec(), Object::Dict(fonts));
-        af.set(b"DR".to_vec(), Object::Dict(dr));
+        // An indirect /DR or /Font stays the object it is.
+        match dr.get(b"Font").and_then(Object::as_ref) {
+            Some(fr) => doc.set(fr, Object::Dict(fonts)),
+            None => dr.set(b"Font".to_vec(), Object::Dict(fonts)),
+        }
+        match af.get(b"DR").and_then(Object::as_ref) {
+            Some(dr_ref) => doc.set(dr_ref, Object::Dict(dr)),
+            None => af.set(b"DR".to_vec(), Object::Dict(dr)),
+        }
     }
     doc.set(r, Object::Dict(af));
     Ok(r)
