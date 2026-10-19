@@ -174,8 +174,8 @@ impl PdfCraftApp {
     /// while Edit is on (its tab, or the Edit text & images or Add text tool). The page must be a
     /// picture (an image covering at least half of it) with no text of its own: comments and text
     /// boxes over it do not count as text, but real page text does, and such a page (a flyer with a
-    /// background picture) is left alone. It is one undoable step, "Recognize text", and is not
-    /// run again for that page after Undo.
+    /// background picture) is left alone, and is judged again only when the document changes. It
+    /// is one undoable step, "Recognize text", and is not run again for that page after Undo.
     pub(crate) fn auto_ocr_scanned_page(&mut self) {
         // Edit is on when its panel is open (the Edit tab) or Edit text & images or Add text is picked,
         // the same test the page view uses for editing content.
@@ -193,16 +193,23 @@ impl PdfCraftApp {
         if doc.read_only_reason.is_some() || !doc.allows_modification() {
             return;
         }
+        // A page found not to be a scan is judged again only once the document has changed, not
+        // every frame (listing its images parses the page).
+        let generation = doc.edit_generation();
+        if self.views[vi].auto_ocr_skipped.get(&page) == Some(&generation) {
+            return;
+        }
         let Some(info) = doc.info.pages.get(page) else { return };
         let page_area = f64::from(info.width) * f64::from(info.height);
         let covered = doc.page_images(page).iter().any(|i| {
             let [x0, y0, x1, y1] = i.visible_rect.unwrap_or(i.rect);
             page_area > 0.0 && ((x1 - x0) * (y1 - y0)).abs() >= 0.5 * page_area
         });
-        self.views[vi].auto_ocr_tried.insert(page);
         if !covered || !pdfcraft_engine::ocr::available() {
+            self.views[vi].auto_ocr_skipped.insert(page, generation);
             return;
         }
+        self.views[vi].auto_ocr_tried.insert(page);
         // Only a page with no text of its own is read. Comments and text boxes over the picture do
         // not count as its text (a scan with a few comments is still a scan, as in Acrobat), but
         // a page with real text and a background picture is left alone.

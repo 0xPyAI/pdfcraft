@@ -275,6 +275,37 @@ fn editing_a_page_with_text_over_a_background_picture_changes_nothing() {
     assert!(!h.state().session.get(id).unwrap().dirty, "the file is not marked modified");
 }
 
+/// A page that is not a scan when Edit looks at it is looked at again after the document changes:
+/// adding a picture of text that covers it turns it into a scan, and Edit then reads it (and does
+/// so once).
+#[test]
+fn a_page_that_becomes_a_scan_while_edit_is_on_is_recognized() {
+    if !pdfcraft_engine::ocr::available() {
+        eprintln!("skipped: OCR models not installed");
+        return;
+    }
+    let png = {
+        let mut s = Session::new();
+        let text = s.create_from_text("t", "Recognize these scanned words").unwrap();
+        let id = s.open("text.pdf", None, text, None).unwrap();
+        export::Exporter::new(s.get(id).unwrap()).png(0, 150.0).unwrap()
+    };
+    let blank = Session::new().create_blank(595.0, 842.0, 1).unwrap().to_vec();
+    let mut h = edit_harness(blank);
+    let id = h.state().active_ids().unwrap().1;
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(4);
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), None, "a blank page is no scan: nothing happened");
+    // The same page, now with a picture of text over all of it.
+    h.state_mut()
+        .session
+        .apply(id, Edit::AddImage { page: 0, rect: Some([0.0, 0.0, 595.0, 842.0]), name: "scan.png".into(), bytes: std::sync::Arc::new(png) })
+        .unwrap();
+    h.run_steps(6);
+    assert!(h.state().ocr_run.is_none(), "finished");
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Recognize text"));
+}
+
 #[test]
 fn editing_a_page_that_has_text_does_not_recognize_anything() {
     let mut h = edit_harness(text_page());
