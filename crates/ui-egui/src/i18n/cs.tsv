@@ -2508,3 +2508,5 @@ animation effects	Off	Vypnuto
 	Make properties default	Nastavit vlastnosti jako výchozí
 	Pages selected	Vybrané stránky
 	Page properties	Vlastnosti stránky
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Změnit tvar komentáře

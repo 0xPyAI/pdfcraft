@@ -172,6 +172,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-20 (M5, reshape lines):** A line or arrow could only be moved after it was drawn; its length and angle stayed. A selected line, connected lines, polygon or cloud now has a handle on each end or corner: dragging one reshapes it (Shift holds it to 45°), as one undo step, with the new shape drawn while dragging. `pdfcraft_annot::set_points`, `Edit::ReshapeAnnotation`, `comment_edit points`; comment lists carry the points. Estimates unchanged.
+
 - **2026-10-19 (M14, #3373):** The main menu and its long submenus scroll in short windows, keeping their commands reachable. Estimates unchanged.
 
 - **2026-10-19 (M3, #3387):** Save-prompt shortcuts yield to later consent and utility dialogs; a synthetic UI regression checks that an edited document stays open. Estimates unchanged.

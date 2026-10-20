@@ -2440,3 +2440,5 @@ animation effects	Off	Ανενεργά
 	Make properties default	Ορισμός ιδιοτήτων ως προεπιλογή
 	Pages selected	Επιλεγμένες σελίδες
 	Page properties	Ιδιότητες σελίδας
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Αλλαγή σχήματος σχολίου

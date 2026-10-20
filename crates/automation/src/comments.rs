@@ -174,7 +174,7 @@ impl Automation {
         let all = self.comments(a)?;
         let view = |c: &Annotation| -> Value {
             let p = &doc.info.pages[c.page.min(doc.info.pages.len().saturating_sub(1))];
-            json!({
+            let mut v = json!({
                 "id": c.name,
                 "page": c.page + 1,
                 "index": c.index + 1,
@@ -184,7 +184,14 @@ impl Automation {
                 "modified": c.modified,
                 "rect": rect_to_view(p, c.rect),
                 "color": c.color.map(hex),
-            })
+            });
+            // A line's ends, or the corners of connected lines, a polygon or a cloud, as
+            // comment_edit's `points` takes them.
+            if !c.points.is_empty() {
+                let round = |v: f32| (v * 100.0).round() / 100.0;
+                v["points"] = json!(c.points.iter().map(|q| p.user_to_view(q[0], q[1]).map(round)).collect::<Vec<_>>());
+            }
+            v
         };
         let roots: Vec<Value> = all
             .iter()
@@ -632,8 +639,23 @@ impl Automation {
             let (o, d) = (to_user(&info, 0.0, 0.0), to_user(&info, dx, dy));
             edits.push(Edit::MoveAnnotation { page, index, dx: d[0] - o[0], dy: d[1] - o[1] });
         }
+        if let Some(pts) = a.get("points") {
+            let wrong = || ToolError::InvalidArgs("points must be an array of [x, y] points (a line's two ends, or every corner)".into());
+            let points = pts
+                .as_array()
+                .ok_or_else(wrong)?
+                .iter()
+                .map(|p| match p.as_array().map(|p| p.iter().map(|v| v.as_f64()).collect::<Vec<_>>()).as_deref() {
+                    Some([Some(x), Some(y)]) => Ok(to_user(&info, *x, *y)),
+                    _ => Err(wrong()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            edits.push(Edit::ReshapeAnnotation { page, index, points });
+        }
         if edits.is_empty() {
-            return Err(ToolError::InvalidArgs("nothing to change: pass contents, color, opacity, width, fill, font_size, rect or move".into()));
+            return Err(ToolError::InvalidArgs(
+                "nothing to change: pass contents, color, opacity, width, fill, font_size, rect, move or points".into(),
+            ));
         }
         let edit = if edits.len() == 1 { edits.remove(0) } else { Edit::Batch { label: "Edit comment".into(), edits } };
         self.apply(a, edit)

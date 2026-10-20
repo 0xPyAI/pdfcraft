@@ -2435,3 +2435,5 @@ animation effects	Off	Aus
 	Make properties default	Eigenschaften als Standard festlegen
 	Pages selected	Ausgewählte Seiten
 	Page properties	Seiteneigenschaften
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Kommentar umformen

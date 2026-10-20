@@ -2433,3 +2433,5 @@ animation effects	Off	Ki
 	Make properties default	Tulajdonságok beállítása alapértelmezettként
 	Pages selected	Kijelölt oldalak
 	Page properties	Oldaltulajdonságok
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Megjegyzés alakjának módosítása

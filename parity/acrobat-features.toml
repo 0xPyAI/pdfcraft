@@ -3960,6 +3960,18 @@ evidence = ["crates/ui-egui/tests/comments.rs::comments_are_selected_moved_and_d
 notes = "deletes the pop-up and the reply thread"
 
 [[feature]]
+id = "comment.reshape"
+title = "Change a line's ends and a polygon's corners after drawing"
+area = "E"
+tier = "P1"
+milestone = "M5"
+status = "shipped"
+commands = []
+tools = ["comment_edit"]
+evidence = ["crates/annot/src/tests.rs::lines_and_polygons_are_reshaped_by_their_points", "crates/ui-egui/tests/comments.rs::line_ends_are_dragged_to_change_length_and_angle", "crates/automation/tests/automation.rs::comments_are_reshaped_through_the_tool"]
+notes = "A selected line, arrow, connected lines, polygon or cloud has a handle on each end or corner (instead of the frame); dragging one changes the length and angle (Shift holds it to 45° from the point before), with the new shape drawn while dragging, as one undo step (Edit::ReshapeAnnotation). The drawing tools keep drawing from an end (a new line starts there); the Select tool reshapes. /Rect follows the points with room for the width and arrowheads, and the appearance is drawn anew. Headless: comment_edit `points`; comment_list reports them. Measurements keep the points they measured; locked comments keep their shape. Not yet: adding or removing a corner."
+
+[[feature]]
 id = "comment.edit-comment-text"
 title = "Edit comment text"
 area = "E"

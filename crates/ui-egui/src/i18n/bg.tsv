@@ -2397,3 +2397,5 @@ animation effects	Off	Изключени
 	Make properties default	Задаване като свойства по подразбиране
 	Pages selected	Избрани страници
 	Page properties	Свойства на страницата
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Промяна на формата на коментара
