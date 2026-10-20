@@ -70,6 +70,13 @@ impl Number {
 impl Skippable for Number {
     fn skip(r: &mut Reader<'_>, _: bool) -> Option<()> {
         let has_sign = r.forward_if(|b| b == b'+' || b == b'-').is_some();
+        // PdfCraft patch: one more sign, so that skipping a number covers what `read_inner`
+        // reads. `--280` was already covered by the `b'-'` arm below, but `-+280` and `++280`
+        // were not, and a skip that fails where a read succeeds puts the reader back where it
+        // started (#3630 review).
+        if has_sign {
+            r.forward_if(|b| b == b'+' || b == b'-');
+        }
 
         // Some PDFs have weird trailing minuses, so try to accept those as well.
         match r.peek_byte()? {
@@ -368,6 +375,15 @@ mod tests {
         // The fraction too, and a lone sign is still zero.
         assert_eq!(Reader::new("--280.5".as_bytes()).read_without_context::<f64>().unwrap(), -280.5);
         assert_eq!(Reader::new("-".as_bytes()).read_without_context::<i32>().unwrap(), 0);
+
+        // Skipping covers what reading accepts: a skip that fails where a read succeeds puts the
+        // reader back where it started, so `Object::skip` would leave the number in place
+        // (#3630 review).
+        for src in ["--280", "+-280", "-+280", "++280", "-280", "+280", "--280.5"] {
+            let mut r = Reader::new(src.as_bytes());
+            assert!(r.skip::<Number>(false).is_some(), "{src}: not skipped");
+            assert!(r.at_end(), "{src}: only part of the number was skipped");
+        }
     }
 
     #[test]
