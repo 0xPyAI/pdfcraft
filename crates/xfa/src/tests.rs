@@ -1232,6 +1232,16 @@ fn a_label_without_a_width_is_as_wide_as_its_text() {
     assert!(lines.len() > 1, "wraps: {} line(s)", lines.len());
 }
 
+/// A draw without a width and without text (a bordered spacer or rule) keeps the width it has
+/// room for: with no text to size it to, it doesn't shrink to its margins.
+#[test]
+fn an_empty_draw_without_a_width_keeps_the_width_it_has_room_for() {
+    let items = positioned(r#"<draw name="rule" x="0" y="0" h="12pt"><value><text></text></value><border><edge thickness="1pt"/></border></draw>"#);
+    let widest =
+        items.iter().filter_map(|i| if let Item::Line { from, to, .. } = i { Some((to.0 - from.0).abs()) } else { None }).fold(0.0_f64, f64::max);
+    assert!((widest - 540.0).abs() < 0.5, "the border spans the 7.5in box: {widest}");
+}
+
 /// A button without a width is as wide as its caption, not the subform it sits in, unless its
 /// minimum width is wider.
 #[test]

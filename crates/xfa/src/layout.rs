@@ -1015,14 +1015,17 @@ impl Layouter<'_> {
     }
 
     /// How wide text `v` is unwrapped, in `font` and `para`, with a hair to spare so that laying
-    /// it out at that width keeps it on its lines; `None` for what isn't text.
+    /// it out at that width keeps it on its lines; `None` for what isn't text, or text that draws
+    /// nothing.
     fn natural_width(&self, v: &Value, font: &Font, para: &Para) -> Option<f64> {
         let rich = match v {
             Value::Text(t) => text::plain(t),
             Value::Rich(r) => r.clone(),
             _ => return None,
         };
-        Some(text::natural_width(&rich, para, &Face::of(font), &|id| self.embed(id)) + 0.01)
+        // No text (a bordered spacer or rule): nothing to size to, so it keeps what it has room for.
+        let w = text::natural_width(&rich, para, &Face::of(font), &|id| self.embed(id));
+        (w > 0.0).then_some(w + 0.01)
     }
 
     fn value_height(&self, v: &Value, w: f64, ctx: &Ctx) -> f64 {
