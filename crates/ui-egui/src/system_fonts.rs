@@ -110,21 +110,52 @@ fn script_fallback(candidates: &[PathBuf], probe: char) -> Option<Arc<FontData>>
     candidates.iter().find_map(|path| read(path, probe, MAX_BYTES))
 }
 
+/// macOS folders that hold Apple's own families, system folder first. On macOS 26.6 (Apple M5
+/// Max) `Kohinoor.ttc` is in `/System/Library/Fonts` while the Sangam MN faces are under
+/// `Supplemental/`, so looking one family up in both folders stops a move by Apple from silently
+/// dropping it — which is what happened to `Supplemental/Kohinoor.ttc`, listed by the code but
+/// not present on that OS. `/Library/Fonts` is deliberately not listed here: it holds
+/// compatibility symlinks into `Supplemental/`, and the one face wanted from it is named in full
+/// below. On that machine each family below lives in exactly one of the two folders, so their
+/// order is a deterministic choice rather than a tie-break that was ever exercised.
+///
+/// Only [`macos_devanagari_candidates`] uses this today; the Telugu, Sinhala and Tamil lists still
+/// name one folder each. Their first choices all exist on macOS 26.6, so nothing is dropping there
+/// now — the same expansion would fit them, and is left for a change that tests it.
+const MACOS_FONT_DIRS: [&str; 2] = ["/System/Library/Fonts", "/System/Library/Fonts/Supplemental"];
+
+/// The Devanagari families this list tries, best first. Spelled as the files are on disk —
+/// `Devanagari Sangam MN.ttc` has spaces, like the other Sangam MN families below. Apple ships at
+/// least one more Devanagari-capable collection on macOS 26.6 (`Supplemental/ITFDevanagari.ttc`,
+/// 10 faces), and this list does not try it.
+const MACOS_DEVANAGARI_FAMILIES: &[&str] = &["DevanagariMT.ttc", "Devanagari Sangam MN.ttc", "Kohinoor.ttc"];
+
+/// `families`, best first, each looked for in every folder of `dirs`. Split out from
+/// [`macos_candidates`] so the macOS layout can be tested on a machine with no Apple fonts.
+fn macos_families_in(dirs: &[&str], families: &[&str]) -> Vec<PathBuf> {
+    families.iter().flat_map(|family| dirs.iter().map(move |dir| Path::new(dir).join(family))).collect()
+}
+
+/// [`macos_families_in`] against the folders Apple actually uses.
+fn macos_candidates(families: &[&str]) -> Vec<PathBuf> {
+    macos_families_in(&MACOS_FONT_DIRS, families)
+}
+
+/// The macOS Devanagari list: Apple's installed families, then the last-resort Unicode face.
+/// `Arial Unicode.ttf` is listed from `/Library/Fonts`, where it is a symlink into
+/// `Supplemental/` on current macOS, and is read only when no family above covers the script.
+fn macos_devanagari_candidates() -> Vec<PathBuf> {
+    let mut list = macos_candidates(MACOS_DEVANAGARI_FAMILIES);
+    list.push(PathBuf::from("/Library/Fonts/Arial Unicode.ttf"));
+    list
+}
+
 /// Well-known locations of Devanagari (Hindi) faces, best first.
 fn devanagari_candidates() -> Vec<PathBuf> {
     if cfg!(windows) {
         ["Nirmala.ttf", "NirmalaB.ttf", "mangal.ttf", "aparaj.ttf", "utsah.ttf"].iter().map(|f| windows_fonts().join(f)).collect()
     } else if cfg!(target_os = "macos") {
-        [
-            "/System/Library/Fonts/Supplemental/DevanagariMT.ttc",
-            "/System/Library/Fonts/Supplemental/DevanagariSangamMN.ttc",
-            "/System/Library/Fonts/Supplemental/Kohinoor.ttc",
-            "/System/Library/Fonts/Kohinoor.ttc",
-            "/Library/Fonts/Arial Unicode.ttf",
-        ]
-        .iter()
-        .map(PathBuf::from)
-        .collect()
+        macos_devanagari_candidates()
     } else {
         unix_fonts(&[
             "google-noto/NotoSansDevanagariUI-Regular.ttf",
@@ -398,6 +429,33 @@ mod tests {
         }
     }
 
+    /// `script_fallback` honours the documented installed-font switch, under which it returns
+    /// nothing before order is ever consulted — so both loader tests skip when it is off, the way
+    /// `tests/fonts.rs` skips for the same reason. Without this the suite goes red in exactly the
+    /// mode `cargo xtask screenshots` uses.
+    fn installed_faces_switched_off() -> bool {
+        std::env::var_os("PDFCRAFT_SYSTEM_FONTS").is_some_and(|v| v == "0")
+    }
+
+    #[test]
+    fn the_first_readable_candidate_wins_not_the_last() {
+        // List order *is* the preference, so a loader that scanned back-to-front would pick a
+        // different face and nobody would notice. Two bundled faces both cover 'A' and differ in
+        // size, so the winner is identifiable by length alone.
+        if installed_faces_switched_off() {
+            eprintln!("skipping: PDFCRAFT_SYSTEM_FONTS=0 turns the loader off before order matters");
+            return;
+        }
+        let dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts"));
+        let (inter, mono) = (dir.join("Inter-Regular.ttf"), dir.join("JetBrainsMono-Regular.ttf"));
+        let size = |p: &Path| std::fs::metadata(p).expect("bundled face").len();
+        assert_ne!(size(&inter), size(&mono), "the two fixtures must be tellable apart");
+        let first = script_fallback(&[inter.clone(), mono.clone()], 'A').expect("Inter covers 'A'");
+        assert_eq!(first.font.len() as u64, size(&inter), "the first readable candidate must win");
+        let reversed = script_fallback(&[mono.clone(), inter], 'A').expect("JetBrains Mono covers 'A'");
+        assert_eq!(reversed.font.len() as u64, size(&mono), "reversing the list must reverse the pick");
+    }
+
     #[test]
     fn a_script_fallback_is_the_first_candidate_with_the_probe() {
         let inter = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/Inter-Regular.ttf"));
@@ -426,5 +484,87 @@ mod tests {
                 assert!(!["notosanscjk", "notoserifcjk", "sourcehan", "source-han"].iter().any(|b| name.contains(b)), "{name}");
             }
         }
+    }
+
+    /// The macOS Devanagari list, exactly: families best first, each tried in the system folder
+    /// before `Supplemental/`. This pins the spellings Apple uses on disk and the order that
+    /// decides which face wins. A missing space (`DevanagariSangamMN.ttc`), swapping the two
+    /// folders, or walking folder-major instead of family-major all fail here — and they fail on
+    /// every OS, because this test reads no filesystem.
+    #[test]
+    fn the_macos_devanagari_list_is_apples_layout() {
+        assert_eq!(
+            macos_devanagari_candidates(),
+            vec![
+                PathBuf::from("/System/Library/Fonts/DevanagariMT.ttc"),
+                PathBuf::from("/System/Library/Fonts/Supplemental/DevanagariMT.ttc"),
+                PathBuf::from("/System/Library/Fonts/Devanagari Sangam MN.ttc"),
+                PathBuf::from("/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc"),
+                PathBuf::from("/System/Library/Fonts/Kohinoor.ttc"),
+                PathBuf::from("/System/Library/Fonts/Supplemental/Kohinoor.ttc"),
+                PathBuf::from("/Library/Fonts/Arial Unicode.ttf"),
+            ]
+        );
+        // Pin what the application actually consults, not just the helper that builds it.
+        #[cfg(target_os = "macos")]
+        assert_eq!(devanagari_candidates(), macos_devanagari_candidates(), "the app must consult the list this test pins");
+    }
+
+    #[test]
+    fn a_family_whose_name_has_spaces_is_still_found() {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+        let root = std::env::temp_dir().join(format!("pdfcraft-macos-fonts-{}-{nanos}", std::process::id()));
+        let supplemental = root.join("Supplemental");
+        std::fs::create_dir_all(&supplemental).expect("build a temp macOS-shaped font tree");
+        let dirs = [root.to_string_lossy().to_string(), supplemental.to_string_lossy().to_string()];
+        let names: Vec<&str> = dirs.iter().map(|d| d.as_str()).collect();
+        let inter: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+        let spaced = "Devanagari Sangam MN.ttc";
+        std::fs::write(supplemental.join(spaced), inter).expect("place a face at the spaced path");
+        let found = macos_families_in(&names, &[spaced]).iter().any(|p| read(p, 'A', MAX_BYTES).is_some());
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(found, "a family named with spaces did not resolve under {dirs:?}");
+    }
+
+    /// On a Mac, where Apple's fonts are installed: every family folder that really exists is
+    /// reachable from the candidate list, and something in the list covers Devanagari. A family
+    /// Apple no longer ships is reported rather than failed — this list exists precisely for the
+    /// case where one of them is missing. CI has no macOS runner (`.github/workflows/ci.yml`
+    /// keeps the org's Mac slots for release builds), so this runs on contributors' and
+    /// maintainers' machines.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn every_installed_devanagari_face_is_reachable_on_this_mac() {
+        if installed_faces_switched_off() {
+            eprintln!("skipping on this machine: PDFCRAFT_SYSTEM_FONTS=0 turns installed faces off");
+            return;
+        }
+        let list = devanagari_candidates();
+        for family in MACOS_DEVANAGARI_FAMILIES {
+            let installed: Vec<PathBuf> = MACOS_FONT_DIRS.iter().map(|dir| Path::new(dir).join(family)).filter(|p| p.is_file()).collect();
+            if installed.is_empty() {
+                eprintln!("{family}: not installed on this machine, so the list offers nothing that exists — fine, and reported only");
+                continue;
+            }
+            for path in &installed {
+                assert!(list.contains(path), "{path:?} is installed here but the candidate list skips it: {list:?}");
+            }
+        }
+        assert!(script_fallback(&devanagari_candidates(), DEVANAGARI_PROBE).is_some(), "no installed face on this Mac covers Devanagari");
+        // And the function callers use, not just its inputs: asserting *some* face loads is not
+        // enough, because both lists end at the same last-resort Unicode face and would rescue a
+        // mix-up. The app-facing function must land on the same bytes, and the same face within
+        // them, as this list produces.
+        let direct = script_fallback(&devanagari_candidates(), DEVANAGARI_PROBE).expect("the list above resolves");
+        let cached = devanagari_fallback().expect("devanagari_fallback() resolves where these faces are installed");
+        assert_eq!(cached.font.len(), direct.font.len(), "devanagari_fallback() must load the face this list points at, not another script's");
+        assert_eq!(cached.index, direct.index, "and the same face within that file");
+        // The advertised last resort is the biggest file on the list and reaches its target
+        // through a symlink, so both the size cap and the link are worth checking here rather
+        // than in a shell. `MAX_BYTES` is what the loader applies to non-Han scripts.
+        assert!(
+            read(Path::new("/Library/Fonts/Arial Unicode.ttf"), DEVANAGARI_PROBE, MAX_BYTES).is_some(),
+            "the last-resort Unicode face did not resolve and load under MAX_BYTES"
+        );
     }
 }
