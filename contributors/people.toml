@@ -148,3 +148,8 @@ sync_github_name = false
 
 [people.MortenHusted]
 sync_github_name = true
+
+[people.EricKaden]
+real_name = "Eric Kaden"
+display_name = "Eric Kaden"
+sync_github_name = false
