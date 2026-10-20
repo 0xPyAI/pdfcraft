@@ -153,3 +153,45 @@ fn form_xobject_inline_image_with_ei_in_samples_keeps_all_samples() {
     let grey = mean_grey_in_box(&rendered.rgba, rendered.width, 110, 302, 290, 482);
     assert!((grey - 54.37).abs() < 1.0, "form inline image mean grey {grey} must be ~54.37 (not ~2 from 1-byte cut)");
 }
+
+#[test]
+fn unfiltered_inline_image_layouts_and_mismatched_l_do_not_inject_content() {
+    let inject_prefix = b"0EI Q BT /F1 18 Tf 72 600 Td (Injected) Tj ET q";
+    let make_image = |params: &str, len: usize| {
+        let mut samples = inject_prefix.to_vec();
+        samples.resize(len, b'0');
+        let mut img = format!("BI {params} ID ").into_bytes();
+        img.extend_from_slice(&samples);
+        img.extend_from_slice(b" EI");
+        img
+    };
+
+    let cases = [
+        ("/W 16 /H 2 /CS /RGB /BPC 8", 96),
+        ("/W 12 /H 2 /CS /CMYK /BPC 8", 96),
+        ("/W 70 /H 4 /CS /G /BPC 1", 36),
+        ("/IM true /W 70 /H 4", 36),
+        ("/W 47 /H 1 /CS /G /BPC 8 /L 5", 47),
+    ];
+
+    let pages: Vec<Vec<u8>> = cases.iter().enumerate().map(|(i, (params, len))| page_stream(&make_image(params, *len), i + 1)).collect();
+
+    let pdf = Arc::new(build_pdf(&pages, &[], ""));
+    let mut renderer = PageRenderer::new(Arc::clone(&pdf), RenderConfig::default());
+
+    for (i, (params, _)) in cases.iter().enumerate() {
+        let page_idx = i;
+        let text_page = renderer.render(RenderRequest { page: page_idx, kind: RequestKind::Text, tile: None, scale: 1.0, tag: 0, preview: false });
+        assert!(text_page.error.is_none(), "case {params} text error: {:?}", text_page.error);
+        let text = text_page.text.expect("page text");
+        let plain = text.plain_text();
+        assert_eq!(plain.trim(), format!("After image P{}", i + 1), "case {params}");
+        assert!(text.find("Injected").is_empty(), "case {params} must not match Injected in Find");
+
+        let rendered = renderer.render(RenderRequest { page: page_idx, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, preview: false });
+        assert!(rendered.error.is_none(), "case {params} render error: {:?}", rendered.error);
+
+        let dark = dark_pixels_in_box(&rendered.rgba, rendered.width, 72, 172, 200, 196);
+        assert_eq!(dark, 0, "case {params} must not draw Injected at (72, 600)");
+    }
+}

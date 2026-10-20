@@ -900,7 +900,6 @@ fn unfiltered_image_len(dict: &Dict<'_>) -> Option<usize> {
         (b"ColorSpace", b"CS"),
         (b"BitsPerComponent", b"BPC"),
         (b"ImageMask", b"IM"),
-        (b"Length", b"L"),
     ] {
         if let (Some(full), Some(short)) = (dict.get::<Object<'_>>(full), dict.get::<Object<'_>>(short))
             && full != short
@@ -968,13 +967,7 @@ fn unfiltered_image_len(dict: &Dict<'_>) -> Option<usize> {
         (components, bits)
     };
     let row = width.checked_mul(components)?.checked_mul(bits)?.div_ceil(8);
-    let len = row.checked_mul(height)?;
-    match get(b"Length", b"L") {
-        None | Some(Object::Null(_)) => {}
-        Some(value) if usize::try_from(int(&value)?).ok() == Some(len) => {}
-        Some(_) => return None,
-    }
-    Some(len)
+    row.checked_mul(height)
 }
 
 /// PdfCraft patch: locate the deterministic `EI` terminator of an unfiltered inline image (#3107).
@@ -1243,8 +1236,34 @@ BT /F1 14 Tf 72 550 Td (After) Tj ET";
             assert_eq!(windowed_instructions(indexed_stream, || piece), expected_indexed);
         }
 
-        // Conflicting /W and /Width or mismatched /L falls back to the heuristic scan.
+        // Conflicting /W and /Width falls back to the heuristic scan; mismatched /L does not disrupt the verified layout.
         let mismatch_l = b"BI /W 4 /H 1 /CS /G /BPC 8 /L 99 ID abcd EI Q";
         assert_eq!(operators(mismatch_l), vec![b"BI".to_vec(), b"Q".to_vec()]);
+        let conflict_w = b"BI /W 4 /Width 8 /H 1 /CS /G /BPC 8 ID abcd EI Q";
+        assert_eq!(operators(conflict_w), vec![b"BI".to_vec(), b"Q".to_vec()]);
+    }
+
+    #[test]
+    fn each_layout_keeps_its_computed_length() {
+        let inject = b" EI Q BT /F1 9 Tf (X) Tj ET q";
+        let case = |params: &str, len: usize| {
+            let mut samples = inject.to_vec();
+            samples.resize(len, b'0');
+            let mut data = format!("BI {params} ID ").into_bytes();
+            data.extend_from_slice(&samples);
+            data.extend_from_slice(b" EI Q");
+            data
+        };
+        for (params, len) in [
+            ("/W 16 /H 2 /CS /RGB /BPC 8", 96),
+            ("/W 12 /H 2 /CS /CMYK /BPC 8", 96),
+            ("/W 70 /H 4 /CS /G /BPC 1", 36),
+            ("/IM true /W 70 /H 4", 36),
+            ("/W 30 /H 2 /CS [/I /RGB 1 <000000ffffff>] /BPC 4 /L 30", 30),
+            ("/W 15 /H 2 /CS /G /BPC 16 /L 60", 60),
+            ("/W 47 /H 1 /CS /G /BPC 8 /L 5", 47),
+        ] {
+            assert_eq!(operators(&case(params, len)), vec![b"BI".to_vec(), b"Q".to_vec()], "{params}");
+        }
     }
 }
