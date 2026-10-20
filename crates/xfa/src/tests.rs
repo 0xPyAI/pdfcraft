@@ -1191,10 +1191,6 @@ fn repeating_subforms_inside_positioned_content_get_their_instances() {
     assert!(((after.rect.y - rows[2].rect.y) - step).abs() < 0.01, "after: {:?}, last row: {:?}", after.rect, rows[2].rect);
 }
 
-/// A page area without an `<occur>` repeats for as long as the body needs pages. Before, it was
-/// treated like a subform (at most once), so once the first body page was out the layout fell
-/// back to the last page area, here one limited to a single use, and drew its content over every
-/// body page (and listed a copy of its fields per page).
 /// A positioned subform holding `body`, laid out; its page's items.
 fn positioned(body: &str) -> Vec<Item> {
     let xdp = format!(
@@ -1208,6 +1204,8 @@ fn positioned(body: &str) -> Vec<Item> {
     layout_xml(&xdp).unwrap().pages.into_iter().next().unwrap().items
 }
 
+/// A text draw without a width is as wide as its text, so right-aligned text starts at its x; a
+/// minimum width wider than the text still wins, and text longer than the room left still wraps.
 #[test]
 fn a_label_without_a_width_is_as_wide_as_its_text() {
     const TEXT: &str = "PERSONNEL ONLY: from date (YYYYMMDD):";
@@ -1234,6 +1232,8 @@ fn a_label_without_a_width_is_as_wide_as_its_text() {
     assert!(lines.len() > 1, "wraps: {} line(s)", lines.len());
 }
 
+/// A button without a width is as wide as its caption, not the subform it sits in, unless its
+/// minimum width is wider.
 #[test]
 fn a_button_without_a_width_is_as_wide_as_its_caption() {
     // No width, a minimum narrower than its caption: as wide as the caption, not the subform.
@@ -1252,6 +1252,8 @@ fn a_button_without_a_width_is_as_wide_as_its_caption() {
     assert!((button.rect.w - 200.0).abs() < 0.05, "{}", button.rect.w);
 }
 
+/// A button without a height is as tall as one line of its caption in the caption's own font,
+/// with none of a text field's padding, and never shorter than its minimum height.
 #[test]
 fn a_button_without_a_height_is_as_tall_as_its_caption() {
     // A 10pt field font, an 8pt caption: the button is as tall as its caption's line (no
@@ -1266,6 +1268,8 @@ fn a_button_without_a_height_is_as_tall_as_its_caption() {
     assert!((button("10.5pt") - 10.5).abs() < 0.05, "{}", button("10.5pt"));
 }
 
+/// A button's widget is its whole field, at the field's position and size: the field's margins
+/// pad the caption, not the box.
 #[test]
 fn a_buttons_box_is_the_whole_field_whatever_its_margins() {
     // The button's box is its field's border: its margins pad the caption, not the box.
@@ -1277,6 +1281,10 @@ fn a_buttons_box_is_the_whole_field_whatever_its_margins() {
     assert!((button.x - (36.0 + 72.0)).abs() < 0.05, "{button:?}");
 }
 
+/// A page area without an `<occur>` repeats for as long as the body needs pages. Before, it was
+/// treated like a subform (at most once), so once the first body page was out the layout fell
+/// back to the last page area, here one limited to a single use, and drew its content over every
+/// body page (and listed a copy of its fields per page).
 #[test]
 fn page_area_without_occur_serves_every_body_page() {
     let section = |n: u32| {

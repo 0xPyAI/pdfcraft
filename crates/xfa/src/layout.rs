@@ -904,6 +904,9 @@ impl Layouter<'_> {
         size
     }
 
+    /// The size (width, height) of `node` within `avail_w`, uncached ([`Self::size_of`] caches it).
+    /// Without a width, a container, a text draw or a button is as wide as its content (at most
+    /// `avail_w`) and anything else takes `avail_w`; without a height, it is as tall as its content.
     fn measure(&self, node: &Node, avail_w: f64, ctx: &Ctx, depth: usize) -> (f64, f64) {
         let c = node.common();
         // The node's own SOM: its repeating children count their instances under it, and a
@@ -1055,6 +1058,9 @@ impl Layouter<'_> {
         Some((placement, reserve))
     }
 
+    /// The height of field `f`'s content within `inner_w` (inside its margins): its widget (a check
+    /// box, a button's caption, or one line of text or three when multi-line, more for a text field
+    /// that grows) plus a caption above or below it, or the taller of the two for one beside it.
     fn field_height(&self, f: &Field, inner_w: f64, ctx: &Ctx) -> f64 {
         let font = ctx.font.apply(&f.common.font);
         let lines = if f.multiline { 3.0 } else { 1.0 };
@@ -1486,6 +1492,9 @@ impl Layouter<'_> {
         if *n == 1 { base } else { format!("{base}_{n}") }
     }
 
+    /// Draw field `f` at `rect`: its border (a button's is its widget's box), its caption, then its
+    /// widget, or its value as plain text when it is non-interactive, a barcode, or a text field
+    /// taller than its content area. `radio` is set for a group's radio button; `sib` is its SOM index.
     fn draw_field(
         &mut self,
         f: &Field,
