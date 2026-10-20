@@ -119,9 +119,10 @@ fn script_fallback(candidates: &[PathBuf], probe: char) -> Option<Arc<FontData>>
 /// below. On that machine each family below lives in exactly one of the two folders, so their
 /// order is a deterministic choice rather than a tie-break that was ever exercised.
 ///
-/// Only [`macos_devanagari_candidates`] uses this today; the Telugu, Sinhala and Tamil lists still
-/// name one folder each. Their first choices all exist on macOS 26.6, so nothing is dropping there
-/// now — the same expansion would fit them, and is left for a change that tests it.
+/// Only [`macos_devanagari_candidates`] uses this today: in the Telugu, Sinhala and Tamil lists each
+/// family is named once, in a single folder (some of those lists also name `/Library/Fonts` for the
+/// Unicode face). Their first choices all exist on macOS 26.6, so nothing is dropping there now — the
+/// same two-folder expansion would fit them, and is left for a change that tests it.
 const MACOS_FONT_DIRS: [&str; 2] = ["/System/Library/Fonts", "/System/Library/Fonts/Supplemental"];
 
 /// The Devanagari families this list tries, best first. Spelled as the files are on disk —
@@ -430,8 +431,8 @@ mod tests {
     }
 
     /// `script_fallback` honours the documented installed-font switch, under which it returns
-    /// nothing before order is ever consulted — so both loader tests skip when it is off, the way
-    /// `tests/fonts.rs` skips for the same reason. Without this the suite goes red in exactly the
+    /// nothing before order is ever consulted — so both loader tests and the macOS oracle skip when
+    /// it is off, the way `tests/fonts.rs` skips for the same reason. Without this the suite goes red in exactly the
     /// mode `cargo xtask screenshots` uses.
     fn installed_faces_switched_off() -> bool {
         std::env::var_os("PDFCRAFT_SYSTEM_FONTS").is_some_and(|v| v == "0")
@@ -551,7 +552,11 @@ mod tests {
     /// reachable from the candidate list, and something in the list covers Devanagari. A family
     /// Apple no longer ships is reported rather than failed — this list exists precisely for the case
     /// where one of them is missing, with one exception: if *nothing* here covers Devanagari the test
-    /// fails loudly, because a machine with no face to check cannot validate the list at all. CI has no macOS runner (`.github/workflows/ci.yml`
+    /// fails loudly, because a machine with no face to check cannot validate the list at all. That
+    /// leniency is not a guess: Apple's "Fonts included with macOS Tahoe" page (support.apple.com/122869)
+    /// titles its list "Installed or downloadable fonts" and says most install automatically while
+    /// others download on demand via Font Book — without marking which is which, so no entry in these
+    /// lists can be assumed present on a given Mac. CI has no macOS runner (`.github/workflows/ci.yml`
     /// keeps the org's Mac slots for release builds), so this runs on contributors' and
     /// maintainers' machines.
     #[cfg(target_os = "macos")]
