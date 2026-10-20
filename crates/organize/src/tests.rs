@@ -2821,3 +2821,26 @@ fn rotate_repeated_indices_accumulate_from_the_current_page_value() {
         }
     }
 }
+
+#[test]
+fn page_walk_skips_repeated_and_cyclic_kids_without_copying_attributes() {
+    let mut doc = open(fixture());
+    let (root, branch) = (ObjRef { num: 2, generation: 0 }, ObjRef { num: 3, generation: 0 });
+    let (first, second) = (ObjRef { num: 4, generation: 0 }, ObjRef { num: 5, generation: 0 });
+    // The branch node carries Resources for its pages: a cycle back to it, then both pages
+    // 128 times over.
+    let mut kids = vec![Object::Ref(branch)];
+    kids.extend([Object::Ref(first), Object::Ref(second)].into_iter().cycle().take(256));
+    doc.update_dict(branch, |d| d.set(b"Kids".to_vec(), Object::Array(kids))).unwrap();
+    let mut walk = PageWalk::new(&doc, root);
+    let (page, attrs) = walk.next().unwrap();
+    assert_eq!(page, first);
+    assert!(walk.pending.len() <= 3, "repeated kids retained {} pending entries", walk.pending.len());
+    assert!(attrs.get(b"Resources").and_then(|r| r.as_dict()).is_some_and(|r| r.contains(b"Font")), "Resources from the branch");
+    assert_eq!(attrs.get(b"Rotate").and_then(Object::as_int), Some(90), "Rotate from the root");
+    assert_eq!(walk.next().map(|(p, _)| p), Some(second));
+    let (_, last) = walk.next().unwrap();
+    assert_eq!(last.get(b"MediaBox").and_then(Object::as_array).map(Vec::len), Some(4), "own MediaBox kept");
+    assert!(walk.next().is_none());
+    assert_eq!(labels(&doc), ["Page 1", "Page 2", "Page 3"]);
+}
