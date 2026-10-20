@@ -2812,6 +2812,8 @@ mod tests {
         assert!(same_base_font("Arial", "ABCDEF+Arial"));
         assert!(same_base_font("Arial", "Arial"));
         assert!(!same_base_font("ABCDEF+Arial", "GHIJKL+Helvetica"));
+        // Five letters are part of the name, not a subset tag.
+        assert!(!same_base_font("ABCDE+Helvetica-Bold", "Helvetica-Bold"));
         // A tag with no name after it, or no name at all, names no font.
         assert!(!same_base_font("ABCDEF+", "GHIJKL+"));
         assert!(!same_base_font("", ""));

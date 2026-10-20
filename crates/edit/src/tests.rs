@@ -1778,6 +1778,51 @@ fn lines_in_a_font_without_a_base_font_stay_one_block() {
     assert_eq!(reading[0].text, "First second");
 }
 
+/// Two subsets of one font can carry different encodings: here the second names `-` and `l`
+/// through `/Differences` (codes 33 and 34), so the same letters have different codes. The visual
+/// line still joins and reads in coding order (#3661).
+#[test]
+fn a_reencoded_subset_of_the_same_font_stays_one_line() {
+    let content = "BT /F1 16 Tf 72 700 Td (Two) Tj /F2 16 Tf (!\") Tj /F1 16 Tf (ine heading) Tj ET";
+    let mut doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>",
+        &stream("", content),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /ABCDEF+Helvetica-Bold >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /GHIJKL+Helvetica-Bold /Encoding << /Type /Encoding /BaseEncoding /WinAnsiEncoding /Differences [33 /hyphen /l] >> >>",
+    ]);
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 1, "{:?}", lines.iter().map(|l| &l.text).collect::<Vec<_>>());
+    assert_eq!(lines[0].text, "Two-line heading");
+    let reading = text::reading_blocks(&doc, 0).unwrap();
+    assert_eq!(reading.len(), 1);
+    assert_eq!(reading[0].text, "Two-line heading");
+    // Editing the one line replaces every run, including the re-encoded subset's.
+    text::replace_line(&mut doc, 0, 0, "Two-line heading done").unwrap();
+    let reopened = reopen(&doc);
+    let lines = text::text_lines(&reopened, 0).unwrap();
+    assert_eq!(lines.len(), 1, "{:?}", lines.iter().map(|l| &l.text).collect::<Vec<_>>());
+    assert_eq!(lines[0].text, "Two-line heading done");
+}
+
+/// `ABCDE+` is five letters, not the six-letter subset tag of §9.6.4, so it stays part of the
+/// name: `ABCDE+Helvetica-Bold` and `Helvetica-Bold` are different fonts and their runs stay apart.
+#[test]
+fn a_five_letter_prefix_is_not_a_subset_tag() {
+    let content = "BT /F1 16 Tf 72 700 Td (Two) Tj /F2 16 Tf (-l) Tj /F1 16 Tf (ine heading) Tj ET";
+    let doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>",
+        &stream("", content),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /ABCDE+Helvetica-Bold >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+    ]);
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 3, "{:?}", lines.iter().map(|l| &l.text).collect::<Vec<_>>());
+}
+
 #[test]
 fn text_lines_are_found_and_replaced_in_place() {
     let mut doc =
