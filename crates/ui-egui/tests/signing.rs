@@ -152,11 +152,16 @@ fn drawing_a_signature_creating_an_id_signing_and_trusting() {
     h.get_by_label_contains("Signed by Grace Hopper").click();
     h.run_steps(2);
     h.get_by_label("Signature validity is UNKNOWN:");
+    // Seed a find so the trust path proves it invalidates the view: trust rebuilds
+    // the display copy, and the next frame must draw from it without any zoom change.
+    h.state_mut().views[0].find = Some(pdfcraft_ui_egui::canvas::Find { matches: vec![(0, 0..5)], ..Default::default() });
     h.get_by_label("Add to trusted certificates").click();
     h.run_steps(3);
     h.get_by_label("Signed and all signatures are valid.");
     let s = h.state();
     assert_eq!(s.session.get(s.views[0].id).unwrap().signatures[0].status, SignatureStatus::Valid);
+    assert!(s.views[0].find.as_ref().is_some_and(|f| f.matches.is_empty()), "trust invalidates the view without zooming");
+    assert!(!s.session.get(s.views[0].id).unwrap().dirty, "trust alone is not an edit");
     // Show certificate: the Certificate Viewer.
     h.get_by_label("Show certificate…").click();
     h.run_steps(3);
@@ -182,8 +187,60 @@ fn drawing_a_signature_creating_an_id_signing_and_trusting() {
     assert_eq!(s.views.len(), 2);
     let v = s.session.get(s.views[1].id).unwrap();
     assert!(v.name.contains("signed version") && v.signatures.iter().any(|x| x.signed));
+    assert!(s.views[0].snapshot.is_none());
+    assert!(s.views[1].snapshot.as_ref().is_some_and(|snap| snap.kind == pdfcraft_ui_egui::canvas::SnapshotKind::SignedVersion));
+    // A repeat click reuses the snapshot tab instead of opening another identical one.
+    h.get_by_label("View signed version").click();
+    h.run_steps(3);
+    let s = h.state();
+    assert_eq!((s.views.len(), s.active), (2, Some(1)));
+    // A repeat from the original tab reuses it too.
+    h.state_mut().active = Some(0);
+    h.run_steps(1);
+    h.get_by_label("View signed version").click();
+    h.run_steps(3);
+    let s = h.state();
+    assert_eq!((s.views.len(), s.active), (2, Some(1)));
+    // The snapshot tab says what it is.
+    h.get_by_label_contains("You are viewing the signed version of");
+    // Closing a clean snapshot closes the tab with no save prompt. The bar's own
+    // Close is addressed from its message, because the tab chrome has a Close button
+    // with the same label.
+    let label = h.get_by_label_contains("You are viewing the signed version of");
+    let label_row = label.rect().y_range();
+    let mut node = label;
+    let mut close = None;
+    for _ in 0..4 {
+        if let Some(pill) = node.query_by_label("Close") {
+            close = Some(pill);
+            break;
+        }
+        let Some(up) = node.parent() else { break };
+        node = up;
+    }
+    let close = close.expect("the notice bar holds its own Close");
+    // The bar's Close sits in the bar's row and the tab chrome's sits above it. Without
+    // this the walk could reach the chrome's button, which closes the same tab, and the
+    // test would pass with the bar's own button never pressed.
+    assert!(label_row.contains(close.rect().center().y), "the Close found is the bar's own");
+    close.click();
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 1);
+    assert!(h.state().close_request.is_none());
+    // Closing a dirty snapshot asks about saving instead of closing at once.
+    h.get_by_label("View signed version").click();
+    h.run_steps(3);
+    let id = h.state().views[1].id;
+    h.state_mut().session.apply(id, pdfcraft_engine::Edit::SetInfo { key: "Title".into(), value: "Dirty".into() }).unwrap();
+    h.state_mut().views[1].close_requested = true;
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 2);
+    h.get_by_label("Save changes to “contract_signed (signed version).pdf” before closing?");
+    h.get_by_label("Don't save").click();
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 1);
     // Trusted certificates and the ID list persist.
-    let saved = s.persist();
+    let saved = h.state().persist();
     let mut fresh = PdfCraftApp::new();
     fresh.set_option("language", "en").unwrap();
     fresh.restore(&saved);
@@ -226,6 +283,38 @@ fn certifying_without_a_visible_signature() {
     let sig = doc.signatures.iter().find(|x| x.signed).unwrap();
     assert_eq!((sig.certify, sig.visible), (Some(2), false));
     h.get_by_label_contains("Certified by Test Signer EC");
+}
+
+#[test]
+fn save_as_keeps_a_signed_document_incremental() {
+    // #2165: Save As to a new file rewrites unsigned documents in full; a signed one is appended
+    // to, or its signature would no longer cover the file.
+    let p12 = concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12");
+    let digital_id = pdfcraft_engine::sign::pkcs12::open(&std::fs::read(p12).unwrap(), "test").unwrap();
+    let mut s = pdfcraft_engine::Session::new();
+    let id = s.open("contract.pdf", None, std::sync::Arc::new(FIXTURE.to_vec()), None).unwrap();
+    let opts = pdfcraft_engine::SignOptions { page: 0, rect: Some([20.0, 20.0, 180.0, 60.0]), ..Default::default() };
+    let signed = s.sign(id, &digital_id, opts).unwrap();
+    let out = dir().join("copy.pdf");
+    let (bytes, cert) = (signed.to_vec(), digital_id.certificate.clone());
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("contract.pdf", None, bytes).expect("opens");
+        app.session.set_trusted_certificates(vec![cert]);
+        app
+    });
+    h.run_steps(4);
+    let status = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().signatures.iter().find(|x| x.signed).map(|x| x.status)
+    };
+    assert_eq!(status(&h), Some(SignatureStatus::Valid));
+    h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    assert!(h.state_mut().save_active(pdfcraft_ui_egui::SaveTarget::As), "a signed document can be saved as a copy");
+    let saved = std::fs::read(&out).expect("file written");
+    assert!(saved.starts_with(&signed), "the signed revision is kept as it was");
+    assert_eq!(status(&h), Some(SignatureStatus::Valid));
 }
 
 /// The fixture with an empty signature field across the bottom of the page.
