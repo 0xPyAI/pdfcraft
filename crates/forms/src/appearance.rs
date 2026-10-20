@@ -240,6 +240,8 @@ pub(crate) fn button_caption(doc: &Document, da: &str, caption: &str, width: f64
     (out, name, font, missing)
 }
 
+/// A non-embedded Helvetica font dictionary in WinAnsi encoding, the fallback when the form's
+/// `/DR` has no font that can show the text.
 fn helvetica() -> Object {
     let mut f = Dict::new();
     f.set(b"Type".to_vec(), Object::name("Font"));

@@ -80,6 +80,7 @@ fn field<'a>(all: &'a [Field], name: &str) -> &'a Field {
     all.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("no field {name}"))
 }
 
+/// The decoded text of widget `w`'s normal (`/N`) appearance stream.
 fn ap(doc: &Document, w: &Widget) -> String {
     let wd = doc.get(w.obj).as_dict().cloned().unwrap();
     let n = wd.get(b"AP").unwrap().as_dict().unwrap().reference(b"N").expect("normal appearance stream");
@@ -136,6 +137,9 @@ fn a_button_caption_its_fonts_encoding_cant_hold_is_reported() {
     assert_eq!(undrawn_fields(&doc), [("go".to_string(), '\u{2000B}')]);
 }
 
+/// Changing one widget's caption on a push button with two widgets leaves the other widget, the
+/// shared `/MK` and the parent's action untouched, keeps the other `/MK` and `/AP` entries, and
+/// drops the stale rollover and down appearances, with a direct or indirect caption and either save.
 #[test]
 fn button_caption_preserves_other_widgets_and_shared_dictionaries() {
     for indirect_caption in [false, true] {
