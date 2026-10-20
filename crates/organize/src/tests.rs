@@ -2840,7 +2840,8 @@ fn page_walk_skips_repeated_and_cyclic_kids_without_copying_attributes() {
     assert_eq!(attrs.get(b"Rotate").and_then(Object::as_int), Some(90), "Rotate from the root");
     assert_eq!(walk.next().map(|(p, _)| p), Some(second));
     let (_, last) = walk.next().unwrap();
-    assert_eq!(last.get(b"MediaBox").and_then(Object::as_array).map(Vec::len), Some(4), "own MediaBox kept");
+    let media_box = last.get(b"MediaBox").and_then(Object::as_array).map(|m| m.iter().filter_map(Object::as_int).collect::<Vec<_>>());
+    assert_eq!(media_box, Some(vec![0, 0, 500, 500]), "own MediaBox kept over the root's");
     assert!(walk.next().is_none());
     assert_eq!(labels(&doc), ["Page 1", "Page 2", "Page 3"]);
 }
