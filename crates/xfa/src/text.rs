@@ -81,6 +81,8 @@ pub struct Face {
 }
 
 impl Face {
+    /// The face a resolved font is drawn in: the standard-14 family its typeface maps to,
+    /// with its size and horizontal scale clamped to a drawable range.
     pub fn of(font: &Font) -> Face {
         Face {
             family: Family::of(&font.typeface),
@@ -93,6 +95,8 @@ impl Face {
         }
     }
 
+    /// This face with what a rich-text run sets in place of its own: weight, posture,
+    /// underline, size and horizontal scale. The family and color stay.
     pub fn with_run(&self, run: &Run) -> Face {
         Face {
             family: self.family,
@@ -111,6 +115,8 @@ impl Face {
         Face { h_scale: 1.0, ..self }
     }
 
+    /// The resource name of this face's standard font, as content streams and `/DA` strings
+    /// refer to it.
     pub fn resource_name(&self) -> &'static str {
         self.family.resource_name(self.bold, self.italic)
     }

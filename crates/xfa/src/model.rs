@@ -180,6 +180,8 @@ impl Default for Font {
 }
 
 impl Font {
+    /// This font with the properties `spec` sets in place of its own; those `spec` leaves
+    /// `None` are inherited.
     pub fn apply(&self, spec: &FontSpec) -> Font {
         Font {
             typeface: spec.typeface.clone().unwrap_or_else(|| self.typeface.clone()),

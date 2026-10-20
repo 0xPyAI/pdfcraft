@@ -570,6 +570,9 @@ impl Emitter<'_> {
         }
     }
 
+    /// Write one laid-out page under `pages_ref`: its fills, lines, text and pictures in a
+    /// content stream, the fonts and images it uses as resources, and its widgets as
+    /// annotations. Returns the page object.
     fn page(&mut self, page: &Page, pages_ref: ObjRef) -> Result<ObjRef, XfaError> {
         let page_ref = self.doc.add(Object::Dict(Dict::new()));
         let mut content: Vec<u8> = Vec::new();

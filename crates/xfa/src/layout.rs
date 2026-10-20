@@ -1464,6 +1464,9 @@ impl Layouter<'_> {
         if *n == 1 { base } else { format!("{base}_{n}") }
     }
 
+    /// Draw a field in `rect`: its border and caption, then its value as text (non-interactive
+    /// fields, barcodes, text longer than a page) or as a widget. `radio` puts it in an
+    /// exclusion group; `sib` is its index in its SOM path (`name[sib]`).
     fn draw_field(
         &mut self,
         f: &Field,

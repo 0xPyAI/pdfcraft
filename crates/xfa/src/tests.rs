@@ -51,6 +51,9 @@ fn scaled_text_template() -> (String, &'static str) {
     (xdp, TEXT)
 }
 
+/// `fontHorizontalScale` is read as a percentage and text is measured at it: the 80% draw
+/// fits its box on one line where the full-width one takes two, and a span's own scale
+/// applies to that span alone.
 #[test]
 fn horizontally_scaled_text_is_measured_and_drawn_narrower() {
     let (xdp, text) = scaled_text_template();
@@ -80,6 +83,8 @@ fn horizontally_scaled_text_is_measured_and_drawn_narrower() {
     assert!((half.face.width("half") - full.face.width("half") / 2.0).abs() < 1e-9);
 }
 
+/// A growing non-interactive field is measured in the face its text is drawn in: condensed,
+/// its text takes fewer lines and the field grows only to hold them.
 #[test]
 fn a_non_interactive_field_is_measured_at_the_scale_its_text_is_drawn() {
     // A growing, non-interactive text field (drawn as text by the layout, not as a widget),
@@ -111,6 +116,8 @@ fn a_non_interactive_field_is_measured_at_the_scale_its_text_is_drawn() {
     assert!((narrow_gap - full_gap).abs() < 0.01, "the field shrinks with its text: gap {narrow_gap} vs {full_gap}");
 }
 
+/// Condensed text is written with `Tz` inside a `q`/`Q` pair of its own, and full-width text
+/// sets no scale, so none carries over from the text before it.
 #[test]
 fn horizontally_scaled_text_is_written_with_tz_inside_its_own_graphics_state() {
     let (xdp, _) = scaled_text_template();

@@ -146,6 +146,8 @@ fn parse_border(n: Option<XmlNode>) -> Option<Border> {
     Some(Border { presence: Presence::parse(n.attribute("presence")), edges: four, fill: parse_fill(child(n, "fill")) })
 }
 
+/// `<font>`: typeface, size, weight, posture, underline, fill color and horizontal scale.
+/// What the element doesn't set, or a missing element, is left `None` to inherit.
 fn parse_font(n: Option<XmlNode>) -> FontSpec {
     let Some(n) = n else { return FontSpec::default() };
     FontSpec {
@@ -206,6 +208,8 @@ fn parse_rich(body: XmlNode) -> RichText {
         size: Option<f64>,
         h_scale: Option<f64>,
     }
+    /// `base` with the CSS declarations in `css` applied: weight, style, underline, size and
+    /// `xfa-font-horizontal-scale`. Anything else is ignored.
     fn styled(base: &Style, css: Option<&str>) -> Style {
         let mut s = base.clone();
         for decl in css.unwrap_or("").split(';') {
@@ -224,6 +228,9 @@ fn parse_rich(body: XmlNode) -> RichText {
     }
     // Paragraph boundaries from `p` are implicit (dropped when empty); `br` makes an explicit
     // line break that stays even when the line is blank.
+    /// Add the text under `n` to `out` as runs in `style`, as the elements it meets restyle it;
+    /// `p` and `br` start paragraphs (`explicit` marks the `br` ones) and `embed` spans add
+    /// embedded fields. Nothing deeper than `MAX_DEPTH` is read.
     fn walk(n: XmlNode, style: &Style, out: &mut RichText, explicit: &mut Vec<bool>, depth: usize) {
         if depth > MAX_DEPTH {
             return;
