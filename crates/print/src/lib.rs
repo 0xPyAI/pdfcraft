@@ -748,7 +748,12 @@ fn appearance_matrix(doc: &Document, form: &Dict, rect: [f64; 4]) -> Option<Matr
 }
 
 /// A Form XObject holding page `index` as it prints (user space; BBox = crop box).
-fn page_form(doc: &mut Document, index: usize, content: Content) -> Result<ObjRef, PrintError> {
+fn page_form(
+    doc: &mut Document,
+    index: usize,
+    content: Content,
+    promoted: &mut std::collections::HashMap<ObjRef, ObjRef>,
+) -> Result<ObjRef, PrintError> {
     let page = pdfcraft_model::pages(doc).swap_remove(index);
     let crop = page.crop(doc);
     let mut res = page.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
@@ -782,9 +787,15 @@ fn page_form(doc: &mut Document, index: usize, content: Content) -> Result<ObjRe
         {
             // Some existing annotation appearances omit Subtype, but Do dispatch needs a Form XObject.
             // Keep the original intact: other document objects can share this appearance.
-            let mut stream = stream.clone();
-            stream.dict.set(b"Subtype".to_vec(), Object::name("Form"));
-            doc.add(Object::Stream(stream))
+            if let Some(&cached) = promoted.get(&ap) {
+                cached
+            } else {
+                let mut stream = stream.clone();
+                stream.dict.set(b"Subtype".to_vec(), Object::name("Form"));
+                let copy = doc.add(Object::Stream(stream));
+                promoted.insert(ap, copy);
+                copy
+            }
         } else {
             ap
         };
@@ -817,6 +828,7 @@ pub fn impose(src: &Document, settings: &Settings) -> Result<Vec<u8>, PrintError
     let mut doc = src.clone();
     // One form per source page used (a page may appear on several sheets: posters).
     let mut forms: std::collections::HashMap<usize, ObjRef> = std::collections::HashMap::new();
+    let mut promoted = std::collections::HashMap::new();
     let views: Vec<[f64; 6]> = pages.iter().map(|p| p.view_matrix(src)).collect();
     let pages_root = doc.add(Object::Null);
     let mut kids = Vec::new();
@@ -827,7 +839,7 @@ pub fn impose(src: &Document, settings: &Settings) -> Result<Vec<u8>, PrintError
             let form = match forms.get(&pl.page) {
                 Some(f) => *f,
                 None => {
-                    let f = page_form(&mut doc, pl.page, settings.content)?;
+                    let f = page_form(&mut doc, pl.page, settings.content, &mut promoted)?;
                     forms.insert(pl.page, f);
                     f
                 }
