@@ -5802,6 +5802,60 @@ fn ocr_recognize_files_writes_searchable_copies() {
     assert!(found.to_string().contains("\"page\""), "{found}");
 }
 
+/// Two inputs that share a file name (from different folders) would both write `out/scan.pdf`:
+/// the second output replaces the first while both results report success. The batch is refused
+/// up front, naming the file, before the folder is created, anything is read or the OCR engines
+/// load, so the outcome is the same with or without the models installed.
+#[test]
+fn ocr_recognize_files_refuses_inputs_that_share_a_file_name() {
+    let dir = workdir("ocr-files-same-name");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "one/scan.pdf" }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "two/scan.pdf" }));
+    let r = a.call("ocr_recognize_files", &json!({ "paths": ["one/scan.pdf", "two/scan.pdf"], "folder": "out" }));
+    assert!(matches!(&r, Err(ToolError::InvalidArgs(m)) if m.contains("scan.pdf")), "{r:?}");
+    assert!(!dir.join("out").exists(), "nothing was started: the output folder was not created");
+}
+
+/// File names are compared the way the default filesystem compares them: without regard to case
+/// on Windows and macOS (`scan.pdf` and `Scan.PDF` are one file there), and exactly elsewhere,
+/// where they are two files and the batch is not refused.
+#[test]
+fn ocr_recognize_files_compares_names_the_way_the_filesystem_does() {
+    let dir = workdir("ocr-files-case");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "one/scan.pdf" }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "two/Scan.PDF" }));
+    let r = a.call("ocr_recognize_files", &json!({ "paths": ["one/scan.pdf", "two/Scan.PDF"], "folder": "out" }));
+    if cfg!(any(windows, target_os = "macos")) {
+        assert!(matches!(&r, Err(ToolError::InvalidArgs(m)) if m.contains("Scan.PDF")), "{r:?}");
+        assert!(!dir.join("out").exists(), "nothing was started: the output folder was not created");
+    } else {
+        assert!(!matches!(&r, Err(ToolError::InvalidArgs(_))), "{r:?}");
+    }
+}
+
+/// Inputs with distinct names are not refused, and the batch writes one searchable copy per input
+/// under its own name. Without the models it stops at the models error, as it did before.
+#[test]
+fn ocr_recognize_files_with_distinct_names_runs_as_before() {
+    let dir = workdir("ocr-files-distinct");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "one/scan.pdf" }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "two/other.pdf" }));
+    if ok(&mut a, "ocr_status", json!({}))["available"] == true {
+        let r = ok(&mut a, "ocr_recognize_files", json!({ "paths": ["one/scan.pdf", "two/other.pdf"], "folder": "out" }));
+        assert!(r["files"][0]["error"].is_null() && r["files"][1]["error"].is_null(), "{r}");
+        assert!(dir.join("out/scan.pdf").is_file() && dir.join("out/other.pdf").is_file(), "{r}");
+    } else {
+        let r = a.call("ocr_recognize_files", &json!({ "paths": ["one/scan.pdf", "two/other.pdf"], "folder": "out" }));
+        assert!(matches!(&r, Err(ToolError::Failed(m)) if m.contains("not installed")), "{r:?}");
+    }
+}
+
 #[test]
 fn javascript_through_tools() {
     let dir = workdir("js");
