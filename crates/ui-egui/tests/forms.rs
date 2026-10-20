@@ -1072,3 +1072,18 @@ fn auto_size_fields_shrink_and_wrap_typed_text_to_fit_their_box() {
     // An explicit size is kept, as in Acrobat: the text may then run past the box.
     assert_eq!(on_screen_fit(&h, "fixed", long).0, 10.0);
 }
+
+#[test]
+fn a_form_button_shows_and_hides_the_attachments_panel() {
+    let mut h = harness();
+    h.state_mut().set_option("panel", "none").unwrap();
+    h.run_steps(2);
+    let id = h.state().views[0].id;
+    h.state_mut().run_button_script(id, "size", "app.execMenuItem('ShowHideFileAttachment');");
+    h.run_steps(2);
+    assert_eq!(h.state().right, Some(pdfcraft_ui_egui::RightPanel::Attachments));
+    // Show/Hide, as its name says: asked again, it closes.
+    h.state_mut().run_button_script(id, "size", "app.execMenuItem('ShowHideFileAttachment');");
+    h.run_steps(2);
+    assert_eq!(h.state().right, None);
+}

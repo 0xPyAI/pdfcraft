@@ -657,6 +657,7 @@ fn request_json(r: &pdfcraft_engine::js::Request) -> Value {
         R::Focus(f) => json!({ "focus": f }),
         R::Beep => json!({ "beep": true }),
         R::SaveAs => json!({ "save_as": true }),
+        R::ShowPanel(p) => json!({ "panel": format!("{p:?}").to_lowercase() }),
     }
 }
 

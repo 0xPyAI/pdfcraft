@@ -7,7 +7,7 @@
 //! off, scripts don't run and AF calls keep working natively.
 
 use pdfcraft_forms::{Field, FieldChange, FieldEvent, FieldKind, FieldProps, ScriptResult, Scripts};
-pub use pdfcraft_js::{Limits, Outcome, Request};
+pub use pdfcraft_js::{Limits, Outcome, Panel, Request};
 
 use crate::{DocId, Edit, EditError, Session};
 
@@ -29,7 +29,14 @@ impl JsOutput {
     fn absorb(&mut self, o: &Outcome) {
         self.alerts.extend(o.alerts.iter().cloned());
         self.console.extend(o.console.iter().cloned());
-        self.requests.extend(o.requests.iter().cloned());
+        // A field's own scripts (keystroke, format, validate, calculate) run unasked: only a
+        // button's may show or hide a side panel.
+        for r in &o.requests {
+            match r {
+                Request::ShowPanel(_) => self.console.push("A field script asked to show a side panel; only a button may show a side panel".into()),
+                r => self.requests.push(r.clone()),
+            }
+        }
         self.errors.extend(o.error.iter().cloned());
     }
 
