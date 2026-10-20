@@ -2788,8 +2788,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["page.extract"]
 tools = ["page_extract"]
-evidence = ["crates/ui-egui/tests/it/editing.rs::extract_button_copies_selected_pages_to_a_new_tab", "crates/automation/tests/it/automation.rs::combine_extract_and_split", "crates/organize/src/tests.rs::extract_and_split_keep_the_pdfx_output_intent_and_identification"]
-notes = "Carries the PDF/X output intent and identification (#263) in a new XMP packet; the source XMP (dates, other schemas) is not copied."
+evidence = ["crates/ui-egui/tests/it/editing.rs::extract_button_copies_selected_pages_to_a_new_tab", "crates/automation/tests/it/automation.rs::combine_extract_and_split", "crates/organize/src/tests.rs::extract_and_split_keep_the_pdfx_output_intent_and_identification", "crates/ui-egui/tests/it/pickers.rs::extract_pages_takes_the_page_ranges_typed_in_the_dialog"]
+notes = "Carries the PDF/X output intent and identification (#263) in a new XMP packet; the source XMP (dates, other schemas) is not copied. The dialog's Pages field takes page ranges (\"1-5, 8, 11-13\", in the order typed, each page once) instead of the selection (#3593); page labels are not accepted there yet."
 
 [[feature]]
 id = "organize.extract-separate-files"
