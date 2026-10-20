@@ -309,6 +309,37 @@ fn xfdf_round_trips_comments_and_values() {
 }
 
 #[test]
+fn xfdf_round_trip_keeps_zero_flags() {
+    let square = |doc: &Document| {
+        let page = pdfcraft_model::pages(doc)[0].obj;
+        let annots = doc.get(page).as_dict().unwrap().get(b"Annots").map(|a| doc.resolve(a)).unwrap();
+        annots
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Object::as_ref)
+            .find(|r| doc.get(*r).as_dict().unwrap().name(b"Subtype") == Some(b"Square"))
+            .unwrap()
+    };
+    let mut src = blank();
+    let shape = Shape::Rectangle { rect: [10.0, 10.0, 100.0, 60.0] };
+    add_annotation(
+        &mut src,
+        &NewAnnotation { page: 0, style: Style::default_for(&shape), shape, contents: String::new(), author: "A".into() },
+        &Meta { id: "s1".into(), date: None },
+    )
+    .unwrap();
+    let annot = square(&src);
+    src.update_dict(annot, |d| d.set(b"F".to_vec(), Object::Int(0))).unwrap();
+    let xfdf = export_xfdf(&src, true, false, "a.pdf");
+    let mut dst = blank();
+    import(&mut dst, xfdf.as_bytes()).unwrap();
+    let imported = square(&dst);
+    let flags = dst.get(imported).as_dict().unwrap().get(b"F").and_then(|f| dst.resolve(f).as_int());
+    assert_eq!(flags, Some(0), "flags after round trip: {xfdf}");
+}
+
+#[test]
 fn fdf_round_trips_values_and_comments() {
     let src = filled();
     let fdf = export_fdf(&src, true, true, "form.pdf").unwrap();
