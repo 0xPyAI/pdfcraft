@@ -877,17 +877,23 @@ fn odd_arabic_text_never_panics() {
     }
 }
 
-/// One page with Helvetica (WinAnsi) and a subset font that has only the glyphs it uses.
+/// One page with Helvetica (WinAnsi) and subsets of Arial: `/F2` and `/F3` are two subsets of the
+/// same font, as Word writes a font split across several resources, and `/F4` repeats Helvetica.
 fn text_page(content: &str) -> Document {
     let objs: Vec<String> = vec![
         "<< /Type /Catalog /Pages 2 0 R >>".into(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R /F4 8 0 R >> >> >>".into(),
         format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
         // Subset: glyphs for a (97) and b (98) only.
         "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+Arial /FirstChar 97 /LastChar 99 /Widths [500 520 0] /Encoding /WinAnsiEncoding >>"
             .into(),
+        // Another subset of the same Arial, with a subset tag of its own.
+        "<< /Type /Font /Subtype /TrueType /BaseFont /GHIJKL+Arial /FirstChar 97 /LastChar 99 /Widths [500 520 0] /Encoding /WinAnsiEncoding >>"
+            .into(),
+        // Helvetica again, in a second resource.
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
     ];
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offs = Vec::new();
@@ -1725,6 +1731,33 @@ fn word_boxes_span_whole_words_when_glyphs_run_backwards() {
         let (x0, x1) = ink.iter().fold((f64::MAX, f64::MIN), |(a, b), r| (a.min(r[0]), b.max(r[2])));
         assert!(x0 >= lines[0].rect[0] - 0.01 && x1 <= lines[0].rect[2] + 0.01, "{content}: {ink:?} {:?}", lines[0].rect);
     }
+}
+
+/// PDF writers split one font into several subsets, each a font resource of its own: a word drawn
+/// through two of them is still one visual line (#3661).
+#[test]
+fn one_line_continues_across_two_resources_of_the_same_font() {
+    for (content, text) in [
+        // The issue's case: two resources for the same Helvetica.
+        ("BT /F1 12 Tf 72 700 Td (Hel) Tj /F4 12 Tf (lo) Tj ET", "Hello"),
+        // Word's case: two tagged subsets of one font, "abcab" through /F2, /F3, /F2.
+        ("BT /F2 12 Tf 72 700 Td (ab) Tj /F3 12 Tf (ca) Tj /F2 12 Tf (b) Tj ET", "abcab"),
+    ] {
+        let doc = text_page(content);
+        let lines = text::text_lines(&doc, 0).unwrap();
+        assert_eq!(lines.len(), 1, "{content}: {:?}", lines.iter().map(|l| &l.text).collect::<Vec<_>>());
+        assert_eq!(lines[0].text, text, "{content}");
+        let blocks = text::text_blocks(&doc, 0).unwrap();
+        assert_eq!(blocks.len(), 1, "{content}");
+        assert_eq!(blocks[0].text, text, "{content}");
+    }
+}
+
+/// Two genuinely different fonts still start a new line: the subset tag is all that may differ.
+#[test]
+fn different_fonts_start_a_new_line() {
+    let doc = text_page("BT /F1 12 Tf 72 700 Td (Hel) Tj /F2 12 Tf (lo) Tj ET");
+    assert_eq!(text::text_lines(&doc, 0).unwrap().len(), 2);
 }
 
 #[test]

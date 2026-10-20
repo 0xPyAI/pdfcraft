@@ -51,8 +51,8 @@ fn invisible(line: &TextLine) -> bool {
 }
 
 fn same_style(a: &TextLine, b: &TextLine) -> bool {
-    same_font(a, b.font.as_bytes(), b.face.as_deref())
-        && a.base_font == b.base_font
+    same_font(a, b.font.as_bytes(), &b.base_font, b.face.as_deref())
+        && same_base_font(&a.base_font, &b.base_font)
         && a.bold == b.bold
         && a.italic == b.italic
         && a.color == b.color
