@@ -3972,6 +3972,18 @@ evidence = ["crates/ui-egui/tests/it/comments.rs::comments_are_selected_moved_an
 notes = "deletes the pop-up and the reply thread"
 
 [[feature]]
+id = "comment.keyboard-nudge"
+title = "Move the selected comment with the arrow keys"
+area = "E"
+tier = "P2"
+milestone = "M5"
+status = "shipped"
+commands = []
+tools = ["comment_edit"]
+evidence = ["crates/ui-egui/tests/it/comments.rs::arrow_keys_nudge_the_selected_comment"]
+notes = "With a comment selected (Select tool, or a Fill & Sign mark picked up), an arrow key moves it a screen pixel and ⌘/Ctrl or Shift and an arrow ten, up being up on screen whatever the zoom and rotation; each press is one undo step, and the arrows scroll and turn pages again once nothing is selected. Text markup stays with its text and a locked comment where it is. Headless, comment_edit's `move` takes the offset in points."
+
+[[feature]]
 id = "comment.reshape"
 title = "Change a line's ends and a polygon's corners after drawing"
 area = "E"

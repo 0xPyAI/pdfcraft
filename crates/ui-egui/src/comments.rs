@@ -1823,6 +1823,55 @@ pub(crate) fn keys(ctx: &egui::Context, view: &mut DocView, tool: &mut QuickTool
     }
 }
 
+/// The arrow keys move the selected comment a screen pixel; with ⌘/Ctrl or Shift, ten. Up is up
+/// on screen whatever the zoom, the page's rotation and the view's; the keys are taken before
+/// the view scrolls or turns the page with them. Each press is one undo step. Text markup stays
+/// with its text, and a locked comment where it is.
+pub(crate) fn nudge_keys(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) {
+    if ctx.egui_wants_keyboard_input() || view.pending_edit.is_some() {
+        return;
+    }
+    let cv = &view.comments;
+    if cv.gesture.is_some() || cv.composer.is_some() {
+        return;
+    }
+    let Some((page, index)) = cv.selected else { return };
+    let movable =
+        info.annotations.iter().any(|a| a.page == page && a.index == index && a.in_reply_to.is_none() && !is_markup(&a.subtype) && !a.locked);
+    let (Some(xf), Some(p)) = (view.page_xform(page), info.pages.get(page)) else { return };
+    if !movable {
+        return;
+    }
+    use egui::{Key, Modifiers};
+    let mut step = egui::Vec2::ZERO;
+    ctx.input_mut(|i| {
+        for (key, direction) in
+            [(Key::ArrowLeft, vec2(-1.0, 0.0)), (Key::ArrowRight, vec2(1.0, 0.0)), (Key::ArrowUp, vec2(0.0, -1.0)), (Key::ArrowDown, vec2(0.0, 1.0))]
+        {
+            // The modified patterns first: a plain one also matches a Shift press.
+            if i.consume_key(Modifiers::COMMAND, key) || i.consume_key(Modifiers::SHIFT, key) {
+                step += direction * 10.0;
+            } else if i.consume_key(Modifiers::NONE, key) {
+                step += direction;
+            }
+        }
+    });
+    if step == egui::Vec2::ZERO {
+        return;
+    }
+    // The step on screen, in user space: from the page's centre to `step` pixels away.
+    let user = |s: Pos2| {
+        let (vx, vy) = xf.screen_to_view(s);
+        let u = p.view_to_user(vx, vy);
+        [f64::from(u[0]), f64::from(u[1])]
+    };
+    let (a, b) = (user(xf.rect.center()), user(xf.rect.center() + step));
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    if dx.is_finite() && dy.is_finite() && (dx != 0.0 || dy != 0.0) {
+        view.pending_edit = Some(Edit::MoveAnnotation { page, index, dx, dy });
+    }
+}
+
 /// Save attachment… and, for a PDF, Open in a new tab, first in a file attachment comment's
 /// menus as in the Attachments panel: the comment is where the reader finds its file. Reading
 /// the file changes nothing, so a read-only document offers them too.
