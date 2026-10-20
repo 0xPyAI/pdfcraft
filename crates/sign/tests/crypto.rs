@@ -295,6 +295,19 @@ fn certificates_load_from_pkcs7_bundles() {
     assert!(load_certificates(&p7b(&[])).is_err());
     let not_signed_data = pdfcraft_sign::der::seq(&[&pdfcraft_sign::der::oid(cms::DATA), &pdfcraft_sign::der::explicit(0, &[])]);
     assert!(load_certificates(&not_signed_data).is_err());
+    // A SignedData out of shape: no signerInfos SET, or a version that isn't an INTEGER.
+    {
+        use pdfcraft_sign::der::{explicit, int, oid, seq, set_of, tlv};
+        let wrap = |sd: &[&[u8]]| seq(&[&oid(cms::SIGNED_DATA), &explicit(0, &seq(sd))]);
+        let (certs, encap) = (tlv(0xA0, &[leaf.raw.as_slice(), &root.raw].concat()), seq(&[&oid(cms::DATA)]));
+        assert_eq!(load_certificates(&wrap(&[&int(1), &set_of(&[]), &encap, &certs, &set_of(&[])])).unwrap().len(), 2);
+        assert!(load_certificates(&wrap(&[&int(1), &set_of(&[]), &encap, &certs])).is_err());
+        assert!(load_certificates(&wrap(&[&set_of(&[]), &set_of(&[]), &encap, &certs, &set_of(&[])])).is_err());
+    }
+    let mut trailing = bundle.clone();
+    trailing.extend_from_slice(&[0x05, 0x00]);
+    assert!(load_certificates(&trailing).is_err());
+    assert!(cms::certificate_bundle(&bundle).is_ok());
     // Truncated anywhere: an error, never a panic.
     for n in 0..bundle.len() {
         let _ = load_certificates(&bundle[..n]);

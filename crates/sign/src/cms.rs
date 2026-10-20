@@ -74,19 +74,27 @@ fn carried_certificates(set: &Tlv) -> Result<Vec<Certificate>, SignError> {
 /// authorities hand out a chain or a set of CA certificates. Signers and CRLs, if present, are
 /// ignored; only the certificates are read. DER or BER.
 pub fn certificate_bundle(bytes: &[u8]) -> Result<Vec<Certificate>, SignError> {
-    let (ci, _) = Tlv::parse_ber(bytes)?;
+    let (ci, rest) = Tlv::parse_ber(bytes)?;
+    // A trust file is the bundle alone: bytes after it mean a damaged or spliced file.
+    if !rest.is_empty() {
+        return Err(bad("data after the bundle"));
+    }
     let ci = ci.expect(tag::SEQUENCE, "ContentInfo")?.children()?;
     let [ct, content] = ci.as_slice() else { return Err(bad("ContentInfo")) };
     if ct.oid()? != SIGNED_DATA {
         return Err(bad("not SignedData"));
     }
     let sd = content.expect(tag::ctx(0), "content")?.inner()?.children()?;
-    // version, digestAlgorithms, encapContentInfo, then the optional [0] certificates.
+    // version, digestAlgorithms, encapContentInfo, the optional [0] certificates and [1] CRLs,
+    // then signerInfos (RFC 5652 §5.1).
+    let [version, digests, encap, middle @ .., signers] = sd.as_slice() else { return Err(bad("SignedData")) };
+    let shape = [(version, tag::INTEGER), (digests, tag::SET), (encap, tag::SEQUENCE), (signers, tag::SET)];
+    if shape.iter().any(|(t, want)| t.tag != *want) || middle.iter().any(|t| t.tag != tag::ctx(0) && t.tag != tag::ctx(1)) {
+        return Err(bad("SignedData"));
+    }
     let mut certificates = Vec::new();
-    for t in sd.iter().skip(3) {
-        if t.tag == tag::ctx(0) {
-            certificates.extend(carried_certificates(t)?);
-        }
+    for t in middle.iter().filter(|t| t.tag == tag::ctx(0)) {
+        certificates.extend(carried_certificates(t)?);
     }
     if certificates.is_empty() {
         return Err(bad("the bundle holds no certificate"));
