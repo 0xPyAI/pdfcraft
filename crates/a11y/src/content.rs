@@ -167,12 +167,15 @@ pub(crate) fn document_rule(doc: &Document, rule: Rule, pages: &[Page], scan: &S
             }
         }
         Rule::TaggedPdf => {
-            let marked = cat.get(b"MarkInfo").map(|m| doc.resolve(m)).and_then(|m| m.as_dict().and_then(|d| d.get(b"Marked").cloned()));
+            // `/Marked` may be an indirect reference like any other value, so it is resolved
+            // before the test below, which looks for the boolean itself (#3671).
+            let marked =
+                cat.get(b"MarkInfo").map(|m| doc.resolve(m)).and_then(|m| m.as_dict().and_then(|d| d.get(b"Marked").map(|v| doc.resolve(v))));
             let mut out = Vec::new();
             if !cat.contains(b"StructTreeRoot") {
                 out.push(Finding::plain(None, "The document has no tags (structure tree)"));
             }
-            if !matches!(marked, Some(Object::Bool(true))) {
+            if !matches!(marked.as_deref(), Some(Object::Bool(true))) {
                 out.push(Finding::plain(None, "The document isn't marked as tagged (MarkInfo Marked)"));
             }
             out

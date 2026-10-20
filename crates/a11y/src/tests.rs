@@ -192,6 +192,26 @@ fn an_untagged_document_fails_the_document_rules() {
     assert_eq!((only.count(Status::Failed), only.count(Status::Skipped)), (1, 31));
 }
 
+/// `/MarkInfo /Marked` may be written as an indirect reference, like any value. The rule read the
+/// reference itself and so reported a tagged document as untagged (#3671).
+#[test]
+fn marked_as_an_indirect_reference_still_counts_as_tagged() {
+    let mut bodies = good();
+    // The catalog is object 1; point /Marked at a new object holding `true`.
+    let last = bodies.len() + 1;
+    bodies[0] = bodies[0].replace("/MarkInfo << /Marked true >>", &format!("/MarkInfo << /Marked {last} 0 R >>"));
+    bodies.push("true".into());
+    let doc = pdf(&bodies, "");
+    let report = check(&doc, &Options { rules: [Rule::TaggedPdf].into(), pages: None });
+    assert_eq!(status(&report, Rule::TaggedPdf), Status::Passed, "{:?}", failed(&report));
+
+    // The direct form is unchanged, and a document with no flag at all still fails.
+    assert_eq!(status(&check(&pdf(&good(), ""), &Options { rules: [Rule::TaggedPdf].into(), pages: None }), Rule::TaggedPdf), Status::Passed);
+    let mut none = good();
+    none[0] = none[0].replace("/MarkInfo << /Marked true >>", "");
+    assert_eq!(status(&check(&pdf(&none, ""), &Options { rules: [Rule::TaggedPdf].into(), pages: None }), Rule::TaggedPdf), Status::Failed);
+}
+
 /// A tagged document that passes every automatic rule.
 fn good() -> Vec<String> {
     vec![
