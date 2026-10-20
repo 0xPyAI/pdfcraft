@@ -105,6 +105,8 @@ two the listing showed. A paragraph an edit merged into a neighbour (or changed)
 itself when the edit merged it into one, with
 a message to list the page again, instead of rewriting whichever paragraph took its number
 (#2516). The result of an edit names the numbers that are gone in `stale_paragraphs`. Listing
-a page again renumbers it. Without a listing, a number is a position in the page's current
+a page again renumbers it. The listings kept are capped (256 pages); once the cap drops
+them, a page of an affected document is refused until it is listed again, instead of reading its
+numbers as positions. Without a listing, a number is a position in the page's current
 paragraphs, as before. The inline editor holds the paragraph a switching click asked for the
 same way. What is still missing is an identity that survives save and reopen (design: #2508).

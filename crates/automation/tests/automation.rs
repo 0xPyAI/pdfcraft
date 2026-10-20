@@ -6991,6 +6991,37 @@ fn page_render_hide_text_block_refuses_a_paragraph_number_an_earlier_edit_regrou
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// The listings kept for paragraph numbers are capped. A page whose listing was dropped must not
+/// fall back to reading its numbers as positions, which an edit may have regrouped: it is refused
+/// until the page is listed again (#2516).
+#[test]
+fn text_edit_refuses_a_paragraph_number_whose_listing_was_dropped_at_the_cap() {
+    let dir = workdir("text-edit-evicted-listing");
+    std::fs::write(dir.join("p.pdf"), three_paragraph_pdf()).unwrap();
+    let mut a = auto(&dir);
+    let open = |a: &mut Automation| ok(a, "doc_open", json!({"path":"p.pdf"}))["doc"].as_u64().unwrap();
+    let doc = open(&mut a);
+    ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
+    // 256 more pages fill the cap, so the next new page drops every earlier listing.
+    let others: Vec<u64> = (0..256).map(|_| open(&mut a)).collect();
+    for &other in &others {
+        ok(&mut a, "text_paragraphs", json!({"doc":other,"page":1}));
+    }
+
+    let dropped = a.call("text_edit", &json!({"doc":doc,"page":1,"paragraph":2,"text":"Bravo paragraph, edited."}));
+    assert!(matches!(&dropped, Err(ToolError::InvalidArgs(m)) if m.contains("text_paragraphs")), "{dropped:?}");
+    assert!(!page_text(&mut a, doc).join(" ").contains("Bravo paragraph, edited."), "nothing was rewritten");
+    let hidden = a.call("page_render", &json!({"doc":doc,"page":1,"dpi":72,"hide_text_block":2}));
+    assert!(matches!(&hidden, Err(ToolError::InvalidArgs(m)) if m.contains("text_paragraphs")), "{:?}", hidden.map(|_| ()));
+
+    // A page listed after the drop keeps its numbers, and so does the page once it is listed again.
+    ok(&mut a, "text_edit", json!({"doc":others[255],"page":1,"paragraph":2,"text":"Bravo paragraph, edited."}));
+    ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
+    ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":2,"text":"Bravo paragraph, edited."}));
+    assert!(page_text(&mut a, doc).join(" ").contains("Bravo paragraph, edited."));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// A number from the listing keeps naming its paragraph while other paragraphs are edited, and
 /// a paragraph can be edited twice in a row by the same number.
 #[test]

@@ -32,7 +32,7 @@ mod signing;
 mod text_cache;
 mod tools;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -121,6 +121,9 @@ pub struct Automation {
     /// The paragraphs of the last `text_paragraphs` listing of each page, so a paragraph number
     /// keeps naming that paragraph after edits regroup the page (#2516).
     listed: HashMap<(DocId, usize), Vec<BlockKey>>,
+    /// Documents that lost a listing to the cap. A page of one with no listing is refused rather
+    /// than read as "a number is a position", which the page may no longer match.
+    evicted: HashSet<DocId>,
 }
 
 impl Default for Automation {
@@ -131,7 +134,15 @@ impl Default for Automation {
 
 impl Automation {
     pub fn new() -> Self {
-        Self { session: Session::new(), root: None, roots: None, renderers: HashMap::new(), texts: TextCache::default(), listed: HashMap::new() }
+        Self {
+            session: Session::new(),
+            root: None,
+            roots: None,
+            renderers: HashMap::new(),
+            texts: TextCache::default(),
+            listed: HashMap::new(),
+            evicted: HashSet::new(),
+        }
     }
 
     /// Confine every path the tools read or write to `root` (relative paths resolve inside it).
@@ -908,6 +919,7 @@ impl Automation {
     /// resolved against that listing.
     fn record_listing(&mut self, doc: DocId, page: usize, blocks: &[TextBlock]) {
         if self.listed.len() >= Self::MAX_LISTINGS && !self.listed.contains_key(&(doc, page)) {
+            self.evicted.extend(self.listed.keys().map(|(d, _)| *d));
             self.listed.clear();
         }
         self.listed.insert((doc, page), blocks.iter().map(BlockKey::of).collect());
@@ -918,9 +930,16 @@ impl Automation {
     /// After `text_paragraphs` a number names the paragraph that listing showed, wherever it is
     /// now. Without a listing it is a position in `blocks`. A paragraph an edit merged into a
     /// neighbour (or changed) is refused: the number would otherwise rewrite another paragraph
-    /// and lose its text (#2516).
+    /// and lose its text (#2516). So is any number on a page of a document whose listings were
+    /// dropped at the cap, until the page is listed again.
     fn paragraph_index(&self, doc: DocId, page: usize, k: i64, blocks: &[TextBlock]) -> Result<usize> {
         let keys = self.listed.get(&(doc, page));
+        if keys.is_none() && self.evicted.contains(&doc) {
+            return Err(ToolError::InvalidArgs(format!(
+                "page {} has no paragraph listing any more: too many pages were listed and the oldest listings were dropped. List the page again with text_paragraphs",
+                page + 1
+            )));
+        }
         let n = keys.map_or(blocks.len(), Vec::len);
         let i = usize::try_from(k)
             .ok()
@@ -972,6 +991,8 @@ impl Automation {
         self.session.close(id);
         self.renderers.remove(&id);
         self.texts.remove(&id);
+        self.listed.retain(|(d, _), _| *d != id);
+        self.evicted.remove(&id);
         Ok(json!({ "closed": id.0 }))
     }
 
