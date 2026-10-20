@@ -2085,6 +2085,8 @@ fn draw_spans(xdp: &str) -> Vec<text::Span> {
     layout_xml(xdp).unwrap().pages[0].items.iter().filter_map(|i| if let Item::Text(s) = i { Some(s.clone()) } else { None }).collect()
 }
 
+/// A label that fits its box but is written with trailing spaces stays on one line and measures
+/// as tall as without them; text wider than the box still wraps.
 #[test]
 fn a_space_at_the_end_of_a_line_does_not_count_when_fitting_it() {
     // The box is just wide enough for "a. DATE"; the label is written "a. DATE " (as forms
@@ -2107,6 +2109,7 @@ fn a_space_at_the_end_of_a_line_does_not_count_when_fitting_it() {
     assert_eq!(baselines.len(), 2, "{spans:?}");
 }
 
+/// Centered and right-aligned text is placed by its drawn width, whatever spaces follow it.
 #[test]
 fn trailing_spaces_do_not_shift_centered_or_right_aligned_text() {
     let w = 200.0;

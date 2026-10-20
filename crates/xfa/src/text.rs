@@ -144,7 +144,6 @@ struct Word {
     width: f64,
 }
 
-/// Break the runs of a paragraph into words (spaces stay attached to the word before them).
 /// The width of `w` without the spaces it ends with: what it takes at the end of a line, where
 /// a space is never drawn.
 fn ink_width(w: &Word) -> f64 {
@@ -152,6 +151,7 @@ fn ink_width(w: &Word) -> f64 {
     if ink.len() == w.text.len() { w.width } else { w.face.width(ink) }
 }
 
+/// Break the runs of a paragraph into words (spaces stay attached to the word before them).
 fn words(runs: &[Run], base: &Face, embed: &dyn Fn(&str) -> String) -> Vec<Word> {
     let mut out = Vec::new();
     for run in runs {
