@@ -492,6 +492,21 @@ mod tests {
         }
     }
 
+    /// Retune tripwires, deliberately separate from the layout test above: these assert that three
+    /// constants still hold the values this module's contract depends on. They cannot fail on their
+    /// own — they exist so that editing one is a decision someone has to make twice. Each was
+    /// checked by deleting the pin and watching the matching regression go green again: raising
+    /// `MAX_BYTES` above Arial Unicode's ~23 MB, swapping the Devanagari probe for Arabic `U+0627`
+    /// (which that face also covers, so every other test stays green), and cutting `MAX_FACES` to 1.
+    /// The oracle in the macOS test below also depends on all three, and it is conditional on
+    /// installation — so on CI these are the only guard.
+    #[test]
+    fn the_load_constants_are_the_documented_contract() {
+        assert_eq!(MAX_BYTES, 32 << 20, "the non-Han installed-face size cap is this module's contract (Arial Unicode is ~23 MB)");
+        assert_eq!(DEVANAGARI_PROBE, '\u{0915}', "Devanagari ka is what the Hindi candidates are probed for, not another script's letter");
+        assert_eq!(MAX_FACES, 16, "how deep into a .ttc collection the loader looks; the macOS oracle trusts this depth");
+    }
+
     /// The macOS Devanagari list, exactly: families best first, each tried in the system folder
     /// before `Supplemental/`. This pins the spellings Apple uses on disk and the order that
     /// decides which face wins. A missing space (`DevanagariSangamMN.ttc`), swapping the two
@@ -511,13 +526,6 @@ mod tests {
                 PathBuf::from("/Library/Fonts/Arial Unicode.ttf"),
             ]
         );
-        // These two constants decide what the loader accepts, and one of them is what makes a Hindi
-        // check a Hindi check. Pin them here so neither can be retuned out from under this test — or
-        // from under the macOS oracle, whose Arial assertion is now conditional on installation.
-        assert_eq!(MAX_BYTES, 32 << 20, "the non-Han installed-face size cap is part of this module's contract (Arial Unicode is 23,278,008 B)");
-        assert_eq!(DEVANAGARI_PROBE, '\u{0915}', "Devanagari ka is what the Hindi candidates are probed for, not another script's letter");
-        assert_eq!(MAX_FACES, 16, "how deep into a .ttc collection the loader looks; the macOS oracle trusts this depth");
-
         // Pin what the application actually consults, not just the helper that builds it.
         #[cfg(target_os = "macos")]
         assert_eq!(devanagari_candidates(), macos_devanagari_candidates(), "the app must consult the list this test pins");
@@ -579,10 +587,18 @@ mod tests {
         // moved reads as "no file", which is exactly the dead-path defect this change exists to
         // catch. So gate on the entry existing (lstat), then require that it resolves, then check
         // size cap and coverage. `MAX_BYTES` is what the loader applies to non-Han scripts; the path
-        // comes from the list itself rather than being written out again, so it cannot drift.
+        // comes from the list itself rather than being written out again, so this oracle cannot
+        // drift from what production offers.
         let last_resort = list.last().expect("the macOS Devanagari list always ends at the Unicode face").clone();
+        assert!(
+            last_resort.to_string_lossy().ends_with("Arial Unicode.ttf"),
+            "this block checks the Unicode last resort, so the list must still end at it: {last_resort:?}"
+        );
         if std::fs::symlink_metadata(&last_resort).is_ok() {
-            assert!(last_resort.is_file(), "{last_resort:?} exists but does not resolve — Apple moved the target and this path has gone dead");
+            assert!(
+                last_resort.is_file(),
+                "{last_resort:?} exists but does not resolve — its target was moved or removed, so this path has gone dead"
+            );
             assert!(
                 read(&last_resort, DEVANAGARI_PROBE, MAX_BYTES).is_some(),
                 "the last-resort Unicode face is installed here but did not resolve and load under MAX_BYTES"
