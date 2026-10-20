@@ -1568,6 +1568,25 @@ fn overlapping_markup_hover_shows_the_topmost_comment() {
 }
 
 #[test]
+fn overlapping_markup_hover_uses_annotation_index_with_different_top_edges() {
+    // Inspection sorts by position, while /Annots determines paint order. The later
+    // highlight wins the overlap whether its upper edge is above or below the first's.
+    for top in [175, 160] {
+        let other = format!(
+            "9 0 obj << /Type /Annot /Subtype /Highlight /Rect [150 145 200 {top}] \
+             /QuadPoints [150 {top} 200 {top} 150 145 200 145] /Contents (Topmost comment) >> endobj"
+        );
+        let mut h = markup_hover_harness(markup_hover_fixture("Highlight", 0, &other, "9 0 R"), 0);
+        hover_markup_at(&mut h, 170.0, 155.0);
+        h.get_by_label_contains("Topmost comment");
+        assert!(h.query_by_label_contains("First multiline comment").is_none(), "later annotation with top {top} owns the overlap");
+        hover_markup_at(&mut h, 230.0, 155.0);
+        h.get_by_label_contains("First multiline comment");
+        assert!(h.query_by_label_contains("Topmost comment").is_none());
+    }
+}
+
+#[test]
 fn markup_hover_skips_popup_containers() {
     // /Popup holds the parent's comment window; it is not a second comment in paint order.
     let popup = "9 0 obj << /Type /Annot /Subtype /Popup /Parent 8 0 R /Rect [150 145 200 165] >> endobj";
