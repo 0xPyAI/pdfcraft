@@ -227,6 +227,27 @@ fn selected_text_copy_edit_and_context_menus() {
 }
 
 #[test]
+fn escape_closes_an_open_menu_before_it_clears_the_selection() {
+    // #3535: one Escape closed the main menu and dropped the selection with it.
+    use egui_kittest::kittest::Queryable;
+    let (mut h, at) = harness(|_| {});
+    click(&mut h, at);
+    click(&mut h, at);
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].selected_text().as_deref(), Some("quick"));
+    h.get_by_label("Menu").click();
+    h.run_steps(2);
+    assert!(egui::Popup::is_any_open(&h.ctx), "the menu is open");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    assert!(!egui::Popup::is_any_open(&h.ctx), "Escape closes the menu");
+    assert_eq!(h.state().views[0].selected_text().as_deref(), Some("quick"), "and keeps the selection");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].selected_text(), None, "a second Escape clears it");
+}
+
+#[test]
 fn selected_text_copy_command_requires_selection() {
     let (mut h, at) = harness(|_| {});
     assert!(!h.state_mut().execute("edit.copy"));

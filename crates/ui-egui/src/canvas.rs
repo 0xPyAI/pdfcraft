@@ -2285,7 +2285,8 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_s
         view.view_history(true);
     }
     let key = |k| ctx.input(|i| i.key_pressed(k));
-    if key(Key::Escape) {
+    // An open menu takes Escape first and closes; the selection stays for the next one (#3535).
+    if key(Key::Escape) && !egui::Popup::is_any_open(ctx) {
         if view.camera.is_some() || view.camera_done.is_some() {
             view.pending_action = Some(ViewAction::CancelCamera);
         } else if view.selection.is_some() {
