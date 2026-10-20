@@ -5218,3 +5218,24 @@ fn a_clipping_copy_on_the_same_baseline_is_refused() {
     assert!(matches!(&block, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{block:?}");
     assert_eq!(text::text_lines(&doc, 0).unwrap().len(), 2, "refused means untouched");
 }
+
+/// #3573: past the 256-level marked-content cap every `EMC` must still close its own sequence,
+/// so `/ActualText` nested that deep is neither dropped nor applied to too little text.
+#[test]
+fn actual_text_pairs_past_the_marked_content_cap() {
+    let span = "/Span <</ActualText (REPLACED)>> BDC BT /F1 24 Tf 72 700 Td (abc) Tj ET EMC";
+    let outer = "/Span <</ActualText (OUTER)>> BDC BT /F1 24 Tf 72 700 Td /Y BMC (abc) Tj EMC (def) Tj ET EMC";
+    for (content, expected) in [
+        (span.to_string(), "REPLACED"),
+        (format!("{}{span}{}", "/X BMC ".repeat(256), " EMC".repeat(256)), "REPLACED"),
+        (format!("{}{span}{}", "/X BMC ".repeat(1000), " EMC".repeat(1000)), "REPLACED"),
+        (outer.to_string(), "OUTER"),
+        (format!("{}{outer}{}", "/X BMC ".repeat(255), " EMC".repeat(255)), "OUTER"),
+    ] {
+        let doc = text_page(&content);
+        let lines = text::text_lines(&doc, 0).unwrap();
+        assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), [expected]);
+        let reading: Vec<String> = text::reading_blocks(&doc, 0).unwrap().into_iter().map(|b| b.text).collect();
+        assert_eq!(reading, [expected]);
+    }
+}

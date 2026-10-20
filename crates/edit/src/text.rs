@@ -829,7 +829,9 @@ fn interpret(
     let mut actual: Vec<Option<(usize, usize, String)>> = Vec::new();
     for (i, op) in ops.iter().enumerate() {
         match op.op.as_slice() {
-            b"BMC" | b"BDC" if marked.len() < 256 => {
+            // No depth cap: every `EMC` pops, so a capped push would pair it with the enclosing
+            // sequence (#3573). Both stacks stay bounded by the number of operators.
+            b"BMC" | b"BDC" => {
                 // Marked text paragraphs/headings are authoritative boundaries. Ignore
                 // artifacts and inner spans, which inherit their enclosing region.
                 let region = matches!(op.name(0), Some(b"P" | b"H" | b"H1" | b"H2" | b"H3" | b"H4" | b"H5" | b"H6" | b"LI" | b"TD" | b"TH"));
