@@ -237,6 +237,9 @@ impl Walker<'_> {
         self.ov.access.get(som).cloned().unwrap_or_else(|| access_name(a).to_string())
     }
 
+    /// The live node of field `f`, child `index` of `parent_som`, with its scripts recorded. In an
+    /// exclusion group (`radio` is the group's selected value) its value is its on value when picked,
+    /// else empty; elsewhere it is its data value (as saved) or its template default.
     fn field(&mut self, f: &Field, parent_som: &str, index: usize, radio: Option<&str>) -> FormNode {
         let som = child_som(parent_som, f.common.name.as_deref().or(Some("field")), index);
         let data_value = self.data.and_then(|d| d.value_at(&data_path(self.tpl, &som))).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
@@ -276,6 +279,9 @@ impl Walker<'_> {
         }
     }
 
+    /// The live nodes of `nodes`, the children of `parent_som`, with their scripts recorded: one per
+    /// instance of a repeating subform (what the data holds, else its initial count). Nothing past
+    /// [`MAX_DEPTH`] is built, and building stops once the object budget is spent.
     fn children(&mut self, nodes: &[Node], parent_som: &str, depth: usize) -> Vec<FormNode> {
         let mut out = Vec::new();
         if depth > MAX_DEPTH {
@@ -445,6 +451,9 @@ pub fn has_scripts(tpl: &Template) -> bool {
 /// The template with `ov` applied to its objects (instance 0 of each; scripts that hide one
 /// instance of a repeating subform hide them all).
 pub fn apply_overrides(tpl: &Template, ov: &Overrides) -> Template {
+    /// Set the presence `ov` gives each of `nodes` (children of `parent_som`) and their descendants,
+    /// down to [`MAX_DEPTH`], and the access it gives a field outside an exclusion group. An unnamed
+    /// draw, area or subform shares its parent's SOM path, so it takes no override of its own.
     fn walk(nodes: &mut [Node], parent_som: &str, ov: &Overrides, depth: usize) {
         if depth > MAX_DEPTH {
             return;

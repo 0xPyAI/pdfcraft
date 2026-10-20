@@ -716,6 +716,9 @@ fn overrides_live_in_the_acroform_and_hide_objects_in_the_layout() {
     assert!(overrides(&doc).is_empty());
 }
 
+/// Showing a hidden subform through an override leaves its unnamed hidden draw and subform hidden,
+/// in the layout and in the live form scripts see: they share the subform's SOM path, so its
+/// override is not theirs.
 #[test]
 fn showing_a_subform_leaves_its_unnamed_hidden_objects_hidden() {
     let (tpl, _) = parse(&unnamed_hidden_template()).unwrap();

@@ -114,10 +114,6 @@ fn assemble(objs: Vec<Vec<u8>>) -> Vec<u8> {
     out
 }
 
-/// A scripted form (JavaScript events): `qty` (initialised to 2, validated ≤ 100) × `price`
-/// (5) = `total` (calculated); a check box `more` that shows the hidden `details` subform;
-/// a table whose `row` (item, amount) repeats, with `addRow`, `removeRow` and `hello` buttons;
-/// `grand`, the calculated sum of the amounts.
 /// A hidden subform `details` a script may show, holding a named field and three unnamed
 /// objects: a caption, an old caption the form keeps hidden, and a hidden subform. Unnamed
 /// objects have no SOM name of their own, so showing `details` must leave the hidden ones hidden.
@@ -142,6 +138,10 @@ pub fn unnamed_hidden_template() -> String {
     .to_string()
 }
 
+/// A scripted form (JavaScript events): `qty` (initialised to 2, validated ≤ 100) × `price`
+/// (5) = `total` (calculated); a check box `more` that shows the hidden `details` subform;
+/// a table whose `row` (item, amount) repeats, with `addRow`, `removeRow` and `hello` buttons;
+/// `grand`, the calculated sum of the amounts.
 pub fn scripted_template() -> String {
     r##"<?xml version="1.0" encoding="UTF-8"?>
 <xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
