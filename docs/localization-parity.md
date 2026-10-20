@@ -9,11 +9,16 @@ add a language: [localization.md](localization.md). Summary in [ROADMAP.md](../R
 ## How this was measured
 
 - **Strings translated** is measured: the catalogs in `crates/ui-egui/src/i18n/<code>.tsv`, counted
-  as distinct `(context, English)` keys with a non-empty translation. The **current** denominator is
-  the union of keys across all catalogs (**2,674** keys as of 2026-10-20, counting language-specific
-  context rows such as `theme`/`Appearance`). The twelve-language percentage table below
-  still quotes the **historical 2,143-key snapshot** from 2026-10-10 for every language except
-  Vietnamese and Spanish (re-measured against the current union). English is built in.
+  as distinct `(context, English)` keys with a non-empty translation. The denominator is the union of
+  keys across all catalogs, counting language-specific context rows such as `theme`/`Appearance`.
+  **That union is a moving target**: every change that adds a string widens it, so a count is only
+  comparable with others measured on the same date, and a catalog that reached 100% falls behind
+  without losing a single translation. Every figure here therefore carries its date. The current
+  union is **2,674** keys as of 2026-10-20, against the **2,143-key snapshot** of 2026-10-10; earlier
+  revisions quote the union of their own date (see the revision history), not this one. The
+  twelve-language percentage table below still quotes the 2026-10-10 snapshot for every language
+  except Spanish, Vietnamese and Lithuanian, which are measured against the current union. English is
+  built in.
 - **Not counted:** error details from the engine and the operating system, which are shown in
   English inside a translated frame; there is no translated user documentation or help yet (Acrobat
   ships localized help).
@@ -69,7 +74,7 @@ help/docs polish (catalog and script work are already done), not missing UI stri
 | Slovenian | `sl` | 2,324 entries | partial | no |
 | Greek | `el` | 2,341 entries | partial | no |
 | Turkish | `tr` | 2,313 entries | partial | yes |
-| Lithuanian | `lt` | 2,585 entries | partial; community native-speaker review ([#1401](https://github.com/storytold/pdfcraft/pull/1401)) | no |
+| Lithuanian | `lt` | 2,674 (100% of current key union) | partial; community native-speaker review ([#1401](https://github.com/storytold/pdfcraft/pull/1401)) | no |
 
 **14 other languages** ship (22 catalogs plus English = **23** interface languages in Preferences).
 The entry counts without percentages were measured on 2026-10-12–13; they are not percentages of the older 2,143-key snapshot above. Their presence does not imply a detailed linguistic or runtime review.
@@ -82,7 +87,7 @@ Acrobat languages PdfCraft lacks: Danish, Dutch, Finnish, Norwegian, Swedish, He
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-20 | minor | Spanish: the 143 keys the other catalogs had and `es.tsv` was missing; `es` now covers the whole 2,674-key union, like `lt` and `vi` |
+| 2026-10-20 | minor | Spanish: the 143 keys the other catalogs had and `es.tsv` was missing; `es` now covers the whole 2,674-key union, like `lt` and `vi`. Restated Lithuanian against the current union (its 2,585 was measured on 2026-10-13) and said plainly in *How this was measured* that the union moves, so counts only compare within a date |
 | 2026-10-13 | minor | Vietnamese (`vi`) catalog: 2,591 entries (100% of current key union + `theme`/`Appearance`); twelve-language mean ≈ 68%; native-speaker community review; registered with `plural_none` |
 | 2026-10-14 | minor | Italian: 2,528 entries after adding the 201 keys the other catalogs had and the code looks up |
 | 2026-10-12 | minor | Added current counts for Kazakh, Polish, Slovenian, Greek, Turkish and Lithuanian; retained existing language assessments and the original percentage snapshot |
