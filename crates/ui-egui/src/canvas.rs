@@ -3461,9 +3461,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             }
 
             // Form-field highlight (Acrobat's "Highlight existing fields"); required fields get a
-            // red border. Radio buttons are round, and so is theirs (as in Acrobat).
+            // red border. Radio buttons are round, and so is theirs (as in Acrobat). Only fields
+            // that can be filled are marked: a read-only one is left as it is drawn.
             if view.highlight_fields {
-                for f in form.iter() {
+                for f in form.iter().filter(|f| !f.has(pdfcraft_engine::field_flags::READ_ONLY)) {
                     let required = f.has(pdfcraft_engine::field_flags::REQUIRED);
                     let round = f.kind == pdfcraft_engine::FormFieldKind::Radio;
                     for w in f.widgets.iter().filter(|w| w.page == Some(i) && !w.hidden) {

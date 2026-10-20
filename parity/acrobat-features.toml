@@ -4392,8 +4392,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/view.rs::highlight_fields_tints_the_field_area", "crates/ui-egui/tests/view.rs::required_radio_buttons_get_a_round_red_border", "crates/ui-egui/tests/view.rs::field_highlighting_is_remembered", "crates/ui-egui/tests/editing.rs::a_secured_form_shows_its_form_notice_and_its_security"]
-notes = "offered on secured forms too; remembered for the next document and session; required fields get a red border (round for radio buttons); the tint is drawn over the field, where Acrobat paints the highlight colour behind it"
+evidence = ["crates/ui-egui/tests/view.rs::highlight_fields_tints_the_field_area", "crates/ui-egui/tests/view.rs::required_radio_buttons_get_a_round_red_border", "crates/ui-egui/tests/view.rs::field_highlighting_is_remembered", "crates/ui-egui/tests/view.rs::highlight_fields_leaves_read_only_fields_alone", "crates/ui-egui/tests/editing.rs::a_secured_form_shows_its_form_notice_and_its_security"]
+notes = "only fields that can be filled are marked (a read-only field is left as drawn, so a form's locked boxes don't look fillable); offered on secured forms too; remembered for the next document and session; required fields get a red border (round for radio buttons); the tint is drawn over the field, where Acrobat paints the highlight colour behind it"
 
 [[feature]]
 id = "form.field-appearance-display"

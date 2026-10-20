@@ -1083,6 +1083,35 @@ fn highlight_fields_tints_the_field_area() {
     assert_ne!(before, after, "the field area is tinted when highlighting is on");
 }
 
+/// A text field that can be filled and one that is read-only (`/Ff` 1).
+const LOCKED: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R] >> endobj
+4 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (open) /Rect [50 300 250 330] /P 3 0 R >> endobj
+5 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (locked) /Ff 1 /Rect [50 200 250 230] /P 3 0 R >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
+/// Highlight fields marks the fields that can be filled: a read-only one (a form's locked
+/// box, or one its scripts have not opened yet) is left as it is drawn, as in Acrobat.
+#[test]
+fn highlight_fields_leaves_read_only_fields_alone() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("locked.pdf", None, LOCKED.to_vec()).expect("opens");
+        app.set_option("left", "closed").unwrap();
+        app.set_option("panel", "none").unwrap();
+        app.set_option("fields", "on").unwrap();
+        app
+    });
+    h.run_steps(6);
+    let tint = egui::Color32::from_rgba_unmultiplied(0x6E, 0x8E, 0xF5, 48);
+    let tinted = h.output().shapes.iter().filter(|c| matches!(&c.shape, egui::Shape::Rect(r) if r.fill == tint)).count();
+    assert_eq!(tinted, 1, "only the field that can be filled is tinted");
+}
+
 /// A required radio group (`/Ff` 32768 radio + 2 required) with two 40 pt round buttons.
 const RADIOS: &[u8] = b"%PDF-1.7
 1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> >> endobj
