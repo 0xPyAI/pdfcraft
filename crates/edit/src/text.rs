@@ -1466,8 +1466,10 @@ fn same_font(line: &TextLine, font: &[u8], base_font: &str, face: Option<&str>) 
 
 /// Whether two `/BaseFont` names name the same font: a subset's six-letter tag and `+` prefix do
 /// not change the font (ISO 32000-2 §9.6.4), so `ABCDEF+Arial` and `GHIJKL+Arial` are one font.
+/// A name that is missing, or only a tag (`ABCDEF+`), names no font and matches nothing.
 fn same_base_font(a: &str, b: &str) -> bool {
-    !a.is_empty() && (a == b || strip_subset_tag(a) == strip_subset_tag(b))
+    let (a, b) = (strip_subset_tag(a), strip_subset_tag(b));
+    !a.is_empty() && a == b
 }
 
 /// `ABCDEF+Arial` → `Arial`. A name without a subset tag is returned unchanged.
@@ -2803,6 +2805,18 @@ pub(crate) fn translate_blocks(doc: &mut Document, page: usize, indexes: &[usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_subset_tag_is_the_only_difference_between_subsets_of_one_font() {
+        assert!(same_base_font("ABCDEF+Arial", "GHIJKL+Arial"));
+        assert!(same_base_font("Arial", "ABCDEF+Arial"));
+        assert!(same_base_font("Arial", "Arial"));
+        assert!(!same_base_font("ABCDEF+Arial", "GHIJKL+Helvetica"));
+        // A tag with no name after it, or no name at all, names no font.
+        assert!(!same_base_font("ABCDEF+", "GHIJKL+"));
+        assert!(!same_base_font("", ""));
+        assert!(!same_base_font("Arial", ""));
+    }
 
     #[test]
     fn paragraph_wrapping_keeps_ideographic_spaces() {

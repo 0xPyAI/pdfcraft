@@ -883,7 +883,7 @@ fn text_page(content: &str) -> Document {
     let objs: Vec<String> = vec![
         "<< /Type /Catalog /Pages 2 0 R >>".into(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R /F4 8 0 R >> >> >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R /F4 8 0 R /F5 9 0 R >> >> >>".into(),
         format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
         // Subset: glyphs for a (97) and b (98) only.
@@ -894,6 +894,8 @@ fn text_page(content: &str) -> Document {
             .into(),
         // Helvetica again, in a second resource.
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        // No `/BaseFont`: `Metrics::from_dict` leaves its base-font name empty.
+        "<< /Type /Font /Subtype /Type1 /Encoding /WinAnsiEncoding >>".into(),
     ];
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offs = Vec::new();
@@ -1758,6 +1760,22 @@ fn one_line_continues_across_two_resources_of_the_same_font() {
 fn different_fonts_start_a_new_line() {
     let doc = text_page("BT /F1 12 Tf 72 700 Td (Hel) Tj /F2 12 Tf (lo) Tj ET");
     assert_eq!(text::text_lines(&doc, 0).unwrap().len(), 2);
+}
+
+/// A font without `/BaseFont` has no name to compare. Its lines still group by resource, as they
+/// did before subset joining: an empty name must not split one paragraph into two blocks.
+#[test]
+fn lines_in_a_font_without_a_base_font_stay_one_block() {
+    let doc = text_page("BT /F5 12 Tf 72 700 Td (First) Tj 0 -15 Td (second) Tj ET");
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 2);
+    assert!(lines.iter().all(|l| l.base_font.is_empty()), "{:?}", lines.iter().map(|l| &l.base_font).collect::<Vec<_>>());
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].text, "First second");
+    let reading = text::reading_blocks(&doc, 0).unwrap();
+    assert_eq!(reading.len(), 1, "{:?}", reading.iter().map(|b| &b.text).collect::<Vec<_>>());
+    assert_eq!(reading[0].text, "First second");
 }
 
 #[test]
