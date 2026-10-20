@@ -712,19 +712,6 @@ pub(crate) fn glyph_name_to_text(name: &str) -> Option<BfString> {
     }
 }
 
-/// PdfCraft patch: whether a glyph name only numbers the glyph, one or two letters and then
-/// digits (`C39`, `c251`, `g12`), so it says nothing about the character. ZapfDingbats' own
-/// names (`a1` to `a191`) are left out: they name dingbats, not the code's letter.
-pub(crate) fn numbered_glyph_name(name: &str) -> bool {
-    // As in the glyph list's mapping, a suffix (`C39.sc`) is dropped first.
-    let name = name.split('.').next().unwrap_or_default();
-    let letters = name.bytes().take_while(u8::is_ascii_alphabetic).count();
-    (1..=2).contains(&letters)
-        && name.len() > letters
-        && name.bytes().skip(letters).all(|b| b.is_ascii_digit())
-        && !(letters == 1 && name.starts_with('a'))
-}
-
 pub(crate) fn unicode_from_name(name: &str) -> Option<char> {
     let convert = |input: &str| u32::from_str_radix(input, 16).ok().and_then(char::from_u32);
 
