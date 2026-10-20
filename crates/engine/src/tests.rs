@@ -519,6 +519,63 @@ fn save_is_incremental_stamps_mod_date_and_rebases() {
     assert_eq!(reopened.revisions().len(), 3);
 }
 
+/// #1937: a file whose cross-reference data had to be rebuilt saved as its original bytes when
+/// nothing was edited, so the damage Document Properties reported as repaired was still in the
+/// file. Save writes the rebuilt file in full; reopened, it needs no repair.
+#[test]
+fn a_repaired_file_is_rewritten_by_save_even_without_edits() {
+    let good = fixture(2);
+    // Every offset in the table is off by the inserted line: the chain reads but leads nowhere.
+    let mut shifted = b"%PDF-1.7\n%shifted\n".to_vec();
+    shifted.extend_from_slice(&good[b"%PDF-1.7\n".len()..]);
+    // No cross-reference table at all.
+    let mut lost = good.clone();
+    lost.truncate(good.windows(9).rposition(|w| w == b"startxref").unwrap());
+    lost.extend_from_slice(b"startxref\n999999\n%%EOF\n");
+    for (name, damaged) in [("shifted", shifted), ("lost", lost)] {
+        let mut s = Session::new().with_clock(|| 1_700_000_000);
+        let id = s.open("broken.pdf", Some("/tmp/broken.pdf".into()), Arc::new(damaged.clone()), None).unwrap();
+        let doc = s.get(id).unwrap();
+        assert!(doc.repair_log().iter().any(|l| l.contains("rebuilt cross-reference index")), "{name}: {:?}", doc.repair_log());
+        assert_eq!(doc.info.pages.len(), 2, "{name}");
+        assert!(!doc.dirty, "{name}: a repair is not an edit");
+        let saved = s.save_bytes(id).unwrap();
+        assert_ne!(&saved[..], &damaged[..], "{name}: the damaged bytes are not what Save writes");
+        let reopened = pdfcraft_cos::Document::open(saved.clone()).unwrap();
+        assert!(reopened.repair_log().is_empty(), "{name}: {:?}", reopened.repair_log());
+        assert_eq!(reopened.revisions().len(), 1, "{name}");
+        s.mark_saved(id, saved.clone(), None).unwrap();
+        let doc = s.get(id).unwrap();
+        assert!(doc.repair_log().is_empty(), "{name}: {:?}", doc.repair_log());
+        assert_eq!(doc.info.pages.len(), 2, "{name}");
+        // Sound now: saving again without edits writes the same bytes.
+        assert_eq!(s.save_bytes(id).unwrap(), saved, "{name}");
+    }
+}
+
+/// A damaged file that is signed keeps its bytes on a Save without edits: rewriting it in full
+/// to put the repair on disk would invalidate its signatures without a word.
+#[test]
+fn a_signed_repaired_file_keeps_its_bytes_when_saved_without_edits() {
+    let p12 = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12")).unwrap();
+    let digital_id = sign::pkcs12::open(&p12, "test").unwrap();
+    // After the test certificate's start date (2026-10-02).
+    let mut s = Session::new().with_clock(|| 1_800_000_000);
+    let id = s.open("fixture.pdf", None, Arc::new(fixture(1)), None).unwrap();
+    let opts = SignOptions { page: 0, rect: Some([20.0, 20.0, 180.0, 60.0]), ..SignOptions::default() };
+    let signed = s.sign(id, &digital_id, opts).unwrap();
+    // A trailing `startxref` that points nowhere: the signed revision's bytes are untouched, but
+    // the file's cross-reference data has to be rebuilt.
+    let mut damaged = signed.to_vec();
+    damaged.extend_from_slice(b"\nstartxref\n999999\n%%EOF\n");
+    let mut t = Session::new().with_clock(|| 1_800_000_000);
+    let tid = t.open("damaged.pdf", Some("/tmp/damaged.pdf".into()), Arc::new(damaged.clone()), None).unwrap();
+    let doc = t.get(tid).unwrap();
+    assert!(doc.repair_log().iter().any(|l| l.contains("rebuilt cross-reference index")), "{:?}", doc.repair_log());
+    assert!(doc.is_signed());
+    assert_eq!(&t.save_bytes(tid).unwrap()[..], &damaged[..], "a signed file is not rewritten without edits");
+}
+
 #[test]
 fn undo_still_works_after_save() {
     let (mut s, id) = session_with(2);
@@ -813,7 +870,7 @@ fn form_with_field(name: &str) -> Vec<u8> {
 fn duplicating_a_page_with_a_field_keeps_the_field_name() {
     let mut s = Session::new().with_clock(|| 1_700_000_000);
     let id = s.open("a.pdf", None, Arc::new(form_with_field("Text1")), None).unwrap();
-    s.apply(id, Edit::DuplicatePages { pages: vec![0] }).unwrap();
+    s.apply(id, Edit::DuplicatePages { pages: vec![0], at: None }).unwrap();
     let doc = s.get(id).unwrap();
     assert_eq!(doc.info.pages.len(), 2);
     assert!(doc.form.iter().all(|f| f.name == "Text1"), "{:?}", doc.form.iter().map(|f| &f.name).collect::<Vec<_>>());
@@ -1182,6 +1239,22 @@ fn the_permissions_password_unlocks_an_open_document() {
     s.mark_saved(id, saved, None).unwrap();
     assert!(s.get(id).unwrap().allows_security_change(), "after saving");
     s.apply(id, Edit::RemoveProtection).unwrap();
+    let plain = s.save_bytes(id).unwrap();
+    assert!(pdfcraft_cos::Document::open(plain).unwrap().security().is_none(), "security removed");
+}
+
+#[test]
+fn remove_security_from_a_file_with_its_encrypt_dictionary_in_the_trailer() {
+    // MuPDF writes /Encrypt inline in the trailer rather than as an object (#2661).
+    let mut doc = pdfcraft_cos::Document::open_with_password(protected("user", "owner", -1), Some("owner")).unwrap();
+    let r = doc.trailer().reference(b"Encrypt").unwrap();
+    let dict = doc.get(r).as_dict().cloned().unwrap();
+    doc.trailer_mut().set(b"Encrypt".to_vec(), pdfcraft_cos::Object::Dict(dict));
+    let bytes = Arc::new(pdfcraft_cos::write_full(&doc, &Default::default()).unwrap());
+    let mut s = Session::new();
+    let id = s.open("m.pdf", None, bytes, Some("owner")).unwrap();
+    s.apply(id, Edit::RemoveProtection).unwrap();
+    assert!(!s.get(id).unwrap().info.encrypted);
     let plain = s.save_bytes(id).unwrap();
     assert!(pdfcraft_cos::Document::open(plain).unwrap().security().is_none(), "security removed");
 }
@@ -2110,7 +2183,7 @@ fn crop_and_duplicate_pages_show_in_the_viewer() {
     assert_eq!(d.info.pages[0].crop, [10.0, 20.0, 170.0, 260.0]);
     assert_eq!((d.info.pages[0].width, d.info.pages[0].height), (160.0, 240.0), "the viewer shows the cropped size");
     assert_eq!(d.page_boxes()[1][1], [0.0, 0.0, 200.0, 300.0]);
-    s.apply(id, Edit::DuplicatePages { pages: vec![1] }).unwrap();
+    s.apply(id, Edit::DuplicatePages { pages: vec![1], at: None }).unwrap();
     assert_eq!(page_texts(&s, id), ["Page 1", "Page 2", "Page 2"]);
     assert_eq!(s.get(id).unwrap().can_undo(), Some("Duplicate page"));
 }
@@ -2501,6 +2574,48 @@ fn pages_export_as_png_jpeg_and_tiff() {
     let tif = ex.image(0, 144.0, ImageFormat::Tiff).unwrap();
     let decoded = image::load_from_memory_with_format(&tif, image::ImageFormat::Tiff).unwrap();
     assert_eq!((decoded.width(), decoded.height()), (400, 600));
+    let mut tags = tiff::decoder::Decoder::new(std::io::Cursor::new(&tif)).unwrap();
+    let compression = tags.get_tag_u32(tiff::tags::Tag::Compression).unwrap();
+    let predictor = tags.get_tag_u32(tiff::tags::Tag::Predictor).unwrap();
+    assert_eq!((compression, predictor), (5, 1), "LZW, without a predictor");
+}
+
+/// A TIFF's resolution unit (2 = inch) and its horizontal and vertical resolution.
+fn tiff_resolution(bytes: &[u8]) -> (u32, f64, f64) {
+    use tiff::{decoder::ifd::Value, tags::Tag};
+    let mut d = tiff::decoder::Decoder::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut res = |tag| match d.get_tag(tag).unwrap() {
+        Value::Rational(n, d) => f64::from(n) / f64::from(d),
+        v => panic!("{tag:?} is {v:?}"),
+    };
+    let (x, y) = (res(Tag::XResolution), res(Tag::YResolution));
+    (d.get_tag_u32(Tag::ResolutionUnit).unwrap(), x, y)
+}
+
+/// An exported TIFF or JPEG says the resolution it was drawn at, so other programs show and print it
+/// at the page's size. A TIFF said 1 × 1 with no unit, and a JPEG said nothing.
+#[test]
+fn exported_pages_record_the_resolution_they_were_drawn_at() {
+    use crate::export::{Exporter, ImageFormat};
+    let (s, id) = session_with(1);
+    let mut ex = Exporter::new(s.get(id).unwrap());
+    assert_eq!(tiff_resolution(&ex.image(0, 144.0, ImageFormat::Tiff).unwrap()), (2, 144.0, 144.0));
+    let jpg = ex.image(0, 144.0, ImageFormat::Jpeg { quality: 85 }).unwrap();
+    assert_eq!(&jpg[6..11], b"JFIF\0");
+    assert_eq!(jpg[13..18], [1, 0, 144, 0, 144], "JFIF density in dots per inch");
+    // pHYs counts pixels per metre: 72 dpi would read back as 72.009, and a page made from the PNG
+    // (doc_create from images) would come out 0.01% small.
+    let png = ex.image(0, 72.0, ImageFormat::Png).unwrap();
+    assert!(png::Decoder::new(std::io::Cursor::new(png)).read_info().unwrap().info().pixel_dims.is_none(), "a PNG states no resolution");
+
+    // A page too large for the renderer at the asked resolution says the one it was drawn at.
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let bytes = s.create_blank(14_400.0, 792.0, 1).unwrap();
+    let id = s.open("wide.pdf", None, bytes, None).unwrap();
+    let mut ex = Exporter::new(s.get(id).unwrap());
+    let used = ex.dpi_used(0, 600.0);
+    let (unit, x, y) = tiff_resolution(&ex.image(0, 600.0, ImageFormat::Tiff).unwrap());
+    assert!(unit == 2 && (x - used).abs() < 0.01 && (y - used).abs() < 0.01, "{x} × {y}, drawn at {used}");
 }
 
 #[test]
@@ -3339,6 +3454,35 @@ fn recognize_text_reads_the_euro_sign() {
     assert!(text.contains("€250"), "{text}");
 }
 
+const SYNTHETIC_SCAN_DPI: f64 = 300.0;
+
+/// A scan of the OCR sentence at the source page's physical size, without a text layer.
+fn synthetic_ocr_scan(s: &mut Session) -> (DocId, [f32; 2]) {
+    let text = s.create_from_text("t", "The quick brown fox jumps over the lazy dog.").unwrap();
+    let id = s.open("text.pdf", None, text, None).unwrap();
+    let original = &s.get(id).unwrap().info.pages[0];
+    let size = [original.width, original.height];
+    // A typical 300 DPI scan keeps the small leading glyph in "quick" legible to OCR.
+    let png = export::Exporter::new(s.get(id).unwrap()).png(0, SYNTHETIC_SCAN_DPI).unwrap();
+    // Exported PNGs have no resolution metadata. The 72 DPI import default would enlarge
+    // the page and change the PDF-point coordinates the placement assertions exercise.
+    let scan = s.create_from_images_with_resolution(&[("scan.png".into(), png)], ImageResolution::Dpi(SYNTHETIC_SCAN_DPI)).unwrap();
+    (s.open("scan.pdf", None, scan, None).unwrap(), size)
+}
+
+#[test]
+fn synthetic_ocr_scan_keeps_the_original_page_size_without_models() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let (id, expected) = synthetic_ocr_scan(&mut s);
+    let page = &s.get(id).unwrap().info.pages[0];
+    // Rounding to whole raster pixels may change a page edge by at most one pixel.
+    let tolerance = 72.0 / SYNTHETIC_SCAN_DPI;
+    for (actual, expected) in [page.width, page.height].into_iter().zip(expected) {
+        assert!(f64::from((actual - expected).abs()) <= tolerance, "page edge {actual} pt, expected {expected} pt");
+    }
+    assert_eq!(page_texts(&s, id), [""], "the scan has no text until OCR runs");
+}
+
 #[test]
 fn recognize_text_makes_a_scanned_page_searchable() {
     if !ocr::available() {
@@ -3346,12 +3490,7 @@ fn recognize_text_makes_a_scanned_page_searchable() {
         return;
     }
     let mut s = Session::new().with_clock(|| 1_700_000_000);
-    let text = s.create_from_text("t", "The quick brown fox jumps over the lazy dog.").unwrap();
-    let id = s.open("text.pdf", None, text, None).unwrap();
-    // A typical 300 DPI scan keeps the small leading glyph in "quick" legible to OCR.
-    let png = export::Exporter::new(s.get(id).unwrap()).png(0, 300.0).unwrap();
-    let scan = s.create_from_images(&[("scan.png".into(), png)]).unwrap();
-    let id = s.open("scan.pdf", None, scan, None).unwrap();
+    let (id, _) = synthetic_ocr_scan(&mut s);
     assert_eq!(page_texts(&s, id), [""], "a picture has no text");
 
     let found = s.recognize_text(id, &[], ocr::OcrSettings::default()).unwrap();

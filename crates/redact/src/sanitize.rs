@@ -261,6 +261,12 @@ pub fn scan(doc: &Document) -> Vec<(Hidden, usize)> {
 }
 
 /// Remove the chosen categories. Returns what was removed per category.
+///
+/// # Errors
+///
+/// This operation is not transactional: an error may leave `doc` partially modified, with
+/// sensitive content still present. Call this on a working clone and replace the original only
+/// on success. On any error, discard the working clone; do not save or reuse it.
 pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden, usize)>, RedactError> {
     let counts = scan(doc);
     let count = |h: Hidden| counts.iter().find(|c| c.0 == h).map_or(0, |c| c.1);
@@ -271,6 +277,12 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
     if (text && count(Hidden::HiddenText) > 0) || (layers && count(Hidden::HiddenLayers) > 0) {
         content_pass(doc, text, layers, true)?;
     }
+    // Every annotation the pages list now: whatever is no longer listed at the end (flattened
+    // widgets included) leaves the structure tree too.
+    let listed = |doc: &Document| -> std::collections::HashSet<ObjRef> {
+        pdfcraft_model::pages(doc).iter().flat_map(|p| annots_of(doc, &p.dict)).filter_map(|a| a.as_ref()).collect()
+    };
+    let listed_before = listed(doc);
     if which.contains(&Hidden::FormFields) && count(Hidden::FormFields) > 0 {
         // Fields without appearances get one first, so their values stay visible.
         for f in pdfcraft_forms::fields(doc) {
@@ -291,16 +303,16 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
             || (which.contains(&Hidden::Attachments) && s == b"FileAttachment")
             || (which.contains(&Hidden::LinksActionsScripts) && s == b"Link")
     };
+    // The annotations to remove, on every page first, so a pop-up listed on another page than
+    // its parent goes with it.
+    let removed: std::collections::HashSet<ObjRef> = pdfcraft_model::pages(doc)
+        .iter()
+        .flat_map(|p| annots_of(doc, &p.dict))
+        .filter_map(|a| a.as_ref())
+        .filter(|&r| doc.get(r).as_dict().is_some_and(drop_annot))
+        .collect();
     for p in pdfcraft_model::pages(doc) {
         let list = annots_of(doc, &p.dict);
-        let mut removed: Vec<ObjRef> = Vec::new();
-        for a in &list {
-            if let Some(r) = a.as_ref()
-                && doc.get(r).as_dict().is_some_and(drop_annot)
-            {
-                removed.push(r);
-            }
-        }
         let mut kept = Vec::new();
         for a in list {
             let Some(r) = a.as_ref() else {
@@ -340,6 +352,12 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
             }
         })?;
     }
+    // A tagged PDF's structure tree still points at the removed links, comments and flattened
+    // widgets (#2447): drop those references, or the full rewrite keeps the annotations, URLs,
+    // text and field values included.
+    let still = listed(doc);
+    let gone: std::collections::HashSet<ObjRef> = listed_before.difference(&still).copied().collect();
+    crate::tags::drop_object_refs(doc, &gone)?;
     let off = hidden_layers(doc);
     let mut cat = doc.get(root).as_dict().cloned().unwrap_or_default();
     let mut names = sub(doc, &cat, b"Names");

@@ -367,6 +367,40 @@ fn selected_text_shows_actions_and_underlines_without_changing_tools() {
 }
 
 #[test]
+fn selected_text_copy_action_closes_the_bar_and_keeps_the_selection() {
+    let mut h = harness(|_| {});
+    h.state_mut().views[0].select_text(0, 4, 8);
+    h.run_steps(3);
+    h.get_by_label("Copy").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Add comment").is_none(), "the action bar closes after Copy");
+    assert!(h.state().views[0].selected_text().is_some_and(|t| !t.is_empty()), "the words stay selected");
+    // A new selection brings the bar back.
+    h.state_mut().views[0].select_text(0, 2, 6);
+    h.run_steps(3);
+    h.get_by_label("Add comment");
+}
+
+#[test]
+fn dragging_over_copied_text_again_brings_the_action_bar_back() {
+    let mut h = harness(|_| {});
+    let (a, b) = {
+        let v = &h.state().views[0];
+        (v.glyph_screen_pos(0, 4).expect("text layer"), v.glyph_screen_pos(0, 8).expect("glyph"))
+    };
+    drag(&mut h, a, b);
+    let copied = h.state().views[0].selected_text();
+    assert!(copied.is_some(), "the drag selects text");
+    h.get_by_label("Copy").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Add comment").is_none(), "the action bar closes after Copy");
+    // The same drag again selects the same words, which is a new selection: the bar is back.
+    drag(&mut h, a, b);
+    assert_eq!(h.state().views[0].selected_text(), copied, "the drag selects the same words");
+    assert!(h.query_by_label("Add comment").is_some(), "the action bar is back after a new drag");
+}
+
+#[test]
 fn selected_text_replace_action_opens_replacement_composer() {
     let mut h = harness(|_| {});
     h.state_mut().views[0].select_text(0, 4, 8);
@@ -1536,4 +1570,78 @@ fn text_box_properties_change_the_font_size() {
     let doc = s.session.get(s.views[0].id).unwrap();
     assert_eq!(doc.comment_props(0, 0).unwrap().font_size, Some(30.0));
     assert_eq!(doc.can_undo(), Some("Change comment properties"));
+}
+
+#[test]
+fn text_box_and_callout_properties_include_fill_and_thickness() {
+    use pdfcraft_engine::{Edit, LineEnding, NewAnnotation, Shape};
+    use pdfcraft_ui_egui::comments::CommentTool;
+    let mut h = harness(|_| {});
+    for (tool, shape) in [
+        (CommentTool::TextBox, Shape::TextBox { rect: [40.0, 600.0, 240.0, 640.0], font_size: 12.0 }),
+        (
+            CommentTool::Callout,
+            Shape::Callout {
+                rect: [40.0, 500.0, 240.0, 540.0],
+                knee: [30.0, 460.0],
+                point: [10.0, 440.0],
+                font_size: 12.0,
+                ending: LineEnding::OpenArrow,
+            },
+        ),
+    ] {
+        let index = comments(&h).len();
+        h.state_mut().apply_edit(Edit::AddAnnotation(NewAnnotation {
+            page: 0,
+            shape,
+            style: Default::default(),
+            contents: "Hello".into(),
+            author: "Ada".into(),
+        }));
+        h.run_steps(2);
+        h.state_mut().open_comment_props(0, index);
+        h.run_steps(2);
+        h.get_by_label("Fill colour");
+        {
+            let draft = h.state_mut().comment_props.as_mut().unwrap();
+            assert!(draft.original.fillable && draft.original.width.is_some());
+            draft.edited.fill = Some([1.0; 3]);
+            draft.edited.width = Some(3.0);
+        }
+        h.get_by_label("OK").click();
+        h.run_steps(3);
+        let doc = h.state().session.get(h.state().views[0].id).unwrap();
+        let p = doc.comment_props(0, index).unwrap();
+        assert_eq!((p.fill, p.width), (Some([1.0; 3]), Some(3.0)));
+        h.state_mut().make_comment_default(0, index);
+        assert_eq!(h.state().comment_prefs.style(tool).fill, Some([1.0; 3]));
+        assert_eq!(h.state().comment_prefs.style(tool).width, 3.0);
+    }
+}
+
+#[test]
+fn text_comments_can_save_a_zero_width_default() {
+    use pdfcraft_engine::{Edit, NewAnnotation, Shape};
+    use pdfcraft_ui_egui::comments::CommentTool;
+    let mut h = harness(|_| {});
+    let shape = Shape::TextBox { rect: [40.0, 600.0, 240.0, 640.0], font_size: 12.0 };
+    let mut style = pdfcraft_engine::Style::default_for(&shape);
+    style.width = 0.0;
+    h.state_mut().apply_edit(Edit::AddAnnotation(NewAnnotation { page: 0, shape, style, contents: "Hello".into(), author: "Ada".into() }));
+    h.run_steps(2);
+    h.state_mut().open_comment_props(0, 0);
+    h.run_steps(2);
+    assert_eq!(h.state().comment_props.as_ref().unwrap().edited.width, Some(0.0));
+    h.get_by_label("OK").click();
+    h.run_steps(2);
+    h.state_mut().make_comment_default(0, 0);
+    assert_eq!(h.state().comment_prefs.style(CommentTool::TextBox).width, 0.0);
+    h.state_mut().comment_prefs.set_width(CommentTool::Callout, 0.0);
+    h.state_mut().comment_prefs.set_width(CommentTool::Rectangle, 0.0);
+    assert_eq!(h.state().comment_prefs.style(CommentTool::Callout).width, 0.0);
+    assert_eq!(h.state().comment_prefs.style(CommentTool::Rectangle).width, 0.5);
+    let mut restored = PdfCraftApp::new();
+    restored.restore(&h.state().persist());
+    assert_eq!(restored.comment_prefs.style(CommentTool::TextBox).width, 0.0);
+    assert_eq!(restored.comment_prefs.style(CommentTool::Callout).width, 0.0);
 }
