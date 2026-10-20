@@ -132,6 +132,45 @@ fn header_and_footer_are_drawn_in_the_chosen_standard_face() {
 }
 
 #[test]
+fn a_header_never_takes_over_a_font_name_the_page_already_draws_with() {
+    // From review of #3756: a page that already draws a different font as /PCTimes keeps it; the
+    // header's Times goes under a free name, and an update reuses that name, not a third one.
+    let mut doc = fixture();
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    let mut fonts = Dict::new();
+    let mut theirs = Dict::new();
+    theirs.set(b"Type".to_vec(), Object::name("Font"));
+    theirs.set(b"Subtype".to_vec(), Object::name("Type1"));
+    theirs.set(b"BaseFont".to_vec(), Object::name("Helvetica-Bold"));
+    fonts.set(b"PCTimes".to_vec(), Object::Dict(theirs));
+    let mut res = Dict::new();
+    res.set(b"Font".to_vec(), Object::Dict(fonts));
+    doc.update_dict(page, |d| d.set(b"Resources".to_vec(), Object::Dict(res))).unwrap();
+    let hf = HeaderFooter {
+        text: ["Serif".into(), String::new(), String::new(), String::new(), String::new(), String::new()],
+        font: added::Family::Times,
+        ..HeaderFooter::default()
+    };
+    let base_of = |doc: &Document, name: &[u8]| {
+        let fonts = page_fonts(doc, &pdfcraft_model::pages(doc)[0]);
+        fonts.get(name).map(|f| doc.resolve(f)).and_then(|f| f.as_dict().and_then(|d| d.name(b"BaseFont")).map(<[u8]>::to_vec))
+    };
+    add_header_footer(&mut doc, &[0], &hf, false, &cx()).unwrap();
+    let doc = reopen(&doc);
+    assert_eq!(base_of(&doc, b"PCTimes").as_deref(), Some(&b"Helvetica-Bold"[..]), "the page's own font is untouched");
+    assert_eq!(base_of(&doc, b"PCTimes_1").as_deref(), Some(&b"Times-Roman"[..]));
+    let mark = streams(&doc, 0).last().cloned().unwrap();
+    assert!(mark.contains("/PCTimes_1 8 Tf"), "{mark}");
+    // Updating the header finds its own name again.
+    let mut doc = doc;
+    add_header_footer(&mut doc, &[0], &hf, true, &cx()).unwrap();
+    let doc = reopen(&doc);
+    assert!(streams(&doc, 0).last().unwrap().contains("/PCTimes_1 8 Tf"));
+    assert_eq!(base_of(&doc, b"PCTimes_2"), None, "no new name on update");
+    assert_eq!(base_of(&doc, b"PCTimes").as_deref(), Some(&b"Helvetica-Bold"[..]));
+}
+
+#[test]
 fn header_start_number_that_would_wrap_is_refused_without_drawing() {
     // u32::MAX is a valid start_number on its own, but there is no room for a second page
     // number after it. The old code wrapped the second page to zero; now the whole run is

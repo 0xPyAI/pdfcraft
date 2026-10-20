@@ -308,19 +308,51 @@ fn contents(doc: &mut Document, page: &pdfcraft_model::Page) -> Result<Vec<Objec
 
 /// Add the font (and an opacity state) to the page's own resources.
 fn add_resources(doc: &mut Document, page: &pdfcraft_model::Page, opacity: Option<f64>, content: Option<&[u8]>) -> Result<(), EditError> {
-    let mut res = page.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
-    let mut fonts = res.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
+    let mut faces: Vec<(Vec<u8>, &str)> = Vec::new();
     for (name, base) in [(&b"PCHelv"[..], "Helvetica"), (b"PCTimes", "Times-Roman"), (b"PCCour", "Courier")] {
         // Helvetica always (marks use it); the others only when the content names them.
         if name != b"PCHelv" && !content.is_some_and(|c| c.windows(name.len() + 1).any(|w| w[0] == b'/' && &w[1..] == name)) {
             continue;
         }
+        faces.push((name.to_vec(), base));
+    }
+    add_page_resources(doc, page, opacity, &faces)
+}
+
+/// The fonts a page draws with: its own resources' or the ones it inherits.
+fn page_fonts(doc: &Document, page: &pdfcraft_model::Page) -> Dict {
+    let res = page.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
+    res.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default()
+}
+
+/// A name in `fonts` for the standard face `base` that can't take over a font the page already
+/// draws with: `preferred` when it is free or already names that face, otherwise the first such
+/// `preferred_1`, `preferred_2`… (one of the first `fonts.len() + 1` always is).
+fn free_font_name(doc: &Document, fonts: &Dict, preferred: &str, base: &str) -> String {
+    let usable = |name: &str| match fonts.get(name.as_bytes()) {
+        None => true,
+        Some(font) => doc.resolve(font).as_dict().is_some_and(|d| {
+            d.name(b"Subtype") == Some(b"Type1") && d.name(b"BaseFont") == Some(base.as_bytes()) && d.name(b"Encoding") == Some(b"WinAnsiEncoding")
+        }),
+    };
+    if usable(preferred) {
+        return preferred.to_string();
+    }
+    (1..=fonts.len().saturating_add(1)).map(|k| format!("{preferred}_{k}")).find(|name| usable(name)).unwrap_or_else(|| preferred.to_string())
+}
+
+/// Add the standard `faces` (resource name, base font) and an opacity state to the page's own
+/// resources.
+fn add_page_resources(doc: &mut Document, page: &pdfcraft_model::Page, opacity: Option<f64>, faces: &[(Vec<u8>, &str)]) -> Result<(), EditError> {
+    let mut res = page.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
+    let mut fonts = res.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
+    for (name, base) in faces {
         let mut font = Dict::new();
         font.set(b"Type".to_vec(), Object::name("Font"));
         font.set(b"Subtype".to_vec(), Object::name("Type1"));
         font.set(b"BaseFont".to_vec(), Object::name(base));
         font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
-        fonts.set(name.to_vec(), Object::Dict(font));
+        fonts.set(name.clone(), Object::Dict(font));
     }
     res.set(b"Font".to_vec(), Object::Dict(fonts));
     if let Some(o) = opacity {
@@ -656,12 +688,15 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
         let bates = bates0.checked_add(k as u64).ok_or_else(|| EditError::Invalid("the Bates numbers are too large".into()))?;
         let size = hf.font_size;
         let [top, bottom, left, right] = hf.margins;
-        // The page resource each face is added under (see `add_resources`).
-        let resource = match hf.font {
+        // The page resource the face is added under: the usual name, unless the page already
+        // draws another font by it, which must not change under the header.
+        let preferred = match hf.font {
             added::Family::Helvetica => "PCHelv",
             added::Family::Times => "PCTimes",
             added::Family::Courier => "PCCour",
         };
+        let base = hf.font.base_font(false, false);
+        let resource = free_font_name(doc, &page_fonts(doc, page), preferred, base);
         let mut body: Vec<u8> = format!("BT\n/{resource} {} Tf\n{}\n", n(size), rgb(hf.color)).into_bytes();
         let mut underlines = String::new();
         for (slot, template) in hf.text.iter().enumerate() {
@@ -694,8 +729,7 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
         let mut content = begin(MarkKind::HeaderFooter, "Header", page.view_matrix(doc)).into_bytes();
         content.extend(body);
         content.extend_from_slice(END.as_bytes());
-        // The content names the face, so Times or Courier is added beside Helvetica.
-        add_resources(doc, page, None, Some(&content))?;
+        add_page_resources(doc, page, None, &[(resource.into_bytes(), base)])?;
         let page = &page_list(doc)[i];
         place(doc, page, MarkKind::HeaderFooter, content, false)?;
     }
