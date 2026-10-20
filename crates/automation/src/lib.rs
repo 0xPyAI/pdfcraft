@@ -761,9 +761,10 @@ impl Automation {
                 };
                 let mime = pdfcraft_engine::mime_for_name(&name).map(str::to_string);
                 let description = a.opt_str("description")?.map(str::to_string);
-                let before: Vec<String> = self.doc(&a)?.info.attachments.iter().map(|x| x.name.clone()).collect();
+                // Only the document-level keys: an annotation attachment of the same name is not the new one.
+                let before = document_attachment_keys(self.doc(&a)?);
                 let out = self.apply(&a, Edit::AddAttachment { name, bytes, description, mime })?;
-                let key = self.doc(&a)?.info.attachments.iter().map(|x| x.name.clone()).find(|n| !before.contains(n)).unwrap_or_default();
+                let key = document_attachment_keys(self.doc(&a)?).into_iter().find(|n| !before.contains(n)).unwrap_or_default();
                 json!({ "name": key, "document": out })
             }
             "attachment_delete" => {
@@ -2314,6 +2315,18 @@ impl Args<'_> {
 
 /// Bookmark rows in listing order as JSON: a row holds the rows that follow it on the page at the
 /// next level down in `children`, and paths and pages are 1-based.
+/// The name-tree keys of a document's own attachments, leaving out the files attached to pages as comments.
+fn document_attachment_keys(doc: &Document) -> Vec<String> {
+    doc.info
+        .attachments
+        .iter()
+        .filter_map(|x| match &x.source {
+            pdfcraft_render::AttachmentSource::Document { key } => Some(key.clone()),
+            pdfcraft_render::AttachmentSource::Annotation { .. } => None,
+        })
+        .collect()
+}
+
 fn nest_rows(rows: &[pdfcraft_engine::BookmarkRow], pages: &[pdfcraft_render::PageInfo]) -> Vec<Value> {
     // The open rows, outermost first, with their depth and the children gathered so far.
     let mut open: Vec<(usize, Value, Vec<Value>)> = Vec::new();

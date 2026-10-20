@@ -103,9 +103,16 @@ fn clear_embedded_files(doc: &mut Document) -> Result<(), OrganizeError> {
     let names = doc.get(root).as_dict().and_then(|c| c.get(b"Names").cloned());
     match names {
         Some(Object::Ref(r)) => {
+            let mut empty = false;
             doc.update_dict(r, |n| {
                 n.remove(b"EmbeddedFiles");
+                empty = n.is_empty();
             })?;
+            if empty {
+                doc.update_dict(root, |c| {
+                    c.remove(b"Names");
+                })?;
+            }
         }
         Some(Object::Dict(mut n)) => {
             n.remove(b"EmbeddedFiles");
