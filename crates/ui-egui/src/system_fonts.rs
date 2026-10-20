@@ -458,6 +458,12 @@ mod tests {
 
     #[test]
     fn a_script_fallback_is_the_first_candidate_with_the_probe() {
+        // This one calls `script_fallback` too, so it fails under the documented switch that
+        // published screenshots use — skip with a reason, as tests/fonts.rs does.
+        if installed_faces_switched_off() {
+            eprintln!("skipping: PDFCRAFT_SYSTEM_FONTS=0 turns the loader off");
+            return;
+        }
         let inter = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/Inter-Regular.ttf"));
         let candidates = [PathBuf::from("definitely/not/here.ttf"), inter];
         assert!(script_fallback(&candidates, 'A').is_some());
