@@ -51,3 +51,12 @@ black-point normalization is unchanged. `lab_bradford_tests` checks independent
 D50/equal-energy neutral and chromatic oracles, D65 identity, and direct/Indexed
 consistency (including an asymmetric chromatic Range), and zero/overflowing
 cone-response fallback.
+
+Missing spacing glyphs (#3601): in `hayro-interpret` `Type0Font::map_via_unicode`,
+an OpenType substitute uses its ordinary-space glyph only when its own charmap
+lacks a spacing character (including Adobe-Japan1 U+2002). Native glyphs and
+variation forms retain priority; embedded fonts, PDF advances and Unicode decoding
+are unchanged. Renderer regressions `japanese_substitute_missing_spaces_draw_no_ink`
+and `japanese_substitute_spaces_keep_pdf_widths_and_unicode` use the synthetic
+MS-Mincho / UniJIS-UCS2-HW-H fixture with craft-fonts, including `/W` and `/DW`
+placement controls.

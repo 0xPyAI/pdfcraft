@@ -6701,6 +6701,61 @@ trailer << /Root 1 0 R >>
         }
     }
 
+    // #3601: UniJIS-UCS2-HW-H maps code 0x0020 to CID 231 / U+2002. The PDF's
+    // explicit 500-unit width must win over the substitute's ordinary-space width.
+    fn japanese_spacing_pdf(content: &str, widths: &str) -> Vec<u8> {
+        format!(
+            "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 180 60] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /Font /Subtype /Type0 /BaseFont /MS-Mincho /Encoding /UniJIS-UCS2-HW-H /DescendantFonts [6 0 R] >> endobj
+6 0 obj << /Type /Font /Subtype /CIDFontType2 /BaseFont /MS-Mincho /CIDSystemInfo << /Registry (Adobe) /Ordering (Japan1) /Supplement 4 >>
+  /FontDescriptor 7 0 R /DW 1000 {widths} >> endobj
+7 0 obj << /Type /FontDescriptor /FontName /MS-Mincho /Flags 6 /FontBBox [0 -141 1000 859] /ItalicAngle 0 /Ascent 859 /Descent -141 /CapHeight 700 /StemV 80 >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+            content.len()
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn japanese_substitute_missing_spaces_draw_no_ink() {
+        if pdfcraft_fonts::document_japanese_font().is_none() {
+            eprintln!("built without craft-fonts (CRAFT_FONTS_DIR unset): no Japanese face to check");
+            return;
+        }
+        let out = render_first_page(japanese_spacing_pdf("BT /F1 20 Tf 10 30 Td <002000200020> Tj ET", "/W [231 [500]]"));
+        assert!(out.rgba.as_chunks::<4>().0.iter().all(|pixel| *pixel == [255; 4]), "spacing glyphs must leave the page white");
+    }
+
+    #[test]
+    fn japanese_substitute_spaces_keep_pdf_widths_and_unicode() {
+        if pdfcraft_fonts::document_japanese_font().is_none() {
+            eprintln!("built without craft-fonts (CRAFT_FONTS_DIR unset): no Japanese face to check");
+            return;
+        }
+        for (widths, second_x) in [("/W [231 [500]]", 50), ("", 70)] {
+            let pdf = japanese_spacing_pdf("BT /F1 20 Tf 10 30 Td <65E500200020672C> Tj ET", widths);
+            let out = render_first_page(pdf.clone());
+            // 日 advances 20 pt; each space advances 10 pt (/W) or 20 pt (/DW).
+            // A second independent text matrix pins 本 at the expected original PDF position.
+            let reference = format!("BT /F1 20 Tf 1 0 0 1 10 30 Tm <65E5> Tj 1 0 0 1 {second_x} 30 Tm <672C> Tj ET");
+            let expected = render_first_page(japanese_spacing_pdf(&reference, widths));
+            assert!(expected.rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[0] < 128), "the Japanese control must draw ink");
+            assert!(out.rgba.as_ref() == expected.rgba.as_ref(), "spaces must be blank without changing {widths:?} advances");
+            let mut renderer = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+            let text = renderer.render(RenderRequest { page: 0, kind: RequestKind::Text, ..Default::default() });
+            assert!(text.error.is_none(), "{:?}", text.error);
+            let glyphs: String = text.text.unwrap().glyphs.iter().map(|glyph| glyph.text.as_str()).collect();
+            assert_eq!(glyphs, "日\u{2002}\u{2002}本", "glyph substitution must not rewrite Unicode");
+        }
+    }
+
     /// Half-width katakana are common in Japanese documents set in a non-embedded Mincho font
     /// such as HeiseiMin-W3. The Mincho substitute must have those glyphs: one that lacks them
     /// (Shippori Mincho) draws them as .notdef.
