@@ -40,6 +40,8 @@ pub fn measure(s: &str) -> Option<f64> {
     Some((v * k).clamp(-100_000.0, 100_000.0))
 }
 
+/// The attribute `name` of `n` read as a measurement in points (see [`measure`]); `None`
+/// when it is missing or unreadable.
 fn attr_measure(n: XmlNode, name: &str) -> Option<f64> {
     n.attribute(name).and_then(measure)
 }
@@ -51,6 +53,7 @@ fn scale(v: &str) -> Option<f64> {
     (v.is_finite() && v > 0.0).then(|| (v / 100.0).clamp(0.01, 10.0))
 }
 
+/// The first child element of `n` named `name` (by local name, in any namespace).
 fn child<'a, 'd>(n: XmlNode<'a, 'd>, name: &str) -> Option<XmlNode<'a, 'd>> {
     n.children().find(|c| c.is_element() && c.tag_name().name() == name)
 }

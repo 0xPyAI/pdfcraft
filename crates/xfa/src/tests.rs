@@ -13,14 +13,18 @@ use crate::layout::WidgetKind;
 use crate::model::*;
 use crate::script::{NodeKind, Overrides, apply_overrides, fields_by_som, form_tree, overrides, rerender, set_overrides};
 
+/// The widgets laid out on `page`, in order.
 fn widgets(page: &Page) -> Vec<&Widget> {
     page.items.iter().filter_map(|i| if let Item::Widget(w) = i { Some(w.as_ref()) } else { None }).collect()
 }
 
+/// The text of each text span laid out on `page`, in order.
 fn texts(page: &Page) -> Vec<String> {
     page.items.iter().filter_map(|i| if let Item::Text(s) = i { Some(s.text.clone()) } else { None }).collect()
 }
 
+/// Measurements in points, inches, millimeters and centimeters convert to points, a bare
+/// number is points, and an `em` length, a non-number or a NaN is `None`.
 #[test]
 fn measurements_convert_to_points() {
     assert_eq!(measure("72pt"), Some(72.0));
@@ -137,6 +141,9 @@ fn horizontally_scaled_text_is_written_with_tz_inside_its_own_graphics_state() {
     assert!(ops.lines().filter(|l| l.contains(" Tj ") && !l.contains(" Tz ")).all(|l| l.starts_with("BT ")), "{ops}");
 }
 
+/// The sample template parses without warnings into what the layout uses: its page areas,
+/// page-number draws, rich-text title, field font, caption and widget border, check box,
+/// date field, radio group, table columns and page break all come through.
 #[test]
 fn the_template_parses_with_fonts_captions_and_rich_text() {
     let (tpl, warnings) = parse(&template(2)).unwrap();

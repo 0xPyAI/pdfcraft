@@ -509,6 +509,9 @@ impl Emitter<'_> {
         Some(r)
     }
 
+    /// Write a new image XObject for a picture, tagged with its `hash`: a JPEG as it is, a PNG
+    /// or GIF decoded to samples with a soft mask for any transparency. `None`, with a warning,
+    /// when the picture can't be read or is another kind.
     fn new_image_xobject(&mut self, data: &[u8], content_type: &str, hash: &[u8; 32]) -> Option<ObjRef> {
         let what = if content_type.is_empty() { "picture" } else { content_type };
         let mut d = Dict::new();

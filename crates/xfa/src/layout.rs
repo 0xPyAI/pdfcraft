@@ -1004,6 +1004,9 @@ impl Layouter<'_> {
         }
     }
 
+    /// The height a value takes at width `w` in the context's font and paragraph: its text as
+    /// measured, a picture scaled to `w` keeping its shape, nothing for a line, a rectangle or
+    /// no value.
     fn value_height(&self, v: &Value, w: f64, ctx: &Ctx) -> f64 {
         match v {
             Value::Text(t) => text::measure_height(&text::plain(t), w, &ctx.para, &Face::of(&ctx.font), &|id| self.embed(id)),
@@ -1013,6 +1016,10 @@ impl Layouter<'_> {
         }
     }
 
+    /// Where a field's caption goes and the room it takes there: its reserve, else the height
+    /// of its text above or below, or beside it its text's width plus 2pt, at most 60% of
+    /// `inner_w`. An inline caption goes on the left. `None` for a button, a caption that takes
+    /// no space, or one with neither text nor a reserve.
     fn caption_reserve(&self, f: &Field, inner_w: f64, ctx: &Ctx) -> Option<(Placement, f64)> {
         let cap = f.caption.as_ref()?;
         if !cap.presence.occupies() || f.ui == Ui::Button {
@@ -1037,6 +1044,9 @@ impl Layouter<'_> {
         Some((placement, reserve))
     }
 
+    /// The height of a field at `inner_w`: its widget (a check box's size, or its lines of text,
+    /// grown to hold a long value, plus padding and the widget margin), plus a caption above or
+    /// below it. A caption beside it makes it at least as tall as the caption's text.
     fn field_height(&self, f: &Field, inner_w: f64, ctx: &Ctx) -> f64 {
         let font = ctx.font.apply(&f.common.font);
         let lines = if f.multiline { 3.0 } else { 1.0 };
@@ -1089,6 +1099,8 @@ impl Layouter<'_> {
         text::measure_height(&text::plain(value.trim_end()), w, &ctx.para, &Self::field_text_face(f, &font), &|_| String::new())
     }
 
+    /// The height of an exclusion group's fields at `inner_w`, by the group's layout: stacked
+    /// top to bottom, at their own positions, or packed in rows.
     fn group_height(&self, g: &ExclGroup, inner_w: f64, ctx: &Ctx, depth: usize) -> f64 {
         let nodes: Vec<Node> = g.fields.iter().map(|f| Node::Field(Box::new(f.clone()))).collect();
         match g.layout {
@@ -1457,6 +1469,9 @@ impl Layouter<'_> {
         self.push(Item::Image { rect: fitted, data: Arc::new(data.to_vec()), content_type: content_type.to_string() })
     }
 
+    /// The widget name for a field or group named `base`, cleaned (dots become underscores,
+    /// control characters go): the first use is the name itself, later ones `name_2`, `name_3`
+    /// and so on.
     fn unique_name(&mut self, base: &str) -> String {
         let base = clean_name(base);
         let n = self.names.entry(base.clone()).or_insert(0);
