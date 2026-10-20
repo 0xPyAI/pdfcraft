@@ -143,6 +143,28 @@ fn catalog(doc: &Document) -> Dict {
     doc.root().and_then(|r| doc.get(r).as_dict().cloned()).unwrap_or_default()
 }
 
+/// The most references one value may be written through. A chain is unusual but legal, and the
+/// render inspector follows them (lopdf's `dereference` has a limit of its own), so the two
+/// readers of a flag must agree about one.
+const MAX_REFERENCE_CHAIN: usize = 32;
+
+/// The value a chain of indirect references ends at. [`Document::resolve`] follows one reference,
+/// and an indirect object's value may itself be a reference (ISO 32000-2 §7.3.10): `/Marked
+/// 8 0 R` with object 8 holding `9 0 R` holding `true` is a tagged document, which this rule read
+/// as untagged while `doc_info` read it as tagged. Bounded and cycle-safe, since a damaged file
+/// can point a reference at itself; a chain longer than that, or one that loops, is no value.
+fn resolved(doc: &Document, o: &Object) -> std::sync::Arc<Object> {
+    let mut seen: HashSet<ObjRef> = HashSet::new();
+    let mut value = doc.resolve(o);
+    while let Object::Ref(r) = &*value {
+        if seen.len() >= MAX_REFERENCE_CHAIN || !seen.insert(*r) {
+            return std::sync::Arc::new(Object::Null);
+        }
+        value = doc.get(*r);
+    }
+    value
+}
+
 fn text_of(doc: &Document, d: &Dict, key: &[u8]) -> Option<String> {
     d.get(key).map(|o| doc.resolve(o)).and_then(|o| o.as_string().map(|s| s.to_text())).map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())
 }
@@ -167,10 +189,11 @@ pub(crate) fn document_rule(doc: &Document, rule: Rule, pages: &[Page], scan: &S
             }
         }
         Rule::TaggedPdf => {
-            // `/Marked` may be an indirect reference like any other value, so it is resolved
-            // before the test below, which looks for the boolean itself (#3671).
+            // `/Marked` may be an indirect reference like any other value -- or a chain of
+            // them -- so it is followed to the value before the test below, which looks for the
+            // boolean itself (#3671).
             let marked =
-                cat.get(b"MarkInfo").map(|m| doc.resolve(m)).and_then(|m| m.as_dict().and_then(|d| d.get(b"Marked").map(|v| doc.resolve(v))));
+                cat.get(b"MarkInfo").map(|m| resolved(doc, m)).and_then(|m| m.as_dict().and_then(|d| d.get(b"Marked").map(|v| resolved(doc, v))));
             let mut out = Vec::new();
             if !cat.contains(b"StructTreeRoot") {
                 out.push(Finding::plain(None, "The document has no tags (structure tree)"));

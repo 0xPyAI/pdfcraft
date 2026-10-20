@@ -205,6 +205,24 @@ fn marked_as_an_indirect_reference_still_counts_as_tagged() {
     let report = check(&doc, &Options { rules: [Rule::TaggedPdf].into(), pages: None });
     assert_eq!(status(&report, Rule::TaggedPdf), Status::Passed, "{:?}", failed(&report));
 
+    // A reference to a reference is followed too: the render inspector follows chains, so the
+    // two readers of the flag would otherwise disagree about one file.
+    let mut chain = good();
+    let first = chain.len() + 1;
+    chain[0] = chain[0].replace("/MarkInfo << /Marked true >>", &format!("/MarkInfo << /Marked {first} 0 R >>"));
+    chain.push(format!("{} 0 R", first + 1));
+    chain.push("true".into());
+    let report = check(&pdf(&chain, ""), &Options { rules: [Rule::TaggedPdf].into(), pages: None });
+    assert_eq!(status(&report, Rule::TaggedPdf), Status::Passed, "{:?}", failed(&report));
+
+    // A reference that points at itself is no value, not a hang.
+    let mut loops = good();
+    let at = loops.len() + 1;
+    loops[0] = loops[0].replace("/MarkInfo << /Marked true >>", &format!("/MarkInfo << /Marked {at} 0 R >>"));
+    loops.push(format!("{at} 0 R"));
+    let report = check(&pdf(&loops, ""), &Options { rules: [Rule::TaggedPdf].into(), pages: None });
+    assert_eq!(status(&report, Rule::TaggedPdf), Status::Failed);
+
     // The direct form is unchanged, and a document with no flag at all still fails.
     assert_eq!(status(&check(&pdf(&good(), ""), &Options { rules: [Rule::TaggedPdf].into(), pages: None }), Rule::TaggedPdf), Status::Passed);
     let mut none = good();
