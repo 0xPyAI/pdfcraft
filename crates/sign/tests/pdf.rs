@@ -667,6 +667,49 @@ fn signing_with_keychain_identities() {
     result.unwrap();
 }
 
+/// A Keychain identity carries the certificates macOS chains it to, as a `.p12`'s does, so the
+/// signature embeds its issuers. Ignored by default: the throwaway keychain joins the user's
+/// keychain search list while the test runs (restored afterwards).
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "creates a temporary macOS keychain; run with --ignored"]
+fn keychain_identities_carry_their_issuers() {
+    use std::process::Command;
+    let dir = std::env::temp_dir().join(format!("pdfcraft-keychain-chain-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let kc = dir.join("test.keychain-db");
+    let sec = |args: &[&str]| Command::new("security").args(args).output().unwrap();
+    let list = String::from_utf8(sec(&["list-keychains", "-d", "user"]).stdout).unwrap();
+    let saved: Vec<String> = list.lines().map(|l| l.trim().trim_matches('"').to_string()).filter(|l| !l.is_empty()).collect();
+    let k = kc.to_str().unwrap();
+    assert!(sec(&["create-keychain", "-p", "pc-test", k]).status.success());
+    let set_list = |extra: Option<&str>| {
+        let mut args = vec!["list-keychains", "-d", "user", "-s"];
+        args.extend(saved.iter().map(String::as_str));
+        args.extend(extra);
+        sec(&args);
+    };
+    // macOS finds an identity's issuers in the keychains on the search list.
+    set_list(Some(k));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sec(&["unlock-keychain", "-p", "pc-test", k]);
+        let p = format!("{}/tests/data/chain-legacy.p12", env!("CARGO_MANIFEST_DIR"));
+        let out = sec(&["import", &p, "-k", k, "-P", "test", "-A"]);
+        assert!(out.status.success(), "chain-legacy.p12: {}", String::from_utf8_lossy(&out.stderr));
+        let listed = pdfcraft_sign::keychain::identities(Some(&kc)).unwrap();
+        assert_eq!(listed.len(), 1, "{listed:?}");
+        let id = pdfcraft_sign::keychain::find(&pdfcraft_sign::keychain::reference(&listed[0].certificate)).unwrap();
+        let issuers: Vec<_> = id.chain.iter().map(|c| c.subject.common_name()).collect();
+        assert_eq!(issuers, [Some("PrintCraft Test Root CA")]);
+        let file = pkcs12::open(&data("chain.p12"), "test").unwrap();
+        assert_eq!(id.chain.iter().map(|c| &c.raw).collect::<Vec<_>>(), file.chain.iter().map(|c| &c.raw).collect::<Vec<_>>());
+    }));
+    sec(&["delete-keychain", k]);
+    set_list(None);
+    let _ = std::fs::remove_dir_all(&dir);
+    result.unwrap();
+}
+
 /// `fixture()` plus a Form XObject (object 7) that the page draws.
 fn fixture_with_xobject() -> Vec<u8> {
     let objs: Vec<&[u8]> = vec![
