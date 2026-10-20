@@ -2024,7 +2024,12 @@ fn protected(user: &str, owner: &str, permissions: i32) -> Vec<u8> {
 }
 
 fn protected_with(algorithm: pdfcraft_cos::Algorithm, user: &str, owner: &str, permissions: i32) -> Vec<u8> {
-    let mut doc = pdfcraft_cos::Document::open(std::sync::Arc::new(fixture(2))).unwrap();
+    encrypted(fixture(2), algorithm, user, owner, permissions)
+}
+
+/// `bytes` rewritten encrypted.
+fn encrypted(bytes: Vec<u8>, algorithm: pdfcraft_cos::Algorithm, user: &str, owner: &str, permissions: i32) -> Vec<u8> {
+    let mut doc = pdfcraft_cos::Document::open(std::sync::Arc::new(bytes)).unwrap();
     doc.set_encryption(&pdfcraft_cos::NewEncryption {
         algorithm,
         user_password: user,
@@ -2144,6 +2149,25 @@ fn remove_security_asks_for_the_permissions_password_first() {
     type_password(&mut h, "owner");
     let doc = h.state().session.get(id).unwrap();
     assert!(doc.dirty && doc.security_summary().is_none(), "security is removed (written by the next save)");
+}
+
+/// A secured form still says it is one and offers Highlight fields: the security notice joins
+/// the form's instead of replacing it.
+#[test]
+fn a_secured_form_shows_its_form_notice_and_its_security() {
+    // Changing and assembling withheld, filling allowed (as government forms are often set).
+    let bytes = encrypted(include_bytes!("data/form.pdf").to_vec(), pdfcraft_cos::Algorithm::Aes256, "", "owner", -1036);
+    let mut h = Harness::builder().with_size(egui::vec2(1600.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("form.pdf", None, bytes).unwrap();
+        app
+    });
+    h.run_steps(4);
+    h.get_by_label_contains("interactive form fields. This document is secured. Some changes are restricted by its security settings.");
+    h.get_by_label("Highlight fields");
+    h.get_by_label("Security settings");
+    h.get_by_label("Unlock…");
 }
 
 #[test]
@@ -2388,6 +2412,81 @@ fn dragging_thumbnails_reorders_pages() {
     assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Move page"));
     let sel: Vec<usize> = h.state().views[0].selected.iter().copied().collect();
     assert_eq!(sel, vec![2], "the moved page stays selected");
+}
+
+/// A page drag with the copy modifier held — Ctrl (Option on macOS) — instead of none.
+/// Modifiers are input state: `ModifiersChanged` once, as the column-select drag does.
+fn copy_drag(h: &mut Harness<'static, PdfCraftApp>, from: egui::Pos2, to: egui::Pos2) {
+    page_drag(h, from, to, copy_modifiers(h));
+}
+
+/// The copy modifier of the OS the app reports: Option on macOS, Ctrl elsewhere. That is the OS
+/// the gesture itself reads, so a Mac browser — a wasm build, where `cfg!(target_os = "macos")` is
+/// false — is covered by asking the context rather than the target.
+fn copy_modifiers(h: &Harness<'static, PdfCraftApp>) -> Modifiers {
+    if h.ctx.os() == egui::os::OperatingSystem::Mac { Modifiers::ALT } else { Modifiers::CTRL }
+}
+
+/// Drag the page under `from` to `to` with `modifiers` held for the whole gesture.
+fn page_drag(h: &mut Harness<'static, PdfCraftApp>, from: egui::Pos2, to: egui::Pos2, modifiers: Modifiers) {
+    h.event(egui::Event::ModifiersChanged(modifiers));
+    h.run_steps(1);
+    h.hover_at(from);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers });
+    h.run_steps(1);
+    for k in 1..=5 {
+        h.hover_at(from + (to - from) * (k as f32 / 5.0));
+        h.run_steps(1);
+    }
+    h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers });
+    h.run_steps(4);
+    h.event(egui::Event::ModifiersChanged(Modifiers::NONE));
+    h.run_steps(1);
+}
+
+#[test]
+fn dragging_with_the_copy_modifier_copies_the_pages_into_the_gap() {
+    let mut h = organize(3);
+    let before = page_texts(h.state());
+    let grab = |h: &Harness<'static, PdfCraftApp>, label: &str| h.get_by_label(label).rect();
+    let (from, to) = (grab(&h, "Page 1").center(), grab(&h, "Page 3").right_center() - egui::vec2(10.0, 0.0));
+    copy_drag(&mut h, from, to);
+    // The original stays first; a copy of page 1 lands after page 3 (#2997).
+    let after = page_texts(h.state());
+    assert_eq!(after, vec![before[0].clone(), before[1].clone(), before[2].clone(), before[0].clone()], "{after:?}");
+    assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Duplicate page"));
+    let sel: Vec<usize> = h.state().views[0].selected.iter().copied().collect();
+    assert_eq!(sel, vec![3], "the copy is selected");
+}
+
+/// macOS is not only `cfg!(target_os = "macos")`: the wasm build runs in a Mac browser, where the
+/// cfg is false but the context says Mac. The gesture must follow the context, or Option-drag
+/// there moves the pages instead of copying them (#3092 review).
+#[test]
+fn option_copies_and_ctrl_moves_when_the_context_reports_macos() {
+    let grab = |h: &Harness<'static, PdfCraftApp>, label: &str| h.get_by_label(label).rect();
+    let points = |h: &Harness<'static, PdfCraftApp>| (grab(h, "Page 1").center(), grab(h, "Page 3").right_center() - egui::vec2(10.0, 0.0));
+
+    // Ctrl is not the copy modifier on macOS, so that drag moves the page.
+    let mut h = organize(3);
+    h.ctx.set_os(egui::os::OperatingSystem::Mac);
+    let before = page_texts(h.state());
+    let (from, to) = points(&h);
+    page_drag(&mut h, from, to, Modifiers::CTRL);
+    assert_eq!(page_texts(h.state()), vec![before[1].clone(), before[2].clone(), before[0].clone()], "Ctrl moves on macOS");
+    assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Move page"));
+
+    // Option is, so the same drag drops a copy at the gap.
+    let mut h = organize(3);
+    h.ctx.set_os(egui::os::OperatingSystem::Mac);
+    let before = page_texts(h.state());
+    let (from, to) = points(&h);
+    page_drag(&mut h, from, to, Modifiers::ALT);
+    assert_eq!(page_texts(h.state()), vec![before[0].clone(), before[1].clone(), before[2].clone(), before[0].clone()], "Option copies on macOS");
+    assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Duplicate page"));
+    let sel: Vec<usize> = h.state().views[0].selected.iter().copied().collect();
+    assert_eq!(sel, vec![3], "the copy is selected");
 }
 
 #[test]

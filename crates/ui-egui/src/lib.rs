@@ -139,6 +139,7 @@ mod tab_context;
 pub mod theme;
 pub mod ui_scale;
 pub mod updates;
+mod wheel_boost;
 mod wheel_pager;
 mod widgets;
 pub mod window_controls;
@@ -2800,7 +2801,15 @@ impl PdfCraftApp {
         // properties; Escape cancels it rather than clearing a selection), and nothing may run
         // underneath it. They are read here, before the canvas can consume them.
         if self.close_request.is_some() {
-            if let Some(choice) = dialogs::save_prompt_key(ctx) {
+            // These dialogs are drawn after the save prompt and own the keyboard while open.
+            // Don't let Escape or Return resolve unsaved work underneath one.
+            let covered = self.pending_link.is_some()
+                || self.pending_remote_link.is_some()
+                || self.pending_full_screen.is_some()
+                || self.updates.open
+                || self.dialog.is_some()
+                || self.unlock_prompt.is_some();
+            if !covered && let Some(choice) = dialogs::save_prompt_key(ctx) {
                 self.resolve_close(ctx, choice);
             }
             return;

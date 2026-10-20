@@ -904,6 +904,92 @@ fn text_page(content: &str) -> Document {
     Document::open(Arc::new(out)).unwrap()
 }
 
+#[test]
+fn tracked_text_keeps_words_in_paragraphs_and_objects() {
+    let expected = "TRACKED SAMPLE TEXT";
+    for spacing in [1.5, 2.0001, 3.0] {
+        for scale in [50.0, 100.0, 150.0] {
+            for positioned in [false, true] {
+                let mut show = String::new();
+                if !positioned {
+                    show.push('[');
+                }
+                for (i, c) in expected.chars().enumerate() {
+                    if positioned {
+                        show.push_str(&format!("({c}) Tj "));
+                        if i + 1 < expected.len() {
+                            show.push_str(&format!("[{}] TJ ", -spacing * 100.0));
+                        }
+                    } else {
+                        show.push_str(&format!("({c}) "));
+                        if i + 1 < expected.len() {
+                            show.push_str(&format!("{} ", -spacing * 100.0));
+                        }
+                    }
+                }
+                if !positioned {
+                    show.push_str("] TJ");
+                }
+                let doc = text_page(&format!("BT /F1 10 Tf {scale} Tz 72 700 Td {show} ET"));
+                assert_eq!(text::text_lines(&doc, 0).unwrap()[0].text, expected, "{spacing}, {scale}, {positioned}");
+                assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].text, expected);
+                assert_eq!(crate::objects::editable_objects(&doc, 0).unwrap()[0].text.as_deref(), Some(expected));
+            }
+        }
+        let doc = text_page(&format!("BT /F1 10 Tf {spacing} Tc 72 700 Td ({expected}) Tj ET"));
+        assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].text, expected);
+    }
+}
+
+#[test]
+fn single_glyph_words_and_cells_are_not_tracking() {
+    for (content, expected) in [
+        ("BT /F1 10 Tf 72 700 Td [(a) -1000 (b) -1000 (c) -1000 (d)] TJ ET", "a b c d"),
+        ("BT /F1 10 Tf 72 700 Td [(1) -2500 (2) -2500 (3) -2500 (4) -2500 (5)] TJ ET", "1 2 3 4 5"),
+        ("BT /F1 10 Tf 72 700 Td [(A) -300 (B) -1200 (C) -1200 (D) -1200 (E) -300 (F) -1200 (G)] TJ ET", "A B C D E F G"),
+    ] {
+        assert_eq!(text::text_blocks(&text_page(content), 0).unwrap()[0].text, expected, "{content}");
+    }
+    let mut s = String::from("BT /F1 10 Tf ");
+    for (i, c) in "12345".chars().enumerate() {
+        s.push_str(&format!("1 0 0 1 {} 700 Tm ({c}) Tj ", 72 + i * 12));
+    }
+    s.push_str("ET");
+    assert_eq!(text::text_blocks(&text_page(&s), 0).unwrap()[0].text, "1 2 3 4 5");
+}
+
+#[test]
+fn tracked_text_preserves_larger_word_gaps() {
+    for show in [
+        "[(T) -300 (E) -300 (S) -300 (T) -600 (W) -300 (O) -300 (R) -300 (D)] TJ",
+        "(T) Tj [-300] TJ (E) Tj [-300] TJ (S) Tj [-300] TJ (T) Tj [-600] TJ (W) Tj [-300] TJ (O) Tj [-300] TJ (R) Tj [-300] TJ (D) Tj",
+        "[(TEST) -300 (WORD)] TJ",
+        "(TEST) Tj [-300] TJ (W) Tj [-300] TJ (O) Tj [-300] TJ (R) Tj [-300] TJ (D) Tj",
+    ] {
+        let doc = text_page(&format!("BT /F1 10 Tf 72 700 Td {show} ET"));
+        assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].text, "TEST WORD", "{show}");
+    }
+}
+
+#[test]
+fn tracked_text_positions_do_not_count_character_spacing_twice() {
+    let expected = "TRACKED SAMPLE TEXT";
+    for char_spacing in [0.0, 2.0] {
+        for transform in ["1 0 0 1 0 0", "0 1 -1 0 800 0"] {
+            let mut content = format!("q {transform} cm BT /F1 10 Tf {char_spacing} Tc ");
+            let mut x = 72.0;
+            for c in expected.chars() {
+                content.push_str(&format!("1 0 0 1 {x:.4} 700 Tm ({c}) Tj "));
+                x += pdfcraft_fonts::helvetica_width(&c.to_string(), 10.0) + 2.0001;
+            }
+            content.push_str("ET Q");
+            let doc = text_page(&content);
+            assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].text, expected);
+            assert_eq!(crate::objects::editable_objects(&doc, 0).unwrap()[0].text.as_deref(), Some(expected));
+        }
+    }
+}
+
 fn descriptor_text_page() -> Document {
     let content = "BT /F1 12 Tf 72 700 Td (ab) Tj ET";
     let objs: Vec<String> = vec![
@@ -1471,6 +1557,65 @@ fn skia_subset_page() -> Document {
     let fonts = Dict::from_iter([(b"F3".to_vec(), Object::Dict(font))]);
     doc.update_dict(p, |d| d.set(b"Resources".to_vec(), Object::Dict(Dict::from_iter([(b"Font".to_vec(), Object::Dict(fonts))])))).unwrap();
     doc
+}
+
+/// #2616: a subset whose ToUnicode has no space (as LaTeX and Sphinx output often has, spacing
+/// words with TJ kerning) makes finding the space width read every font on the page. That ran
+/// for every character of a multi-row draft, so each keystroke in a long paragraph took half a
+/// second. It runs once per font now, however long the paragraph.
+#[test]
+fn a_long_draft_in_a_font_without_a_space_works_out_the_space_width_once() {
+    // Two rows of one paragraph (14 pt apart) in the Chrome-style subset of `skia_subset_page`,
+    // whose ToUnicode here has no entry for the space glyph.
+    let mut doc =
+        text_page("BT /F3 12 Tf 72 700 Td <0177031602E001FB03050255> Tj ET          BT /F3 12 Tf 72 686 Td <008D0266035402FE01FB030503E6> Tj ET");
+    let program = doc.add(Object::Stream(Stream::flate(Dict::new(), include_bytes!("../../../assets/fonts/Inter-Regular.ttf"))));
+    let unicode = doc.add(Object::Stream(Stream::flate(
+        Dict::new(),
+        b"1 begincodespacerange <0000> <FFFF> endcodespacerange 12 beginbfchar <0177> <0050> <0316> <006F> <02E0> <006C>           <01FB> <0061> <0305> <006E> <0255> <0064> <008D> <0047> <0266> <0065> <0354> <0072> <02FE> <006D> <03E6> <0079>           <1000> <007A> endbfchar",
+    )));
+    let widths: Vec<Object> =
+        [(0x8D, 746), (0x177, 639), (0x1FB, 551), (0x255, 612), (0x266, 583), (0x2E0, 242), (0x2FE, 876), (0x305, 591), (0x316, 600)]
+            .into_iter()
+            .chain([(0x354, 376), (0x3E6, 515)])
+            .flat_map(|(cid, width)| [Object::Int(cid), Object::Array(vec![Object::Int(width)])])
+            .collect();
+    let descriptor = Dict::from_iter([
+        (b"Type".to_vec(), Object::name("FontDescriptor")),
+        (b"FontName".to_vec(), Object::name("BAAAAA+SampleSans")),
+        (b"Flags".to_vec(), Object::Int(32)),
+        (b"FontFile2".to_vec(), Object::Ref(program)),
+    ]);
+    let cid_font = Dict::from_iter([
+        (b"Type".to_vec(), Object::name("Font")),
+        (b"Subtype".to_vec(), Object::name("CIDFontType2")),
+        (b"BaseFont".to_vec(), Object::name("BAAAAA+SampleSans")),
+        (b"CIDToGIDMap".to_vec(), Object::name("Identity")),
+        (b"DW".to_vec(), Object::Int(562)),
+        (b"W".to_vec(), Object::Array(widths)),
+        (b"FontDescriptor".to_vec(), Object::Dict(descriptor)),
+    ]);
+    let font = Dict::from_iter([
+        (b"Type".to_vec(), Object::name("Font")),
+        (b"Subtype".to_vec(), Object::name("Type0")),
+        (b"BaseFont".to_vec(), Object::name("BAAAAA+SampleSans")),
+        (b"Encoding".to_vec(), Object::name("Identity-H")),
+        (b"DescendantFonts".to_vec(), Object::Array(vec![Object::Dict(cid_font)])),
+        (b"ToUnicode".to_vec(), Object::Ref(unicode)),
+    ]);
+    let p = pdfcraft_model::pages(&doc)[0].obj;
+    let fonts = Dict::from_iter([(b"F3".to_vec(), Object::Dict(font))]);
+    doc.update_dict(p, |d| d.set(b"Resources".to_vec(), Object::Dict(Dict::from_iter([(b"Font".to_vec(), Object::Dict(fonts))])))).unwrap();
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 1, "one paragraph: {:?}", blocks.iter().map(|b| &b.text).collect::<Vec<_>>());
+    let draft = "Poland and Germany
+"
+    .repeat(20);
+    text::SOURCE_SPACE_CALLS.with(|c| c.set(0));
+    let layout = text::text_edit_layout(&doc, 0, 0, draft.trim_end(), &text::BlockStyle::default()).unwrap();
+    let calls = text::SOURCE_SPACE_CALLS.with(std::cell::Cell::get);
+    assert!(layout.draft_rect.is_some_and(|r| r[2] > r[0]), "laid out: {:?}", layout.draft_rect);
+    assert!(calls <= 8, "the space width was worked out {calls} times for {} characters", draft.len());
 }
 
 #[test]
@@ -2837,6 +2982,88 @@ fn form_xobjects_that_fan_out_stop_at_the_visit_budget() {
     assert!(start.elapsed() < std::time::Duration::from_secs(30), "took {:?}", start.elapsed());
 }
 
+/// #3120: a one-page document whose page draws "Secret", then `content`. `forms` are (name,
+/// content) form XObjects, which the page and every form can draw, as they can a 1×1 image `/Im`.
+fn page_with_forms(content: &str, forms: &[(String, String)]) -> Document {
+    let xobjects: String = forms.iter().enumerate().map(|(i, (name, _))| format!("/{name} {} 0 R ", 7 + i)).collect();
+    let resources = format!("<< /Font << /F1 5 0 R >> /XObject << /Im 6 0 R {xobjects}>> >>");
+    let mut objs = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources {resources} /Contents 4 0 R >>"),
+        stream("", &format!("BT /F1 24 Tf 72 700 Td (Secret) Tj ET\n{content}")),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        stream("/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", "A"),
+    ];
+    objs.extend(forms.iter().map(|(_, body)| stream(&format!("/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources {resources}"), body)));
+    build(&objs.iter().map(String::as_str).collect::<Vec<_>>())
+}
+
+/// #3120: export reads text from forms as deep and as often as the renderer draws them, and says
+/// when a limit left some out: a text form drawn 5 000 times (past the old budget of 4 096) or
+/// forms nested 13 deep (past the old 12) lost the form drawn after them, silently.
+#[test]
+fn reading_follows_forms_as_far_as_the_renderer_and_says_where_it_stops() {
+    // Covers "Secret" with a black box and writes "TAIL": drawn last, so a reader that stops
+    // early misses it.
+    const TAIL: &str = "0 g 70 692 90 30 re f BT /F1 24 Tf 72 600 Td (TAIL) Tj ET";
+    let tail = |doc: &Document| {
+        let read = text::reading_blocks_checked(doc, 0).unwrap();
+        (read.blocks.iter().any(|b| b.text.contains("TAIL")), read.truncated)
+    };
+    let form = |name: &str, body: &str| (name.to_string(), body.to_string());
+
+    let rows =
+        |n: usize| page_with_forms(&format!("{}/C Do", "/R Do ".repeat(n)), &[form("R", "BT /F1 6 Tf 300 100 Td (row) Tj ET"), form("C", TAIL)]);
+    assert_eq!(tail(&rows(5_000)), (true, false));
+
+    // The innermost form also draws an image: an image at the depth limit is read, and leaves
+    // nothing out.
+    let chain = |depth: usize| {
+        let mut forms: Vec<_> = (1..depth).map(|i| form(&format!("D{i}"), &format!("/D{} Do", i + 1))).collect();
+        forms.push(form(&format!("D{depth}"), &format!("{TAIL} q 20 0 0 10 5 5 cm /Im Do Q")));
+        page_with_forms("/D1 Do", &forms)
+    };
+    assert_eq!(tail(&chain(13)), (true, false));
+    // The renderer's limit, written out so the test does not move with the constant.
+    assert_eq!(tail(&chain(50)), (true, false));
+    assert_eq!(tail(&chain(51)), (false, true));
+    let deepest = chain(text::MAX_FORM_DEPTH);
+    assert_eq!(tail(&deepest), (true, false));
+    assert_eq!(images::reading_images(&deepest, 0).unwrap().len(), 1);
+    let deep = chain(text::MAX_FORM_DEPTH + 1);
+    assert_eq!(tail(&deep), (false, true));
+    assert!(images::reading_images(&deep, 0).unwrap().is_empty());
+
+    // A wrapper form A draws a dot form B `n` times, then C. A, the dots and C use the page's
+    // budget up exactly; one dot more leaves C unread.
+    let fanout =
+        |n: usize| page_with_forms("/A Do", &[form("A", &format!("{}/C Do", "/B Do ".repeat(n))), form("B", "0 g 10 10 1 1 re f"), form("C", TAIL)]);
+    assert_eq!(tail(&fanout(text::MAX_FORM_VISITS - 2)), (true, false));
+    let many = fanout(text::MAX_FORM_VISITS - 1);
+    assert_eq!(tail(&many), (false, true));
+    assert!(images::reading_images(&many, 0).unwrap().is_empty());
+    // Without the flag, reading is unchanged.
+    let blocks: Vec<String> = text::reading_blocks(&many, 0).unwrap().into_iter().map(|b| b.text).collect();
+    assert_eq!(blocks, ["Secret"]);
+}
+
+/// #3120: with the renderer's limits, forms that each draw the next a hundred times, 12 levels
+/// deep (100^11 forms) or past the depth cap, still stop at the page's budget quickly, and say
+/// that text was left out.
+#[test]
+fn forms_that_fan_out_a_hundred_ways_stop_quickly_and_say_so() {
+    for levels in [12, text::MAX_FORM_DEPTH + 1] {
+        let mut forms: Vec<(String, String)> = (1..levels).map(|i| (format!("N{i}"), format!("/N{} Do ", i + 1).repeat(100))).collect();
+        forms.push((format!("N{levels}"), "BT /F1 10 Tf 10 10 Td (leaf) Tj ET".to_string()));
+        let doc = page_with_forms("/N1 Do", &forms);
+        let start = std::time::Instant::now();
+        assert!(text::reading_blocks_checked(&doc, 0).unwrap().truncated, "{levels} levels");
+        assert!(images::reading_images(&doc, 0).unwrap().is_empty());
+        assert!(start.elapsed() < std::time::Duration::from_secs(30), "{levels} levels took {:?}", start.elapsed());
+    }
+}
+
 /// Forms that draw themselves or each other, have no resources, a malformed matrix, or are
 /// missing are read once (or skipped) without panicking or looping.
 #[test]
@@ -3377,6 +3604,55 @@ fn latin_ligature_actual_text_stays_on_its_line() {
     }
 }
 
+/// #3110: `/ActualText` may come from a named property list (`/Span /MC0 BDC`) looked up in the
+/// page's or the form's `/Properties`, as well as from an inline one.
+#[test]
+fn actual_text_from_named_property_list() {
+    let properties = "/Properties << /MC0 << /ActualText (Hello World) >> /MC1 << /Lang (en) >> >>";
+    let page_with = |content: &str| {
+        build(&[
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            &format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> {properties} >> /Contents 4 0 R >>"),
+            &stream("", content),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        ])
+    };
+    for (content, expected) in [
+        ("/Span /MC0 BDC BT /F1 24 Tf 72 700 Td (Glyphs) Tj ET EMC", "Hello World"),
+        ("/Span <</ActualText (Hello World)>> BDC BT /F1 24 Tf 72 700 Td (Glyphs) Tj ET EMC", "Hello World"),
+        ("/Span /MC1 BDC BT /F1 24 Tf 72 700 Td (Glyphs) Tj ET EMC", "Glyphs"),
+        ("/Span /Missing BDC BT /F1 24 Tf 72 700 Td (Glyphs) Tj ET EMC", "Glyphs"),
+    ] {
+        let doc = page_with(content);
+        for doc in [&doc, &reopen(&doc)] {
+            let lines = text::text_lines(doc, 0).unwrap();
+            assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), [expected], "{content}");
+            assert_eq!(text::text_blocks(doc, 0).unwrap()[0].editor_text, expected, "{content}");
+            let reading: Vec<String> = text::reading_blocks(doc, 0).unwrap().into_iter().map(|b| b.text).collect();
+            assert_eq!(reading, [expected], "{content}");
+        }
+    }
+
+    // A form's named list is looked up in the form's own /Properties, not the page's.
+    let fm = stream(
+        "/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /Properties << /MC0 << /ActualText (Form text) >> >> >>",
+        "/Span /MC0 BDC BT /F1 24 Tf 72 600 Td (Glyphs) Tj ET EMC",
+    );
+    let doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        &format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> /XObject << /Fm1 6 0 R >> {properties} >> /Contents 4 0 R >>"
+        ),
+        &stream("", "/Fm1 Do"),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        &fm,
+    ]);
+    let reading: Vec<String> = text::reading_blocks(&doc, 0).unwrap().into_iter().map(|b| b.text).collect();
+    assert_eq!(reading, ["Form text"]);
+}
+
 #[test]
 fn actual_text_and_visual_rtl_glyphs_keep_their_own_reading_order() {
     let hex: String = "שלום".encode_utf16().map(|u| format!("{u:04X}")).collect();
@@ -3817,6 +4093,74 @@ fn private_image_crop_with_intervening_state_resizes_across_streams() {
                 caption.iter().map(|l| (&l.text, l.rect, l.baseline())).collect::<Vec<_>>()
             );
         }
+    }
+}
+
+/// [`image_page`] with `pieces` as its `/Contents` array and a Form /Fm0 drawing 72,500–172,600.
+fn split_image_page(pieces: &[&[u8]]) -> Document {
+    let mut doc = image_page();
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    let mut form = Dict::new();
+    form.set(b"Type".to_vec(), Object::name("XObject"));
+    form.set(b"Subtype".to_vec(), Object::name("Form"));
+    form.set(b"BBox".to_vec(), Object::Array([72, 500, 172, 600].map(Object::Int).to_vec()));
+    let form = doc.add(Object::Stream(Stream::flate(form, b"0.5 g 72 500 100 100 re f")));
+    let image = doc.get(pdfcraft_model::pages(&doc)[0].obj);
+    let mut res = image.as_dict().and_then(|d| d.get(b"Resources")).and_then(|r| r.as_dict().cloned()).unwrap();
+    let mut xo = res.get(b"XObject").and_then(|x| x.as_dict().cloned()).unwrap();
+    xo.set(b"Fm0".to_vec(), Object::Ref(form));
+    res.set(b"XObject".to_vec(), Object::Dict(xo));
+    let refs = pieces.iter().map(|b| Object::Ref(doc.add(Object::Stream(Stream::flate(Dict::new(), b))))).collect();
+    doc.update_dict(page, |d| {
+        d.set(b"Contents".to_vec(), Object::Array(refs));
+        d.set(b"Resources".to_vec(), Object::Dict(res));
+    })
+    .unwrap();
+    doc
+}
+
+#[test]
+fn an_image_whose_operator_starts_the_next_stream_can_be_selected_moved_and_deleted() {
+    // #3113: an operator's operands end one piece and its keyword starts the next.
+    let square = [72.0, 500.0, 172.0, 600.0];
+    let cases: [(&[&[u8]], bool); 4] = [
+        (&[b"q 100 0 0 100 72 500 cm /Im0", b"Do Q"], false),
+        (&[b"q 100 0 0 100 72 500", b"cm /Im0 Do Q"], false),
+        (&[b"q /Fm0", b"Do Q"], true),
+        (&[b"q 100 0 0 100 72 500 cm /Im0 Do Q"], false),
+    ];
+    for (pieces, is_form) in cases {
+        let doc = split_image_page(pieces);
+        let label: Vec<_> = pieces.iter().map(|p| String::from_utf8_lossy(p)).collect();
+        let images = images::page_images(&doc, 0).unwrap();
+        assert_eq!(images.len(), 1, "{label:?}");
+        assert!(close(images[0].rect, square), "{label:?}: {:?}", images[0].rect);
+        assert_eq!(images[0].is_form, is_form);
+        assert!(images[0].contains([122.0, 550.0]), "{label:?}");
+        if !is_form {
+            let read = images::reading_images(&doc, 0).unwrap();
+            assert!(read.len() == 1 && close(read[0].rect, square), "{label:?}: {read:?}");
+        }
+
+        let mut deleted = doc.clone();
+        images::change_image(&mut deleted, 0, 0, &images::ImageChange::Delete).unwrap();
+        let deleted = reopen(&deleted);
+        assert!(images::page_images(&deleted, 0).unwrap().is_empty(), "{label:?}");
+        let (joined, ops) = joined_ops(&deleted);
+        assert!(!ops.iter().any(|o| o.is("Do")), "{joined}");
+
+        let target = [300.0, 500.0, 400.0, 600.0];
+        let mut moved = doc.clone();
+        images::change_image(&mut moved, 0, 0, &images::ImageChange::Transform(images::rect_to_rect(square, target))).unwrap();
+        let moved = reopen(&moved);
+        let after = images::page_images(&moved, 0).unwrap();
+        assert!(after.len() == 1 && close(after[0].rect, target), "{label:?}: {after:?} {:?}", joined_ops(&moved).0);
+
+        let mut shifted = doc.clone();
+        images::translate_images(&mut shifted, 0, &[0], [228.0, 0.0]).unwrap();
+        let shifted = reopen(&shifted);
+        let after = images::page_images(&shifted, 0).unwrap();
+        assert!(after.len() == 1 && close(after[0].rect, target), "{label:?}: {after:?} {:?}", joined_ops(&shifted).0);
     }
 }
 
@@ -4798,4 +5142,79 @@ fn flattening_comments_keeps_annotations_that_are_not_comments() {
     assert_eq!(flatten(&mut doc, &[0], false, true).unwrap(), 1, "the widget");
     let without_widget: Vec<&str> = all.iter().copied().filter(|s| *s != "Widget").collect();
     assert_eq!(left(&reopen(&doc)), without_widget, "flattening fields touches no annotation that isn't a widget");
+}
+
+/// A page whose text is a clipping mask (`mode` Tr) with a fill painted through it.
+fn clipping_text_page(mode: i64) -> Document {
+    text_page(&format!("q\nBT {mode} Tr /F1 48 Tf 40 60 Td (MASK) Tj ET\n1 0 0 rg 0 0 300 150 re f\nQ\n"))
+}
+
+/// Rewriting text that is a clipping path destroyed the artwork it masked: the glyphs went, the
+/// mask with them, and the fill behind flooded its own rectangle, in a file that still opened
+/// without a warning (#3429). Photoshop exports draw every text object this way. The rewrite is
+/// refused instead, as `clear_block` already refuses a preview.
+#[test]
+fn rewriting_clipping_path_text_is_refused_for_every_clipping_mode() {
+    for mode in [4, 5, 6, 7] {
+        let before = text::text_lines(&clipping_text_page(mode), 0).unwrap();
+        assert_eq!(before.len(), 1, "mode {mode}: the mask is one line");
+
+        let mut doc = clipping_text_page(mode);
+        let line = text::replace_line(&mut doc, 0, 0, "EDITED");
+        assert!(matches!(&line, Err(EditError::Invalid(m)) if m.contains("clipping path")), "mode {mode}: {line:?}");
+
+        let mut doc = clipping_text_page(mode);
+        let block = text::rewrite_block(&mut doc, 0, 0, Some("EDITED"), &BlockStyle::default());
+        assert!(matches!(&block, Err(EditError::Invalid(m)) if m.contains("clipping path")), "mode {mode}: {block:?}");
+
+        // Refused means untouched: the mask is still there to shape what is painted through it.
+        let after = text::text_lines(&doc, 0).unwrap();
+        assert_eq!(after.len(), 1, "mode {mode}");
+        assert_eq!(after[0].text, "MASK", "mode {mode}");
+    }
+}
+
+/// The modes that paint ink are still editable: only 4 to 7 add to the clip path.
+#[test]
+fn painting_modes_are_still_rewritten() {
+    for mode in [0, 1, 2] {
+        let mut doc = clipping_text_page(mode);
+        assert!(text::replace_line(&mut doc, 0, 0, "EDITED").is_ok(), "mode {mode}");
+        assert_eq!(text::text_lines(&doc, 0).unwrap()[0].text, "EDITED", "mode {mode}");
+    }
+}
+
+/// A line's runs need not share a rendering mode: nothing in the join requires it, so a line that
+/// starts as ink can continue as a mask. The refusal reads the whole line, not the mode its first
+/// run set -- otherwise the rewrite passed the guard and took the mask away with the ink.
+#[test]
+fn a_line_that_starts_as_ink_and_continues_as_a_mask_is_refused() {
+    let content = "q\nBT /F1 48 Tf 40 60 Td 0 Tr (TITLE) Tj 7 Tr (MASK) Tj ET\n1 0 0 rg 0 0 300 150 re f\nQ\n";
+    let before = text::text_lines(&text_page(content), 0).unwrap();
+    assert_eq!(before.len(), 1, "the two runs are one line: {:?}", before.iter().map(|l| &l.text).collect::<Vec<_>>());
+    assert_eq!(before[0].text, "TITLEMASK", "and the mask is the second half of it");
+
+    let mut doc = text_page(content);
+    let line = text::replace_line(&mut doc, 0, 0, "EDITED");
+    assert!(matches!(&line, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{line:?}");
+    let block = text::rewrite_block(&mut doc, 0, 0, Some("EDITED"), &BlockStyle::default());
+    assert!(matches!(&block, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{block:?}");
+    assert_eq!(text::text_lines(&doc, 0).unwrap()[0].text, "TITLEMASK", "refused means untouched");
+}
+
+/// Another drawing of the line on the same baseline goes with it, so that the replacement is all
+/// that shows -- and that copy can be the mask while the line being replaced is ink. Dropping it
+/// destroys the artwork as surely as rewriting the mask itself, so this is refused too.
+#[test]
+fn a_clipping_copy_on_the_same_baseline_is_refused() {
+    let content = "q\nBT 0 Tr /F1 48 Tf 40 60 Td (MASK) Tj ET\nBT 7 Tr /F1 48 Tf 40 60 Td (MASK) Tj ET\n1 0 0 rg 0 0 300 150 re f\nQ\n";
+    let before = text::text_lines(&text_page(content), 0).unwrap();
+    assert_eq!(before.len(), 2, "two drawings of the same line");
+
+    let mut doc = text_page(content);
+    let line = text::replace_line(&mut doc, 0, 0, "EDITED");
+    assert!(matches!(&line, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{line:?}");
+    let block = text::rewrite_block(&mut doc, 0, 0, Some("EDITED"), &BlockStyle::default());
+    assert!(matches!(&block, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{block:?}");
+    assert_eq!(text::text_lines(&doc, 0).unwrap().len(), 2, "refused means untouched");
 }
