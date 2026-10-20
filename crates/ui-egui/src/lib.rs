@@ -2886,9 +2886,33 @@ impl PdfCraftApp {
         self.copy_selected_text(i, ctx);
     }
 
+    /// The text Copy takes from view `v`: its selection, or after Select All of the document every
+    /// page's text, the pages not read for display yet read here (#2639).
+    fn selection_text(&self, v: &DocView) -> Option<String> {
+        if !v.all_text {
+            return v.selected_text();
+        }
+        let missing = v.pages_without_text();
+        let mut more = std::collections::HashMap::new();
+        if !missing.is_empty()
+            && let Some(doc) = self.session.get(v.id)
+        {
+            let config = pdfcraft_render::RenderConfig { password: doc.password.as_deref().map(std::sync::Arc::from), ..Default::default() };
+            let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), config);
+            for page in missing {
+                let req =
+                    pdfcraft_render::RenderRequest { page, kind: pdfcraft_render::RequestKind::Text, tile: None, scale: 1.0, tag: 0, preview: false };
+                if let Some(t) = r.render(req).text {
+                    more.insert(page, t);
+                }
+            }
+        }
+        Some(v.whole_text(&more))
+    }
+
     /// Shared permission gate for copying selected page text from menus and keyboard events.
     pub(crate) fn copy_selected_text(&mut self, i: usize, ctx: &egui::Context) -> bool {
-        let Some((id, text)) = self.views.get(i).and_then(|v| Some((v.id, v.selected_text()?))).filter(|(_, text)| !text.is_empty()) else {
+        let Some((id, text)) = self.views.get(i).and_then(|v| Some((v.id, self.selection_text(v)?))).filter(|(_, text)| !text.is_empty()) else {
             return false;
         };
         if !self.may_copy(id) {

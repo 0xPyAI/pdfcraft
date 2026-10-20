@@ -2209,6 +2209,11 @@ fn copying_out_of_a_document_honours_its_security() {
             app.system_clipboard = false;
             app.open_bytes("no-copy.pdf", None, protected("pw", "owner", -1 ^ 0b1_0000)).unwrap();
             app.submit_password(Some(password.into()));
+            // One page at a time: Select All takes that page's text (scrolling continuously it would
+            // take both pages', #2639; what is tested here is the security of copying it).
+            if let Some(v) = app.views.first_mut() {
+                v.set_continuous(false);
+            }
             app
         });
         // Select the page's text once its text layer is loaded (up to ~4 s: a loaded test machine
