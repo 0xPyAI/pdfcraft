@@ -601,6 +601,8 @@ pub(crate) fn menu_item(name: &str) -> Option<Request> {
         "ShowHideSignatures" => Request::ShowPanel(Panel::Signatures),
         "ShowHideOptCont" => Request::ShowPanel(Panel::Layers),
         "Print" => Request::Print,
+        // Save opens Save As too, as it always has for XFA forms' buttons: a click on a form
+        // never overwrites the file unasked.
         "SaveAs" | "Save" => Request::SaveAs,
         _ => return None,
     })
