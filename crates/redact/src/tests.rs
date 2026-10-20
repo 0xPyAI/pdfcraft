@@ -643,6 +643,75 @@ fn unreadable_content_fails_closed() {
     assert_eq!(apply(&mut doc, None), Err(RedactError::Unreadable(1)));
 }
 
+/// Leaves a mark with nothing readable: /QuadPoints becomes a name and /Rect is removed.
+fn break_area(doc: &mut Document, obj: ObjRef) {
+    doc.update_dict(obj, |d| {
+        d.set(b"QuadPoints".to_vec(), Object::name("oops"));
+        d.remove(b"Rect");
+    })
+    .unwrap();
+}
+
+/// A Redact annotation with no readable area (neither usable QuadPoints nor a usable Rect) used to
+/// vanish: `marks` skipped it, so applying the readable mark next to it reported success and left
+/// the text under the broken mark in place. Now the whole operation is refused before anything
+/// changes, and the count is of the unreadable marks.
+#[test]
+fn a_mark_with_no_readable_area_is_refused_instead_of_vanishing() {
+    let mut doc = one_page(b"BT /F1 10 Tf 10 100 Td (AB1234CD) Tj ET", "", vec![]);
+    mark(&mut doc, 0, &[[40.0, 95.0, 50.0, 110.0]], "");
+    mark(&mut doc, 0, &[[0.0, 95.0, 10.0, 110.0]], "");
+    for m in marks(&doc) {
+        break_area(&mut doc, m.obj);
+    }
+    mark(&mut doc, 0, &[[20.0, 95.0, 40.0, 110.0]], "");
+    assert_eq!(marks(&doc).len(), 1, "only the readable mark is listed");
+    assert_eq!(apply(&mut doc, None), Err(RedactError::UnreadableMark(2)));
+    // Nothing changed: the readable mark is still pending and its text is still drawn.
+    assert_eq!(marks(&doc).len(), 1);
+    assert!(content(&doc, 0).contains("(AB1234CD) Tj"), "{}", content(&doc, 0));
+}
+
+/// A mark whose QuadPoints can't be used still redacts through its Rect, as it always did.
+#[test]
+fn a_mark_with_only_a_usable_rect_still_redacts() {
+    let mut doc = one_page(b"BT /F1 10 Tf 10 100 Td (AB1234CD) Tj ET", "", vec![]);
+    mark(&mut doc, 0, &[[20.0, 95.0, 40.0, 110.0]], "");
+    let m = marks(&doc).swap_remove(0);
+    doc.update_dict(m.obj, |d| {
+        d.set(b"QuadPoints".to_vec(), Object::name("oops"));
+        d.set(b"Rect".to_vec(), Object::Array(vec![Object::Int(20), Object::Int(95), Object::Int(40), Object::Int(110)]));
+    })
+    .unwrap();
+    assert_eq!(marks(&doc).len(), 1, "the Rect keeps the mark readable");
+    let r = apply(&mut doc, None).unwrap();
+    assert_eq!((r.marks, r.glyphs), (1, 4));
+    assert!(!content(&doc, 0).contains("1234"));
+}
+
+/// Only the pages being applied decide the refusal: an unreadable mark on another page does not
+/// stop the marks of the selected page from being applied.
+#[test]
+fn an_unreadable_mark_on_another_page_does_not_stop_the_selected_page() {
+    let mut doc = pdf(vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 7 0 R] /Count 2 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_vec(),
+        stream("", b"BT /F1 10 Tf 10 100 Td (AB1234CD) Tj ET"),
+        FONT.replace("95 0 R", "6 0 R").into_bytes(),
+        widths(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 8 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_vec(),
+        stream("", b"BT /F1 10 Tf 10 100 Td (XY) Tj ET"),
+    ]);
+    mark(&mut doc, 1, &[[10.0, 95.0, 30.0, 110.0]], "");
+    let broken = marks(&doc).swap_remove(0);
+    break_area(&mut doc, broken.obj);
+    mark(&mut doc, 0, &[[20.0, 95.0, 40.0, 110.0]], "");
+    assert_eq!(apply(&mut doc, None), Err(RedactError::UnreadableMark(1)));
+    assert_eq!(apply(&mut doc, Some(&[0])).map(|r| r.glyphs), Ok(4));
+    assert!(!content(&doc, 0).contains("1234"));
+}
+
 /// A document with something in every hidden-information category.
 fn hidden_fixture() -> Document {
     let content = b"BT /F1 10 Tf 10 100 Td (Visible) Tj 3 Tr (Hidden) Tj 0 Tr ET BT /F1 10 Tf 500 500 Td (Offpage) Tj ET /OC /L1 BDC BT /F1 10 Tf 10 50 Td (Layer) Tj ET EMC";
