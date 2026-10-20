@@ -186,6 +186,9 @@ impl Walker<'_> {
         true
     }
 
+    /// Record the scripts of the object at `som` as events: each non-empty event script, then its
+    /// calculate and validate scripts (the validate one with `message`). Once [`MAX_EVENTS`] events
+    /// are recorded, nothing more is and the form is marked truncated.
     fn push_events(&mut self, som: &str, scripts: &[Script], calculate: Option<&Script>, validate: Option<&Script>, message: Option<&str>) {
         if self.events.len() >= MAX_EVENTS {
             self.truncated = true;
@@ -233,6 +236,7 @@ impl Walker<'_> {
         name.and_then(|_| self.ov.presence.get(som)).cloned().unwrap_or_else(|| presence_name(p).to_string())
     }
 
+    /// The access of the object at `som`: a script's, or else the template's `a`.
     fn access(&self, som: &str, a: Access) -> String {
         self.ov.access.get(som).cloned().unwrap_or_else(|| access_name(a).to_string())
     }

@@ -96,6 +96,8 @@ pub fn static_shell(data: &str) -> Vec<u8> {
     assemble(objs)
 }
 
+/// A PDF file holding `objs` as objects 1, 2, … in order, with a cross-reference table and a
+/// trailer whose root is object 1.
 fn assemble(objs: Vec<Vec<u8>>) -> Vec<u8> {
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();
