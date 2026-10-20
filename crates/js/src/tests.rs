@@ -1040,6 +1040,8 @@ mod session {
     use crate::xfa::*;
     use crate::xfa_session::{Script, XfaSession};
 
+    /// A JavaScript or FormCalc script for `activity` on `target`, against the test form with
+    /// default limits and a 3 s timeout.
     fn script(source: &str, formcalc: bool, target: &str, activity: &str) -> Script {
         Script {
             source: source.into(),
@@ -1051,6 +1053,9 @@ mod session {
         }
     }
 
+    /// JavaScript and FormCalc scripts run in turn in one session, each on the form the caller
+    /// sends: nothing an earlier script changed or defined leaks into the next, a failing script
+    /// doesn't end the session, and hundreds of scripts run on its one thread.
     #[test]
     fn scripts_of_one_event_run_on_one_thread_each_on_the_form_the_caller_sends() {
         let mut s = XfaSession::new(XfaDoc { page_count: 3, ..Default::default() });
@@ -1090,6 +1095,8 @@ mod session {
         assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
     }
 
+    /// A JavaScript or FormCalc script whose engine takes longer to be ready than the script's
+    /// time limit still runs and returns its result, and the session stays alive.
     #[test]
     fn a_scripts_time_starts_when_its_context_is_ready() {
         // The engine made slow to be ready (300 ms) under a 50 ms script limit: the script is
@@ -1110,6 +1117,9 @@ mod session {
         assert_eq!(s.dead(), None);
     }
 
+    /// An endless JavaScript loop past its 200 ms limit is abandoned within 2 s and leaves the
+    /// session dead, so nothing more runs in it; an endless FormCalc loop is abandoned or
+    /// reported as running too long.
     #[test]
     fn a_script_past_its_time_is_abandoned_and_the_session_is_dead_after_it() {
         let mut s = XfaSession::new(XfaDoc::default());

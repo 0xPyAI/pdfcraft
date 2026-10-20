@@ -997,17 +997,22 @@ fn resolver(ctx: &mut Context, from: usize, many: bool) -> JsResult<JsValue> {
 
 // ── xfa.host, xfa.layout, xfa.event, app, console ───────────────────────────────────────────
 
+/// Records effect `e` on the host, as [`XHost::push`] does.
 fn effect(ctx: &mut Context, e: XfaEffect) -> JsResult<()> {
     host(ctx)?.borrow_mut().push(e);
     Ok(())
 }
 
+/// `xfa.host.messageBox(message)`: records the message, cut to [`MAX_LINE`] characters, and
+/// returns 1.
 fn message_box(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let m = clip(text(&arg(args, 0), ctx)?);
     effect(ctx, XfaEffect::MessageBox(m))?;
     Ok(JsValue::from(1.0))
 }
 
+/// `xfa.host.resetData(names)`: asks to reset the comma-separated fields, or every field when
+/// the list is empty.
 fn reset_data(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let list = text(&arg(args, 0), ctx)?;
     let names: Vec<String> = list.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect();
@@ -1015,22 +1020,28 @@ fn reset_data(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsVa
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.print(…)`: asks to print; its arguments are ignored.
 fn print(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     effect(ctx, XfaEffect::Print)?;
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.beep()`: asks to beep.
 fn beep(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     effect(ctx, XfaEffect::Beep)?;
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.gotoURL(url)`: asks to open the URL.
 fn goto_url(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let u = text(&arg(args, 0), ctx)?;
     effect(ctx, XfaEffect::LaunchUrl(u))?;
     Ok(JsValue::undefined())
 }
 
+/// `xfa.host.setFocus(target)`: asks to focus the node, given as a node object or as a SOM
+/// expression resolved from the current node; an expression that names no node is passed on
+/// as written.
 fn set_focus(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let target = arg(args, 0);
     let som = match target.as_object() {

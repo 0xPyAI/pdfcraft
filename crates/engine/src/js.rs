@@ -22,6 +22,7 @@ pub struct JsOutput {
 }
 
 impl JsOutput {
+    /// Whether scripts produced nothing: no alerts, console lines, requests or errors.
     pub fn is_empty(&self) -> bool {
         self.alerts.is_empty() && self.console.is_empty() && self.requests.is_empty() && self.errors.is_empty()
     }
