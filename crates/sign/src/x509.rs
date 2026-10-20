@@ -577,6 +577,10 @@ pub fn load_certificates(bytes: &[u8]) -> Result<Vec<Certificate>, SignError> {
             b.push_str(line);
         }
     }
+    // Certificates before a block that never ends are not a smaller set: the file is damaged.
+    if block.is_some() {
+        return Err(SignError::Malformed("a PEM block is not closed".into()));
+    }
     if out.is_empty() {
         return Err(SignError::Malformed("no certificate found (expected DER, PEM or a PKCS #7 bundle)".into()));
     }

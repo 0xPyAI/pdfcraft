@@ -239,8 +239,6 @@ fn certificates_load_from_pem_and_der_and_export_as_pem() {
     assert!(pdfcraft_sign::x509::load_certificates(b"hello").is_err());
 }
 
-/// A PKCS #7 certificate bundle (degenerate SignedData, RFC 5652 §5.2) holding `certs`, laid out
-/// as `openssl crl2pkcs7 -nocrl` writes it.
 /// Base64 in 64-column lines, for PEM armour.
 fn encode_base64(der: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -255,6 +253,8 @@ fn encode_base64(der: &[u8]) -> String {
     lines.join("\n")
 }
 
+/// A PKCS #7 certificate bundle (degenerate SignedData, RFC 5652 §5.2) holding `certs`, laid out
+/// as `openssl crl2pkcs7 -nocrl` writes it.
 fn p7b(certs: &[&[u8]]) -> Vec<u8> {
     use pdfcraft_sign::der::{explicit, int, oid, seq, set_of, tlv};
     let encap = seq(&[&oid(cms::DATA)]);
@@ -288,6 +288,9 @@ fn certificates_load_from_pkcs7_bundles() {
     // An END that closes a different block ends nothing.
     let mismatched = format!("-----BEGIN PKCS7-----\n{b64}\n-----END CERTIFICATE-----\n");
     assert!(load_certificates(mismatched.as_bytes()).is_err());
+    // A block that never ends is a damaged file, not a shorter list.
+    let unclosed = format!("{}-----BEGIN PKCS7-----\n{b64}\n", to_pem(&leaf));
+    assert!(load_certificates(unclosed.as_bytes()).is_err());
     // A bundle with no certificate, and a SignedData that isn't one, are errors, not empty lists.
     assert!(load_certificates(&p7b(&[])).is_err());
     let not_signed_data = pdfcraft_sign::der::seq(&[&pdfcraft_sign::der::oid(cms::DATA), &pdfcraft_sign::der::explicit(0, &[])]);
