@@ -87,6 +87,8 @@ fn ap(doc: &Document, w: &Widget) -> String {
     String::from_utf8_lossy(&s.decoded().unwrap()).into_owned()
 }
 
+/// A push button's caption is drawn in the font, size and color its `/DA` asks for; with an
+/// automatic size (0) it is sized to fit the button, in the form's default font and color.
 #[test]
 fn a_button_caption_is_drawn_in_its_fields_font_size_and_color() {
     let objs: Vec<String> = vec![
@@ -111,6 +113,9 @@ fn a_button_caption_is_drawn_in_its_fields_font_size_and_color() {
     assert!(auto.contains("/Helv 14.00 Tf") && auto.contains(" 0 g"), "{auto}");
 }
 
+/// A button caption in a font whose UCS-2 CMap holds 签 is not reported; once `set_props` adds a
+/// character beyond U+FFFF, the caption is still drawn in that font and `undrawn_fields` reports
+/// the character.
 #[test]
 fn a_button_caption_its_fonts_encoding_cant_hold_is_reported() {
     let objs: Vec<String> = vec![

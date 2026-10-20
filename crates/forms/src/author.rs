@@ -683,6 +683,9 @@ pub fn redraw_field(doc: &mut Document, name: &str) -> Result<(), FormError> {
     redraw_widgets(doc, name, None)
 }
 
+/// `redraw_field` for the widget at index `only` alone (so a caption-only edit leaves the field's
+/// other widgets' appearances as they are), or for every widget when `only` is `None`. Fails with
+/// `FormError::NoSuchField` when no field is named `name`.
 fn redraw_widgets(doc: &mut Document, name: &str, only: Option<usize>) -> Result<(), FormError> {
     let f = fields(doc).into_iter().find(|f| f.name == name).ok_or_else(|| FormError::NoSuchField(name.into()))?;
     let mut undrawn = false;
