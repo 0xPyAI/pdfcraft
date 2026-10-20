@@ -492,7 +492,7 @@ mod tests {
         }
     }
 
-    /// Retune tripwires, deliberately separate from the layout test above: these assert that three
+    /// Retune tripwires, deliberately separate from `the_macos_devanagari_list_is_apples_layout` below: these assert that three
     /// constants still hold the values this module's contract depends on. They cannot fail on their
     /// own — they exist so that editing one is a decision someone has to make twice. Each was
     /// checked by deleting the pin and watching the matching regression go green again: raising
@@ -549,8 +549,9 @@ mod tests {
 
     /// On a Mac, where Apple's fonts are installed: every family folder that really exists is
     /// reachable from the candidate list, and something in the list covers Devanagari. A family
-    /// Apple no longer ships is reported rather than failed — this list exists precisely for the
-    /// case where one of them is missing. CI has no macOS runner (`.github/workflows/ci.yml`
+    /// Apple no longer ships is reported rather than failed — this list exists precisely for the case
+    /// where one of them is missing, with one exception: if *nothing* here covers Devanagari the test
+    /// fails loudly, because a machine with no face to check cannot validate the list at all. CI has no macOS runner (`.github/workflows/ci.yml`
     /// keeps the org's Mac slots for release builds), so this runs on contributors' and
     /// maintainers' machines.
     #[cfg(target_os = "macos")]
@@ -562,12 +563,21 @@ mod tests {
         }
         let list = devanagari_candidates();
         for family in MACOS_DEVANAGARI_FAMILIES {
-            let installed: Vec<PathBuf> = MACOS_FONT_DIRS.iter().map(|dir| Path::new(dir).join(family)).filter(|p| p.is_file()).collect();
-            if installed.is_empty() {
+            // Same rule as the last resort below: an entry that exists counts, even a link whose
+            // target has gone — "present but unresolved" is precisely the dead-path defect this change
+            // is about, and filtering on `is_file()` would quietly reclassify it as "not installed".
+            // Absence is tolerated; a broken entry is not.
+            let present: Vec<PathBuf> =
+                MACOS_FONT_DIRS.iter().map(|dir| Path::new(dir).join(family)).filter(|p| std::fs::symlink_metadata(p).is_ok()).collect();
+            if present.is_empty() {
                 eprintln!("{family}: not installed on this machine, so the list offers nothing that exists — fine, and reported only");
                 continue;
             }
-            for path in &installed {
+            for path in &present {
+                assert!(
+                    path.is_file(),
+                    "{family}: {path:?} exists but does not resolve — its target was moved or removed, so this candidate path has gone dead"
+                );
                 assert!(list.contains(path), "{path:?} is installed here but the candidate list skips it: {list:?}");
             }
         }
