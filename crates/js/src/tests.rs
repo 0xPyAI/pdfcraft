@@ -1138,6 +1138,12 @@ mod menu_items {
     use crate::xfa::{XfaDoc, XfaEffect, XfaEvent, run_xfa};
 
     #[test]
+    fn each_panel_has_a_fixed_id_for_automation() {
+        let ids = [Panel::Bookmarks, Panel::Pages, Panel::Attachments, Panel::Signatures, Panel::Layers].map(Panel::id);
+        assert_eq!(ids, ["bookmarks", "pages", "attachments", "signatures", "layers"]);
+    }
+
+    #[test]
     fn exec_menu_item_shows_side_panels_prints_and_saves() {
         let o = go(
             "app.execMenuItem('ShowHideFileAttachment'); app.execMenuItem('ShowHideBookmarks'); app.execMenuItem('ShowHideThumbnails'); \

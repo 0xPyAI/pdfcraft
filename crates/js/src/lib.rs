@@ -174,6 +174,19 @@ pub enum Panel {
     Layers,
 }
 
+impl Panel {
+    /// The panel's name in automation output, fixed whatever the variant is called.
+    pub fn id(self) -> &'static str {
+        match self {
+            Panel::Bookmarks => "bookmarks",
+            Panel::Pages => "pages",
+            Panel::Attachments => "attachments",
+            Panel::Signatures => "signatures",
+            Panel::Layers => "layers",
+        }
+    }
+}
+
 /// What running a script did.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Outcome {
