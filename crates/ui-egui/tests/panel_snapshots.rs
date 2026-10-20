@@ -1,8 +1,9 @@
 //! Snapshot tests of every side panel (M3): each panel opens on one synthetic document and its
 //! AccessKit tree (the roles, labels, values and states a screen reader gets) is compared with a
-//! text file in `tests/snapshots/`. Text rather than pixels: it is the same on every platform and
-//! GPU, it is not an asset (AGENTS.md §1), and a reviewer can read a change in the diff. Positions
-//! are left out, so moving a widget is not a change but adding, removing or renaming one is.
+//! text file in `tests/snapshots/`. Text rather than pixels: with the reported OS pinned (shortcut
+//! labels follow it) it is the same on every platform and GPU, it is not an asset (AGENTS.md §1),
+//! and a reviewer can read a change in the diff. Positions are left out, so moving a widget is not
+//! a change but adding, removing or renaming one is.
 //!
 //! `UPDATE_SNAPSHOTS=1 cargo test -p pdfcraft-ui-egui --test panel_snapshots` rewrites the files.
 
@@ -73,7 +74,9 @@ fn fixture() -> Vec<u8> {
 
 fn harness(panel: &'static str) -> Harness<'static, PdfCraftApp> {
     let bytes = fixture();
-    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+    // Shortcut labels follow the reported OS ("Ctrl+B" against "⌘B"), so pin it rather than rely
+    // on kittest's default; the snapshots then match on every host.
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_os(egui::os::OperatingSystem::Nix).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
         app.set_option("language", "en").unwrap();
         app.open_bytes("panels.pdf", None, bytes).expect("opens");
