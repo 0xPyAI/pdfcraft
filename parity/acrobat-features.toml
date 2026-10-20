@@ -5740,8 +5740,8 @@ milestone = "M8"
 status = "shipped"
 commands = ["redact.apply"]
 tools = ["redact_apply"]
-evidence = ["crates/redact/src/tests.rs::tags_lose_what_redaction_removed"]
-notes = "marked content changed by redaction is found by comparing each MCID before and after; its elements lose Alt, ActualText and E, and references to now-empty marked content are dropped; untouched tags stay"
+evidence = ["crates/redact/src/tests.rs::tags_lose_what_redaction_removed", "crates/redact/src/tests.rs::applied_redactions_drop_structure_tree_references_to_what_they_remove"]
+notes = "marked content changed by redaction is found by comparing each MCID before and after; its elements lose Alt, ActualText and E, and references to now-empty marked content are dropped; object references (OBJR) to the comments and form fields redaction removes are dropped too (#2874); untouched tags stay"
 
 [[feature]]
 id = "protect.redaction-verification"
