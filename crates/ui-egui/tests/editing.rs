@@ -4856,13 +4856,20 @@ fn a_paragraph_running_off_its_page_edits_without_covering_the_next_page() {
         app
     });
     h.run_steps(4);
-    assert!(h.state_mut().execute("edit.edit_text"));
     h.state_mut().views[0].fit = pdfcraft_ui_egui::canvas::Fit::Page;
     h.run_steps(4);
+    let rects =
+        |h: &Harness<'static, PdfCraftApp>| (h.state().views[0].page_screen_rect(0).unwrap(), h.state().views[0].page_screen_rect(1).unwrap());
+    // The same pages without Edit text, so without the paragraph's outline: what the gap looks
+    // like there, pixel by pixel (review on #3070: it isn't one colour on every platform).
+    let (first, second) = rects(&h);
+    let plain = h.render().unwrap();
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(4);
+    assert_eq!(rects(&h), (first, second), "Edit text keeps the pages where they were");
     let id = h.state().views[0].id;
     let info = h.state().session.get(id).unwrap().info.pages[0].clone();
-    let (first, second) = (h.state().views[0].page_screen_rect(0).unwrap(), h.state().views[0].page_screen_rect(1).unwrap());
-    shown_on_its_page_only(&mut h, first, second, "the paragraph's outline");
+    shown_on_its_page_only(&mut h, &plain, first, second, "the paragraph's outline");
     let v = info.user_to_view(200.0, 378.0);
     let p = first.min + egui::vec2(v[0], v[1]) * (first.width() / info.width);
     h.hover_at(p);
@@ -4881,7 +4888,7 @@ fn a_paragraph_running_off_its_page_edits_without_covering_the_next_page() {
         h.state().views[0].line_editor.as_ref().is_some_and(|e| e.page == 0 && e.text.contains("line 50")),
         "the paragraph's off-page lines are in it"
     );
-    shown_on_its_page_only(&mut h, first, second, "the open editor");
+    shown_on_its_page_only(&mut h, &plain, first, second, "the open editor");
     // Scrolled up past the tool bar, the editor stays inside the document area.
     let viewport = h.state().views[0].viewport_rect();
     let above = viewport.top() - 3.0;
@@ -4904,15 +4911,15 @@ fn a_paragraph_running_off_its_page_edits_without_covering_the_next_page() {
 }
 
 /// Between pages `first` and `second`, and on `second` above its own text, across where page
-/// 1's paragraph is: what is there without it (the gap's colour right of the paragraph, white
-/// paper).
-fn shown_on_its_page_only(h: &mut Harness<'static, PdfCraftApp>, first: egui::Rect, second: egui::Rect, what: &str) {
+/// 1's paragraph is: what is there without it (the gap as `plain` shows it without Edit text,
+/// white paper).
+fn shown_on_its_page_only(h: &mut Harness<'static, PdfCraftApp>, plain: &image::RgbaImage, first: egui::Rect, second: egui::Rect, what: &str) {
     let shot = h.render().unwrap();
     let pixel = |x: f32, y: f32| shot.get_pixel(x as u32, y as u32).0;
-    let gap = pixel(first.right() - 40.0, (first.bottom() + second.top()) / 2.0);
+    let gap_y = (first.bottom() + second.top()) / 2.0;
     for x in (first.left() as u32 + 70)..(first.left() as u32 + 420) {
         let x = x as f32;
-        assert_eq!(pixel(x, (first.bottom() + second.top()) / 2.0), gap, "{what}: between the pages at x = {x}");
+        assert_eq!(pixel(x, gap_y), plain.get_pixel(x as u32, gap_y as u32).0, "{what}: between the pages at x = {x}");
         for dy in [4.0, 20.0, 40.0] {
             let [r, g, b, _] = pixel(x, second.top() + dy);
             assert!(r > 240 && g > 240 && b > 240, "{what}: page 2 at {x}, +{dy}: {r},{g},{b}");
