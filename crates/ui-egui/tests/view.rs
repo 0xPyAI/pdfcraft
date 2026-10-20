@@ -1112,6 +1112,37 @@ fn highlight_fields_leaves_read_only_fields_alone() {
     assert_eq!(tinted, 1, "only the field that can be filled is tinted");
 }
 
+/// A radio group whose second button is locked on its own widget (`/Ff` 1 there), as the
+/// layout of an XFA exclusion group with one read-only button writes it.
+const LOCKED_RADIO: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /Annots [5 0 R 6 0 R] >> endobj
+4 0 obj << /FT /Btn /Ff 49152 /T (choice) /V /Off /Kids [5 0 R 6 0 R] >> endobj
+5 0 obj << /Type /Annot /Subtype /Widget /Parent 4 0 R /Rect [50 300 90 340] /AS /Off /P 3 0 R >> endobj
+6 0 obj << /Type /Annot /Subtype /Widget /Parent 4 0 R /Ff 1 /Rect [150 300 190 340] /AS /Off /P 3 0 R >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
+/// A read-only button of a radio group is left untinted while the group's other button, which
+/// can be chosen, is tinted.
+#[test]
+fn highlight_fields_leaves_a_groups_read_only_button_alone() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("radio.pdf", None, LOCKED_RADIO.to_vec()).expect("opens");
+        app.set_option("left", "closed").unwrap();
+        app.set_option("panel", "none").unwrap();
+        app.set_option("fields", "on").unwrap();
+        app
+    });
+    h.run_steps(6);
+    let tint = egui::Color32::from_rgba_unmultiplied(0x6E, 0x8E, 0xF5, 48);
+    let tinted = h.output().shapes.iter().filter(|c| matches!(&c.shape, egui::Shape::Circle(r) if r.fill == tint)).count();
+    assert_eq!(tinted, 1, "only the button that can be chosen is tinted");
+}
+
 /// A required radio group (`/Ff` 32768 radio + 2 required) with two 40 pt round buttons.
 const RADIOS: &[u8] = b"%PDF-1.7
 1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> >> endobj
