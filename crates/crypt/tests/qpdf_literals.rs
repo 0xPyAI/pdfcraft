@@ -1,18 +1,38 @@
-//! Encryption numbers written by an **outside implementation**: qpdf core 12.2.0 (through pikepdf
-//! 9.11) built each fixture, and the `/O`, `/U`, `/OE`, `/UE`, `/Perms` and `/ID` values quoted below
-//! were copied out of those files rather than computed here.
+//! Encryption numbers from an **outside implementation**. Six of the seven rows below are qpdf's own,
+//! written by qpdf core 12.2.0 through pikepdf 9.11, and their `/O`, `/U`, `/OE`, `/UE`, `/Perms`
+//! and `/ID` values were copied out of those files rather than computed here. The seventh row,
+//! `crafted-r3-40bit-hand-derived`, is ours and says so where it is defined - no producer we can run
+//! here writes revision 3 at 40 bits (qpdf core 12.2.0 emits `/Length 128` at `R=3`, measured below),
+//! so nothing outside computed that one either.
 //!
 //! That distinction is the whole point. `create()` and `open()` share one derivation, so a wrong-but
-//! self-consistent implementation passes every internal test: two review rounds proved it by breaking the
-//! key derivation in ten different ways and watching both suites stay green. Quoting an outsider's bytes
+//! self-consistent implementation round-trips cleanly against itself: across two review rounds we
+//! broke the key derivation several ways and the unit suite stayed green (deleting Algorithm 2 step f
+//! leaves all 17 unit tests passing while our rows fail). Quoting an outsider's bytes
 //! breaks the circle - `open()` recomputes `/U` (or the revision 6 hash chain) and compares it to what
-//! qpdf stored, so a derivation that diverges cannot authenticate at all.
+//! was stored, so a derivation that diverges cannot authenticate at all.
 //!
 //! Revisions covered: 2 (export-grade RC4, where the five-byte key makes a truncation error visible that
-//! every existing R3/R4 vector in this repository hides as a no-op), 3, and 4 and 6 each with metadata
-//! encrypted *and* plain - which is the only way to see Algorithm 2 step f's four `FF` bytes from
-//! outside. Regenerate with `make-oracle-fixtures.py` in the workspace root (needs `.dc-tools/`, which
-//! lives outside this repository); the PDFs themselves are never committed, only these quoted numbers.
+//! every pre-existing R3/R4 vector in this repository hides as a no-op), 3, and 4 and 6 each with metadata
+//! encrypted *and* plain. For revision 4 that pairing is the only outside view of Algorithm 2 step
+//! f's four `FF` bytes; revision 6 shows the same flag differently - its `/U` differs between the two
+//! metadata variants, which is measured here rather than attributed to a named algorithm step. Only the
+//! numbers are committed - never the PDFs, and no generator script that lives outside
+//! this repository. To re-derive the six qpdf rows, take one blank 200x200 page and save it with
+//! pikepdf 9.11 (qpdf core 12.2.0) using `Encryption(owner=OWNER, user=USER,`
+//! `allow=Permissions(extract=False), R=<revision>, aes=…, metadata=…)` plus `save(..., static_id=True)`,
+//! then read `/Encrypt` back. Below revision 4 both flags are forced rather than chosen, because pikepdf
+//! refuses AES and refuses encrypted metadata there - so those two rows need `aes=False, metadata=False`,
+//! while revisions 4 and 6 take `aes=True` with the case's own metadata flag. Run to run, every quoted
+//! field of those rows reproduces at revisions 2-4, and whole files too for revisions 2 and 3; a
+//! revision 4 file falls short of that by one stream, because `/CFM /AESV2` prepends a fresh random IV.
+//! Revision 6 reproduces structurally only, its salts being new each run. What stays checked rather than
+//! trusted - `open()` recovers the user password from `/O` and verifies `/U` at revisions 2-4
+//! (Algorithm 7), matches both stored hashes at revision 6 and unwraps `/OE`/`/UE` into the file key
+//! there; this file then decrypts `/Perms` with that key, which authentication itself never reads. One
+//! thing no assertion here verifies is the crypt-filter names: renaming a row's `/StmF` or replacing its
+//! filter set leaves all three tests green, so those are held to review rather than to a test. For how
+//! this repository treats qpdf as an oracle, see `crates/oracle/README.md`.
 
 use pdfcraft_crypt::{Auth, EncryptDict, Method, SecurityHandler, aes_cbc_decrypt};
 
@@ -194,10 +214,10 @@ const CASES: &[Case] = &[
     },
     // HAND-DERIVED, not produced by qpdf: an independent re-implementation of ISO Algorithms 2/3
     // (n = 5) computed this pair, cross-validated by having the same routine reproduce qpdf's
-    // n = 16 `/O` byte for byte. It exists because no conforming producer emits R3 at 40 bits -
-    // qpdf always writes 128 there, and this crate's own create() maps Rc4_40 to revision 2 - so
-    // the only way to reach `key_len` = 5 with the derivation loop RUNNING (r >= 3) is to craft
-    // it. With that combination live, the loop's truncation stops being a no-op: mutating
+    // n = 16 `/O` byte for byte. It exists because no producer we can run here emits R3 at 40 bits -
+    // qpdf core 12.2.0 writes `/Length 128` there, and this crate's own create() maps Rc4_40 to revision 2 - so
+    // the only route we have to `key_len` = 5 with the derivation loop RUNNING (r >= 3) is to craft
+    // it by hand. With that combination live, the loop's truncation stops being a no-op: mutating
     // `Md5::digest(&digest[..n])` to hash the whole digest makes this password stop authenticating.
     Case {
         label: "crafted-r3-40bit-hand-derived",
@@ -257,8 +277,9 @@ fn outside_derived_dictionaries_authenticate_with_the_intended_role() {
 fn metadata_flag_from_outside_changes_the_file_key_it_certifies() {
     // `/EncryptMetadata` false folds four set bytes into a revision 4 key (Algorithm 2, step f) and
     // changes what revision 6 stores in `/U`. qpdf wrote both variants of each, so an implementation
-    // that ignored the flag would give identical keys - invisible to every internal test, because all
-    // of them build metadata-encrypted files.
+    // that ignored the flag would give identical keys. Internally this is no longer untested -
+    // `tests/proptests.rs` from #2358 varies the flag and asserts the keys differ - but internal tests
+    // still share our derivation, so what these rows add is a second implementation's own numbers.
     for (enc_label, plain_label) in [("r4-aes128-meta-enc", "r4-aes128-meta-plain"), ("r6-aes256-meta-enc", "r6-aes256-meta-plain")] {
         let a = CASES.iter().find(|c| c.label == enc_label).expect("encrypted-metadata fixture present");
         let b = CASES.iter().find(|c| c.label == plain_label).expect("plain-metadata fixture present");
@@ -278,7 +299,7 @@ fn metadata_flag_from_outside_changes_the_file_key_it_certifies() {
     let r3 = CASES.iter().find(|c| c.r == 3).unwrap();
     assert_ne!(hex(r2.u_hex), hex(r3.u_hex), "revision 2 and revision 3 /U differ because the key width differs");
     assert_eq!(r2.u_hex.len(), 64, "revision 2 /U is RC4 over the padding: 32 bytes");
-    assert_eq!(r3.u_hex.len(), 64, "revision 3 /U is sixteen bytes plus sixteen reserved zeros");
+    assert_eq!(r3.u_hex.len(), 64, "revision 3 /U is 32 bytes: sixteen derived, plus padding qpdf fills (our crafted row leaves it zero)");
 }
 
 #[test]
