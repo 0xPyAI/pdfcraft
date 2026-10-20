@@ -835,6 +835,22 @@ fn an_outline_counts_no_more_items_than_its_total_budget() {
     assert_eq!(scan(&doc).iter().find(|c| c.0 == Hidden::Bookmarks), Some(&(Hidden::Bookmarks, 100_000)));
 }
 
+/// Items written inline (not as indirect objects) count towards the total budget too. Each of
+/// 60,000 indirect siblings has one inline child, so 120,000 items are reached, and the total must
+/// still stop at 100,000.
+#[test]
+fn inline_outline_children_count_towards_the_total_budget() {
+    use crate::sanitize::{Hidden, scan};
+    let siblings = 60_000;
+    let mut items = Vec::with_capacity(siblings);
+    for i in 0..siblings {
+        let next = if i + 1 < siblings { format!(" /Next {} 0 R", 7 + i) } else { String::new() };
+        items.push(format!("<< /Title (a){next} /First << /Title (c) >> >>").into_bytes());
+    }
+    let doc = outlined_document(items);
+    assert_eq!(scan(&doc).iter().find(|c| c.0 == Hidden::Bookmarks), Some(&(Hidden::Bookmarks, 100_000)));
+}
+
 /// Issue #2447: in a tagged PDF the structure tree points at the link and the comment it tags
 /// (`/OBJR`). Removing them must drop those references too, or the full rewrite keeps the
 /// annotations, the URL and the comment text included, while the page no longer lists them.

@@ -101,21 +101,31 @@ fn name_tree_len(doc: &Document, node: &Dict, depth: usize) -> usize {
 const OUTLINE_ITEM_BUDGET: usize = 100_000;
 
 fn outline_len(doc: &Document, first: Option<&Object>, depth: usize) -> usize {
-    outline_len_seen(doc, first, depth, &mut std::collections::HashSet::new())
+    let (mut seen, mut counted) = (std::collections::HashSet::new(), 0);
+    outline_len_seen(doc, first, depth, &mut seen, &mut counted)
 }
 
-/// Counts an outline level and everything below it, each item once. `seen` holds the items already
-/// counted. An item that two others name (as `/First` or `/Next`) is counted where the walk first
-/// reaches it, and a level stops at an item already seen, because the walk that reached that item
-/// counts the rest of its level. A hostile outline therefore costs one step per item, not 2^n steps
-/// for n levels of shared children.
-fn outline_len_seen(doc: &Document, first: Option<&Object>, depth: usize, seen: &mut std::collections::HashSet<ObjRef>) -> usize {
+/// Counts an outline level and everything below it, each item once. `seen` holds the indirect items
+/// already counted, and `counted` every item counted so far, inline ones included, which the total
+/// budget applies to. An item that two others name (as `/First` or `/Next`) is counted where the walk
+/// first reaches it, and a level stops at an item already seen, because the walk that reached that
+/// item counts the rest of its level. A hostile outline therefore costs one step per item, not 2^n
+/// steps for n levels of shared children. The depth limit of 64 only matters for outlines nested that
+/// deep: an item first reached through a deeper path is not visited again from a shallower one, so
+/// items nested beyond the limit may stay uncounted.
+fn outline_len_seen(
+    doc: &Document,
+    first: Option<&Object>,
+    depth: usize,
+    seen: &mut std::collections::HashSet<ObjRef>,
+    counted: &mut usize,
+) -> usize {
     let mut n = 0;
     let mut cur = first.cloned();
     let mut guard = 0;
     while let Some(o) = cur {
         guard += 1;
-        if guard > 100_000 || depth > 64 || seen.len() >= OUTLINE_ITEM_BUDGET {
+        if guard > 100_000 || depth > 64 || *counted >= OUTLINE_ITEM_BUDGET {
             break;
         }
         if let Object::Ref(r) = &o
@@ -124,7 +134,8 @@ fn outline_len_seen(doc: &Document, first: Option<&Object>, depth: usize, seen: 
             break;
         }
         let Some(d) = doc.resolve(&o).as_dict().cloned() else { break };
-        n += 1 + outline_len_seen(doc, d.get(b"First"), depth + 1, seen);
+        *counted += 1;
+        n += 1 + outline_len_seen(doc, d.get(b"First"), depth + 1, seen, counted);
         cur = d.get(b"Next").cloned();
     }
     n
