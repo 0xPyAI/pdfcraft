@@ -97,17 +97,34 @@ fn name_tree_len(doc: &Document, node: &Dict, depth: usize) -> usize {
     leaves + kids.iter().filter_map(|k| doc.resolve(k).as_dict().cloned()).map(|k| name_tree_len(doc, &k, depth + 1)).sum::<usize>()
 }
 
+/// The most distinct outline items one count reads, over all levels together.
+const OUTLINE_ITEM_BUDGET: usize = 100_000;
+
 fn outline_len(doc: &Document, first: Option<&Object>, depth: usize) -> usize {
+    outline_len_seen(doc, first, depth, &mut std::collections::HashSet::new())
+}
+
+/// Counts an outline level and everything below it, each item once. `seen` holds the items already
+/// counted. An item that two others name (as `/First` or `/Next`) is counted where the walk first
+/// reaches it, and a level stops at an item already seen, because the walk that reached that item
+/// counts the rest of its level. A hostile outline therefore costs one step per item, not 2^n steps
+/// for n levels of shared children.
+fn outline_len_seen(doc: &Document, first: Option<&Object>, depth: usize, seen: &mut std::collections::HashSet<ObjRef>) -> usize {
     let mut n = 0;
     let mut cur = first.cloned();
     let mut guard = 0;
     while let Some(o) = cur {
         guard += 1;
-        if guard > 100_000 || depth > 64 {
+        if guard > 100_000 || depth > 64 || seen.len() >= OUTLINE_ITEM_BUDGET {
+            break;
+        }
+        if let Object::Ref(r) = &o
+            && !seen.insert(*r)
+        {
             break;
         }
         let Some(d) = doc.resolve(&o).as_dict().cloned() else { break };
-        n += 1 + outline_len(doc, d.get(b"First"), depth + 1);
+        n += 1 + outline_len_seen(doc, d.get(b"First"), depth + 1, seen);
         cur = d.get(b"Next").cloned();
     }
     n
