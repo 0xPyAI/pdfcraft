@@ -11,7 +11,8 @@
 //! so its graphics state cannot reach the mark. The closing stream also ends known unfinished
 //! marked-content sequences before the new mark.
 //!
-//! Text uses standard Helvetica (WinAnsi) added to the page resources as `/PCHelv`.
+//! Text uses standard Helvetica (WinAnsi) added to the page resources as `/PCHelv`; headers and
+//! footers may use standard Times (`/PCTimes`) or Courier (`/PCCour`) instead (#3754).
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -58,6 +59,8 @@ pub struct HeaderFooter {
     /// `<<m/d/yy>>`, `<<mmmm d, yyyy>>`, and Bates numbers `<<Bates Number#6#1#PRE#SUF>>`
     /// (digits, start, prefix, suffix).
     pub text: [String; 6],
+    /// The standard face the text is drawn in (#3754): Helvetica (the default), Times or Courier.
+    pub font: added::Family,
     pub font_size: f64,
     pub color: Rgb,
     pub underline: bool,
@@ -70,7 +73,15 @@ pub struct HeaderFooter {
 impl Default for HeaderFooter {
     /// Acrobat's defaults: 8 pt black, margins 0.5 in top and bottom, 1 in left and right.
     fn default() -> Self {
-        Self { text: Default::default(), font_size: 8.0, color: [0.0; 3], underline: false, margins: [36.0, 36.0, 72.0, 72.0], start_number: 1 }
+        Self {
+            text: Default::default(),
+            font: added::Family::Helvetica,
+            font_size: 8.0,
+            color: [0.0; 3],
+            underline: false,
+            margins: [36.0, 36.0, 72.0, 72.0],
+            start_number: 1,
+        }
     }
 }
 
@@ -645,7 +656,13 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
         let bates = bates0.checked_add(k as u64).ok_or_else(|| EditError::Invalid("the Bates numbers are too large".into()))?;
         let size = hf.font_size;
         let [top, bottom, left, right] = hf.margins;
-        let mut body: Vec<u8> = format!("BT\n/PCHelv {} Tf\n{}\n", n(size), rgb(hf.color)).into_bytes();
+        // The page resource each face is added under (see `add_resources`).
+        let resource = match hf.font {
+            added::Family::Helvetica => "PCHelv",
+            added::Family::Times => "PCTimes",
+            added::Family::Courier => "PCCour",
+        };
+        let mut body: Vec<u8> = format!("BT\n/{resource} {} Tf\n{}\n", n(size), rgb(hf.color)).into_bytes();
         let mut underlines = String::new();
         for (slot, template) in hf.text.iter().enumerate() {
             if template.trim().is_empty() {
@@ -655,7 +672,8 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
             let header = slot < 3;
             let line_h = size * 1.2;
             for (li, line) in lines.iter().enumerate() {
-                let tw = helvetica_width(line, size);
+                // Centred and right-aligned text is placed by its width in the chosen face.
+                let tw = hf.font.width(line, size, false, false);
                 let x = match slot % 3 {
                     0 => left,
                     1 => (w - tw) / 2.0,
@@ -676,7 +694,8 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
         let mut content = begin(MarkKind::HeaderFooter, "Header", page.view_matrix(doc)).into_bytes();
         content.extend(body);
         content.extend_from_slice(END.as_bytes());
-        add_resources(doc, page, None, None)?;
+        // The content names the face, so Times or Courier is added beside Helvetica.
+        add_resources(doc, page, None, Some(&content))?;
         let page = &page_list(doc)[i];
         place(doc, page, MarkKind::HeaderFooter, content, false)?;
     }

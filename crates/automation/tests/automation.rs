@@ -2239,6 +2239,20 @@ fn headers_watermarks_and_backgrounds_through_tools() {
     assert!(matches!(a.call("doc_remove_marks", &json!({ "doc": doc, "kind": "watermark" })), Err(ToolError::Failed(_))));
     assert!(matches!(a.call("doc_header_footer", &json!({ "doc": doc })), Err(ToolError::Failed(_))), "no text");
     ok(&mut a, "doc_save", json!({ "doc": doc, "path": "marked.pdf" }));
+    // A standard face other than Helvetica (#3754), kept through save and reopen; one it doesn't
+    // offer is refused with the faces it does.
+    let mono = ok(&mut a, "doc_open", json!({ "path": "b.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_header_footer", json!({ "doc": mono, "header_left": "MONO", "font": "Courier" }));
+    assert!(page_text(&mut a, mono)[0].contains("MONO"));
+    ok(&mut a, "doc_save", json!({ "doc": mono, "path": "courier.pdf" }));
+    let saved = pdfcraft_cos::Document::open(std::sync::Arc::new(std::fs::read(dir.join("courier.pdf")).unwrap())).unwrap();
+    let page = &pdfcraft_model::pages(&saved)[0];
+    let res = saved.resolve(page.dict.get(b"Resources").unwrap());
+    let fonts = saved.resolve(res.as_dict().unwrap().get(b"Font").unwrap()).as_dict().cloned().unwrap();
+    let face = saved.resolve(fonts.get(b"PCCour").expect("Courier is added")).as_dict().cloned().unwrap();
+    assert_eq!(face.name(b"BaseFont"), Some(&b"Courier"[..]));
+    let refused = a.call("doc_header_footer", &json!({ "doc": mono, "header_left": "X", "font": "Arial" }));
+    assert!(matches!(refused, Err(ToolError::InvalidArgs(e)) if e.contains("Courier")));
 }
 
 #[test]
