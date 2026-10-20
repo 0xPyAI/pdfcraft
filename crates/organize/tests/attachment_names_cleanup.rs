@@ -40,9 +40,5 @@ fn deleting_the_last_attachment_removes_an_indirect_empty_names_dictionary() {
     assert!(attachment_keys(&doc).is_empty());
     let root = doc.root().unwrap();
     let catalog = doc.get(root).as_dict().cloned().unwrap();
-    assert!(
-        catalog.get(b"Names").is_none(),
-        "the catalog keeps no empty /Names: {:?}",
-        catalog.get(b"Names").map(|n| matches!(n, Object::Ref(_)))
-    );
+    assert!(catalog.get(b"Names").is_none(), "the catalog keeps no empty /Names: {:?}", catalog.get(b"Names").map(|n| matches!(n, Object::Ref(_))));
 }
