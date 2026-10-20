@@ -608,6 +608,8 @@ pub(crate) fn menu_item(name: &str) -> Option<Request> {
     })
 }
 
+/// `app.execMenuItem(name)`: queues the request [`menu_item`] gives for the name (Save opens
+/// Save As too); an unknown name does nothing.
 fn exec_menu_item(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let item = text(&arg(args, 0), ctx)?;
     if let Some(r) = menu_item(&item) {
@@ -941,6 +943,9 @@ fn color_object(ctx: &mut Context) -> JsObject {
     o.build()
 }
 
+/// Installs the form object model's globals: the document's functions and properties
+/// (`getField`, `numFields`, `pageNum`, `info`, …), `app`, `util`, `console`, `display` and
+/// `color`.
 fn install(ctx: &mut Context) -> JsResult<()> {
     let globals: [(&str, usize, NativeFunction); 9] = [
         ("getField", 1, NativeFunction::from_fn_ptr(get_field)),

@@ -1073,6 +1073,8 @@ fn auto_size_fields_shrink_and_wrap_typed_text_to_fit_their_box() {
     assert_eq!(on_screen_fit(&h, "fixed", long).0, 10.0);
 }
 
+/// A button script's `ShowHideFileAttachment` opens the attachments panel, and running it again
+/// closes it.
 #[test]
 fn a_form_button_shows_and_hides_the_attachments_panel() {
     let mut h = harness();

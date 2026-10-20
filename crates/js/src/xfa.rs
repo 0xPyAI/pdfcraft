@@ -1049,6 +1049,8 @@ fn set_focus(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsVal
     Ok(JsValue::undefined())
 }
 
+/// `app.execMenuItem(name)`: the effect for the request the shared menu table gives the name
+/// (Save opens Save As too); an unknown name does nothing.
 fn exec_menu_item(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let item = text(&arg(args, 0), ctx)?;
     match crate::menu_item(&item) {

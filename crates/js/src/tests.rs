@@ -1137,12 +1137,15 @@ mod menu_items {
     use super::*;
     use crate::xfa::{XfaDoc, XfaEffect, XfaEvent, run_xfa};
 
+    /// Every side panel has a fixed id in automation output.
     #[test]
     fn each_panel_has_a_fixed_id_for_automation() {
         let ids = [Panel::Bookmarks, Panel::Pages, Panel::Attachments, Panel::Signatures, Panel::Layers].map(Panel::id);
         assert_eq!(ids, ["bookmarks", "pages", "attachments", "signatures", "layers"]);
     }
 
+    /// Each side panel item, Print and SaveAs make their request, in order; an unknown item
+    /// makes none and is not an error.
     #[test]
     fn exec_menu_item_shows_side_panels_prints_and_saves() {
         let o = go(
@@ -1166,6 +1169,7 @@ mod menu_items {
         );
     }
 
+    /// `app.execMenuItem` works in XFA scripts too: a click shows the attachments panel.
     #[test]
     fn xfa_scripts_show_the_attachments_panel() {
         let event = XfaEvent { activity: "click".into(), target: "form1[0].page1[0].go[0]".into(), ..Default::default() };

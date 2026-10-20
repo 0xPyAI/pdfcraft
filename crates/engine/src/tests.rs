@@ -6107,6 +6107,8 @@ fn undo_never_makes_an_unsaved_document_clean() {
     assert!(!s.get(new).unwrap().dirty, "once saved, undo back to the saved state is clean");
 }
 
+/// An XFA button's click script may show the attachments panel; a text field's exit script
+/// asking the same is noted on the console and ignored.
 #[test]
 fn an_xfa_button_may_show_a_side_panel_and_other_events_may_not() {
     let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
@@ -6134,6 +6136,8 @@ fn an_xfa_button_may_show_a_side_panel_and_other_events_may_not() {
     assert!(out.console.iter().any(|c| c.contains("show a side panel")), "{:?}", out.console);
 }
 
+/// A validate script that asks for Save As and a side panel gets neither, with a console note
+/// for each; a button's script may still open Save As.
 #[test]
 fn a_fields_own_script_may_not_save_as_or_show_a_panel() {
     let mut s = Session::new().with_clock(|| 1_700_000_000);

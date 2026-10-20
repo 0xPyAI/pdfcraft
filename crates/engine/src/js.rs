@@ -26,6 +26,9 @@ impl JsOutput {
         self.alerts.is_empty() && self.console.is_empty() && self.requests.is_empty() && self.errors.is_empty()
     }
 
+    /// Adds what a field's own script produced: its alerts, console lines, errors and requests,
+    /// except a request to show a side panel or open Save As, which is noted on the console
+    /// and dropped.
     fn absorb(&mut self, o: &Outcome) {
         self.alerts.extend(o.alerts.iter().cloned());
         self.console.extend(o.console.iter().cloned());
