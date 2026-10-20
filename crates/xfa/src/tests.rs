@@ -1230,6 +1230,12 @@ fn a_label_without_a_width_is_as_wide_as_its_text() {
     let lines: std::collections::BTreeSet<i64> =
         items.iter().filter_map(|i| if let Item::Text(s) = i { Some((s.baseline * 100.0).round() as i64) } else { None }).collect();
     assert!(lines.len() > 1, "wraps: {} line(s)", lines.len());
+    // And within the room it has: no line's drawn text runs past the subform's right edge.
+    let right = items
+        .iter()
+        .filter_map(|i| if let Item::Text(s) = i { Some(s.x + s.face.width(s.text.trim_end())) } else { None })
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert!(right <= 36.0 + 7.5 * 72.0 + 0.05, "the text stays within the available width: {right}");
 }
 
 /// A draw without a width and without text (a bordered spacer or rule) keeps the width it has
