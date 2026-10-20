@@ -288,6 +288,59 @@ fn vectors_are_removed_or_clipped_and_inline_images_go() {
     assert!(c.contains("150 150 m"), "the line elsewhere stays");
 }
 
+/// A chain of nested forms deeper than the pass can walk was removed from the page, taking
+/// whatever else it drew with it even when nothing in it was marked. The limit now reaches as
+/// deep as the renderer and Edit text read (50), so anything a reader can see can be walked;
+/// past that nothing is drawn either, so removing it costs nothing visible (#3645).
+#[test]
+fn a_deeply_nested_form_keeps_the_text_nobody_marked() {
+    /// A page that draws `HEAD` at the top, then a chain of `depth` forms whose innermost draws
+    /// `DEEP`, then `TAIL`. Only `HEAD` is marked.
+    fn page_with_chain(depth: usize) -> Document {
+        let first = 7;
+        let mut objs: Vec<Vec<u8>> = vec![
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R                  /Resources << /Font << /F1 5 0 R >> /XObject << /Fm1 {first} 0 R >> >> >>"
+            )
+            .into_bytes(),
+            stream("", b"BT /F1 10 Tf 10 280 Td (HEAD) Tj ET /Fm1 Do BT /F1 10 Tf 10 10 Td (TAIL) Tj ET"),
+            FONT.replace("95 0 R", "6 0 R").into_bytes(),
+            widths(),
+        ];
+        for k in 1..=depth {
+            let res = if k < depth {
+                format!("/Resources << /Font << /F1 5 0 R >> /XObject << /Fm{} {} 0 R >> >>", k + 1, first + k)
+            } else {
+                "/Resources << /Font << /F1 5 0 R >> >>".to_string()
+            };
+            let body: Vec<u8> = if k < depth { format!("/Fm{} Do", k + 1).into_bytes() } else { b"BT /F1 10 Tf 10 150 Td (DEEP) Tj ET".to_vec() };
+            objs.push(stream(&format!("/Type /XObject /Subtype /Form /BBox [0 0 300 300] {res}"), &body));
+        }
+        pdf(objs)
+    }
+
+    // Deeper than the old limit of 12 and within the new one: the innermost text survives.
+    for depth in [1, 12, 13, 20, 50] {
+        let mut doc = page_with_chain(depth);
+        mark(&mut doc, 0, &[[5.0, 275.0, 60.0, 295.0]], "");
+        let report = apply(&mut doc, None).unwrap();
+        assert_eq!(report.forms_removed, 0, "depth {depth}: a form was removed");
+        let c = content(&doc, 0);
+        assert!(c.contains("(TAIL)"), "depth {depth}: {c}");
+        // The innermost form's text is still in the saved file.
+        let saved = write_incremental(&doc, &SaveOptions::default()).unwrap();
+        assert!(saved.windows(6).any(|w| w == b"(DEEP)"), "depth {depth}: the innermost form's text was deleted");
+    }
+
+    // Past what any reader follows, the form is still removed: the fail-safe, and nothing the
+    // renderer draws is lost because it stops at 50 too.
+    let mut doc = page_with_chain(51);
+    mark(&mut doc, 0, &[[5.0, 275.0, 60.0, 295.0]], "");
+    assert_eq!(apply(&mut doc, None).unwrap().forms_removed, 1, "a chain past 50 is removed");
+}
+
 #[test]
 fn shared_form_xobjects_are_copied_not_changed() {
     let form =
