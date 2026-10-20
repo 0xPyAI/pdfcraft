@@ -684,10 +684,12 @@ impl Automation {
                 let wanted: String = text.split_whitespace().collect();
                 let mut out = self.apply(&a, Edit::EditTextBlock { page, block: index, text, style })?;
                 let after = self.doc(&a)?.text_blocks(page);
-                // Only a paragraph that now shows the requested text is the edited one. A neighbour
-                // that overlaps the old box (overlaid text, a text layer) must not take its number.
+                // Only a paragraph that now shows exactly the requested text is the edited one. A
+                // neighbour that overlaps the old box (overlaid text, a text layer) must not take
+                // its number, and neither must a paragraph the edit merged it into: rewriting that
+                // one by this number would drop the neighbour's text.
                 let edited = block_overlapping(&after, moved)
-                    .filter(|&i| !wanted.is_empty() && after.get(i).is_some_and(|b| b.text.split_whitespace().collect::<String>().contains(&wanted)));
+                    .filter(|&i| !wanted.is_empty() && after.get(i).is_some_and(|b| b.text.split_whitespace().collect::<String>() == wanted));
                 if let Some(b) = edited.and_then(|i| after.get(i)) {
                     out["paragraph"] = json!({ "text": b.text, "lines": b.lines.len(), "font": b.base_font });
                 }
@@ -1897,11 +1899,13 @@ impl Automation {
             return Err(ToolError::InvalidArgs("choose only one of hide_text_block and hide_added_text".into()));
         }
         let out = if let Some(block) = block {
-            let index = usize::try_from(block)
-                .ok()
-                .and_then(|n| n.checked_sub(1))
-                .ok_or_else(|| ToolError::InvalidArgs("hide_text_block must be a positive paragraph index from text_paragraphs".into()))?;
-            self.doc(a)?.text_edit_preview(page, index).map_err(failed)?.render_background(scale).map_err(failed)?
+            if block < 1 {
+                return Err(ToolError::InvalidArgs("hide_text_block must be a positive paragraph index from text_paragraphs".into()));
+            }
+            // The number names the paragraph text_paragraphs listed, as it does for text_edit.
+            let doc = self.doc(a)?;
+            let index = self.paragraph_index(doc.id, page, block, &doc.text_blocks(page))?;
+            doc.text_edit_preview(page, index).map_err(failed)?.render_background(scale).map_err(failed)?
         } else if let Some(added) = added {
             let index = usize::try_from(added)
                 .ok()

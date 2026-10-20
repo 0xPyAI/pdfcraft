@@ -171,7 +171,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 | 8 | 1.0 polish: performance, right-to-left, missing languages, keyboard-only (M14) | 55–95 |
 
 ## Progress log
-- **2026-10-16 (M7, #2516):** A paragraph number from `text_paragraphs` keeps naming the paragraph it listed after edits regroup the page: `text_edit` and `text_edit_layout` find it again by its text and box, and refuse one that was merged into a neighbour instead of rewriting the paragraph that took its number (`stale_paragraphs` lists the numbers gone). The inline editor's switch-paragraph click holds the same key. No stable identity across save and reopen yet (#2508).
+- **2026-10-16 (M7, #2516):** A paragraph number from `text_paragraphs` keeps naming the paragraph it listed after edits regroup the page: `text_edit`, `text_edit_layout` and `page_render`'s `hide_text_block` find it again by its text and box, and refuse one that was merged into a neighbour (the edited paragraph included) instead of rewriting the paragraph that took its number (`stale_paragraphs` lists the numbers gone). The inline editor's switch-paragraph click holds the same key. No stable identity across save and reopen yet (#2508).
 - **2026-10-19 (M14, #3373):** The main menu and its long submenus scroll in short windows, keeping their commands reachable. Estimates unchanged.
 
 - **2026-10-19 (M3, #3387):** Save-prompt shortcuts yield to later consent and utility dialogs; a synthetic UI regression checks that an edited document stays open. Estimates unchanged.

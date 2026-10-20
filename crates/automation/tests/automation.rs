@@ -6923,7 +6923,7 @@ fn text_edit_refuses_a_paragraph_number_an_earlier_edit_regrouped() {
         "text_edit",
         json!({"doc":doc,"page":1,"paragraph":1,"text":"Alpha paragraph, first row.\nAlpha paragraph, second row.\nAlpha paragraph, a third row."}),
     );
-    assert_eq!(first["stale_paragraphs"], json!([2]), "the third row regroups Alpha with Bravo: {first}");
+    assert_eq!(first["stale_paragraphs"], json!([1, 2]), "the third row regroups Alpha with Bravo: {first}");
 
     // Paragraph 2 of the earlier listing was Bravo, which is now part of Alpha's paragraph.
     let stale = a.call("text_edit", &json!({"doc":doc,"page":1,"paragraph":2,"text":"Bravo paragraph, edited."}));
@@ -6939,6 +6939,55 @@ fn text_edit_refuses_a_paragraph_number_an_earlier_edit_regrouped() {
     ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":2,"text":"Charlie paragraph, edited."}));
     let text = page_text(&mut a, doc).join(" ");
     assert!(text.contains("Charlie paragraph, edited.") && text.contains("Alpha paragraph, a third row."), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// An edit that merges its paragraph into a neighbour leaves no paragraph of its own to follow:
+/// the merged one holds the edited text too, but rewriting it by the edited paragraph's number
+/// would drop the neighbour's text (#2516).
+#[test]
+fn text_edit_does_not_follow_a_paragraph_into_the_one_it_merged_with() {
+    let dir = workdir("text-edit-merged-number");
+    std::fs::write(dir.join("p.pdf"), three_paragraph_pdf()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path":"p.pdf"}))["doc"].as_u64().unwrap();
+    ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
+    let first = ok(
+        &mut a,
+        "text_edit",
+        json!({"doc":doc,"page":1,"paragraph":1,"text":"Alpha paragraph, first row.\nAlpha paragraph, second row.\nAlpha paragraph, a third row."}),
+    );
+    assert!(first.get("paragraph").is_none(), "the result must not present the merged paragraph as the edited one: {first}");
+
+    // Paragraph 1 was Alpha. Alpha now shares a paragraph with Bravo, so the number is refused.
+    let again = a.call("text_edit", &json!({"doc":doc,"page":1,"paragraph":1,"text":"Alpha only."}));
+    assert!(matches!(&again, Err(ToolError::InvalidArgs(m)) if m.contains("text_paragraphs")), "{again:?}");
+    let text = page_text(&mut a, doc).join(" ");
+    assert!(text.contains("Bravo paragraph, a single row."), "Bravo is untouched: {text}");
+    assert!(!text.contains("Alpha only."), "nothing was rewritten: {text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The editor background preview takes the same paragraph number as `text_edit`, so it hides the
+/// paragraph the number named in the listing and refuses a number an edit made stale (#2516).
+#[test]
+fn page_render_hide_text_block_refuses_a_paragraph_number_an_earlier_edit_regrouped() {
+    let dir = workdir("hide-text-block-stale-number");
+    std::fs::write(dir.join("p.pdf"), three_paragraph_pdf()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path":"p.pdf"}))["doc"].as_u64().unwrap();
+    ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
+    ok(
+        &mut a,
+        "text_edit",
+        json!({"doc":doc,"page":1,"paragraph":1,"text":"Alpha paragraph, first row.\nAlpha paragraph, second row.\nAlpha paragraph, a third row."}),
+    );
+
+    // Paragraph 2 of the listing was Bravo, now inside Alpha's paragraph; position 2 is Charlie.
+    let stale = a.call("page_render", &json!({"doc":doc,"page":1,"dpi":72,"hide_text_block":2}));
+    assert!(matches!(&stale, Err(ToolError::InvalidArgs(m)) if m.contains("text_paragraphs")), "{:?}", stale.map(|_| ()));
+    // Paragraph 3 of the listing is Charlie, wherever it is now.
+    assert!(a.call("page_render", &json!({"doc":doc,"page":1,"dpi":72,"hide_text_block":3})).is_ok());
     std::fs::remove_dir_all(dir).unwrap();
 }
 

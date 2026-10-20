@@ -99,9 +99,10 @@ is included in the repository.
 
 A paragraph's number is its position in a list that is regrouped from geometry on every read,
 so an edit that merges two paragraphs, or splits one, moves the others. After `text_paragraphs`
-the numbers name the paragraphs *that listing showed*: `text_edit` and `text_edit_layout` find
-the paragraph again by its text and box, so editing paragraph 3 then paragraph 1 still edits the
-two the listing showed. A paragraph an edit merged into a neighbour (or changed) is refused with
+the numbers name the paragraphs *that listing showed*: `text_edit`, `text_edit_layout` and
+`page_render`'s `hide_text_block` find the paragraph again by its text and box, so editing paragraph 3 then paragraph 1 still edits the
+two the listing showed. A paragraph an edit merged into a neighbour (or changed) is refused, and so is the edited paragraph
+itself when the edit merged it into one, with
 a message to list the page again, instead of rewriting whichever paragraph took its number
 (#2516). The result of an edit names the numbers that are gone in `stale_paragraphs`. Listing
 a page again renumbers it. Without a listing, a number is a position in the page's current
