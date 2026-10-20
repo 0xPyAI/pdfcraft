@@ -505,8 +505,8 @@ fn isolation(doc: &Document, list: &[Object]) -> Isolation {
     Isolation::Clean { suffix: (dirty || comment_open || marked != 0).then_some(split), wrappers, marked }
 }
 
-/// Put a mark's content on a page: behind (prepended) or on top (appended, after wrapping the
-/// original content in q/Q).
+/// Put a mark's content on a page: behind (with the behind-marks at the start) or on top
+/// (appended, after wrapping the original content in q/Q).
 fn place(doc: &mut Document, page: &pdfcraft_model::Page, kind: MarkKind, content: Vec<u8>, behind: bool) -> Result<(), EditError> {
     place_tagged(doc, page, kind.tag(), content, behind)
 }
@@ -518,6 +518,9 @@ fn place(doc: &mut Document, page: &pdfcraft_model::Page, kind: MarkKind, conten
 /// sequences are closed at the end too, so hidden optional content cannot hide the new mark.
 fn place_tagged(doc: &mut Document, page: &pdfcraft_model::Page, tag: &str, content: Vec<u8>, behind: bool) -> Result<(), EditError> {
     let mut list = contents(doc, page)?;
+    // The behind-marks at the start: backgrounds, then watermarks, each in the order added.
+    let behind_kinds = [MarkKind::Background.tag(), MarkKind::Watermark.tag()];
+    let behind_marks = list.iter().take_while(|o| stream_tag(doc, o).is_some_and(|t| behind_kinds.contains(&t.as_str()))).count();
     let wrap = if behind {
         None
     } else {
@@ -526,16 +529,19 @@ fn place_tagged(doc: &mut Document, page: &pdfcraft_model::Page, tag: &str, cont
             // Content that can't be read precisely is wrapped whole, as before: after the
             // behind-marks at the start. A `q` it leaves open is closed at its end, where
             // closing it changes nothing already drawn.
-            Isolation::Unknown { unclosed, marked } => {
-                let behind_kinds = [MarkKind::Background.tag(), MarkKind::Watermark.tag()];
-                let split = list.iter().position(|o| !stream_tag(doc, o).is_some_and(|t| behind_kinds.contains(&t.as_str()))).unwrap_or(list.len());
-                (split < list.len()).then_some((split, unclosed, marked))
-            }
+            Isolation::Unknown { unclosed, marked } => (behind_marks < list.len()).then_some((behind_marks, unclosed, marked)),
         }
     };
     let mark = Object::Ref(doc.add(Object::Stream(Stream::flate(tagged(tag), &content))));
     if behind {
-        list.insert(0, mark);
+        // A new background goes after the backgrounds already there and below any watermark;
+        // a new watermark after all of them. Each is painted over the older ones (#3591).
+        let at = if tag == MarkKind::Background.tag() {
+            list.iter().take(behind_marks).rposition(|o| stream_tag(doc, o).as_deref() == Some(tag)).map_or(0, |i| i + 1)
+        } else {
+            behind_marks
+        };
+        list.insert(at, mark);
     } else {
         if let Some((split, unclosed, marked)) = wrap {
             let mut close_bytes = b"\nEMC".repeat(marked);

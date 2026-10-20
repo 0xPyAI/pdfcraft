@@ -169,6 +169,33 @@ fn watermarks_rotate_fade_and_can_go_behind() {
 }
 
 #[test]
+fn a_second_background_is_drawn_over_the_first() {
+    // #3591: the new background went in front of the old one in /Contents, so the old colour
+    // was painted over it and stayed.
+    let mut doc = fixture();
+    add_background(&mut doc, &[0], &Background { color: [0.0, 0.0, 1.0], opacity: 1.0, ..Background::default() }, false).unwrap();
+    add_background(&mut doc, &[0], &Background { color: [0.0, 1.0, 0.0], opacity: 1.0, ..Background::default() }, false).unwrap();
+    let s = streams(&doc, 0);
+    assert_eq!(s.len(), 3, "{s:?}");
+    assert!(s[0].contains("0 0 1 rg") && s[1].contains("0 1 0 rg"), "the newer background is painted last: {s:?}");
+    assert!(s[2].contains("(Hi) Tj"), "both stay behind the content: {s:?}");
+}
+
+#[test]
+fn backgrounds_stay_below_watermarks_behind_the_content() {
+    // Behind the content, backgrounds come first and then watermarks, each in the order added,
+    // so a watermark added after a background shows and a later background doesn't cover it.
+    let mut doc = fixture();
+    add_background(&mut doc, &[0], &Background { color: [0.0, 0.0, 1.0], opacity: 1.0, ..Background::default() }, false).unwrap();
+    add_watermark(&mut doc, &[0], &Watermark { text: "DRAFT".into(), behind: true, ..Watermark::default() }, false).unwrap();
+    add_background(&mut doc, &[0], &Background { color: [0.0, 1.0, 0.0], opacity: 1.0, ..Background::default() }, false).unwrap();
+    let s = streams(&doc, 0);
+    assert_eq!(s.len(), 4, "{s:?}");
+    assert!(s[0].contains("0 0 1 rg") && s[1].contains("0 1 0 rg"), "backgrounds first, oldest first: {s:?}");
+    assert!(s[2].contains("/PCMark /Watermark") && s[3].contains("(Hi) Tj"), "then the watermark, then the content: {s:?}");
+}
+
+#[test]
 fn watermark_offset_moves_the_centre_right_and_up() {
     let mut doc = fixture();
     let wm = Watermark { text: "DRAFT".into(), rotation: 0.0, offset: [-100.0, 50.0], ..Watermark::default() };
