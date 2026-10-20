@@ -4324,6 +4324,30 @@ trailer << /Root 1 0 R >>
         assert!(!(14..=26).any(|x| dark(x, 10)), "the side the path leaves open stays open");
     }
 
+    /// Five points all on the corners still need not trace the rectangle: three sides and a step
+    /// back along the third is such a path, and it was painted as the box -- drawing a fourth
+    /// side the path does not have (FredApps on #3327).
+    #[test]
+    fn a_path_that_visits_every_corner_out_of_order_is_not_a_rectangle() {
+        // Bottom, right, top, then back along the top. The left side is never drawn.
+        let content = b"0 0 0 RG 2 w 10 10 m 30 10 l 30 30 l 10 30 l 30 30 l S".to_vec();
+        let pdf = one_page_pdf(&content, "");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+            let _ = tx.send(r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, preview: false }));
+        });
+        let page = rx.recv_timeout(std::time::Duration::from_secs(60)).expect("the path must render");
+        assert!(page.error.is_none(), "{:?}", page.error);
+        let dark = |x: u32, y: u32| {
+            let offset = ((y * page.width + x) * 4) as usize;
+            page.rgba[offset] < 128
+        };
+        // Device y counts down the 40 pt page: the bottom side at y = 10 is row 30.
+        assert!((14..=26).any(|x| dark(x, 30)), "the sides the path does draw are drawn");
+        assert!(!(14..=26).any(|y| dark(10, y)), "the left side it never draws is not drawn");
+    }
+
     /// A rectangle still takes the rectangle route, written either way: `m l l l` and closed, or
     /// `m l l l l` back to its first corner.
     #[test]

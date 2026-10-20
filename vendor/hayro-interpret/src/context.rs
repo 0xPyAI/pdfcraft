@@ -447,50 +447,60 @@ pub(crate) fn path_as_rect(path: &BezPath) -> Option<Rect> {
         return None;
     }
 
-    let bbox = path.fast_bounding_box();
-    let (min_x, min_y, max_x, max_y) = (bbox.min_x(), bbox.min_y(), bbox.max_x(), bbox.max_y());
-    let mut corners = [false; 4];
-
-    // PdfCraft patch: a point that is not a corner means this is not a rectangle. The length
-    // check above admits one MoveTo and four LineTo as well as the intended one MoveTo, three
-    // LineTo and one ClosePath, and covering the four corners says nothing about the points
-    // between them, so a five-point polyline whose ends reach every corner of its own bounding
-    // box was painted as that box (and a clip of that shape was discarded).
-    let mut off_corner = false;
-
-    let mut check_point = |p: Point| {
-        let hits = [
-            p.x.is_nearly_equal(min_x) && p.y.is_nearly_equal(min_y),
-            p.x.is_nearly_equal(min_x) && p.y.is_nearly_equal(max_y),
-            p.x.is_nearly_equal(max_x) && p.y.is_nearly_equal(min_y),
-            p.x.is_nearly_equal(max_x) && p.y.is_nearly_equal(max_y),
-        ];
-        off_corner |= !hits.iter().any(|hit| *hit);
-
-        for (corner, hit) in corners.iter_mut().zip(hits) {
-            *corner |= hit;
-        }
-    };
-
+    // PdfCraft patch: the points have to trace the rectangle, not merely reach its corners. The
+    // length check above admits one MoveTo and four LineTo as well as the intended one MoveTo,
+    // three LineTo and one ClosePath, and asking only that each corner of the bounding box was
+    // visited says nothing about the order or the steps between: a five-point polyline whose
+    // ends reached every corner of its own bounding box was painted as that box, and a clip of
+    // that shape was discarded. Four distinct points, each step along one axis, the last point
+    // back at the first: that is a rectangle and nothing else is.
+    let mut points: Vec<Point> = Vec::with_capacity(5);
+    let mut closed = false;
     for (idx, el) in path.elements().iter().enumerate() {
         match el {
             PathEl::MoveTo(p) => {
                 if idx != 0 {
                     return None;
                 }
-
-                check_point(*p);
+                points.push(*p);
             }
-            PathEl::LineTo(l) => check_point(*l),
+            PathEl::LineTo(p) => points.push(*p),
             PathEl::QuadTo(_, _) => return None,
             PathEl::CurveTo(_, _, _) => return None,
-            PathEl::ClosePath => {}
+            // A subpath that ends and starts again is more than one shape.
+            PathEl::ClosePath => {
+                if idx + 1 != path.elements().len() {
+                    return None;
+                }
+                closed = true;
+            }
         }
     }
 
-    if !off_corner && corners[0] && corners[1] && corners[2] && corners[3] {
-        Some(bbox)
-    } else {
-        None
+    let same = |a: Point, b: Point| a.x.is_nearly_equal(b.x) && a.y.is_nearly_equal(b.y);
+    // `m l l l l`: the fourth line goes back to the start, which `m l l l h` does with ClosePath.
+    if !closed {
+        if points.len() != 5 || !same(points[4], points[0]) {
+            return None;
+        }
+        points.pop();
     }
+    if points.len() != 4 {
+        return None;
+    }
+    // Distinct, so a degenerate path is not one, and each step along one axis only: the four
+    // points of an axis-aligned rectangle, in order round it.
+    for (i, p) in points.iter().enumerate() {
+        let q = points[(i + 1) % 4];
+        let along_x = p.y.is_nearly_equal(q.y) && !p.x.is_nearly_equal(q.x);
+        let along_y = p.x.is_nearly_equal(q.x) && !p.y.is_nearly_equal(q.y);
+        if !(along_x || along_y) {
+            return None;
+        }
+        if points.iter().skip(i + 1).any(|o| same(*p, *o)) {
+            return None;
+        }
+    }
+
+    Some(path.fast_bounding_box())
 }
