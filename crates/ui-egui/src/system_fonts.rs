@@ -511,6 +511,13 @@ mod tests {
                 PathBuf::from("/Library/Fonts/Arial Unicode.ttf"),
             ]
         );
+        // These two constants decide what the loader accepts, and one of them is what makes a Hindi
+        // check a Hindi check. Pin them here so neither can be retuned out from under this test — or
+        // from under the macOS oracle, whose Arial assertion is now conditional on installation.
+        assert_eq!(MAX_BYTES, 32 << 20, "the non-Han installed-face size cap is part of this module's contract (Arial Unicode is 23,278,008 B)");
+        assert_eq!(DEVANAGARI_PROBE, '\u{0915}', "Devanagari ka is what the Hindi candidates are probed for, not another script's letter");
+        assert_eq!(MAX_FACES, 16, "how deep into a .ttc collection the loader looks; the macOS oracle trusts this depth");
+
         // Pin what the application actually consults, not just the helper that builds it.
         #[cfg(target_os = "macos")]
         assert_eq!(devanagari_candidates(), macos_devanagari_candidates(), "the app must consult the list this test pins");
@@ -565,12 +572,23 @@ mod tests {
         let cached = devanagari_fallback().expect("devanagari_fallback() resolves where these faces are installed");
         assert_eq!(cached.font.len(), direct.font.len(), "devanagari_fallback() must load the face this list points at, not another script's");
         assert_eq!(cached.index, direct.index, "and the same face within that file");
-        // The advertised last resort is the biggest file on the list and reaches its target
-        // through a symlink, so both the size cap and the link are worth checking here rather
-        // than in a shell. `MAX_BYTES` is what the loader applies to non-Han scripts.
-        assert!(
-            read(Path::new("/Library/Fonts/Arial Unicode.ttf"), DEVANAGARI_PROBE, MAX_BYTES).is_some(),
-            "the last-resort Unicode face did not resolve and load under MAX_BYTES"
-        );
+        // The advertised last resort is the biggest file on the list and reaches its target through
+        // a compatibility symlink in `/Library/Fonts`, a folder installers and users may modify — so
+        // it is optional in the same sense the families above are, and a Mac without it must not go
+        // red for an unrelated reason. But `is_file()` follows symlinks: a link whose target has
+        // moved reads as "no file", which is exactly the dead-path defect this change exists to
+        // catch. So gate on the entry existing (lstat), then require that it resolves, then check
+        // size cap and coverage. `MAX_BYTES` is what the loader applies to non-Han scripts; the path
+        // comes from the list itself rather than being written out again, so it cannot drift.
+        let last_resort = list.last().expect("the macOS Devanagari list always ends at the Unicode face").clone();
+        if std::fs::symlink_metadata(&last_resort).is_ok() {
+            assert!(last_resort.is_file(), "{last_resort:?} exists but does not resolve — Apple moved the target and this path has gone dead");
+            assert!(
+                read(&last_resort, DEVANAGARI_PROBE, MAX_BYTES).is_some(),
+                "the last-resort Unicode face is installed here but did not resolve and load under MAX_BYTES"
+            );
+        } else {
+            eprintln!("{last_resort:?} is not installed on this machine — optional to the loader, so nothing to check");
+        }
     }
 }
