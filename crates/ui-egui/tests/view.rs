@@ -1119,8 +1119,8 @@ const LOCKED_RADIO: &[u8] = b"%PDF-1.7
 2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >> endobj
 3 0 obj << /Type /Page /Parent 2 0 R /Annots [5 0 R 6 0 R] >> endobj
 4 0 obj << /FT /Btn /Ff 49152 /T (choice) /V /Off /Kids [5 0 R 6 0 R] >> endobj
-5 0 obj << /Type /Annot /Subtype /Widget /Parent 4 0 R /Rect [50 300 90 340] /AS /Off /P 3 0 R >> endobj
-6 0 obj << /Type /Annot /Subtype /Widget /Parent 4 0 R /Ff 1 /Rect [150 300 190 340] /AS /Off /P 3 0 R >> endobj
+5 0 obj << /Type /Annot /Subtype /Widget /Parent 4 0 R /Rect [50 300 90 340] /AS /Off /AP << /N << /one << >> /Off << >> >> >> /P 3 0 R >> endobj
+6 0 obj << /Type /Annot /Subtype /Widget /Parent 4 0 R /Ff 1 /Rect [150 300 190 340] /AS /Off /AP << /N << /two << >> /Off << >> >> >> /P 3 0 R >> endobj
 trailer << /Root 1 0 R >>
 %%EOF";
 
@@ -1141,6 +1141,40 @@ fn highlight_fields_leaves_a_groups_read_only_button_alone() {
     let tint = egui::Color32::from_rgba_unmultiplied(0x6E, 0x8E, 0xF5, 48);
     let tinted = h.output().shapes.iter().filter(|c| matches!(&c.shape, egui::Shape::Circle(r) if r.fill == tint)).count();
     assert_eq!(tinted, 1, "only the button that can be chosen is tinted");
+}
+
+/// A radio group's read-only button can't be chosen by a click, while the group's other button
+/// can.
+#[test]
+fn a_groups_read_only_button_is_not_chosen_by_a_click() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("radio.pdf", None, LOCKED_RADIO.to_vec()).expect("opens");
+        app.set_option("left", "closed").unwrap();
+        app.set_option("panel", "none").unwrap();
+        app
+    });
+    h.run_steps(6);
+    let r = rect(&h, 0).expect("page 1");
+    // The buttons' centers on the 300×400 pt page (y up).
+    let at = |x: f32, y: f32| egui::pos2(r.min.x + r.width() * (x / 300.0), r.min.y + r.height() * (1.0 - y / 400.0));
+    let click = |h: &mut Harness<'static, PdfCraftApp>, pos: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(pos));
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        h.run_steps(4);
+    };
+    let value = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().form.iter().find(|f| f.name == "choice").map(|f| f.value.clone()).unwrap_or_default()
+    };
+    click(&mut h, at(70.0, 320.0));
+    assert_eq!(value(&h), ["one"], "the button that can be chosen is");
+    click(&mut h, at(170.0, 320.0));
+    assert_eq!(value(&h), ["one"], "the read-only button leaves the choice as it was");
 }
 
 /// A required radio group (`/Ff` 32768 radio + 2 required) with two 40 pt round buttons.

@@ -721,6 +721,8 @@ pub fn set_tab_order(doc: &mut Document, pages: &[usize], order: TabOrder) -> Re
     Ok(())
 }
 
+/// Read the field at `r` and the fields under it into `out`, with what they inherit from
+/// `parent`: kids with a name are fields of their own, kids without are this field's widgets.
 fn walk(
     doc: &Document,
     r: ObjRef,
