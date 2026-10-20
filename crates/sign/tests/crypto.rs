@@ -303,6 +303,12 @@ fn certificates_load_from_pkcs7_bundles() {
         assert_eq!(load_certificates(&wrap(&[&int(1), &set_of(&[]), &encap, &certs, &set_of(&[])])).unwrap().len(), 2);
         assert!(load_certificates(&wrap(&[&int(1), &set_of(&[]), &encap, &certs])).is_err());
         assert!(load_certificates(&wrap(&[&set_of(&[]), &set_of(&[]), &encap, &certs, &set_of(&[])])).is_err());
+        // An empty encapContentInfo, a repeated [0], and [1] CRLs before [0] certificates.
+        let crls = tlv(0xA1, &[]);
+        assert!(load_certificates(&wrap(&[&int(1), &set_of(&[]), &seq(&[]), &certs, &set_of(&[])])).is_err());
+        assert!(load_certificates(&wrap(&[&int(1), &set_of(&[]), &encap, &certs, &certs, &set_of(&[])])).is_err());
+        assert!(load_certificates(&wrap(&[&int(1), &set_of(&[]), &encap, &crls, &certs, &set_of(&[])])).is_err());
+        assert_eq!(load_certificates(&wrap(&[&int(1), &set_of(&[]), &encap, &certs, &crls, &set_of(&[])])).unwrap().len(), 2);
     }
     let mut trailing = bundle.clone();
     trailing.extend_from_slice(&[0x05, 0x00]);

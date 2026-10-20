@@ -89,7 +89,13 @@ pub fn certificate_bundle(bytes: &[u8]) -> Result<Vec<Certificate>, SignError> {
     // then signerInfos (RFC 5652 §5.1).
     let [version, digests, encap, middle @ .., signers] = sd.as_slice() else { return Err(bad("SignedData")) };
     let shape = [(version, tag::INTEGER), (digests, tag::SET), (encap, tag::SEQUENCE), (signers, tag::SET)];
-    if shape.iter().any(|(t, want)| t.tag != *want) || middle.iter().any(|t| t.tag != tag::ctx(0) && t.tag != tag::ctx(1)) {
+    // At most one [0] certificates and one [1] CRLs, in that order.
+    const CERTS: u8 = tag::ctx(0);
+    const CRLS: u8 = tag::ctx(1);
+    let middle_ok = matches!(middle.iter().map(|t| t.tag).collect::<Vec<_>>().as_slice(), [] | [CERTS] | [CRLS] | [CERTS, CRLS]);
+    // encapContentInfo starts with its eContentType OID.
+    let encap_ok = encap.children()?.first().is_some_and(|t| t.tag == tag::OID);
+    if shape.iter().any(|(t, want)| t.tag != *want) || !middle_ok || !encap_ok {
         return Err(bad("SignedData"));
     }
     let mut certificates = Vec::new();
