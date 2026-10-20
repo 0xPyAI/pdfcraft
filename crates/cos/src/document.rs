@@ -2017,7 +2017,10 @@ fn prev_offset(data: &[u8], trailer: &Dict, off: u64, lookup: impl Fn(u32) -> Op
                     Some(p)
                 }
                 None => {
-                    log.push(format!("the trailer at {off} gives /Prev as the reference {} 0 R; reading it as offset {}", r.num, r.num));
+                    log.push(format!(
+                        "the trailer at {off} gives /Prev as the reference {} {} R; reading it as offset {}",
+                        r.num, r.generation, r.num
+                    ));
                     Some(u64::from(r.num))
                 }
             }
