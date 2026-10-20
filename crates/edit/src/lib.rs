@@ -2,8 +2,9 @@
 //! Watermark, Background and Bates numbering (execution plan M7.6).
 //!
 //! **How marks are stored.** Each mark is one content stream appended to (or, for content behind
-//! the page, prepended to) the page's `/Contents`, drawn in display space (after `/Rotate`) and
-//! wrapped in a marked-content artifact (§14.8.2.2) so readers and screen readers skip it:
+//! the page, inserted after the backgrounds at the start of) the page's `/Contents`, drawn in
+//! display space (after `/Rotate`) and wrapped in a marked-content artifact (§14.8.2.2) so
+//! readers and screen readers skip it:
 //! `/Artifact <</Type /Pagination /Subtype /Header /PCMark /HeaderFooter>> BDC … EMC`. The
 //! `/PCMark` entry (also in the stream dictionary) names the kind of mark, which is how Update and
 //! Remove find them again without decompressing page content. When
@@ -518,7 +519,7 @@ fn place(doc: &mut Document, page: &pdfcraft_model::Page, kind: MarkKind, conten
 /// sequences are closed at the end too, so hidden optional content cannot hide the new mark.
 fn place_tagged(doc: &mut Document, page: &pdfcraft_model::Page, tag: &str, content: Vec<u8>, behind: bool) -> Result<(), EditError> {
     let mut list = contents(doc, page)?;
-    // The behind-marks at the start: backgrounds, then watermarks, each in the order added.
+    // The behind-marks at the start: backgrounds in the order added, then watermarks.
     let behind_kinds = [MarkKind::Background.tag(), MarkKind::Watermark.tag()];
     let behind_marks = list.iter().take_while(|o| stream_tag(doc, o).is_some_and(|t| behind_kinds.contains(&t.as_str()))).count();
     let wrap = if behind {
@@ -534,13 +535,11 @@ fn place_tagged(doc: &mut Document, page: &pdfcraft_model::Page, tag: &str, cont
     };
     let mark = Object::Ref(doc.add(Object::Stream(Stream::flate(tagged(tag), &content))));
     if behind {
-        // A new background goes after the backgrounds already there and below any watermark;
-        // a new watermark after all of them. Each is painted over the older ones (#3591).
-        let at = if tag == MarkKind::Background.tag() {
-            list.iter().take(behind_marks).rposition(|o| stream_tag(doc, o).as_deref() == Some(tag)).map_or(0, |i| i + 1)
-        } else {
-            behind_marks
-        };
+        // Right after the backgrounds already there, so a new background is painted over the
+        // older ones (#3591) and a watermark over all of them. Not after the watermarks: on a
+        // page with no content, one on top is at the start too and can't be told apart, so a
+        // newer watermark behind goes under the older ones.
+        let at = list.iter().take(behind_marks).rposition(|o| stream_tag(doc, o).as_deref() == Some(MarkKind::Background.tag())).map_or(0, |i| i + 1);
         list.insert(at, mark);
     } else {
         if let Some((split, unclosed, marked)) = wrap {

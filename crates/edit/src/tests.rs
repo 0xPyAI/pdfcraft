@@ -183,8 +183,8 @@ fn a_second_background_is_drawn_over_the_first() {
 
 #[test]
 fn backgrounds_stay_below_watermarks_behind_the_content() {
-    // Behind the content, backgrounds come first and then watermarks, each in the order added,
-    // so a watermark added after a background shows and a later background doesn't cover it.
+    // Behind the content, backgrounds come first, in the order added, and then watermarks, so a
+    // watermark added after a background shows and a later background doesn't cover it.
     let mut doc = fixture();
     add_background(&mut doc, &[0], &Background { color: [0.0, 0.0, 1.0], opacity: 1.0, ..Background::default() }, false).unwrap();
     add_watermark(&mut doc, &[0], &Watermark { text: "DRAFT".into(), behind: true, ..Watermark::default() }, false).unwrap();
@@ -193,6 +193,18 @@ fn backgrounds_stay_below_watermarks_behind_the_content() {
     assert_eq!(s.len(), 4, "{s:?}");
     assert!(s[0].contains("0 0 1 rg") && s[1].contains("0 1 0 rg"), "backgrounds first, oldest first: {s:?}");
     assert!(s[2].contains("/PCMark /Watermark") && s[3].contains("(Hi) Tj"), "then the watermark, then the content: {s:?}");
+}
+
+#[test]
+fn a_watermark_behind_goes_under_one_on_top_of_a_page_without_content() {
+    // With no content of its own, the page's watermark on top is its first stream, which looks
+    // like a behind-mark; a watermark added behind later must still be painted under it.
+    let mut doc = fixture();
+    add_watermark(&mut doc, &[2], &Watermark { text: "TOP".into(), ..Watermark::default() }, false).unwrap();
+    add_watermark(&mut doc, &[2], &Watermark { text: "BEHIND".into(), behind: true, ..Watermark::default() }, false).unwrap();
+    let s = streams(&doc, 2);
+    assert_eq!(s.len(), 2, "{s:?}");
+    assert!(s[0].contains("(BEHIND) Tj") && s[1].contains("(TOP) Tj"), "the watermark behind is painted first: {s:?}");
 }
 
 #[test]

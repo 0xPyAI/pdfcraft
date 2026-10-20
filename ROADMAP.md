@@ -172,7 +172,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
-- **2026-10-19 (M7, #3591):** A background added to a page that already has one is painted over the old one instead of going under it and staying hidden. Behind the content, backgrounds come first and then behind-content watermarks, each in the order added, so a watermark added after a background no longer disappears. Synthetic regressions in `crates/edit` check the order. Estimates unchanged.
+- **2026-10-19 (M7, #3591):** A background added to a page that already has one is painted over the old one instead of going under it and staying hidden. Behind the content, backgrounds come first, in the order added, and then behind-content watermarks, so a watermark added after a background no longer disappears. Synthetic regressions in `crates/edit` check the order. Estimates unchanged.
 
 - **2026-10-19 (M14, #3373):** The main menu and its long submenus scroll in short windows, keeping their commands reachable. Estimates unchanged.
 
