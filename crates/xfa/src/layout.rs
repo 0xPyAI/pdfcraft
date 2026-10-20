@@ -873,6 +873,8 @@ impl Layouter<'_> {
         }
     }
 
+    /// The width and height `node` takes in `avail_w`: its own size, else what its content needs
+    /// (containers are measured once per width and depth, and measuring stops at its caps).
     fn size_of(&self, node: &Node, avail_w: f64, ctx: &Ctx, depth: usize) -> (f64, f64) {
         let c = node.common();
         let spent = self.measures.get().saturating_add(1);
@@ -1028,6 +1030,8 @@ impl Layouter<'_> {
         (w > 0.0).then_some(w + 0.01)
     }
 
+    /// How tall value `v` is laid out `w` wide: text wrapped in the context's font and paragraph,
+    /// an image at its aspect ratio, and nothing for lines, rectangles and empty values.
     fn value_height(&self, v: &Value, w: f64, ctx: &Ctx) -> f64 {
         match v {
             Value::Text(t) => text::measure_height(&text::plain(t), w, &ctx.para, &Face::of(&ctx.font), &|id| self.embed(id)),
@@ -1037,6 +1041,8 @@ impl Layouter<'_> {
         }
     }
 
+    /// Where field `f`'s caption goes and how much room it takes from the field's box, or `None`
+    /// when it has no caption that takes room (a button's is drawn inside its box).
     fn caption_reserve(&self, f: &Field, inner_w: f64, ctx: &Ctx) -> Option<(Placement, f64)> {
         let cap = f.caption.as_ref()?;
         if !cap.presence.occupies() || f.ui == Ui::Button {
@@ -1488,6 +1494,8 @@ impl Layouter<'_> {
         self.push(Item::Image { rect: fitted, data: Arc::new(data.to_vec()), content_type: content_type.to_string() })
     }
 
+    /// A field name made from `base` that no earlier field of the form has: the first keeps it,
+    /// later ones get `_2`, `_3`, ….
     fn unique_name(&mut self, base: &str) -> String {
         let base = clean_name(base);
         let n = self.names.entry(base.clone()).or_insert(0);
