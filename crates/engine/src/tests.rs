@@ -6133,3 +6133,26 @@ fn an_xfa_button_may_show_a_side_panel_and_other_events_may_not() {
     assert!(out.requests.is_empty(), "only a click shows a panel: {out:?}");
     assert!(out.console.iter().any(|c| c.contains("show a side panel")), "{:?}", out.console);
 }
+
+#[test]
+fn a_fields_own_script_may_not_save_as_or_show_a_panel() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("order.pdf", None, Arc::new(scripted_form()), None).unwrap();
+    s.apply(
+        id,
+        Edit::SetFieldScript {
+            name: "qty".into(),
+            event: "validate".into(),
+            script: Some("app.execMenuItem('SaveAs'); app.execMenuItem('ShowHideFileAttachment');".into()),
+        },
+    )
+    .unwrap();
+    s.take_js_output(id);
+    s.apply(id, Edit::SetFieldValue { name: "qty".into(), value: FieldValue::Text("4".into()) }).unwrap();
+    let out = s.take_js_output(id);
+    assert!(out.requests.is_empty(), "a validate script runs unasked: {out:?}");
+    assert_eq!(out.console.iter().filter(|c| c.contains("only a button may")).count(), 2, "{:?}", out.console);
+    // A button's script may.
+    let o = s.run_javascript(id, "app.execMenuItem('SaveAs');", Some("go")).unwrap();
+    assert_eq!(o.requests, [js::Request::SaveAs]);
+}

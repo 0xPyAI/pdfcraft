@@ -30,10 +30,13 @@ impl JsOutput {
         self.alerts.extend(o.alerts.iter().cloned());
         self.console.extend(o.console.iter().cloned());
         // A field's own scripts (keystroke, format, validate, calculate) run unasked: only a
-        // button's may show or hide a side panel.
+        // button's may show or hide a side panel, or open Save As.
         for r in &o.requests {
             match r {
                 Request::ShowPanel(_) => self.console.push("A field script asked to show a side panel; only a button may show a side panel".into()),
+                Request::SaveAs => {
+                    self.console.push("A field script asked to save the document as a new file; only a button may open Save As".into())
+                }
                 r => self.requests.push(r.clone()),
             }
         }
