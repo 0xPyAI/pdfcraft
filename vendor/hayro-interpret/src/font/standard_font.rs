@@ -729,9 +729,28 @@ const ACCENTED_LETTERS: &[(&str, &str, &str, Place)] = &[
     ("zdotaccent", "z", "dotaccent", Place::Above),
 ];
 
+/// PdfCraft patch: the comma-below letters of [`ACCENTED_LETTERS`] by character. The glyph list
+/// names the Latvian ones `Kcedilla`… (their comma is a cedilla in Unicode's names), has no name
+/// for Ț ț, and gives `Tcommaaccent` and `tcommaaccent` to Ţ ţ, which keep their cedilla.
+const COMMA_BELOW_BY_CHAR: &[(char, &str)] = &[
+    ('\u{0122}', "Gcommaaccent"),
+    ('\u{0136}', "Kcommaaccent"),
+    ('\u{0137}', "kcommaaccent"),
+    ('\u{013B}', "Lcommaaccent"),
+    ('\u{013C}', "lcommaaccent"),
+    ('\u{0145}', "Ncommaaccent"),
+    ('\u{0146}', "ncommaaccent"),
+    ('\u{0156}', "Rcommaaccent"),
+    ('\u{0157}', "rcommaaccent"),
+    ('\u{0218}', "Scommaaccent"),
+    ('\u{0219}', "scommaaccent"),
+    ('\u{021A}', "Tcommaaccent"),
+    ('\u{021B}', "tcommaaccent"),
+];
+
 /// PdfCraft patch: the base letter, accent and placement of an accented letter in
-/// [`ACCENTED_LETTERS`], by glyph name (`uni011E` and `u011E` forms too). Ș ș Ț ț by code point:
-/// the glyph list names only the first two, and gives the names of the second two to Ţ ţ.
+/// [`ACCENTED_LETTERS`], by glyph name (`uni011E` and `u011E` forms too). A comma-below letter
+/// is found by its character ([`COMMA_BELOW_BY_CHAR`]), so `/uni0136` and `/Kcedilla` are Ķ too.
 fn accented_parts(name: &str) -> Option<(&'static str, &'static str, Place)> {
     let name = normalized_glyph_name(name);
     let by_name = |n: &str| {
@@ -742,10 +761,9 @@ fn accented_parts(name: &str) -> Option<(&'static str, &'static str, Place)> {
     };
     by_name(name).or_else(|| {
         let c = glyph_name_to_unicode(name)?;
-        match c {
-            '\u{021A}' => by_name("Tcommaaccent"),
-            '\u{021B}' => by_name("tcommaaccent"),
-            _ => by_name(glyph_names::get_reverse(c)?),
+        match COMMA_BELOW_BY_CHAR.iter().find(|(letter, _)| *letter == c) {
+            Some((_, comma_below)) => by_name(comma_below),
+            None => by_name(glyph_names::get_reverse(c)?),
         }
     })
 }

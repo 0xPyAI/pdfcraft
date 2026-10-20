@@ -5759,10 +5759,20 @@ trailer << /Root 1 0 R >>
     /// `StandardKind`). The stand-ins have neither these letters nor a `commaaccent` to build
     /// them from, so Romanian ș Ș (a form laid out from its XFA template names `/scommaaccent`)
     /// and Latvian ķ ļ ņ ŗ Ģ drew nothing, and ț Ț drew a cedilla. Each is now its letter with a
-    /// comma under it, apart from the letter and inside the descender.
+    /// comma under it, apart from the letter and inside the descender, whichever name the font
+    /// gives it: the glyph list calls the Latvian letters `/Kcedilla`…, and `uni` names say only
+    /// the code point.
     #[test]
     fn comma_below_letters_in_standard_fonts_draw_a_comma_under_the_letter() {
         let pairs = [
+            ("s", "uni0219"),
+            ("t", "uni021B"),
+            ("T", "uni021A"),
+            ("K", "uni0136"),
+            ("k", "kcedilla"),
+            ("G", "uni0122"),
+            ("G", "Gcedilla"),
+            ("R", "uni0156"),
             ("s", "scommaaccent"),
             ("S", "Scommaaccent"),
             ("t", "tcommaaccent"),
