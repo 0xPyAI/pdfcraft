@@ -1098,6 +1098,9 @@ fn xfa_resolve(ctx: &mut Context, many: bool) -> JsResult<JsValue> {
     resolver(ctx, current, many)
 }
 
+/// Defines the globals for one script on node `current`: `xfa` (`form`, `host`, `layout`, `event`,
+/// `resolveNode` and more), `event` as the same object as `xfa.event`, `app`, `console`, `util`,
+/// and the nodes in scope by name, with `_name` for each repeatable one's instance manager.
 fn install(ctx: &mut Context, event: &XfaEvent, doc: &XfaDoc, current: usize) -> JsResult<()> {
     let rw = Attribute::CONFIGURABLE;
     let form = node_object(ctx, 0)?;

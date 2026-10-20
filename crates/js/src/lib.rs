@@ -825,6 +825,7 @@ enum DateUnit {
 }
 
 impl DateUnit {
+    /// A year, month or day: a format needs one of these for `util.scand` to read anything.
     fn is_date(self) -> bool {
         matches!(self, Self::Year | Self::ShortYear | Self::Month | Self::MonthName | Self::Day)
     }
@@ -845,6 +846,9 @@ enum ScanPart {
     Word(String),
 }
 
+/// The fields and literal words of a `util.scand` format, in order. A numeric field is marked
+/// `joined` when another numeric field follows it directly; anything but letters and digits
+/// outside a field is left out.
 fn scan_parts(fmt: &str) -> Vec<ScanPart> {
     let chars: Vec<char> = fmt.chars().collect();
     let mut parts: Vec<ScanPart> = Vec::new();
@@ -956,6 +960,8 @@ struct ScanValues {
 }
 
 impl ScanValues {
+    /// Records `v` as the value of `unit`: a `yy` year as 1950–2049, and an `h` or `hh` hour
+    /// marked as 12-hour. Month names, weekdays and am/pm are not read here.
     fn set(&mut self, unit: DateUnit, v: u32) {
         match unit {
             DateUnit::Year => self.y = i32::try_from(v).ok(),
@@ -1202,6 +1208,9 @@ fn color_object(ctx: &mut Context) -> JsObject {
     o.build()
 }
 
+/// Defines the form object model's globals: the document's functions (`getField`, `resetForm`,
+/// `print`, `submitForm` and others) and properties (`numFields`, `pageNum`, `numPages`,
+/// `documentFileName`, `info`), and the `app`, `util`, `console`, `display` and `color` objects.
 fn install(ctx: &mut Context) -> JsResult<()> {
     let globals: [(&str, usize, NativeFunction); 9] = [
         ("getField", 1, NativeFunction::from_fn_ptr(get_field)),

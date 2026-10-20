@@ -1157,6 +1157,8 @@ mod scand {
 
     // The cases below are another viewer's answers, observed black-box with a synthetic file.
 
+    /// Any separator may come between fields, whether the format has that one, another or none,
+    /// but a text with a space or a letter before or after the date reads nothing.
     #[test]
     fn scand_allows_separators_between_fields_but_nothing_before_or_after_them() {
         assert_scand(&[
@@ -1171,6 +1173,8 @@ mod scand {
         ]);
     }
 
+    /// Digits typed together fill the joined fields with exactly as many digits as each field has
+    /// letters, so a run of any other length reads nothing.
     #[test]
     fn scand_splits_digits_typed_together_by_the_formats_letter_counts() {
         assert_scand(&[
@@ -1188,6 +1192,8 @@ mod scand {
         ]);
     }
 
+    /// A month past 12, a day past the month's end and February 29 outside a leap year are
+    /// refused, while a month or day of 0 is read as 1.
     #[test]
     fn scand_refuses_impossible_dates_and_reads_a_zero_month_or_day_as_1() {
         assert_scand(&[
@@ -1201,6 +1207,8 @@ mod scand {
         ]);
     }
 
+    /// A field typed by itself may have one or two digits, but a `yyyy` year needs four; `yy` reads
+    /// as 1950–2049; month names may be full or three letters in any case; weekday names are read.
     #[test]
     fn scand_reads_lone_fields_two_digit_years_and_month_and_weekday_names() {
         assert_scand(&[
@@ -1223,6 +1231,7 @@ mod scand {
         ]);
     }
 
+    /// A time is read along with a date, but a format with only time fields reads nothing.
     #[test]
     fn scand_reads_a_time_only_with_a_date() {
         assert_scand(&[
@@ -1236,6 +1245,8 @@ mod scand {
         ]);
     }
 
+    /// An empty text reads as today at noon, and a text that is not a string (a number, or none
+    /// at all) reads nothing.
     #[test]
     fn scand_reads_only_text_and_an_empty_text_is_today_at_noon() {
         let o = go(
@@ -1250,6 +1261,8 @@ mod scand {
 
     // Not observed: the choices made where the other viewer wasn't asked.
 
+    /// A year left out is this year, `h:MM tt` reads a 12-hour time and refuses hours it cannot
+    /// have, and a letter the format writes must be typed there.
     #[test]
     fn scand_takes_this_year_when_none_is_given_and_reads_12_hour_times_and_written_letters() {
         assert_scand(&[
@@ -1268,6 +1281,8 @@ mod scand {
         assert_eq!(o.value, "true|9|18");
     }
 
+    /// A format of 50,000 literal letters and one of 100,000 fields, with texts to match, are read
+    /// in under two seconds.
     #[test]
     fn scand_reads_long_formats_and_texts_in_linear_time() {
         // Scripts can pass anything; native code isn't bounded by the loop limit.
@@ -1282,6 +1297,8 @@ mod scand {
         assert!(started.elapsed() < std::time::Duration::from_secs(2), "{:?}", started.elapsed());
     }
 
+    /// The check an XFA form runs on leaving a date field tries six formats with `util.scand` and
+    /// writes the first that reads the text back as `yyyymmdd`, or reports an invalid date.
     #[test]
     fn xfa_scripts_check_typed_dates_with_util_scand() {
         // The check a form runs when a date field is left: the first of six formats that reads
