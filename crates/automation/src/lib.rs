@@ -2313,8 +2313,6 @@ impl Args<'_> {
     }
 }
 
-/// Bookmark rows in listing order as JSON: a row holds the rows that follow it on the page at the
-/// next level down in `children`, and paths and pages are 1-based.
 /// The name-tree keys of a document's own attachments, leaving out the files attached to pages as comments.
 fn document_attachment_keys(doc: &Document) -> Vec<String> {
     doc.info
@@ -2327,6 +2325,8 @@ fn document_attachment_keys(doc: &Document) -> Vec<String> {
         .collect()
 }
 
+/// Bookmark rows in listing order as JSON: a row holds the rows that follow it on the page at the
+/// next level down in `children`, and paths and pages are 1-based.
 fn nest_rows(rows: &[pdfcraft_engine::BookmarkRow], pages: &[pdfcraft_render::PageInfo]) -> Vec<Value> {
     // The open rows, outermost first, with their depth and the children gathered so far.
     let mut open: Vec<(usize, Value, Vec<Value>)> = Vec::new();
