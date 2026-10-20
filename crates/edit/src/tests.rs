@@ -5218,3 +5218,14 @@ fn a_clipping_copy_on_the_same_baseline_is_refused() {
     assert!(matches!(&block, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{block:?}");
     assert_eq!(text::text_lines(&doc, 0).unwrap().len(), 2, "refused means untouched");
 }
+
+/// A `TJ` with a surplus array operand (`[(FIRSTARR)] [(LASTARR)] TJ`) is malformed, but the
+/// operator still takes the one immediately before it, as the renderer, MuPDF and pdftotext do
+/// (#3569) -- not the first, which this reader took before, showing a word the page never draws.
+#[test]
+fn a_tj_with_a_surplus_array_reads_the_last_one() {
+    let doc = text_page("BT /F1 24 Tf 20 100 Td [(FIRSTARR)] [(LASTARR)] TJ ET");
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, "LASTARR", "the operand immediately before TJ, as the page draws: {lines:?}");
+}

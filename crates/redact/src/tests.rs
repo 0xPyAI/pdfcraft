@@ -1772,3 +1772,13 @@ fn unused_descriptions_in_shared_or_inherited_resources_are_retired() {
 }
 
 mod property_retirement;
+
+/// `[(FIRSTARR)] [(LASTARR)] TJ` is malformed (a surplus array operand), but the operator still
+/// draws only the one immediately before it (LASTARR, 7 glyphs, 35 pt wide from x = 10) -- not
+/// the first (FIRSTARR, 8 glyphs), which is never drawn at all, as the renderer agrees (#3569).
+#[test]
+fn a_tj_surplus_arrays_undrawn_glyphs_are_not_seen_under_a_mark() {
+    let mut doc = one_page(b"BT /F1 10 Tf 10 100 Td [(FIRSTARR)] [(LASTARR)] TJ ET", "", vec![]);
+    assert_eq!(under(&mut doc, 0, &[[45.0, 95.0, 50.0, 110.0]]), 0, "nothing is drawn past LASTARR's 35pt width");
+    assert_eq!(under(&mut doc, 0, &[[10.0, 95.0, 45.0, 110.0]]), 7, "LASTARR's 7 glyphs, the one the page draws");
+}
