@@ -477,7 +477,13 @@ pub(crate) fn path_as_rect(path: &BezPath) -> Option<Rect> {
         }
     }
 
-    let same = |a: Point, b: Point| a.x.is_nearly_equal(b.x) && a.y.is_nearly_equal(b.y);
+    // Exactly equal, not nearly: `is_nearly_equal` allows a 256th of a path unit, and the matrix
+    // is applied after this, so a `cm` of 10,000 turns that into tens of device units -- a path
+    // that only nearly closes would be painted as the rectangle, with a side it does not have.
+    // A rectangle's coordinates are equal in the content stream, not approximately equal, so
+    // nothing that is one loses the fast path by this; a path that misses takes the general route
+    // and is painted as written (#3327 review).
+    let same = |a: Point, b: Point| a.x == b.x && a.y == b.y;
     // `m l l l l`: the fourth line goes back to the start, which `m l l l h` does with ClosePath.
     if !closed {
         if points.len() != 5 || !same(points[4], points[0]) {
@@ -492,8 +498,8 @@ pub(crate) fn path_as_rect(path: &BezPath) -> Option<Rect> {
     // points of an axis-aligned rectangle, in order round it.
     for (i, p) in points.iter().enumerate() {
         let q = points[(i + 1) % 4];
-        let along_x = p.y.is_nearly_equal(q.y) && !p.x.is_nearly_equal(q.x);
-        let along_y = p.x.is_nearly_equal(q.x) && !p.y.is_nearly_equal(q.y);
+        let along_x = p.y == q.y && p.x != q.x;
+        let along_y = p.x == q.x && p.y != q.y;
         if !(along_x || along_y) {
             return None;
         }
