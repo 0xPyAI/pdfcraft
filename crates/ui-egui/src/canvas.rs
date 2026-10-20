@@ -981,6 +981,7 @@ impl DocView {
         self.waiting_since.clear();
         self.last_queue.clear();
         self.selection = None;
+        self.all_text = false;
         if let Some(f) = self.find.as_mut() {
             f.matches.clear();
             f.current = None;
@@ -1067,6 +1068,7 @@ impl DocView {
 
     /// Select text on `page` from glyph `from` to glyph `to` (tests and automation).
     pub fn select_text(&mut self, page: usize, from: usize, to: usize) {
+        self.all_text = false;
         self.selection = Some(Selection::run(page, from, to));
     }
 
@@ -1367,6 +1369,7 @@ impl DocView {
             self.all_text = true;
             return self.selected_text().is_some();
         }
+        self.all_text = false;
         let page = self.current;
         let Some(t) = self.texts.get(&page) else { return false };
         if t.glyphs.is_empty() {
@@ -1435,6 +1438,8 @@ impl DocView {
     pub fn set_continuous(&mut self, continuous: bool) {
         if self.continuous != continuous {
             self.continuous = continuous;
+            // Select All of the document belongs to continuous scrolling.
+            self.all_text = false;
             self.goto = Some((self.current, 0.0));
             self.reset_coarse_state();
         }
@@ -3301,6 +3306,11 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             view.signature_drag.prepare(ui.ctx(), doc, preview_target, scale);
             view.signature_drag.paint(painter, &pcx, &view.comments, view.pending_edit.as_ref());
 
+            // Any press on the page ends Select All of the document: text read or not, any tool,
+            // on a link too.
+            if view.all_text && ui.input(|inp| inp.pointer.primary_pressed() && inp.pointer.press_origin().is_some_and(|o| r.contains(o))) {
+                view.all_text = false;
+            }
             // Text layer: find matches, selection, I-beam and drag-to-select.
             let to_screen = |g: [f32; 4]| xf.view_rect(g);
             if let Some(text) = view.texts.get(&i).cloned() {
@@ -3373,8 +3383,6 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                         .is_some_and(|o| r.contains(o));
                     let pressed = ui.input(|inp| inp.pointer.primary_pressed());
                     if pressed && press_here && !over_link {
-                        // A press on a page starts over: Select All of the document is dropped.
-                        view.all_text = false;
                         let now = ui.input(|inp| inp.time);
                         // The same limits egui uses to count clicks on release.
                         let (max_delay, max_dist) = ui.ctx().options(|o| (o.input_options.max_double_click_delay, o.input_options.max_click_dist));
@@ -5754,10 +5762,87 @@ trailer << /Root 1 0 R >>
         assert!(!v.select_all());
         assert!(v.all_text && v.selection.is_none());
         assert_eq!(v.pages_without_text(), vec![0, 1, 2]);
-        let text = app.selection_text(&app.views[0]).expect("text to copy");
+        // Copy reads the pages off the UI thread; the clipboard gets the text once they're read.
+        let ctx = egui::Context::default();
+        assert!(app.copy_selected_text(0, &ctx), "the copy starts");
+        assert!(app.document_copy.is_some(), "reading the pages, not on this thread");
+        let mut text = None;
+        for _ in 0..500 {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| app.finish_document_copy(ui.ctx()));
+            out.textures_delta.clear();
+            text = out.platform_output.commands.iter().find_map(|c| match c {
+                egui::OutputCommand::CopyText(t) => Some(t.clone()),
+                _ => None,
+            });
+            if text.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let text = text.expect("the copied text arrives");
+        assert!(app.document_copy.is_none(), "done");
         let at = |w: &str| text.find(w).unwrap_or_else(|| panic!("{w:?} missing from {text:?}"));
         assert!(at("Alpha") < at("Bravo") && at("Bravo") < at("Charlie"), "page order: {text:?}");
         assert_eq!(text.lines().count(), 3, "a line per page: {text:?}");
+        // A new scope ends it: one page at a time, Select All is the page's again.
+        app.views[0].set_continuous(false);
+        assert!(!app.views[0].all_text, "not after switching to one page at a time");
+        // So do a page selection and a change of the document's content (an edit, undo).
+        app.views[0].set_continuous(true);
+        app.views[0].select_all();
+        app.views[0].select_text(0, 0, 0);
+        assert!(!app.views[0].all_text, "a page selection replaces it");
+        app.views[0].select_all();
+        app.views[0].invalidate_content();
+        assert!(!app.views[0].all_text, "not past an edit of the document");
+    }
+
+    /// A press anywhere on a page ends Select All of the document, whatever the tool (here the
+    /// Hand, which selects no text) and whether the page's text is read yet.
+    #[test]
+    fn a_press_on_a_page_ends_select_all_of_the_document() {
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+            let mut app = PdfCraftApp::new();
+            app.open_bytes("three.pdf", None, text_pages_pdf(&["Alpha one", "Bravo two", "Charlie three"])).unwrap();
+            app
+        });
+        let mut on_screen = None;
+        for _ in 0..600 {
+            h.run_steps(2);
+            on_screen = h.state().views[0].page_screen_rect(0);
+            if on_screen.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let r = on_screen.expect("the first page is on screen");
+        h.state_mut().quick_tool = crate::QuickTool::Hand;
+        h.state_mut().views[0].select_all();
+        assert!(h.state().views[0].all_text);
+        let at = r.center();
+        h.event(egui::Event::PointerMoved(at));
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(2);
+        assert!(!h.state().views[0].all_text, "a press on the page ends it");
+    }
+
+    /// The pages of a whole-document copy come out in order whatever was read before, and a
+    /// cancelled copy gives nothing (a new copy or a closed document cancels the old one).
+    #[test]
+    fn a_document_copy_reads_in_page_order_and_stops_when_cancelled() {
+        let mut app = PdfCraftApp::new();
+        app.open_bytes("three.pdf", None, text_pages_pdf(&["Alpha one", "Bravo two", "Charlie three"])).unwrap();
+        // The middle page's text read for display already; the others read by the copy.
+        let doc = app.session.get(app.views[0].id).unwrap();
+        let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), Default::default());
+        let middle = r.render(RenderRequest { page: 1, kind: RequestKind::Text, ..Default::default() }).text.unwrap();
+        app.views[0].texts.insert(1, middle);
+        let job = || crate::DocumentCopyJob::of(&app.views[0], app.session.get(app.views[0].id).unwrap());
+        let text = job().text(&std::sync::atomic::AtomicBool::new(false)).unwrap();
+        assert!(text.find("Alpha").unwrap() < text.find("Bravo").unwrap() && text.find("Bravo").unwrap() < text.find("Charlie").unwrap(), "{text:?}");
+        assert_eq!(job().text(&std::sync::atomic::AtomicBool::new(true)), None, "cancelled");
     }
 
     /// Select All keeps to the page shown one page at a time, and in a document of one page; of
