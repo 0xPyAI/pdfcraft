@@ -1575,6 +1575,38 @@ fn page_shapes_reads_boxes_and_rules() {
     assert_eq!(sh.rules, [[40.0, 100.0, 240.0, 100.0], [60.0, 600.5, 260.0, 600.5]]);
 }
 
+#[test]
+fn page_shapes_preserves_content_piece_boundaries() {
+    use crate::detect::{Candidate, Kind, Shapes, detect, page_shapes};
+    let read = |pieces: &[&[u8]]| {
+        let mut doc = one_page();
+        let page = pdfcraft_model::pages(&doc)[0].obj;
+        let contents =
+            pieces.iter().map(|bytes| Object::Ref(doc.add(Object::Stream(pdfcraft_cos::Stream::flate(Default::default(), bytes))))).collect();
+        doc.update_dict(page, |d| d.set(b"Contents".to_vec(), Object::Array(contents))).unwrap();
+        page_shapes(&doc, 0)
+    };
+    let empty = Shapes::default();
+    for pieces in [vec![b"% trailing".as_slice(), b"40 120 300 30 re S\n"], vec![b"% trailing".as_slice(), b"", b"", b"40 120 300 30 re S\n"]] {
+        let shapes = read(&pieces);
+        assert_eq!(shapes, empty, "an unterminated comment hides the next piece's first line");
+        assert_eq!(detect(&[], &shapes, &[], &[]), Vec::<Candidate>::new());
+    }
+    let visible = Shapes { boxes: vec![[40.0, 120.0, 340.0, 150.0]], rules: vec![] };
+    for ending in [b"% trailing\n".as_slice(), b"% trailing\r", b"% trailing\r\n"] {
+        let shapes = read(&[ending, b"40 120 300 30 re S\n"]);
+        assert_eq!(shapes, visible);
+        assert_eq!(detect(&[], &shapes, &[], &[]), vec![Candidate { kind: Kind::Text, rect: [41.0, 121.0, 339.0, 149.0], name: "Text1".into() }]);
+    }
+    assert_eq!(read(&[b"40 120", b"", b"300 30", b"re", b"S"]), visible);
+    assert_eq!(
+        read(&[b"q 2 0 0 2 0 0 cm 10 10", b"60 20 re", b"S Q 10 20 m 100 20 l S"]),
+        Shapes { boxes: vec![[20.0, 20.0, 140.0, 60.0]], rules: vec![[10.0, 20.0, 100.0, 20.0]] }
+    );
+    assert_eq!(read(&[]), empty);
+    assert_eq!(read(&[b""]), empty);
+}
+
 fn close(a: f64, b: f64) -> bool {
     (a - b).abs() < 0.05
 }
