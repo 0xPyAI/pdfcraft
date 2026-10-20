@@ -1396,6 +1396,27 @@ fn erasing_part_of_a_drawing() {
 }
 
 #[test]
+fn the_eraser_rubs_as_wide_as_its_thickness_setting() {
+    // #3747: the eraser's size changed nothing; it always rubbed 6 pixels either side.
+    let stroke_near = |width: f64| {
+        let mut h = harness(|app| app.set_option("quick", "ink").unwrap());
+        drag_pt(&mut h, (40.0, 60.0), (260.0, 60.0));
+        assert_eq!(comments(&h).len(), 1);
+        let zoom = h.state().views[0].page_screen_rect(0).expect("page 1 on screen").width() / 300.0;
+        let app = h.state_mut();
+        app.comment_prefs.set_width(pdfcraft_ui_egui::comments::CommentTool::Eraser, width);
+        app.set_option("quick", "eraser").unwrap();
+        // Along the whole drawing, 20 pixels above it: out of reach of the default eraser
+        // (6 pixels), within reach of the largest (36).
+        let y = 60.0 + 20.0 / zoom;
+        drag_pt(&mut h, (30.0, y), (270.0, y));
+        comments(&h).len()
+    };
+    assert_eq!(stroke_near(2.0), 1, "the default eraser passes by");
+    assert_eq!(stroke_near(12.0), 0, "the largest rubs the drawing out");
+}
+
+#[test]
 fn hovering_a_comment_shows_its_author_and_text() {
     // A square comment by Ada over the first page's text.
     let pdf = String::from_utf8_lossy(TEXT_FIXTURE).replace("/Contents 5 0 R /Resources", "/Contents 5 0 R /Annots [8 0 R] /Resources").replace(
