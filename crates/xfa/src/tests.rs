@@ -7,7 +7,9 @@ use crate::data::{
     DatasetsWrite, FieldData, FieldDatum, build_data, iso_to_pattern, parse_datasets, pattern_to_iso, read_values, som_to_path, write_datasets,
 };
 use crate::data::{add_data_instances, remove_data_instance, write_data_value};
-use crate::fixtures::{TINY_GIF, fields_template, scripted_template, shell, static_shell, template, template_with_data, tiny_png};
+use crate::fixtures::{
+    TINY_GIF, fields_template, scripted_template, shell, static_shell, template, template_with_data, tiny_png, unnamed_hidden_template,
+};
 use crate::layout::Item;
 use crate::layout::WidgetKind;
 use crate::model::*;
@@ -712,6 +714,26 @@ fn overrides_live_in_the_acroform_and_hide_objects_in_the_layout() {
     let mut doc = doc;
     set_overrides(&mut doc, &Overrides::default()).unwrap();
     assert!(overrides(&doc).is_empty());
+}
+
+#[test]
+fn showing_a_subform_leaves_its_unnamed_hidden_objects_hidden() {
+    let (tpl, _) = parse(&unnamed_hidden_template()).unwrap();
+    let mut ov = Overrides::default();
+    ov.presence.insert("form[0].page1[0].details[0]".into(), "visible".into());
+    let form = layout(&apply_overrides(&tpl, &ov), None).unwrap();
+    let shown = texts(&form.pages[0]);
+    assert!(shown.iter().any(|t| t == "Current caption"), "{shown:?}");
+    assert!(!shown.iter().any(|t| t == "Old caption" || t == "Old section"), "{shown:?}");
+    assert_eq!(form.fields, 1);
+    // Scripts see the same: the hidden draw stays hidden in the live form.
+    let root = form_tree(&tpl, None, &ov).root;
+    let details = &root.children[0].children[0];
+    assert_eq!(details.presence, "visible");
+    let presence = |text: &str| details.children.iter().find(|c| c.value == text).map(|c| c.presence.clone());
+    assert_eq!(presence("Current caption").as_deref(), Some("visible"));
+    assert_eq!(presence("Old caption").as_deref(), Some("hidden"));
+    assert_eq!(details.children.iter().find(|c| c.kind == Some(NodeKind::Subform)).map(|c| c.presence.as_str()), Some("hidden"));
 }
 
 #[test]

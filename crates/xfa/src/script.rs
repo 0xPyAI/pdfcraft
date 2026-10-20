@@ -227,8 +227,10 @@ impl Walker<'_> {
         }
     }
 
-    fn presence(&self, som: &str, p: Presence) -> String {
-        self.ov.presence.get(som).cloned().unwrap_or_else(|| presence_name(p).to_string())
+    /// The presence of the object named `name` at `som`: a script's, or else the template's. An
+    /// unnamed object shares its parent's SOM path, so a presence set there is not its own.
+    fn presence(&self, name: Option<&str>, som: &str, p: Presence) -> String {
+        name.and_then(|_| self.ov.presence.get(som)).cloned().unwrap_or_else(|| presence_name(p).to_string())
     }
 
     fn access(&self, som: &str, a: Access) -> String {
@@ -254,7 +256,7 @@ impl Walker<'_> {
             kind: Some(NodeKind::Field),
             value,
             numeric: f.numeric,
-            presence: self.presence(&som, f.common.presence),
+            presence: self.presence(Some("field"), &som, f.common.presence),
             access: self.access(&som, f.access),
             repeatable: false,
             occur_min: 1,
@@ -307,7 +309,7 @@ impl Walker<'_> {
                             kind: Some(NodeKind::Subform),
                             value: String::new(),
                             numeric: false,
-                            presence: self.presence(&som, sf.common.presence),
+                            presence: self.presence(sf.common.name.as_deref(), &som, sf.common.presence),
                             access: "open".into(),
                             repeatable: sf.occur.max != Some(1),
                             occur_min: sf.occur.min,
@@ -324,7 +326,7 @@ impl Walker<'_> {
                         name: a.common.name.clone().unwrap_or_else(|| "#area".into()),
                         som: som.clone(),
                         kind: Some(NodeKind::Area),
-                        presence: self.presence(&som, a.common.presence),
+                        presence: self.presence(a.common.name.as_deref(), &som, a.common.presence),
                         access: "open".into(),
                         occur_min: 1,
                         occur_max: Some(1),
@@ -341,7 +343,7 @@ impl Walker<'_> {
                         som: som.clone(),
                         kind: Some(NodeKind::Draw),
                         value: d.value.plain().unwrap_or_default(),
-                        presence: self.presence(&som, d.common.presence),
+                        presence: self.presence(d.common.name.as_deref(), &som, d.common.presence),
                         access: "open".into(),
                         occur_min: 1,
                         occur_max: Some(1),
@@ -368,7 +370,7 @@ impl Walker<'_> {
                         som: som.clone(),
                         kind: Some(NodeKind::ExclGroup),
                         value: selected.unwrap_or_default(),
-                        presence: self.presence(&som, g.common.presence),
+                        presence: self.presence(Some("group"), &som, g.common.presence),
                         access: "open".into(),
                         occur_min: 1,
                         occur_max: Some(1),
@@ -455,9 +457,12 @@ pub fn apply_overrides(tpl: &Template, ov: &Overrides) -> Template {
                 Node::ExclGroup(_) => Some("group"),
                 _ => None,
             };
-            let som = child_som(parent_som, n.common().name.as_deref().or(name_default), sib);
-            let presence = ov.presence.get(&som).map(|p| Presence::parse(Some(p)));
-            let access = ov.access.get(&som).cloned();
+            let name = n.common().name.as_deref().or(name_default);
+            let som = child_som(parent_som, name, sib);
+            // An unnamed draw, area or subform has no SOM name: `som` is its parent's, and so are
+            // the overrides under it.
+            let presence = name.and_then(|_| ov.presence.get(&som)).map(|p| Presence::parse(Some(p)));
+            let access = name.and_then(|_| ov.access.get(&som)).cloned();
             match n {
                 Node::Subform(s) => {
                     if let Some(p) = presence {
