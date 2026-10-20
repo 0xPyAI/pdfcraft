@@ -1964,6 +1964,25 @@ fn image_page_with(content: &str) -> Document {
     Document::open(Arc::new(out)).unwrap()
 }
 
+/// A path segment operator before any `m` (or `re`) has no subpath to extend: the image scan used
+/// to call `BezPath`'s `line_to`/`curve_to`/`close_path` on an empty path, which panics by contract,
+/// taking `object_list`, `page_images` and the Office export's image walk down with it (#3581).
+/// The segment is now skipped, as the renderer, MuPDF and pdftotext do, and the page's images are
+/// still listed.
+#[test]
+fn image_scan_skips_a_path_segment_before_any_m() {
+    for bad in ["1 1 l S", "1 1 2 2 3 3 c S", "1 1 2 2 4 4 y S", "1 1 2 2 3 3 v S", "h S"] {
+        let content = format!("q {bad} Q 100 100 200 100 cm /Im0 Do");
+        let doc = image_page_with(&content);
+        assert_eq!(images::page_images(&doc, 0).unwrap().len(), 1, "{bad}: the image is still listed");
+    }
+    // A path started with m (or re) still extends and closes as before.
+    let doc = image_page_with("q 0 0 m 1 1 l h S Q 100 100 200 100 cm /Im0 Do");
+    assert_eq!(images::page_images(&doc, 0).unwrap().len(), 1);
+    let doc = image_page_with("q 10 10 20 20 re W n Q 100 100 200 100 cm /Im0 Do");
+    assert_eq!(images::page_images(&doc, 0).unwrap().len(), 1);
+}
+
 /// The box of the first `re` on the page in user space, after the `cm`s before it.
 fn first_rect_in_user_space(doc: &Document) -> [f64; 4] {
     let mut ctm = pdfcraft_content::Matrix::IDENTITY;
