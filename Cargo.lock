@@ -4278,6 +4278,7 @@ dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
  "pdfcraft-model",
+ "pdfcraft-render",
  "thiserror 2.0.21",
 ]
 

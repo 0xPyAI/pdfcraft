@@ -777,6 +777,17 @@ fn page_form(doc: &mut Document, index: usize, content: Content) -> Result<ObjRe
         let Some(ap) = appearance(doc, &d) else { continue };
         let form = doc.get(ap).as_dict().cloned().unwrap_or_default();
         let Some(m) = appearance_matrix(doc, &form, rect) else { continue };
+        let ap = if !form.contains(b"Subtype")
+            && let Object::Stream(stream) = &*doc.get(ap)
+        {
+            // Some existing annotation appearances omit Subtype, but Do dispatch needs a Form XObject.
+            // Keep the original intact: other document objects can share this appearance.
+            let mut stream = stream.clone();
+            stream.dict.set(b"Subtype".to_vec(), Object::name("Form"));
+            doc.add(Object::Stream(stream))
+        } else {
+            ap
+        };
         let name = format!("PCPrA{k}");
         k += 1;
         let [a0, b0, c0, d0, e0, f0] = m.0;
