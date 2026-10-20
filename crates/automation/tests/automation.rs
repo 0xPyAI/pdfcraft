@@ -2295,6 +2295,63 @@ fn exporting_images_and_text_through_tools() {
 }
 
 #[test]
+fn accessibility_character_encoding_accepts_identity_cjk_through_tools() {
+    use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, SaveOptions, Stream, write_full};
+    use std::sync::Arc;
+
+    let dir = workdir("a11y-identity-cjk");
+    let mut a = auto(&dir);
+    for encoding in ["Identity-H", "Identity-V"] {
+        let mut source = Document::open(Arc::new(fixture(1))).unwrap();
+        let mut system = Dict::new();
+        system.set(b"Registry".to_vec(), Object::String(PdfString::literal(b"Adobe".to_vec())));
+        system.set(b"Ordering".to_vec(), Object::String(PdfString::literal(b"Japan1".to_vec())));
+        system.set(b"Supplement".to_vec(), Object::Int(0));
+        let system = source.add(Object::Dict(system));
+        let mut descriptor = Dict::new();
+        descriptor.set(b"Type".to_vec(), Object::Name(b"FontDescriptor".to_vec()));
+        descriptor.set(b"FontName".to_vec(), Object::Name(b"SyntheticCID".to_vec()));
+        descriptor.set(b"Flags".to_vec(), Object::Int(6));
+        descriptor.set(b"FontBBox".to_vec(), Object::Array([0, -200, 1000, 800].into_iter().map(Object::Int).collect()));
+        descriptor.set(b"ItalicAngle".to_vec(), Object::Int(0));
+        descriptor.set(b"Ascent".to_vec(), Object::Int(800));
+        descriptor.set(b"Descent".to_vec(), Object::Int(-200));
+        descriptor.set(b"CapHeight".to_vec(), Object::Int(700));
+        descriptor.set(b"StemV".to_vec(), Object::Int(80));
+        let descriptor = source.add(Object::Dict(descriptor));
+        let mut cid = Dict::new();
+        cid.set(b"Type".to_vec(), Object::Name(b"Font".to_vec()));
+        cid.set(b"Subtype".to_vec(), Object::Name(b"CIDFontType0".to_vec()));
+        cid.set(b"BaseFont".to_vec(), Object::Name(b"SyntheticCID".to_vec()));
+        cid.set(b"CIDSystemInfo".to_vec(), Object::Ref(system));
+        cid.set(b"FontDescriptor".to_vec(), Object::Ref(descriptor));
+        cid.set(b"DW".to_vec(), Object::Int(1000));
+        let cid = source.add(Object::Dict(cid));
+        source
+            .update_dict(ObjRef::new(3, 0), |font| {
+                font.set(b"Subtype".to_vec(), Object::Name(b"Type0".to_vec()));
+                font.set(b"BaseFont".to_vec(), Object::Name(b"SyntheticCID".to_vec()));
+                font.set(b"Encoding".to_vec(), Object::Name(encoding.as_bytes().to_vec()));
+                font.set(b"DescendantFonts".to_vec(), Object::Array(vec![Object::Ref(cid)]));
+            })
+            .unwrap();
+        source.set(ObjRef::new(5, 0), Object::Stream(Stream::flate(Dict::new(), b"BT /F1 24 Tf 20 150 Td <002200230024> Tj ET")));
+        let name = format!("{encoding}.pdf");
+        let bytes = write_full(&source, &SaveOptions::default()).unwrap();
+        std::fs::write(dir.join(&name), &bytes).unwrap();
+        let doc = ok(&mut a, "doc_open", json!({ "path": name }))["doc"].as_u64().unwrap();
+        assert_eq!(page_text(&mut a, doc), ["ABC"], "the collection maps the CIDs to Unicode without ToUnicode");
+        let report = ok(&mut a, "accessibility_check", json!({ "doc": doc, "rules": ["character-encoding"] }));
+        let result = report["results"].as_array().unwrap().iter().find(|r| r["rule"] == "character-encoding").unwrap();
+        assert_eq!(result["status"], "passed", "{encoding}: {result}");
+        assert_eq!(result["findings"], json!([]));
+        assert_eq!(ok(&mut a, "doc_info", json!({ "doc": doc }))["document"]["dirty"], false);
+        assert_eq!(std::fs::read(dir.join(name)).unwrap(), bytes, "checking is read-only");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn accessibility_check_report_and_fixes_through_tools() {
     let dir = workdir("a11y");
     let mut a = auto(&dir);
