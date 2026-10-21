@@ -1231,6 +1231,13 @@ fn replacing_text_strikes_it_and_adds_a_caret() {
     assert_eq!(caret.in_reply_to, strike.name, "grouped with the strikeout");
     assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Replace text"));
     assert_eq!(h.state().quick_tool, QuickTool::Select);
+    // The strikeout is the Replace text tool's, not Strikethrough's (#3947): the panel names it
+    // so, and Make Current Properties Default updates the Replace text tool.
+    assert_eq!(pdfcraft_ui_egui::comments::tool_for(strike), Some(pdfcraft_ui_egui::comments::CommentTool::ReplaceText));
+    h.state_mut().set_option("panel", "comments").unwrap();
+    h.run_steps(3);
+    assert!(h.query_by_role_and_label(egui::accesskit::Role::Label, "Replace text").is_some(), "the panel names the comment Replace text");
+    assert!(h.query_by_role_and_label(egui::accesskit::Role::Label, "Strikethrough").is_none(), "not Strikethrough");
 }
 
 #[test]
