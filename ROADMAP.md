@@ -172,6 +172,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-22 (M2, #3107 / PR #3438):** Inline-image parsing falls back to the existing EI heuristic when missing declared samples, headers or terminators exceed the content-window budget, instead of waiting for an impossible allocation. Exact-length parsing for available samples and ordinary large streamed images is retained. Estimates unchanged.
+
 - **2026-10-19 (M14, #3373):** The main menu and its long submenus scroll in short windows, keeping their commands reachable. Estimates unchanged.
 
 - **2026-10-19 (M3, #3387):** Save-prompt shortcuts yield to later consent and utility dialogs; a synthetic UI regression checks that an edited document stays open. Estimates unchanged.

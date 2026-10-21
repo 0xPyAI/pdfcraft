@@ -245,7 +245,12 @@ impl<'a> UntypedIter<'a> {
                     // PdfCraft patch: an unfiltered inline image's byte length is determined by
                     // its parameters (and `/L` or `/Length` when present and consistent), so
                     // `EI` inside its samples does not cut the image short (#3107).
-                    match unfiltered_image_end(stream_data, &dict, self.complete) {
+                    match unfiltered_image_end(
+                        stream_data,
+                        &dict,
+                        self.complete,
+                        start_offset.saturating_sub(self.committed),
+                    ) {
                         UnfilteredEnd::Found(end_data, end_after_ei) => {
                             let image_data = stream_data.get(..end_data)?;
                             let stream = Stream::new(image_data, dict.clone());
@@ -971,33 +976,37 @@ fn unfiltered_image_len(dict: &Dict<'_>) -> Option<usize> {
 }
 
 /// PdfCraft patch: locate the deterministic `EI` terminator of an unfiltered inline image (#3107).
-fn unfiltered_image_end(data: &[u8], dict: &Dict<'_>, complete: bool) -> UnfilteredEnd {
+fn unfiltered_image_end(data: &[u8], dict: &Dict<'_>, complete: bool, header_bytes: usize) -> UnfilteredEnd {
     let Some(end_data) = unfiltered_image_len(dict) else {
         return UnfilteredEnd::Fallback;
     };
+    // An inline image shares the content window's budget, not the larger decoded-image
+    // budget. Include its dictionary/header and the shortest whitespace + EI + delimiter
+    // look-ahead, or one more byte beyond any separator whitespace already present.
+    // Missing bytes that cannot fit must use the existing heuristic, not pin the window
+    // and discard following content. Already-available exact ends still win.
+    let missing_end = if complete
+        || end_data
+            .checked_add(4)
+            .and_then(|minimum| data.len().checked_add(1).map(|next| minimum.max(next)))
+            .and_then(|needed| needed.checked_add(header_bytes))
+            .is_none_or(|needed| needed > crate::MAX_DECODED_STREAM)
+    {
+        UnfilteredEnd::Fallback
+    } else {
+        UnfilteredEnd::NeedsMore
+    };
     let Some(after) = data.get(end_data..) else {
-        return if complete {
-            UnfilteredEnd::Fallback
-        } else {
-            UnfilteredEnd::NeedsMore
-        };
+        return missing_end;
     };
     let Some(&first) = after.first() else {
-        return if complete {
-            UnfilteredEnd::Fallback
-        } else {
-            UnfilteredEnd::NeedsMore
-        };
+        return missing_end;
     };
     if !is_white_space_character(first) {
         return UnfilteredEnd::Fallback;
     }
     let Some(separator) = after.iter().position(|&b| !is_white_space_character(b)) else {
-        return if complete {
-            UnfilteredEnd::Fallback
-        } else {
-            UnfilteredEnd::NeedsMore
-        };
+        return missing_end;
     };
     let Some(rest) = after.get(separator..) else {
         return UnfilteredEnd::Fallback;
@@ -1006,11 +1015,7 @@ fn unfiltered_image_end(data: &[u8], dict: &Dict<'_>, complete: bool) -> Unfilte
         return UnfilteredEnd::Fallback;
     }
     let Some(&second) = rest.get(1) else {
-        return if complete {
-            UnfilteredEnd::Fallback
-        } else {
-            UnfilteredEnd::NeedsMore
-        };
+        return missing_end;
     };
     if second != b'I' {
         return UnfilteredEnd::Fallback;
@@ -1022,13 +1027,14 @@ fn unfiltered_image_end(data: &[u8], dict: &Dict<'_>, complete: bool) -> Unfilte
         Some(&b) if !is_regular_character(b) => UnfilteredEnd::Found(end_data, end_after_ei),
         Some(_) => UnfilteredEnd::Fallback,
         None if complete => UnfilteredEnd::Found(end_data, end_after_ei),
-        None => UnfilteredEnd::NeedsMore,
+        None => missing_end,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{ContentTokenizer, UntypedIter};
+    use crate::reader::ReaderExt;
 
     fn operators(data: &[u8]) -> Vec<Vec<u8>> {
         let mut tokenizer = UntypedIter::new(data);
@@ -1213,6 +1219,63 @@ BT /F1 14 Tf 72 550 Td (After) Tj ET";
         let expected = slice_instructions(data);
         for piece in 1..=data.len() {
             assert_eq!(windowed_instructions(data, || piece), expected, "piece size {piece}");
+        }
+    }
+
+    #[test]
+    fn oversized_unfiltered_inline_image_does_not_hold_following_content() {
+        for length in [crate::MAX_DECODED_STREAM - 1, crate::MAX_DECODED_STREAM, crate::MAX_DECODED_STREAM + 1] {
+            // The next BI supplies the existing EI heuristic's bounded look-ahead. The
+            // stream is not exhausted: an impossible declaration must not pin this window.
+            let data = format!(
+                "BI /W {length} /H 1 /CS /G /BPC 8 ID x EI BT (After) Tj ET \
+                 BI /W 1 /H 1 /CS /G /BPC 8 ID y EI Q"
+            );
+            let mut tokenizer = UntypedIter::new_window(data.as_bytes(), false);
+            for expected in [b"BI".as_slice(), b"BT", b"Tj", b"ET"] {
+                let instruction = tokenizer.next_instruction().expect("following content survives");
+                assert_eq!(instruction.operator.as_ref(), expected, "declared length {length}");
+            }
+        }
+    }
+
+    #[test]
+    fn unfiltered_inline_image_budget_includes_header_and_terminator() {
+        let mut reader = crate::reader::Reader::new(b"/W 1 /H 1 /CS /G /BPC 8 ID ");
+        let inline = reader
+            .read_without_context::<crate::object::dict::InlineImageDict<'_>>()
+            .expect("synthetic inline dictionary");
+        let dict = inline.get_dict();
+        let fits = crate::MAX_DECODED_STREAM - 5; // One sample + whitespace/EI/delimiter.
+        assert!(matches!(super::unfiltered_image_end(b"", dict, false, fits), super::UnfilteredEnd::NeedsMore));
+        assert!(matches!(super::unfiltered_image_end(b"x    ", dict, false, fits), super::UnfilteredEnd::Fallback));
+        assert!(matches!(super::unfiltered_image_end(b"x EI", dict, false, fits + 1), super::UnfilteredEnd::Fallback));
+        assert!(matches!(super::unfiltered_image_end(b"x EI", dict, true, usize::MAX), super::UnfilteredEnd::Found(1, 4)));
+        for header in [fits + 1, usize::MAX] {
+            assert!(matches!(super::unfiltered_image_end(b"", dict, false, header), super::UnfilteredEnd::Fallback));
+            // The guard is only for missing bytes, never a reason to reinterpret available samples.
+            assert!(matches!(super::unfiltered_image_end(b"x EI Q", dict, false, header), super::UnfilteredEnd::Found(1, 4)));
+        }
+    }
+
+    #[test]
+    fn large_unfiltered_inline_image_still_waits_for_its_samples() {
+        // A valid image larger than the interpreter's initial 64 KiB window must
+        // still use its exact length rather than execute operators in its samples.
+        let length = (64 << 10) + 1;
+        let mut data = format!("BI /W {length} /H 1 /CS /G /BPC 8 ID ").into_bytes();
+        let sample_start = data.len();
+        data.extend_from_slice(b"0EI Q BT (Injected) Tj ET q");
+        data.resize(sample_start + length, b'0');
+        data.extend_from_slice(b" EI BT (After) Tj ET");
+        let mut partial = UntypedIter::new_window(&data[..64 << 10], false);
+        assert!(partial.next_instruction().is_none());
+        assert!(partial.needs_more);
+        assert_eq!(partial.committed, 0);
+        assert_eq!(operators(&data), [b"BI".to_vec(), b"BT".to_vec(), b"Tj".to_vec(), b"ET".to_vec()]);
+        let expected = slice_instructions(&data);
+        for piece in [4096, 64 << 10, data.len()] {
+            assert_eq!(windowed_instructions(&data, || piece), expected, "piece size {piece}");
         }
     }
 
