@@ -5218,3 +5218,27 @@ fn a_clipping_copy_on_the_same_baseline_is_refused() {
     assert!(matches!(&block, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{block:?}");
     assert_eq!(text::text_lines(&doc, 0).unwrap().len(), 2, "refused means untouched");
 }
+
+/// A producer wrote `0.0001 Tc` on one word of a line (Word through macOS Quartz). That spacing
+/// can't be seen, so the word stays on its line; spacing that can be seen still keeps runs apart.
+#[test]
+fn a_word_with_invisible_extra_spacing_stays_on_its_line() {
+    let page = |spacing: &str| {
+        text_page(&format!(
+            "BT /F1 12 Tf 1 0 0 1 72 700 Tm (for company ) Tj ET \
+             BT /F1 12 Tf 1 0 0 1 141.36 700 Tm (A) Tj ET \
+             BT {spacing} Tc /F1 12 Tf 1 0 0 1 149.364 700 Tm (EROSOL) Tj ET"
+        ))
+    };
+    let blocks = text::text_blocks(&page("0.0001"), 0).unwrap();
+    assert_eq!(blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["for company AEROSOL"]);
+
+    let mut doc = page("0.0001");
+    text::rewrite_block(&mut doc, 0, 0, Some("for company AEROSOL LLC"), &BlockStyle::default()).unwrap();
+    let lines = text::text_lines(&reopen(&doc), 0).unwrap();
+    assert_eq!(lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["for company AEROSOL LLC"]);
+    assert!((lines[0].rect[0] - 72.0).abs() < 0.01, "{:?}", lines[0].rect);
+
+    let blocks = text::text_blocks(&page("0.5"), 0).unwrap();
+    assert_eq!(blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["for company A", "EROSOL"]);
+}
