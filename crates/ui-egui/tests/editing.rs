@@ -4526,11 +4526,30 @@ fn a_resized_image_keeps_its_new_size_until_the_page_is_redrawn() {
         assert!(red(&pixels, kept) > 100, "frame {frame} after the release: the picture is not at its new size");
         assert_eq!(red(&pixels, gone), 0, "frame {frame} after the release: the picture shows at its old size");
     }
+    // Resized again before the page is drawn: the raster still has the first size, so that is
+    // what stays blanked while the corner moves.
+    let (grip, to) = (to, at(80.0, 60.0));
+    let again = egui::Rect::from_two_pos(at(62.0, 42.0), at(78.0, 58.0));
+    h.hover_at(grip);
+    h.run_steps(1);
+    h.drag_at(grip);
+    h.run_steps(1);
+    for k in 1..=4 {
+        h.hover_at(grip + (to - grip) * (k as f32 / 4.0));
+        h.run_steps(1);
+    }
+    let pixels = h.render().unwrap();
+    assert!(red(&pixels, again) > 20, "the second drag draws the picture at its new size");
+    assert_eq!(red(&pixels, gone), 0, "the second drag shows the picture at its first size");
+    h.drop_at(to);
+    h.run_steps(2);
+    let pixels = h.render().unwrap();
+    assert_eq!(red(&pixels, gone), 0, "after the second release");
     h.state_mut().views[0].hold_rasters = false;
     support::wait_until(&mut h, "the page drawn with the resized picture", |app| !app.render_pending());
     h.run_steps(2);
     let pixels = h.render().unwrap();
-    assert!(red(&pixels, kept) > 100 && red(&pixels, gone) == 0, "the page raster has the picture at its new size");
+    assert!(red(&pixels, again) > 20 && red(&pixels, gone) == 0, "the page raster has the picture at its new size");
 }
 
 /// Exercise actual pointer gestures on each cropped placement, without capturing private pixels.
