@@ -333,8 +333,13 @@ pub(crate) fn compare_area(app: &mut PdfCraftApp, old: usize, new: usize, ui: &m
         }
     }
     let names = [old, new].map(|i| app.session.get(app.views[i].id).map(|d| d.name.clone()).unwrap_or_default());
+    // Drawing a half can close its own tab (its snapshot bar's Close, #3915), which shifts or
+    // removes the indexes below. Each half is found again by id, and the frame stops when one is gone.
+    let ids = [app.views[old].id, app.views[new].id];
+    let find = |app: &PdfCraftApp, id| app.views.iter().position(|v| v.id == id);
     ui.painter().vline(rect.min.x + half_w, rect.y_range(), egui::Stroke::new(gap, t.border));
-    for (k, (r, index)) in [(left, old), (right, new)].into_iter().enumerate() {
+    for (k, (r, id)) in [(left, ids[0]), (right, ids[1])].into_iter().enumerate() {
+        let Some(index) = find(app, id) else { return };
         let caption = egui::Rect::from_min_size(r.min, egui::vec2(r.width(), caption_h));
         ui.painter().rect_filled(caption, 0.0, t.panel);
         let label = crate::i18n::fmt(if k == 0 { tl!("Old file: {name}") } else { tl!("New file: {name}") }, &[("name", &names[k])]);
@@ -351,6 +356,8 @@ pub(crate) fn compare_area(app: &mut PdfCraftApp, old: usize, new: usize, ui: &m
         crate::canvas::document_area(app, index, &mut child);
     }
     // After both drew: the leader's scroll, when it moved, is the follower's next offset.
+    let (Some(old), Some(new)) = (find(app, ids[0]), find(app, ids[1])) else { return };
+    let follow = if leader == 0 { new } else { old };
     let offsets = [app.views[old].last_scroll, app.views[new].last_scroll];
     if let Some(c) = app.compare.as_mut() {
         let lead_k = if leader == 0 { 0 } else { 1 };
