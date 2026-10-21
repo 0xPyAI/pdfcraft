@@ -60,7 +60,8 @@ pub struct RenderConfig {
     /// View ▸ Hide all comments: markup annotations aren't drawn (fields and links still are).
     pub hide_comments: bool,
     /// Refuse a whole-page raster that would be reduced by the renderer's hard size caps.
-    /// Tiled requests remain available for pages that exceed those caps.
+    /// Tiled requests remain available for pages that exceed those caps. Both modes refuse
+    /// a raster whose rounded integer dimensions exceed the final pixel-allocation budget.
     pub reject_oversize: bool,
     /// View ▸ Reading colours: solid text and line-art paints are remapped for readability and
     /// the page clears to the setting's background. Display only; the document never changes.
@@ -365,6 +366,9 @@ fn render_page<'a>(
         };
         // Rendered straight into a buffer of whole pixels, which the GUI takes over as is.
         let (w, h) = render_size(page, &rs);
+        if u64::from(w).checked_mul(u64::from(h)).is_none_or(|pixels| pixels > MAX_PIXELS as u64) {
+            return Err(format!("page {} raster size {w}x{h} exceeds renderer pixel limit", req.page + 1));
+        }
         let mut pixels = Pixels::zeroed(w.into(), h.into()).ok_or_else(|| format!("page {} is too large to render", req.page + 1))?;
         // Previews render at low detail (tiny images are skipped); finals always draw all.
         let mut preview_settings = settings.clone();
@@ -2799,6 +2803,92 @@ trailer << /Root 1 0 R >>
         let tile = renderer.render(RenderRequest { page: 0, tile: Some(Tile { x: 0, y: 0, w: 32, h: 32 }), scale: 4.0, ..Default::default() });
         assert!(tile.error.is_none(), "tiled rendering must remain available: {:?}", tile.error);
         assert_eq!((tile.width, tile.height), (32, 32));
+    }
+
+    fn allocation_budget_page(width: f32, height: f32, content: &str) -> Arc<Vec<u8>> {
+        Arc::new(format!("%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Contents 4 0 R >> endobj\n4 0 obj << /Length {} >> stream\n{content}\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF", content.len()).into_bytes())
+    }
+
+    #[test]
+    fn rounded_pixel_budget_rejects_before_actual_allocation() {
+        use crate::pixels::allocation_probe::{Attempts, observe};
+        for reject_oversize in [false, true] {
+            let mut renderer = PageRenderer::new(allocation_budget_page(8000.5, 7999.5, ""), RenderConfig { reject_oversize, ..Default::default() });
+            assert_eq!(renderer.page_count(), 1);
+            let (out, attempts) = observe(|| renderer.render(RenderRequest { scale: 1.0, ..Default::default() }));
+            assert_eq!(attempts, Attempts::default(), "rounded over-cap raster reached allocator; strict={reject_oversize}");
+            assert_eq!(out.error.as_deref(), Some("page 1 raster size 8001x8000 exceeds renderer pixel limit"));
+            assert_eq!((out.width, out.height), (0, 0));
+            assert!(out.rgba.is_empty());
+            assert_eq!(renderer.stats().parser_builds, 1, "normal rejection must not trigger panic recovery");
+        }
+    }
+
+    #[test]
+    fn rounded_pixel_budget_allows_exact_cap_to_reach_allocator() {
+        use crate::pixels::allocation_probe::{Attempts, observe};
+        for reject_oversize in [false, true] {
+            let mut renderer = PageRenderer::new(allocation_budget_page(8000.0, 8000.0, ""), RenderConfig { reject_oversize, ..Default::default() });
+            let (out, attempts) = observe(|| renderer.render(RenderRequest { scale: 1.0, ..Default::default() }));
+            assert_eq!(attempts, Attempts { calls: 1, first: Some((8000, 8000)) });
+            // The test probe refuses the actual allocation: this is admission evidence,
+            // not a successful giant-raster rendering or a 256MB test allocation.
+            assert_eq!(out.error.as_deref(), Some("page 1 is too large to render"));
+            assert_eq!((out.width, out.height), (0, 0));
+            assert!(out.rgba.is_empty());
+            assert_eq!(renderer.stats().parser_builds, 1);
+        }
+    }
+
+    #[test]
+    fn rounded_pixel_budget_preserves_small_pixels_and_large_page_tiles() {
+        let mut previous = None;
+        for reject_oversize in [false, true] {
+            let config = RenderConfig { reject_oversize, ..Default::default() };
+            let mut small = PageRenderer::new(allocation_budget_page(16.0, 12.0, "0 0 1 rg 4 3 8 6 re f"), config.clone());
+            let out = small.render(RenderRequest { scale: 1.0, ..Default::default() });
+            assert!(out.error.is_none(), "{:?}", out.error);
+            assert_eq!((out.width, out.height), (16, 12));
+            let expected: Vec<u8> = (0..12)
+                .flat_map(|y| {
+                    (0..16).flat_map(move |x| if (4..12).contains(&x) && (3..9).contains(&y) { [0, 0, 255, 255] } else { [255, 255, 255, 255] })
+                })
+                .collect();
+            assert_eq!(&*out.rgba, expected.as_slice());
+            if let Some(previous) = &previous {
+                assert_eq!(previous, &out.rgba);
+            }
+            previous = Some(out.rgba);
+            let mut large = PageRenderer::new(allocation_budget_page(8000.5, 7999.5, ""), config);
+            let tile = large.render(RenderRequest { scale: 1.0, tile: Some(Tile { x: 0, y: 0, w: 32, h: 32 }), ..Default::default() });
+            assert!(tile.error.is_none(), "{:?}", tile.error);
+            assert_eq!((tile.width, tile.height), (32, 32));
+            assert_eq!(&*tile.rgba, &[255; 32 * 32 * 4]);
+            assert_eq!(large.stats().parser_builds, 1);
+        }
+    }
+
+    #[test]
+    fn rounded_pixel_budget_invalid_requests_never_reach_allocator() {
+        use crate::pixels::allocation_probe::{Attempts, observe};
+        for reject_oversize in [false, true] {
+            let mut renderer = PageRenderer::new(allocation_budget_page(16.0, 12.0, ""), RenderConfig { reject_oversize, ..Default::default() });
+            let (out, attempts) = observe(|| renderer.render(RenderRequest { page: 1, scale: 1.0, ..Default::default() }));
+            assert_eq!(attempts, Attempts::default());
+            assert!(out.error.is_some());
+            assert_eq!((out.width, out.height), (0, 0));
+            assert!(out.rgba.is_empty());
+            assert_eq!(renderer.stats().parser_builds, 1);
+        }
+        let mut renderer = PageRenderer::new(allocation_budget_page(16.0, 12.0, ""), RenderConfig { reject_oversize: true, ..Default::default() });
+        for scale in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let (out, attempts) = observe(|| renderer.render(RenderRequest { scale, ..Default::default() }));
+            assert_eq!(attempts, Attempts::default());
+            assert!(out.error.as_deref().is_some_and(|error| error.contains("exceeds renderer limits")));
+            assert_eq!((out.width, out.height), (0, 0));
+            assert!(out.rgba.is_empty());
+            assert_eq!(renderer.stats().parser_builds, 1);
+        }
     }
 
     /// Issue #102: an A4 page (595.28×841.89 pt) rendered 595×841 at 72 dpi, dropping the last
