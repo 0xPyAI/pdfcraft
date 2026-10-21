@@ -289,6 +289,11 @@ fn default_printer(printers: &[spool::Printer]) -> Option<String> {
     printers.iter().find(|p| p.default).or(printers.first()).map(|p| p.name.clone())
 }
 
+/// Whether `printer` can still be chosen from `printers`: Save as PDF (`None`) always can.
+fn offered(printer: Option<&str>, printers: &[spool::Printer]) -> bool {
+    printer.is_none_or(|name| printers.iter().any(|p| p.name == name))
+}
+
 impl PdfCraftApp {
     pub fn open_print(&mut self) {
         let Some((i, _)) = self.active_ids() else { return };
@@ -305,6 +310,9 @@ impl PdfCraftApp {
         let current = self.views[i].current;
         let selected: Vec<usize> = self.views[i].selected.iter().copied().collect();
         let keep = std::mem::take(&mut self.print_draft);
+        // The printer picked last time, Save as PDF included, while it is still listed (#3537).
+        let picked = keep.printer_picked && offered(keep.printer.as_deref(), &printers);
+        let printer = if picked { keep.printer.clone() } else { default };
         // Picked pages are what Print is for (Acrobat's "Selected pages"); without any, a choice
         // left over from another document falls back to the whole document.
         let which = match (selected.is_empty(), keep.which) {
@@ -317,9 +325,9 @@ impl PdfCraftApp {
             crop_pages: None,
             printers,
             printers_loading,
-            printer_picked: false,
+            printer_picked: picked,
             units: self.units,
-            printer: default,
+            printer,
             current_page: current,
             sheet: 0,
             selected,
@@ -407,7 +415,9 @@ impl PdfCraftApp {
                 if let Some(printers) = printers {
                     self.print_tasks.printers = None;
                     let d = &mut self.print_draft;
-                    if !d.printer_picked {
+                    // A picked printer that is no longer listed falls back to the default too.
+                    if !d.printer_picked || !offered(d.printer.as_deref(), &printers) {
+                        d.printer_picked = false;
                         d.printer = default_printer(&printers);
                     }
                     d.printers = printers;

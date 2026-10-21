@@ -317,6 +317,57 @@ fn printers_listed_in_the_background_preselect_the_default_unless_one_was_picked
     assert_eq!(h.state().print_draft.printer, None, "Save as PDF, as picked");
 }
 
+/// The printer picked in the dialog, Save as PDF included, is still chosen the next time Print
+/// opens (#3537), until a fresh list no longer has it.
+#[test]
+fn the_picked_printer_is_kept_for_the_next_print_while_it_is_listed() {
+    use pdfcraft_engine::print::spool::Printer;
+    use std::sync::{Arc, Mutex};
+    let mut h = harness();
+    let listed = Arc::new(Mutex::new(vec!["Office", "Front Desk"]));
+    let source = listed.clone();
+    h.state_mut().printer_source = Some(Arc::new(move || {
+        let names = source.lock().map(|n| n.clone()).unwrap_or_default();
+        names.into_iter().map(|name| Printer { name: name.into(), default: name == "Front Desk", two_sided: None }).collect()
+    }));
+    let open = |h: &mut Harness<'static, PdfCraftApp>| {
+        h.state_mut().dialog = None;
+        assert!(h.state_mut().execute("print.dialog"));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while h.state().print_draft.printers_loading && std::time::Instant::now() < deadline {
+            h.run_steps(1);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(!h.state().print_draft.printers_loading);
+        h.run_steps(2);
+    };
+    open(&mut h);
+    assert_eq!(h.state().print_draft.printer.as_deref(), Some("Front Desk"), "the default first");
+
+    // As the Printer list records a choice.
+    {
+        let d = &mut h.state_mut().print_draft;
+        d.printer = None;
+        d.printer_picked = true;
+    }
+    open(&mut h);
+    assert_eq!(h.state().print_draft.printer, None, "Save as PDF, as picked last time");
+
+    {
+        let d = &mut h.state_mut().print_draft;
+        d.printer = Some("Office".into());
+        d.printer_picked = true;
+    }
+    open(&mut h);
+    assert_eq!(h.state().print_draft.printer.as_deref(), Some("Office"), "Office, as picked last time");
+
+    // Unplugged: the fresh list doesn't have it, so the dialog goes back to the default.
+    *listed.lock().unwrap() = vec!["Front Desk"];
+    open(&mut h);
+    assert_eq!(h.state().print_draft.printer.as_deref(), Some("Front Desk"));
+    assert!(!h.state().print_draft.printer_picked);
+}
+
 #[test]
 fn architectural_page_can_be_matched_at_100_percent() {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 1000.0)).build_eframe(|_cc| {
