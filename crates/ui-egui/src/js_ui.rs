@@ -260,7 +260,6 @@ fn reading_mode_label(mode: &str) -> &'static str {
     }
 }
 
-/// Preferences: interface language and size, appearance, identity and JavaScript. Returns `true` to close.
 /// The height the Preferences dialog keeps below its scrolling settings for the OK row: the
 /// button, and the space above it.
 pub(crate) const PREFERENCES_BUTTON_ROW: f32 = 52.0;
@@ -270,8 +269,8 @@ pub(crate) const PREFERENCES_BUTTON_ROW: f32 = 52.0;
 /// leaves 173 pt): a taller floor would push OK off the screen again.
 pub(crate) const PREFERENCES_MIN_SCROLL: f32 = 60.0;
 
-/// The settings, to be drawn in a scroll area; [`preferences_buttons`] goes below it, outside the
-/// scroll, so OK is always in reach.
+/// Preferences: interface language and size, appearance, identity and JavaScript. Drawn in a scroll
+/// area; [`preferences_buttons`] goes below it, outside the scroll, so OK is always in reach.
 pub(crate) fn preferences_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) {
     ui.label(egui::RichText::new(tl!("Preferences")).font(theme::semibold(18.0)));
     ui.horizontal(|ui| {
