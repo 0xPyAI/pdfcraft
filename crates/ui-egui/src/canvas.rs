@@ -1046,6 +1046,12 @@ impl DocView {
         self.pages.get(&page).map(|p| p.tex.id())
     }
 
+    /// Whether `page` is still drawn, somewhere, as it was before its last change: its whole-page
+    /// raster (a tiled page's backdrop too) or any of its tiles waits for a replacement.
+    pub(crate) fn page_out_of_date(&self, page: usize) -> bool {
+        self.pages.get(&page).is_some_and(|p| p.tag == STALE_TAG) || self.stale_tiles.iter().any(|k| k.0 == page)
+    }
+
     /// The print preview's picture of `page`: the sheet raster when it has arrived, otherwise the
     /// thumbnail.
     pub(crate) fn page_preview(&self, page: usize) -> Option<egui::TextureId> {
@@ -1879,6 +1885,9 @@ impl DocView {
                 self.forms.unbaked.retain(|(_, p)| *p != page);
                 self.comments.page_rendered(page);
             }
+            if !self.page_out_of_date(page) {
+                self.text_background.page_received(page);
+            }
         } else if r.request.tag & PRINT_TAG != 0 {
             let tex = ctx.load_texture(
                 format!("print-{:?}-{page}", self.id),
@@ -1898,7 +1907,9 @@ impl DocView {
             self.pages.insert(page, PageTex { tag: r.request.tag, tex });
             self.signature_drag.page_received(page);
             self.move_background.page_received(page);
-            self.text_background.page_received(page);
+            if !self.page_out_of_date(page) {
+                self.text_background.page_received(page);
+            }
             self.comments.page_rendered(page);
             self.waiting_since.remove(&page);
             if !self.stale_tiles.iter().any(|k| k.0 == page) {

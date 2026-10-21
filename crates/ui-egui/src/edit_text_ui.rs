@@ -40,7 +40,7 @@ pub(crate) struct TextBackground {
 }
 
 /// A paragraph editor's text as last drawn: its laid-out rows, where they were on the page (in
-/// the page's 0..1 coordinates) and at what page width on screen.
+/// the page's 0..1 coordinates), and the page's width and turn on screen then.
 struct EditorLook {
     page: usize,
     block: usize,
@@ -48,6 +48,7 @@ struct EditorLook {
     at: (f32, f32),
     color: Color32,
     page_width: f32,
+    rot: u16,
 }
 
 impl TextBackground {
@@ -57,7 +58,7 @@ impl TextBackground {
 
     /// The open paragraph's editor drew `galley` at `pos` this frame.
     pub fn remember(&mut self, xf: &PageXform, page: usize, block: usize, galley: Arc<egui::Galley>, pos: Pos2, color: Color32) {
-        self.look = Some(EditorLook { page, block, galley, at: xf.screen_to_norm(pos), color, page_width: xf.rect.width() });
+        self.look = Some(EditorLook { page, block, galley, at: xf.screen_to_norm(pos), color, page_width: xf.rect.width(), rot: xf.rot });
     }
 
     /// An edit was applied. When it is the open paragraph's, its last look stays up over the
@@ -164,9 +165,10 @@ impl TextBackground {
         editor: Option<&LineEditor>,
         draft: Option<&crate::content_ui::TextDraft>,
     ) {
-        // A zoom since the paragraph was applied would misplace its rows: the page raster
-        // (with the old text) shows until the new one arrives instead.
-        let settled = self.settling.as_ref().filter(|look| look.page == page && (look.page_width - xf.rect.width()).abs() < 0.5);
+        // A zoom or a turn of the view since the paragraph was applied would misplace its rows:
+        // the page raster (with the old text) shows until the new one arrives instead.
+        let settled =
+            self.settling.as_ref().filter(|look| look.page == page && look.rot == xf.rot && (look.page_width - xf.rect.width()).abs() < 0.5);
         let ready = editor.is_some_and(|ed| ed.page == page && self.ready(page, ed.block))
             || draft.is_some_and(|d| d.page == page && d.index.is_some_and(|index| self.ready_added(page, index)))
             || settled.is_some();
