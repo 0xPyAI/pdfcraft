@@ -400,6 +400,16 @@ impl PdfCraftApp {
         let Some(run) = self.ocr_run.as_ref() else { return };
         let (doc, progress, automatic) = (run.doc, run.progress.clone(), run.automatic);
         let Ok(mut s) = progress.lock() else { return };
+        // The result of a run Edit started waits while Read mode or a dialog is up: nothing may change
+        // the document beneath them, and the run may have been started before they appeared. A run
+        // the user asked for completes as before.
+        if automatic && s.result.is_some() && (self.mode == crate::Mode::Read || self.modal_open()) {
+            drop(s);
+            if let Some(ctx) = &self.ctx {
+                ctx.request_repaint_after(std::time::Duration::from_millis(200));
+            }
+            return;
+        }
         let Some(result) = s.result.take() else {
             let msg = crate::i18n::fmt(
                 tl!("Recognizing text… page {d} of {t}"),
@@ -538,5 +548,38 @@ mod tests {
         let add = Edit::AddImage { page: 0, rect: Some([0.0, 0.0, 595.0, 842.0]), name: "scan.png".into(), bytes: Arc::new(png.into_inner()) };
         app.session.apply(id, add).unwrap();
         assert_eq!(found(&mut app), Some(0), "a picture over the page makes it a scan");
+    }
+    /// A finished run Edit started is applied only once Read mode and dialogs are gone; one the user
+    /// asked for is applied at once. The result is made up, so no OCR models are needed.
+    #[test]
+    fn the_result_of_an_automatic_run_waits_for_read_mode_and_dialogs() {
+        let word = || pdfcraft_engine::ocr::PlacedWord { text: "scanned".into(), origin: [72.0, 700.0], across: [60.0, 0.0], up: [0.0, 12.0] };
+        let finished = |app: &PdfCraftApp, automatic: bool| {
+            let page = pdfcraft_engine::ocr::OcrPage { page: 0, words: vec![word()], already_on_page: 0, skipped: None };
+            let progress = Arc::new(Mutex::new(OcrProgress { done: 1, total: 1, result: Some(Ok(vec![page])), cancel: false }));
+            OcrRun { doc: app.active_ids().unwrap().1, progress, automatic }
+        };
+        let label = |app: &PdfCraftApp| app.session.get(app.active_ids().unwrap().1).unwrap().can_undo().map(String::from);
+
+        let mut app = app_with(scan());
+        app.ocr_run = Some(finished(&app, true));
+        app.mode = Mode::Read;
+        app.poll_ocr();
+        assert!(app.ocr_run.is_some() && label(&app).is_none(), "waits in Read mode");
+        app.mode = Mode::Edit;
+        app.dialog = Some(Dialog::JsConsole);
+        app.poll_ocr();
+        assert!(app.ocr_run.is_some() && label(&app).is_none(), "waits beneath a dialog");
+        app.dialog = None;
+        app.poll_ocr();
+        assert!(app.ocr_run.is_none(), "taken once they are gone");
+        assert_eq!(label(&app).as_deref(), Some("Recognize text"));
+
+        // A run the user asked for is not held back.
+        let mut app = app_with(scan());
+        app.ocr_run = Some(finished(&app, false));
+        app.mode = Mode::Read;
+        app.poll_ocr();
+        assert_eq!(label(&app).as_deref(), Some("Recognize text"));
     }
 }
