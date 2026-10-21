@@ -235,6 +235,8 @@ impl Walker<'_> {
         self.ov.access.get(som).cloned().unwrap_or_else(|| access_name(a).to_string())
     }
 
+    /// The live node of field `f`, instance `index` under `parent_som`: its value from the data
+    /// (as scripts read it) or its default, a radio button's from its group's choice `radio`.
     fn field(&mut self, f: &Field, parent_som: &str, index: usize, radio: Option<&str>) -> FormNode {
         let som = child_som(parent_som, f.common.name.as_deref().or(Some("field")), index);
         let data_value = self.data.and_then(|d| d.value_at(&data_path(self.tpl, &som))).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
@@ -244,7 +246,7 @@ impl Walker<'_> {
                 let on = f.items.first().cloned().unwrap_or_default();
                 if selected == on { on } else { String::new() }
             }
-            (None, Some(v)) => f.saved_value(&v),
+            (None, Some(v)) => f.saved_value(&Walker::as_scripts_read(f, &v)),
             (None, None) => f.value.plain().map(|v| f.saved_value(v.trim())).unwrap_or_default(),
         };
         self.push_events(&som, &f.scripts, f.calculate.as_ref(), f.validate.as_ref(), f.validate_message.as_deref());
@@ -264,12 +266,19 @@ impl Walker<'_> {
         }
     }
 
-    /// What [`Self::field`] gives a field outside an exclusion group: its data value (as saved)
-    /// or its template default.
+    /// A value the data holds as scripts read it: a date the field's data picture writes in
+    /// another form (`20261018`) is the ISO date (`2026-10-18`) another viewer gives scripts as
+    /// `rawValue`. Other values, and dates that don't match the picture, are as they are.
+    fn as_scripts_read(f: &Field, v: &str) -> String {
+        crate::data::data_to_iso(v, crate::data::data_date_letters(f).as_deref())
+    }
+
+    /// What [`Self::field`] gives a field outside an exclusion group: its data value (as saved,
+    /// as scripts read it) or its template default.
     fn plain_field_value(tpl: &Template, data: Option<&DataNode>, f: &Field, som: &str) -> String {
         let data_value = data.and_then(|d| d.value_at(&data_path(tpl, som))).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
         match data_value {
-            Some(v) => f.saved_value(&v),
+            Some(v) => f.saved_value(&Walker::as_scripts_read(f, &v)),
             None => f.value.plain().map(|v| f.saved_value(v.trim())).unwrap_or_default(),
         }
     }
@@ -602,6 +611,8 @@ pub fn refresh_value(live: &mut FormNode, tpl: &Template, data: Option<&DataNode
     if path.is_empty() {
         return None;
     }
+    /// Down the one branch of `n` that `path` leads to from segment `pos`, giving each field
+    /// bound there its value from `data`; `None` when something there needs a rebuild.
     fn walk(
         n: &mut FormNode,
         tpl: &Template,

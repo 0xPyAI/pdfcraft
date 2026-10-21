@@ -407,6 +407,8 @@ fn parse_items(n: XmlNode, warnings: &mut Vec<String>) -> (Vec<String>, Vec<Stri
     (shown, saved)
 }
 
+/// A `<field>` element as the model's [`Field`]: its widget kind, caption, value, items,
+/// pictures (edit and data), scripts and access.
 fn parse_field(n: XmlNode, warnings: &mut Vec<String>) -> Field {
     let ui = child(n, "ui");
     let ui_el = ui.and_then(|u| u.children().find(|c| c.is_element() && c.tag_name().name() != "extras" && c.tag_name().name() != "picture"));

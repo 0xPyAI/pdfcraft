@@ -4155,6 +4155,8 @@ fn dynamic_xfa_forms_open_with_the_values_and_rows_of_their_data() {
     assert!(!doc.dirty);
 }
 
+/// A static XFA form's fields take their values from the datasets on opening, and edits are
+/// written back there.
 #[test]
 fn static_xfa_forms_take_their_values_from_the_datasets_and_write_them_back() {
     let original = Arc::new(pdfcraft_xfa::fixtures::static_shell("<form1><page1><name>Ada</name><agree>1</agree></page1></form1>"));
@@ -4206,6 +4208,8 @@ fn xfa_dates_are_written_and_read_back_in_their_data_picture() {
     assert_eq!(value("when"), vec!["10/18/2026".to_string()]);
 }
 
+/// Same-named date fields are each written in their own data picture, and a data picture
+/// without a day keeps the ISO date.
 #[test]
 fn each_xfa_date_field_is_written_in_its_own_data_picture_and_a_partial_one_keeps_iso() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::sibling_date_template("")));
@@ -4231,6 +4235,7 @@ fn each_xfa_date_field_is_written_in_its_own_data_picture_and_a_partial_one_keep
     }
 }
 
+/// Data no field binds to (other namespaces, history) survives an edit and a save.
 #[test]
 fn xfa_data_no_field_binds_to_survives_an_edit_and_save() {
     // Regression: editing a field replaced the whole data element with the fields' values.

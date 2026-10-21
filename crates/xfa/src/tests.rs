@@ -325,6 +325,7 @@ fn datasets_parse_into_a_tree_and_som_paths_find_their_nodes() {
     assert!(parse_datasets("<xdp:xdp xmlns:xdp=\"x\"/>").is_none());
 }
 
+/// Dates convert between ISO and date patterns both ways, and what isn't a date is kept.
 #[test]
 fn dates_convert_between_iso_and_acrobat_patterns() {
     assert_eq!(iso_to_pattern("2001-02-03", "yyyy-mm-dd"), "2001-02-03");
@@ -350,6 +351,7 @@ fn a_date_is_read_from_the_data_in_its_data_picture() {
     assert_eq!(by("when").value.as_deref(), Some("10/18/2026"), "no data picture: the data holds ISO");
 }
 
+/// A SOM path names the template field its segment numbers count to, repeating rows included.
 #[test]
 fn som_paths_name_the_template_field_their_numbers_count_to() {
     let xml = r#"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
@@ -373,6 +375,7 @@ fn som_paths_name_the_template_field_their_numbers_count_to() {
     assert_eq!(picture("form[0].u[0]").as_deref(), Some("inner"));
 }
 
+/// Refreshing a value in place uses the field's own template field, not a same-named one's.
 #[test]
 fn a_refreshed_field_takes_its_value_from_its_own_template_field() {
     // Two text fields named `x` with different defaults; the data holds only the first.
@@ -391,6 +394,24 @@ fn a_refreshed_field_takes_its_value_from_its_own_template_field() {
     assert_eq!(value(&live, "form[0].x[1]").as_deref(), Some("second"), "not the first x's default");
 }
 
+/// Scripts read a date as the ISO date another viewer gives them as `rawValue`
+/// (`2026-10-18`), whatever the field's data picture writes in the data (`20261018`), so a
+/// script's `String(rawValue).length == 10` holds. A field without a data picture keeps the
+/// data's ISO date, and refreshing a value in place reads it the same way.
+#[test]
+fn scripts_read_a_date_as_iso_whatever_its_data_picture_writes() {
+    let xml = bound_date_template("<form><page><due>20261018</due><when>2026-10-18</when></page></form>");
+    let (tpl, _) = parse(&xml).unwrap();
+    let data = parse_datasets(&xml).unwrap();
+    let mut live = form_tree(&tpl, Some(&data), &Overrides::default()).root;
+    let value = |live: &crate::script::FormNode, som: &str| node_at(live, som).map(|n| n.value.clone());
+    assert_eq!(value(&live, "form[0].page[0].due[0]").as_deref(), Some("2026-10-18"));
+    assert_eq!(value(&live, "form[0].page[0].when[0]").as_deref(), Some("2026-10-18"));
+    let later = parse_datasets(&bound_date_template("<form><page><due>20261019</due><when>2026-10-18</when></page></form>")).unwrap();
+    assert_eq!(crate::script::refresh_value(&mut live, &tpl, Some(&later), "form[0].page[0].due[0]"), Some(true));
+    assert_eq!(value(&live, "form[0].page[0].due[0]").as_deref(), Some("2026-10-19"));
+}
+
 /// The node of `live` at `som`.
 fn node_at<'a>(live: &'a crate::script::FormNode, som: &str) -> Option<&'a crate::script::FormNode> {
     if live.som == som {
@@ -399,6 +420,8 @@ fn node_at<'a>(live: &'a crate::script::FormNode, som: &str) -> Option<&'a crate
     live.children.iter().find_map(|c| node_at(c, som))
 }
 
+/// A date its data picture can't hold (2050 in a two-digit year) is written as ISO and reads
+/// back as written.
 #[test]
 fn a_date_its_data_picture_cant_hold_is_written_as_iso() {
     use crate::data::{data_to_iso, iso_to_data};
@@ -410,6 +433,7 @@ fn a_date_its_data_picture_cant_hold_is_written_as_iso() {
     }
 }
 
+/// The datasets fill the fields and add the rows of repeating subforms.
 #[test]
 fn data_fills_the_fields_and_adds_rows() {
     let form = layout_xml(&template_with_data(1, DATA)).unwrap();

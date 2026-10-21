@@ -553,6 +553,8 @@ fn path_of(tpl: Option<&Template>, som: &str) -> DataPath {
     }
 }
 
+/// The values the datasets should hold for `fields`, by data path: dates in each field's data
+/// picture (or ISO), check and radio states, choice values as saved.
 fn wanted(doc: &Document, fields: &[FieldDatum], tpl: Option<&Template>) -> Vec<Want> {
     let mut out = Vec::new();
     for f in fields {
@@ -1636,6 +1638,8 @@ pub fn read_values_with(doc: &Document, tpl: Option<&Template>, fields: &[FieldD
     with_template(doc, tpl, |t| values_at(doc, t, fields))
 }
 
+/// The values the document's datasets hold for `fields`, read in each field's data picture and
+/// shown in its own pattern; only fields the data mentions.
 fn values_at(doc: &Document, tpl: Option<&Template>, fields: &[FieldDatum]) -> Vec<(String, FieldData)> {
     let Ok(Some(p)) = crate::read_packets(doc) else { return Vec::new() };
     let Some(data) = parse_datasets(&p.xdp) else { return Vec::new() };

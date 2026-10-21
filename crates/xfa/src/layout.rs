@@ -399,6 +399,8 @@ fn date_pattern(picture: Option<&str>) -> String {
     picture.and_then(date_letters).unwrap_or_else(|| "yyyy-mm-dd".into())
 }
 
+/// The PDF action a button's click script becomes: a native one for a single-statement idiom
+/// (reset, print, save, a link), else the script itself.
 fn button_action(scripts: &[Script]) -> Option<Action> {
     let s = scripts.iter().find(|s| s.activity == "click")?;
     let t = &s.text;
@@ -1450,6 +1452,8 @@ impl Layouter<'_> {
         if *n == 1 { base } else { format!("{base}_{n}") }
     }
 
+    /// Lay out field `f` in `rect`: its caption, its widget of the right kind, and its value
+    /// from the data.
     fn draw_field(
         &mut self,
         f: &Field,
