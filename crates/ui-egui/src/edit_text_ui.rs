@@ -536,10 +536,13 @@ impl ImageSelection {
     }
 }
 
-/// The page raster's picture of the box `from`, stretched into `to` over a blank where it was.
-fn stretched_picture(painter: &egui::Painter, xf: &PageXform, tex: egui::TextureId, from: Rect, to: Rect) {
+/// The page raster's picture of the box `from`, stretched into `to`, over blanks at `blank` (where
+/// the screen may still show the picture).
+fn stretched_picture(painter: &egui::Painter, xf: &PageXform, tex: egui::TextureId, blank: &[Rect], from: Rect, to: Rect) {
     let clipped = painter.with_clip_rect(painter.clip_rect().intersect(xf.rect));
-    clipped.rect_filled(from, CornerRadius::ZERO, Color32::WHITE);
+    for r in blank {
+        clipped.rect_filled(*r, CornerRadius::ZERO, Color32::WHITE);
+    }
     let mut mesh = egui::Mesh::with_texture(tex);
     for (a, b) in [
         (from.left_top(), to.left_top()),
@@ -724,14 +727,21 @@ pub(crate) fn image_input(
         };
         // Until the page is rendered again its raster has an applied move or resize's picture
         // where it was: it stays blanked there and drawn where it went.
-        let (out_of_date, raster) = (view.page_out_of_date(page), view.page_raster(page));
+        // The whole-page raster and its tiles are replaced separately: the old frame stays blanked
+        // while anything still shows the picture there, but its pixels come from the old frame
+        // only while the whole-page raster itself is the old one. Once that is fresh it has the
+        // picture where it went, and that is where they come from.
+        let (out_of_date, raster_old, raster) = (view.page_out_of_date(page), view.page_raster_out_of_date(page), view.page_raster(page));
         let screen = |r: Rect| Rect::from_two_pos(xf.norm_to_screen(r.min.x, r.min.y), xf.norm_to_screen(r.max.x, r.max.y));
-        // Where the raster on screen has the picture: where it was before an applied move that
-        // hasn't been rendered yet, else its frame. Another drag starts from there too.
-        let drawn_at = view.image_selection.as_ref().and_then(|s| s.settled).filter(|_| out_of_date).map(|(from, _)| from);
+        // Where the screen may still show the picture from before an applied move, while the page
+        // isn't drawn again yet. Another drag keeps it blanked too.
+        let left_at = view.image_selection.as_ref().and_then(|s| s.settled).filter(|_| out_of_date).map(|(from, _)| from);
         if let Some(s) = view.image_selection.as_mut().filter(|s| s.drag.is_none()) {
             match (s.settled, raster) {
-                (Some((from, to)), Some(tex)) if out_of_date => stretched_picture(painter, xf, tex, screen(from), screen(to)),
+                (Some((from, to)), Some(tex)) if out_of_date => {
+                    let source = if raster_old { from } else { to };
+                    stretched_picture(painter, xf, tex, &[screen(from)], screen(source), screen(to));
+                }
                 _ => s.settled = None,
             }
         }
@@ -792,7 +802,10 @@ pub(crate) fn image_input(
                 if preview != b
                     && let Some(tex) = view.page_raster(page)
                 {
-                    stretched_picture(painter, xf, tex, drawn_at.map_or(b, screen), preview);
+                    // Its pixels: where the whole-page raster has it.
+                    let source = left_at.filter(|_| raster_old).map_or(b, screen);
+                    let blank: Vec<Rect> = left_at.map(screen).into_iter().chain(std::iter::once(b)).collect();
+                    stretched_picture(painter, xf, tex, &blank, source, preview);
                 }
                 painter.rect_filled(visible, CornerRadius::ZERO, ACCENT.gamma_multiply(0.04));
                 painter.rect_stroke(visible, CornerRadius::ZERO, Stroke::new(1.5, ACCENT), egui::StrokeKind::Outside);
@@ -805,7 +818,7 @@ pub(crate) fn image_input(
                         let ((u0, v0), (u1, v1)) = (xf.screen_to_norm(r.min), xf.screen_to_norm(r.max));
                         Rect::from_two_pos(Pos2::new(u0, v0), Pos2::new(u1, v1))
                     };
-                    s.settled = (preview != b).then(|| (drawn_at.unwrap_or_else(|| norm(b)), norm(preview)));
+                    s.settled = (preview != b).then(|| (left_at.unwrap_or_else(|| norm(b)), norm(preview)));
                 }
                 if preview != b {
                     view.pending_edit =
