@@ -62,6 +62,15 @@ pub struct BatchProgress {
     pub message: Option<String>,
 }
 
+/// A page Edit should read now (see [`PdfCraftApp::scan_to_read`]).
+struct ScanToRead {
+    view: usize,
+    doc: DocId,
+    page: usize,
+    /// The document's edit generation when it was judged.
+    generation: u64,
+}
+
 pub struct OcrRun {
     pub doc: DocId,
     pub progress: Arc<Mutex<OcrProgress>>,
@@ -180,6 +189,27 @@ impl PdfCraftApp {
     /// background picture) is left alone, and is judged again only when the document changes. It
     /// is one undoable step, "Recognize text", and is not run again for that page after Undo.
     pub(crate) fn auto_ocr_scanned_page(&mut self) {
+        let Some(scan) = self.scan_to_read() else { return };
+        if !pdfcraft_engine::ocr::available() {
+            self.views[scan.view].auto_ocr_skipped.insert(scan.page, scan.generation);
+            return;
+        }
+        self.views[scan.view].auto_ocr_tried.insert(scan.page);
+        // Only a page with no text of its own is read. Comments and text boxes over the picture do
+        // not count as its text (a scan with a few comments is still a scan, as in Acrobat), but
+        // a page with real text and a background picture is left alone.
+        let mut settings = self.ocr_draft.settings();
+        settings.skip_text_pages = true;
+        settings.native_text_only = true;
+        self.start_ocr_pages(scan.doc, &[scan.page], settings, true);
+    }
+
+    /// The page Edit should read now, if there is one: Edit is on outside Read mode with no dialog
+    /// open, nothing else is being recognized, the document may be changed, the page in view has
+    /// not been read before (nor been found no scan since the document last changed), and an image
+    /// covers at least half of it. Needs no OCR models, so the rules can be tested without them;
+    /// the page's own text is judged by the run itself.
+    fn scan_to_read(&mut self) -> Option<ScanToRead> {
         // Edit is on when its panel is open (the Edit tab) or Edit text & images or Add text is picked,
         // the same test the page view uses for editing content.
         let editing = (self.left_open && self.left == crate::LeftPanel::Tool("edit"))
@@ -188,41 +218,34 @@ impl PdfCraftApp {
         // dialog or prompt: nothing may change the document under those. It is tried again once
         // they are gone.
         if !editing || self.mode == crate::Mode::Read || self.modal_open() || self.ocr_run.is_some() || self.ocr_batch.is_some() {
-            return;
+            return None;
         }
-        let Some((vi, id)) = self.active_ids() else { return };
-        let page = self.views[vi].current;
-        if self.views[vi].auto_ocr_tried.contains(&page) {
-            return;
+        let (view, doc) = self.active_ids()?;
+        let page = self.views[view].current;
+        if self.views[view].auto_ocr_tried.contains(&page) {
+            return None;
         }
-        let Some(doc) = self.session.get(id) else { return };
-        if doc.read_only_reason.is_some() || !doc.allows_modification() {
-            return;
+        let document = self.session.get(doc)?;
+        if document.read_only_reason.is_some() || !document.allows_modification() {
+            return None;
         }
         // A page found not to be a scan is judged again only once the document has changed, not
         // every frame (listing its images parses the page).
-        let generation = doc.edit_generation();
-        if self.views[vi].auto_ocr_skipped.get(&page) == Some(&generation) {
-            return;
+        let generation = document.edit_generation();
+        if self.views[view].auto_ocr_skipped.get(&page) == Some(&generation) {
+            return None;
         }
-        let Some(info) = doc.info.pages.get(page) else { return };
+        let info = document.info.pages.get(page)?;
         let page_area = f64::from(info.width) * f64::from(info.height);
-        let covered = doc.page_images(page).iter().any(|i| {
+        let covered = document.page_images(page).iter().any(|i| {
             let [x0, y0, x1, y1] = i.visible_rect.unwrap_or(i.rect);
             page_area > 0.0 && ((x1 - x0) * (y1 - y0)).abs() >= 0.5 * page_area
         });
-        if !covered || !pdfcraft_engine::ocr::available() {
-            self.views[vi].auto_ocr_skipped.insert(page, generation);
-            return;
+        if !covered {
+            self.views[view].auto_ocr_skipped.insert(page, generation);
+            return None;
         }
-        self.views[vi].auto_ocr_tried.insert(page);
-        // Only a page with no text of its own is read. Comments and text boxes over the picture do
-        // not count as its text (a scan with a few comments is still a scan, as in Acrobat), but
-        // a page with real text and a background picture is left alone.
-        let mut settings = self.ocr_draft.settings();
-        settings.skip_text_pages = true;
-        settings.native_text_only = true;
-        self.start_ocr_pages(id, &[page], settings, true);
+        Some(ScanToRead { view, doc, page, generation })
     }
 
     /// Recognize `pages` (0-based; empty = all) of document `id` in the background.
@@ -431,5 +454,89 @@ impl PdfCraftApp {
             }
             Err(e) => self.notify_error(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Dialog, LeftPanel, Mode, QuickTool};
+    use pdfcraft_engine::{Edit, Session};
+
+    /// A one-page PDF that is one picture covering the page.
+    fn scan() -> Vec<u8> {
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(8, 8, image::Rgba([250, 250, 250, 255])))
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        Session::new().create_from_images(&[("scan.png".into(), png.into_inner())]).unwrap().to_vec()
+    }
+
+    fn app_with(pdf: Vec<u8>) -> PdfCraftApp {
+        let mut app = PdfCraftApp::new();
+        app.open_bytes("doc.pdf", None, pdf).unwrap();
+        app.quick_tool = QuickTool::EditText;
+        app
+    }
+
+    fn found(app: &mut PdfCraftApp) -> Option<usize> {
+        app.scan_to_read().map(|s| s.page)
+    }
+
+    /// These rules need no OCR models (the run itself judges the page's own text), so they are
+    /// tested everywhere, unlike the tests that recognize something.
+    #[test]
+    fn edit_reads_a_page_that_is_a_picture_and_no_other() {
+        assert_eq!(found(&mut app_with(scan())), Some(0));
+        let text = Session::new().create_from_text("t", "Real text, no picture").unwrap().to_vec();
+        assert_eq!(found(&mut app_with(text)), None, "a page of text is no scan");
+        let blank = Session::new().create_blank(595.0, 842.0, 1).unwrap().to_vec();
+        assert_eq!(found(&mut app_with(blank)), None, "nor is a blank page");
+    }
+
+    #[test]
+    fn only_edit_being_on_starts_it() {
+        let mut app = app_with(scan());
+        app.quick_tool = QuickTool::Select;
+        assert_eq!(found(&mut app), None, "another tool");
+        // The Edit tab's panel counts, as for the page view, with no tool picked.
+        app.left = LeftPanel::Tool("edit");
+        app.left_open = true;
+        assert_eq!(found(&mut app), Some(0), "the Edit panel");
+        app.left_open = false;
+        assert_eq!(found(&mut app), None, "the Edit panel closed");
+    }
+
+    #[test]
+    fn it_waits_for_read_mode_and_dialogs_to_end() {
+        let mut app = app_with(scan());
+        app.mode = Mode::Read;
+        assert_eq!(found(&mut app), None, "Read mode");
+        app.mode = Mode::Edit;
+        app.dialog = Some(Dialog::JsConsole);
+        assert_eq!(found(&mut app), None, "beneath a dialog");
+        app.dialog = None;
+        assert_eq!(found(&mut app), Some(0), "tried again once they are gone");
+    }
+
+    #[test]
+    fn a_page_is_read_once_and_a_page_found_no_scan_is_judged_again_after_a_change() {
+        let mut app = app_with(scan());
+        app.views[0].auto_ocr_tried.insert(0);
+        assert_eq!(found(&mut app), None, "a page already read is not read again (Undo sticks)");
+
+        // A blank page is no scan; it is judged again only once the document changes.
+        let blank = Session::new().create_blank(595.0, 842.0, 1).unwrap().to_vec();
+        let mut app = app_with(blank);
+        assert_eq!(found(&mut app), None);
+        assert!(app.views[0].auto_ocr_skipped.contains_key(&0), "remembered with the document's generation");
+        let id = app.active_ids().unwrap().1;
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(8, 8, image::Rgba([250, 250, 250, 255])))
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let add = Edit::AddImage { page: 0, rect: Some([0.0, 0.0, 595.0, 842.0]), name: "scan.png".into(), bytes: Arc::new(png.into_inner()) };
+        app.session.apply(id, add).unwrap();
+        assert_eq!(found(&mut app), Some(0), "a picture over the page makes it a scan");
     }
 }
