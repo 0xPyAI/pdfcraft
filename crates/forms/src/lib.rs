@@ -1293,6 +1293,30 @@ pub(crate) fn ask_viewers_to_redraw(doc: &mut Document) -> Result<(), FormError>
     Ok(())
 }
 
+/// Whether any text field with the Password flag holds a value (`/V`) in `doc`.
+pub fn has_password_values(doc: &Document) -> bool {
+    fields(doc).iter().any(|f| f.kind == FieldKind::Text && f.has(flags::PASSWORD) && doc.get(f.obj).as_dict().is_some_and(|d| d.get(b"V").is_some()))
+}
+
+/// Remove the value (`/V`) of every text field with the Password flag, for a copy of the
+/// document about to be written to a file (#3926). ISO 32000-2 §12.7.5.3, Table 231, Password
+/// flag, note: "it is imperative that PDF processors never store the value of the text field in
+/// the PDF file if this flag is set". The appearance keeps its masking characters. Returns how
+/// many values were removed.
+pub fn clear_password_values(doc: &mut Document) -> Result<usize, FormError> {
+    let holders: Vec<ObjRef> = fields(doc)
+        .into_iter()
+        .filter(|f| f.kind == FieldKind::Text && f.has(flags::PASSWORD) && doc.get(f.obj).as_dict().is_some_and(|d| d.get(b"V").is_some()))
+        .map(|f| f.obj)
+        .collect();
+    for r in &holders {
+        doc.update_dict(*r, |d| {
+            d.remove(b"V");
+        })?;
+    }
+    Ok(holders.len())
+}
+
 /// Whether the form asks viewers to draw its fields' appearances themselves (`/NeedAppearances`).
 pub fn need_appearances(doc: &Document) -> bool {
     acroform(doc).is_some_and(|af| matches!(af.get(b"NeedAppearances").map(|o| doc.resolve(o)).as_deref(), Some(Object::Bool(true))))
