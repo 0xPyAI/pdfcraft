@@ -1036,6 +1036,53 @@ impl DocView {
         (!quads.is_empty()).then_some((s.page, quads))
     }
 
+    /// Where a bookmark made now should go: the page and the `/XYZ` position `[left, top]` in user
+    /// space. With text selected it is the corner of the selection that shows at its top-left
+    /// (its page, both coordinates); otherwise the top of the window (the page showing there, and
+    /// only the position along the window's vertical, so the reader's other scroll position and
+    /// zoom are kept). `None` before the first frame has laid pages out, when the bookmark just
+    /// goes to the current page.
+    pub(crate) fn bookmark_position(&self, info: &DocInfo) -> Option<(usize, [Option<f32>; 2])> {
+        if let Some(sel) = self.selection
+            && let Some(text) = self.texts.get(&sel.page)
+            && let Some(p) = info.pages.get(sel.page)
+        {
+            // The selection's bounds in view space, which View ▸ Rotate View leaves unturned: the
+            // corner at the screen's top-left is a different one for each quarter turn.
+            let [x0, y0, x1, y1] = sel.rects(text).iter().fold([f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY], |b, r| {
+                [b[0].min(r[0]), b[1].min(r[1]), b[2].max(r[2]), b[3].max(r[3])]
+            });
+            let (x, y) = match self.rotation {
+                90 => (x0, y1),
+                180 => (x1, y1),
+                270 => (x1, y0),
+                _ => (x0, y0),
+            };
+            if x.is_finite() && y.is_finite() {
+                return Some((sel.page, p.xyz_for_view(Some(x), Some(y))));
+            }
+        }
+        // The page showing at the window's top edge: one that crosses it (the first, in a spread
+        // of pages of different heights, whose shorter page can start below it), else the
+        // nearest one below.
+        let top = self.viewport_screen.top();
+        let showing = || self.screen_xforms.iter().filter(|(_, xf)| xf.rect.bottom() > top);
+        let (page, xf) = showing()
+            .filter(|(_, xf)| xf.rect.top() <= top)
+            .min_by_key(|(p, _)| *p)
+            .or_else(|| showing().min_by(|a, b| a.1.rect.top().total_cmp(&b.1.rect.top()).then(a.0.cmp(&b.0))))?;
+        let p = info.pages.get(*page)?;
+        // Above the page (in the gap before it) is the page's own top. The window's vertical is
+        // the view's y, or its x when the view is turned a quarter.
+        let (x, y) = xf.screen_to_view(pos2(xf.rect.center().x, top.max(xf.rect.top())));
+        let at = if xf.rot.is_multiple_of(180) {
+            p.xyz_for_view(None, Some(y.clamp(0.0, p.height)))
+        } else {
+            p.xyz_for_view(Some(x.clamp(0.0, p.width)), None)
+        };
+        Some((*page, at))
+    }
+
     /// A page's thumbnail texture, when rendered.
     pub(crate) fn thumb_id(&self, page: usize) -> Option<egui::TextureId> {
         self.thumbs.get(&page).map(|t| t.tex.id())

@@ -1983,7 +1983,14 @@ fn split_at_bookmarks_with_equal_titles_keeps_every_part() {
     let mut h = organize(3);
     h.state_mut().export_dir_override = Some(dir.to_string_lossy().into_owned());
     for (index, title) in [(0, "Same"), (1, "Same"), (2, "same")] {
-        h.state_mut().apply_edit(pdfcraft_engine::Edit::AddBookmark { parent: vec![], index, title: title.into(), page: index });
+        h.state_mut().apply_edit(pdfcraft_engine::Edit::AddBookmark {
+            parent: vec![],
+            index,
+            title: title.into(),
+            page: index,
+            left: None,
+            top: None,
+        });
     }
     h.state_mut().split_draft.mode = pdfcraft_ui_egui::SplitMode::Bookmarks;
     h.state_mut().run_command("page.split");

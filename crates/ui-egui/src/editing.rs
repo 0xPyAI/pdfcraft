@@ -1070,7 +1070,11 @@ impl PdfCraftApp {
         let edit = match action {
             A::New => {
                 let n = self.session.get(id).map_or(0, |d| d.info.outline.len());
-                self.apply_edit(Edit::AddBookmark { parent: vec![], index: n, title: "Untitled".into(), page: current });
+                // Where the reader is: the selection's corner, else the top of the window.
+                let (page, [left, top]) =
+                    self.session.get(id).and_then(|d| self.views.get(i)?.bookmark_position(&d.info)).unwrap_or((current, [None, None]));
+                let (left, top) = (left.map(f64::from), top.map(f64::from));
+                self.apply_edit(Edit::AddBookmark { parent: vec![], index: n, title: "Untitled".into(), page, left, top });
                 // Like Acrobat: the new bookmark starts in rename mode.
                 self.bookmark_rename = Some((vec![n], "Untitled".into()));
                 self.right = Some(crate::RightPanel::Bookmarks);

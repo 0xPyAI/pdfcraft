@@ -154,7 +154,7 @@ fn control_button_focus_preserves_document_undo_redo_shortcuts() {
 #[test]
 fn control_text_focus_retains_text_undo_ownership() {
     let (mut h, c) = harness_pages(2);
-    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddBookmark { parent: vec![], index: 0, title: "Target".into(), page: 0 });
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddBookmark { parent: vec![], index: 0, title: "Target".into(), page: 0, left: None, top: None });
     ok(&mut h, &c, "ui.command", json!({"id": "page.insert_blank"}));
     ok(&mut h, &c, "ui.set", json!({"key": "panel", "value": "bookmarks"}));
     let widgets = ok(&mut h, &c, "ui.inspect", json!({"query": "Search", "role": "TextInput"}));
@@ -239,7 +239,7 @@ fn control_quit_clean_document_requests_normal_window_close() {
 fn bookmark_titles_can_be_searched_over_control() {
     let (mut h, c) = harness();
     for (index, title, page) in [(0, "Background", 0), (1, "Target chapter", 3)] {
-        h.state_mut().apply_edit(pdfcraft_engine::Edit::AddBookmark { parent: vec![], index, title: title.into(), page });
+        h.state_mut().apply_edit(pdfcraft_engine::Edit::AddBookmark { parent: vec![], index, title: title.into(), page, left: None, top: None });
     }
     ok(&mut h, &c, "ui.set", json!({ "key": "panel", "value": "bookmarks" }));
     h.run_steps(3);
@@ -1361,8 +1361,22 @@ fn docking_renders_real_pdf_default_floating_and_redocked() {
             let (mut h, c) = harness_pages_at(5, width, scale);
             ok(&mut h, &c, "ui.resize", json!({"width":width,"height":900}));
             ok(&mut h, &c, "ui.set", json!({"key":"panel","value":"bookmarks"}));
-            h.state_mut().apply_edit(pdfcraft_engine::Edit::AddBookmark { parent: vec![], index: 0, title: "Overview".into(), page: 0 });
-            h.state_mut().apply_edit(pdfcraft_engine::Edit::AddBookmark { parent: vec![], index: 1, title: "Details".into(), page: 2 });
+            h.state_mut().apply_edit(pdfcraft_engine::Edit::AddBookmark {
+                parent: vec![],
+                index: 0,
+                title: "Overview".into(),
+                page: 0,
+                left: None,
+                top: None,
+            });
+            h.state_mut().apply_edit(pdfcraft_engine::Edit::AddBookmark {
+                parent: vec![],
+                index: 1,
+                title: "Details".into(),
+                page: 2,
+                left: None,
+                top: None,
+            });
             for state in ["default", "floating", "redocked"] {
                 if state == "floating" {
                     ok(&mut h, &c, "ui.dock", json!({"operation":"float", "panel":"inspector", "rect":[160,100,330,480]}));

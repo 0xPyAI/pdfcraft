@@ -6855,3 +6855,64 @@ fn text_box_and_callout_fill_and_border_through_tools() {
         assert_eq!(session.get(saved).unwrap().comment_props(0, index).unwrap().fill, None);
     }
 }
+
+/// Where the first bookmark on `path` goes, as `bookmark_list` reports it: points from the
+/// top-left of the displayed page.
+fn bookmark_destination(a: &mut Automation, doc: u64, title: &str) -> Value {
+    let list = ok(a, "bookmark_list", json!({ "doc": doc }))["bookmarks"].clone();
+    let row = list.as_array().unwrap().iter().find(|r| r["title"] == title).unwrap_or_else(|| panic!("{title} in {list}"));
+    row["destination"].clone()
+}
+
+#[test]
+fn a_bookmark_added_at_a_position_reports_the_same_position_back_on_any_page_rotation() {
+    let dir = workdir("bookmark-position");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_rotate", json!({ "doc": doc, "pages": [3], "degrees": 90 }));
+    let near = |v: &Value, want: Option<f64>, what: &str| match want {
+        Some(w) => assert!((v.as_f64().unwrap_or_else(|| panic!("{what}: {v}")) - w).abs() < 0.05, "{what}: {v} vs {w}"),
+        None => assert!(v.is_null(), "{what}: {v}"),
+    };
+    // Page 1 upright, page 3 turned a quarter: a displayed top and left come back as given.
+    for (page, title) in [(1, "Upright"), (3, "Turned")] {
+        for (suffix, left, top) in [(" both", Some(72.5), Some(120.25)), (" top", None, Some(200.0)), (" left", Some(50.0), None)] {
+            let name = format!("{title}{suffix}");
+            let mut args = json!({ "doc": doc, "title": name, "page": page });
+            if let Some(l) = left {
+                args["left"] = json!(l);
+            }
+            if let Some(t) = top {
+                args["top"] = json!(t);
+            }
+            ok(&mut a, "bookmark_add", args);
+            let d = bookmark_destination(&mut a, doc, &name);
+            assert_eq!(d["fit"], "XYZ", "{name}");
+            near(&d["left"], left, &format!("{name} left"));
+            near(&d["top"], top, &format!("{name} top"));
+            assert!(d["zoom"].is_null(), "the zoom is kept: {name}");
+        }
+    }
+    // No position is the page top at the reader's zoom, as before.
+    ok(&mut a, "bookmark_add", json!({ "doc": doc, "title": "Plain", "page": 2 }));
+    let plain = bookmark_destination(&mut a, doc, "Plain");
+    assert!(plain["left"].is_null() && plain["top"].is_null() && plain["zoom"].is_null(), "{plain}");
+
+    // A position that is not a usable number is refused and adds nothing.
+    let before = ok(&mut a, "bookmark_list", json!({ "doc": doc }))["bookmarks"].clone();
+    for bad in [json!("high"), json!(2_000_000), json!(-2_000_000.5), json!(true)] {
+        for key in ["top", "left"] {
+            let args = json!({ "doc": doc, "title": "Bad", "page": 1, key: bad });
+            assert!(matches!(a.call("bookmark_add", &args), Err(ToolError::InvalidArgs(_))), "{key} {bad}");
+        }
+    }
+    assert_eq!(ok(&mut a, "bookmark_list", json!({ "doc": doc }))["bookmarks"], before, "nothing was added");
+
+    // It survives a save and reopen.
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "placed.pdf" }));
+    let mut b = auto(&dir);
+    let re = ok(&mut b, "doc_open", json!({ "path": "placed.pdf" }))["doc"].as_u64().unwrap();
+    let d = bookmark_destination(&mut b, re, "Turned both");
+    near(&d["left"], Some(72.5), "reopened left");
+    near(&d["top"], Some(120.25), "reopened top");
+}

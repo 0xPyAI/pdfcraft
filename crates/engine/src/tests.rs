@@ -1371,9 +1371,9 @@ fn outline_titles(items: &[pdfcraft_render::OutlineItem]) -> Vec<String> {
 fn bookmark_edits_show_in_the_viewer_undo_and_save() {
     let (mut s, id) = session_with(3);
     let titles = |s: &Session| outline_titles(&s.get(id).unwrap().info.outline);
-    s.apply(id, Edit::AddBookmark { parent: vec![], index: 0, title: "Start".into(), page: 0 }).unwrap();
-    s.apply(id, Edit::AddBookmark { parent: vec![], index: 1, title: "End".into(), page: 2 }).unwrap();
-    s.apply(id, Edit::AddBookmark { parent: vec![1], index: 0, title: "Détail".into(), page: 1 }).unwrap();
+    s.apply(id, Edit::AddBookmark { parent: vec![], index: 0, title: "Start".into(), page: 0, left: None, top: None }).unwrap();
+    s.apply(id, Edit::AddBookmark { parent: vec![], index: 1, title: "End".into(), page: 2, left: None, top: None }).unwrap();
+    s.apply(id, Edit::AddBookmark { parent: vec![1], index: 0, title: "Détail".into(), page: 1, left: None, top: None }).unwrap();
     // The inspector (an independent parser) sees the same tree and destinations.
     assert_eq!(titles(&s), ["Start→1", "End→3[Détail→2]"]);
     s.apply(id, Edit::MoveBookmark { from: vec![1, 0], to_parent: vec![], index: 0 }).unwrap();
@@ -2735,8 +2735,8 @@ fn split_by_size_and_bookmarks_and_page_filters() {
     assert_eq!(parts.last().unwrap().1, 6, "every page is in a part");
     assert_eq!(s.split_by_size(id, 1).unwrap().len(), 6, "pages larger than the limit stand alone");
     // Top-level bookmarks name the parts.
-    s.apply(id, Edit::AddBookmark { parent: vec![], index: 0, title: "Intro".into(), page: 0 }).unwrap();
-    s.apply(id, Edit::AddBookmark { parent: vec![], index: 1, title: "Results".into(), page: 3 }).unwrap();
+    s.apply(id, Edit::AddBookmark { parent: vec![], index: 0, title: "Intro".into(), page: 0, left: None, top: None }).unwrap();
+    s.apply(id, Edit::AddBookmark { parent: vec![], index: 1, title: "Results".into(), page: 3, left: None, top: None }).unwrap();
     assert_eq!(s.bookmark_splits(id), [(0, "Intro".to_string()), (3, "Results".to_string())]);
     // Filters: page numbers 2, 4, 6 are even.
     let info = &s.get(id).unwrap().info;
@@ -6105,4 +6105,38 @@ fn undo_never_makes_an_unsaved_document_clean() {
     s.apply(new, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
     s.undo(new).unwrap();
     assert!(!s.get(new).unwrap().dirty, "once saved, undo back to the saved state is clean");
+}
+
+#[test]
+fn a_bookmark_added_at_a_point_goes_there_through_undo_and_save() {
+    use pdfcraft_render::DestView;
+    let (mut s, id) = session_with(3);
+    let view = |s: &Session, i: usize| s.get(id).unwrap().info.outline.get(i).map(|o| (o.page, o.view));
+    let add = |s: &mut Session, title: &str, page: usize, left: Option<f64>, top: Option<f64>| {
+        s.apply(id, Edit::AddBookmark { parent: vec![], index: usize::MAX, title: title.into(), page, left, top })
+    };
+    add(&mut s, "Plain", 0, None, None).unwrap();
+    add(&mut s, "Section", 1, None, Some(500.5)).unwrap();
+    add(&mut s, "Table", 2, Some(72.0), Some(300.0)).unwrap();
+    // The page top (no position) is what it always was; the others carry their place.
+    assert_eq!(view(&s, 0), Some((Some(0), DestView::Xyz { left: None, top: None, zoom: None })));
+    assert_eq!(view(&s, 1), Some((Some(1), DestView::Xyz { left: None, top: Some(500.5), zoom: None })));
+    assert_eq!(view(&s, 2), Some((Some(2), DestView::Xyz { left: Some(72.0), top: Some(300.0), zoom: None })));
+
+    // A position that is not a number fails the edit, which then changes nothing.
+    for (left, top) in [(Some(f64::NAN), None), (None, Some(f64::INFINITY))] {
+        assert!(matches!(add(&mut s, "Bad", 0, left, top), Err(EditError::Bookmark(_))), "{left:?} {top:?}");
+    }
+    assert_eq!(s.get(id).unwrap().info.outline.len(), 3);
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Add bookmark"));
+
+    s.undo(id).unwrap();
+    assert_eq!(s.get(id).unwrap().info.outline.len(), 2);
+    s.redo(id).unwrap();
+    let saved = s.save_bytes(id).unwrap();
+    let mut again = Session::new();
+    let id2 = again.open("again.pdf", None, saved, None).unwrap();
+    let outline = &again.get(id2).unwrap().info.outline;
+    assert_eq!(outline[2].view, DestView::Xyz { left: Some(72.0), top: Some(300.0), zoom: None });
+    assert_eq!(outline[1].view, DestView::Xyz { left: None, top: Some(500.5), zoom: None });
 }
