@@ -4320,6 +4320,60 @@ fn typed_signatures_stay_upright_on_rotated_pages() {
     check(&mut a, reopened);
 }
 
+/// #2392: a Fill & Sign checkmark and line look the same on a turned page as on an unturned one:
+/// the checkmark isn't upside down or sideways, and the line runs across as displayed.
+#[test]
+fn fill_sign_marks_stay_upright_on_rotated_pages() {
+    let dir = workdir("marks-upright");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "blank", "width": 200, "height": 300, "pages": 4 }))["doc"].as_u64().unwrap();
+    for (page, degrees) in [(2, 90), (3, 180), (4, 270)] {
+        ok(&mut a, "page_rotate", json!({ "doc": doc, "pages": [page], "degrees": degrees }));
+    }
+    for page in 1..=4 {
+        ok(&mut a, "fill_sign_add", json!({ "doc": doc, "page": page, "type": "check", "at": [40, 60] }));
+        ok(&mut a, "fill_sign_add", json!({ "doc": doc, "page": page, "type": "line", "at": [120, 60] }));
+    }
+    let check = |a: &mut Automation, doc: u64| {
+        let mut upright = Vec::new();
+        for page in 1..=4 {
+            // 144 dpi: two pixels a point.
+            let output = a.call("page_render", &json!({ "doc": doc, "page": page, "dpi": 144 })).unwrap();
+            let Content::Png { data, .. } = &output[0] else { panic!() };
+            let pixels = image::load_from_memory(data).unwrap().to_rgba8();
+            let dark: Vec<bool> = pixels.pixels().map(|p| p.0[..3].iter().all(|v| *v < 128)).collect();
+            let width = pixels.width();
+            // The line, 36 × 4 pt displayed, runs across.
+            let mut b = [u32::MAX, u32::MAX, 0, 0];
+            for (x, y, p) in pixels.enumerate_pixels() {
+                if x.abs_diff(240) < 60 && y.abs_diff(120) < 60 && p.0[..3].iter().all(|v| *v < 128) {
+                    b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
+                }
+            }
+            assert!(b[0] <= b[2], "page {page}: no line drawn");
+            assert!(b[2] - b[0] > 60 && b[3] - b[1] < 10, "page {page}: the line should run across: {b:?}");
+            if page == 1 {
+                upright = dark;
+                continue;
+            }
+            // Same pixels as the unturned page where both pages are (pages 2 and 4 are wider).
+            let (mut differ, mut ink) = (0, 0);
+            for y in 0..400 {
+                for x in 0..400 {
+                    let (want, got) = (upright[(y * 400 + x) as usize], dark[(y * width + x) as usize]);
+                    ink += usize::from(want);
+                    differ += usize::from(want != got);
+                }
+            }
+            assert!(ink > 0 && differ * 10 < ink, "page {page}: {differ} of {ink} ink pixels differ from the unturned page");
+        }
+    };
+    check(&mut a, doc);
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "marked.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "marked.pdf" }))["doc"].as_u64().unwrap();
+    check(&mut a, reopened);
+}
+
 #[test]
 fn comment_checkmarks_locks_hiding_and_summaries_through_tools() {
     let dir = workdir("comment-polish");

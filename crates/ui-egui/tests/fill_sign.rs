@@ -101,6 +101,29 @@ fn rendered_ink(h: &mut Harness<'static, PdfCraftApp>, x: f32, y: f32) -> image:
     panic!("signature ink did not render at ({x}, {y})");
 }
 
+/// #2392: the Line tool's line runs across the page as displayed, on turned pages too (its box was
+/// sized in the page's own axes, so a quarter turn stood it on end).
+#[test]
+fn the_line_mark_runs_across_turned_pages() {
+    for degrees in [0, 90, 180, 270] {
+        let mut h = harness();
+        {
+            let s = h.state_mut();
+            let id = s.views[0].id;
+            s.session.apply(id, pdfcraft_engine::Edit::RotatePages { pages: vec![0], degrees }).unwrap();
+        }
+        h.run_steps(4);
+        assert!(h.state_mut().execute("sign.fill.line"));
+        click(&mut h, 150.0, 350.0);
+        let s = h.state();
+        let info = &s.session.get(s.views[0].id).unwrap().info;
+        let r = info.annotations.last().expect("a line was placed").rect;
+        let (a, b) = (info.pages[0].user_to_view(r[0], r[1]), info.pages[0].user_to_view(r[2], r[3]));
+        let (w, h) = ((a[0] - b[0]).abs(), (a[1] - b[1]).abs());
+        assert!(w > 4.0 * h, "rotation {degrees}: the line's displayed box is {w} × {h}, not across");
+    }
+}
+
 #[test]
 fn text_marks_and_date() {
     let mut h = harness();

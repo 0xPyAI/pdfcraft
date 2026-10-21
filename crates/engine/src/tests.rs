@@ -196,6 +196,59 @@ fn rubber_stamps_point_left_as_displayed_on_rotated_pages() {
     }
 }
 
+/// #2392: Fill & Sign marks are drawn as displayed on every page rotation, including after save:
+/// a checkmark's long stroke rises to the right, and a line runs across.
+#[test]
+fn fill_sign_marks_are_upright_as_displayed_on_rotated_pages() {
+    for degrees in [0, 90, 180, 270] {
+        let (mut session, id) = rotated_blank(degrees);
+        let info = session.get(id).unwrap().info.pages[0].clone();
+        // Displayed boxes: a 40 pt checkmark centred at (50, 50), an 80 × 8 pt line at (130, 50).
+        for (mark, vx, w, h) in [(FillMark::Check, 50.0, 40.0, 40.0), (FillMark::Line, 130.0, 80.0, 8.0)] {
+            let shape = Shape::Mark { rect: displayed_rect(&info, vx, 50.0, w, h), mark };
+            session
+                .apply(
+                    id,
+                    Edit::AddAnnotation(NewAnnotation {
+                        page: 0,
+                        style: Style::default_for(&shape),
+                        shape,
+                        contents: String::new(),
+                        author: "Test".into(),
+                    }),
+                )
+                .unwrap();
+        }
+        let check = |session: &Session, id: DocId| {
+            let rendered = render_page(session, id);
+            // Dark pixels in a displayed box, rendered at scale 2.
+            let ink = |x0: u32, y0: u32, x1: u32, y1: u32| -> Vec<(u32, u32)> {
+                (y0 * 2..y1 * 2)
+                    .flat_map(|y| (x0 * 2..x1 * 2).map(move |x| (x, y)))
+                    .filter(|&(x, y)| stamp_pixel(&rendered, x, y)[..3].iter().all(|c| *c < 128))
+                    .collect()
+            };
+            let tick = ink(30, 30, 70, 70);
+            assert!(!tick.is_empty(), "rotation {degrees}: no checkmark drawn");
+            let top = tick.iter().min_by_key(|p| p.1).unwrap();
+            let bottom = tick.iter().max_by_key(|p| p.1).unwrap();
+            // The long stroke ends at the top right; the short one meets it low, left of centre.
+            assert!(top.0 > bottom.0 + 20, "rotation {degrees}: highest ink {top:?} should be right of the lowest {bottom:?}");
+            assert!(bottom.0 < 100 && top.0 > 110, "rotation {degrees}: checkmark {bottom:?} .. {top:?} is not upright");
+            let line = ink(85, 40, 175, 60);
+            assert!(!line.is_empty(), "rotation {degrees}: no line drawn");
+            let (x0, x1) = (line.iter().map(|p| p.0).min().unwrap(), line.iter().map(|p| p.0).max().unwrap());
+            let (y0, y1) = (line.iter().map(|p| p.1).min().unwrap(), line.iter().map(|p| p.1).max().unwrap());
+            assert!((x1 - x0) > 10 * (y1 - y0 + 1), "rotation {degrees}: line {x0}..{x1} x {y0}..{y1} should run across");
+        };
+        check(&session, id);
+        let saved = session.save_bytes(id).unwrap();
+        let mut reopened = Session::new().with_clock(|| 1_700_000_000);
+        let again = reopened.open("drawing.pdf", None, saved, None).unwrap();
+        check(&reopened, again);
+    }
+}
+
 /// Fill & Sign text and text boxes read across as displayed on turned pages (scanned forms are
 /// often stored sideways with `/Rotate`), including after save.
 #[test]
