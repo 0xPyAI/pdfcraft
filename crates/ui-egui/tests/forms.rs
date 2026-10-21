@@ -1,6 +1,7 @@
 //! Filling in a form in the real shell (egui_kittest): typing, Tab, check boxes, radios, choices.
 
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use pdfcraft_ui_egui::PdfCraftApp;
 
 fn harness() -> Harness<'static, PdfCraftApp> {
@@ -42,6 +43,32 @@ fn click_field(h: &mut Harness<'static, PdfCraftApp>, name: &str, widget: usize)
     h.run_steps(1);
     h.drop_at(p);
     h.run_steps(3);
+}
+
+/// Rest the pointer on the centre of a field's widget long enough for a tooltip.
+fn rest_on_field(h: &mut Harness<'static, PdfCraftApp>, name: &str) {
+    let p = {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f = doc.form.iter().find(|f| f.name == name).unwrap();
+        pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen").center()
+    };
+    h.hover_at(p);
+    for _ in 0..40 {
+        h.step();
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+}
+
+/// #3854: resting on a field shows its tooltip (`/TU`); a field without one shows none.
+#[test]
+fn hovering_a_field_shows_its_tooltip() {
+    let mut h = harness();
+    assert!(h.query_by_label("Your name").is_none(), "no tooltip before the hover");
+    rest_on_field(&mut h, "name");
+    assert!(h.query_by_label("Your name").is_some(), "the name field's /TU shows on hover");
+    rest_on_field(&mut h, "city");
+    assert!(h.query_by_label("Your name").is_none(), "another field doesn't keep the tooltip");
 }
 
 #[test]

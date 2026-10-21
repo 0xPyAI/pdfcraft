@@ -132,6 +132,11 @@ pub(crate) fn page_input(
             .map(|(i, w)| (f, i, w))
     });
     let Some((f, wi, w)) = hit else { return FieldPointer::Away };
+    // The field's tooltip (`/TU`), as Acrobat shows it on hover (#3854). ISO 32000-2 Table 226
+    // makes it the name the user interface identifies the field by.
+    if let Some(tip) = f.tooltip.as_deref().filter(|t| !t.trim().is_empty()) {
+        resp.clone().on_hover_text_at_pointer(tip);
+    }
     // Empty signature fields are signed by clicking them (Use a certificate); push buttons run
     // their action.
     let pressable = f.kind == FormFieldKind::PushButton && !f.read_only() && f.button.is_some();
