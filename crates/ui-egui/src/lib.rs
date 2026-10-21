@@ -402,12 +402,11 @@ struct DocumentCopyJob {
 
 impl DocumentCopyJob {
     fn of(v: &DocView, doc: &pdfcraft_engine::Document) -> DocumentCopyJob {
-        let missing = v.pages_without_text();
         let pages = (0..v.page_count())
             .map(|p| match v.texts.get(&p) {
                 Some(t) => CopyPage::Read(t.clone()),
-                None if missing.contains(&p) => CopyPage::ToRead,
-                None => CopyPage::Skip,
+                None if v.text_failed.contains(&p) => CopyPage::Skip,
+                None => CopyPage::ToRead,
             })
             .collect();
         DocumentCopyJob { pages, bytes: doc.bytes.clone(), password: doc.password.as_deref().map(std::sync::Arc::from) }
@@ -2970,7 +2969,6 @@ impl PdfCraftApp {
                 object_ui::nudge_keys(ctx, &mut self.views[i], doc);
             }
             canvas::shortcuts(&mut self.views[i], ctx, self.scroll_speed);
-            self.finish_document_copy(ctx);
             self.copy_key(i, ctx);
             self.image_pick_keys(i, ctx);
         }
@@ -3009,6 +3007,8 @@ impl PdfCraftApp {
     /// After Select All of the document (#2639), pages whose text wasn't read for display are read
     /// off the UI thread ([`DocumentCopy`]), and the clipboard gets the text when they're done.
     pub(crate) fn copy_selected_text(&mut self, i: usize, ctx: &egui::Context) -> bool {
+        // A newer copy wins: a whole-document copy still reading must not replace it later.
+        self.document_copy = None;
         let Some(v) = self.views.get(i) else { return false };
         let id = v.id;
         if v.all_text && !v.pages_without_text().is_empty() {
@@ -3029,10 +3029,12 @@ impl PdfCraftApp {
     }
 
     /// The clipboard text of a whole-document copy, once its pages are read; dropped with the
-    /// document it was copied from.
+    /// document it was copied from, and by any later copy (a text field's, a comment's), which
+    /// it must not replace. Run at the end of the frame, so it sees this frame's copies.
     fn finish_document_copy(&mut self, ctx: &egui::Context) {
         let Some(c) = &self.document_copy else { return };
-        if !self.views.iter().any(|v| v.id == c.doc) {
+        let copied = ctx.output(|o| o.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(_) | egui::OutputCommand::CopyImage(_))));
+        if copied || !self.views.iter().any(|v| v.id == c.doc) {
             self.document_copy = None;
             return;
         }
@@ -3355,6 +3357,7 @@ impl eframe::App for PdfCraftApp {
 
 impl PdfCraftApp {
     fn finish_render_frame(&mut self, ctx: &egui::Context) {
+        self.finish_document_copy(ctx);
         // The Combine grid's thumbnails, whichever tab shows (renders under way still finish).
         self.combine_thumbs_frame(ctx);
         // Retire hidden documents before admitting the visible document's textures, so the

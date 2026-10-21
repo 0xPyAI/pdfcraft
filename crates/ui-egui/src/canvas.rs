@@ -5797,6 +5797,45 @@ trailer << /Root 1 0 R >>
         assert!(!app.views[0].all_text, "not past an edit of the document");
     }
 
+    /// A whole-document copy reads the pages without text, keeps those already read and skips
+    /// those that failed before.
+    #[test]
+    fn a_document_copy_reads_only_the_pages_it_needs() {
+        let mut app = PdfCraftApp::new();
+        app.open_bytes("three.pdf", None, text_pages_pdf(&["Alpha one", "Bravo two", "Charlie three"])).unwrap();
+        app.views[0].text_failed.insert(2);
+        let job = crate::DocumentCopyJob::of(&app.views[0], app.session.get(app.views[0].id).unwrap());
+        let kinds: Vec<_> = job.pages.iter().map(|p| matches!(p, crate::CopyPage::ToRead)).collect();
+        assert_eq!(kinds, vec![true, true, false], "pages 1 and 2 to read, page 3 failed before");
+        assert!(matches!(job.pages[2], crate::CopyPage::Skip));
+    }
+
+    /// A later copy wins: a whole-document copy still reading its pages never replaces what was
+    /// copied after it started, from the page or anywhere else (a text field, a comment).
+    #[test]
+    fn a_later_copy_cancels_a_document_copy_still_reading() {
+        let mut app = PdfCraftApp::new();
+        app.open_bytes("three.pdf", None, text_pages_pdf(&["Alpha one", "Bravo two", "Charlie three"])).unwrap();
+        let ctx = egui::Context::default();
+        // Another copy in the same frame (here a text field's) drops it.
+        app.views[0].select_all();
+        assert!(app.copy_selected_text(0, &ctx) && app.document_copy.is_some());
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.ctx().copy_text("a word".to_owned());
+            app.finish_document_copy(ui.ctx());
+        });
+        out.textures_delta.clear();
+        assert!(app.document_copy.is_none(), "cancelled");
+        let copies: Vec<_> = out.platform_output.commands.iter().filter(|c| matches!(c, egui::OutputCommand::CopyText(_))).collect();
+        assert_eq!(copies, vec![&egui::OutputCommand::CopyText("a word".to_owned())], "the later copy stays");
+        // So does copying a page selection.
+        app.views[0].select_all();
+        assert!(app.copy_selected_text(0, &ctx) && app.document_copy.is_some());
+        app.views[0].select_text(0, 0, 5);
+        app.copy_selected_text(0, &ctx);
+        assert!(app.document_copy.is_none(), "a page selection's copy cancels it");
+    }
+
     /// A press anywhere on a page ends Select All of the document, whatever the tool (here the
     /// Hand, which selects no text) and whether the page's text is read yet.
     #[test]
