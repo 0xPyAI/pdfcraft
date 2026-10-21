@@ -3760,6 +3760,28 @@ fn dragging_pages_panel_thumbnails_reorders_pages() {
 }
 
 #[test]
+fn resized_pages_panel_thumbnails_reorder_multiple_pages_and_undo() {
+    let mut h = harness(4, |app| {
+        app.right = Some(pdfcraft_ui_egui::RightPanel::Pages);
+        app.set_option("thumbnail-zoom", "50").unwrap();
+    });
+    let before = page_texts(h.state());
+    h.state_mut().views[0].select_pages(&[1, 2]);
+    h.run_steps(2);
+    let from = panel_thumb_rect(&h, "Page 2").center();
+    let to = panel_thumb_rect(&h, "Page 1").center_top() + egui::vec2(0.0, 4.0);
+    drag(&mut h, from, to);
+    h.run_steps(4);
+    assert_eq!(page_texts(h.state()), vec![before[1].clone(), before[2].clone(), before[0].clone(), before[3].clone()]);
+    assert_eq!(h.state().views[0].target_pages(), vec![0, 1]);
+    assert_eq!(h.state().views[0].thumbnail_zoom(), 0.5);
+    assert!(h.state_mut().execute("edit.undo"));
+    h.run_steps(4);
+    assert_eq!(page_texts(h.state()), before);
+    assert_eq!(h.state().views[0].thumbnail_zoom(), 0.5);
+}
+
+#[test]
 fn a_thumbnail_drag_that_ends_off_the_panel_or_outlives_the_pages_is_dropped() {
     let mut h = harness(4, |app| app.right = Some(pdfcraft_ui_egui::RightPanel::Pages));
     let before = page_texts(h.state());

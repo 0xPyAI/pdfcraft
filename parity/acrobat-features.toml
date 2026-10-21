@@ -1262,8 +1262,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/ui.rs::theme_and_view_options_apply", "crates/ui-egui/tests/viewer.rs::going_to_a_far_page_scrolls_its_thumbnail_into_view", "crates/ui-egui/tests/viewer.rs::going_to_a_page_in_view_leaves_the_pages_panel_still", "crates/ui-egui/tests/viewer.rs::a_page_change_while_thumbnails_are_dragged_does_not_scroll_the_pages_panel"]
-notes = "The panel follows the current page (#2781): a page whose thumbnail is out of sight scrolls it into view, as little as it takes; a thumbnail already in view, or clicked, leaves the panel still, and a page change while the user scrolls the panel or drags thumbnails does not move it."
+evidence = ["crates/ui-egui/tests/editing.rs::resized_pages_panel_thumbnails_reorder_multiple_pages_and_undo", "crates/ui-egui/tests/viewer.rs::pages_panel_thumbnail_zoom_is_bounded_independent_and_survives_reload", "crates/ui-egui/tests/viewer.rs::pages_panel_thumbnail_size_controls_show_more_pages_and_keep_the_selection", "crates/ui-egui/tests/viewer.rs::pages_panel_thumbnail_zoom_keeps_a_far_current_page_visible", "crates/ui-egui/tests/control.rs::thumbnail_size_is_settable_and_inspectable_through_the_control_channel", "crates/ui-egui/tests/ui.rs::theme_and_view_options_apply", "crates/ui-egui/tests/viewer.rs::going_to_a_far_page_scrolls_its_thumbnail_into_view", "crates/ui-egui/tests/viewer.rs::going_to_a_page_in_view_leaves_the_pages_panel_still", "crates/ui-egui/tests/viewer.rs::a_page_change_while_thumbnails_are_dragged_does_not_scroll_the_pages_panel"]
+notes = "Thumbnail size: 50–150% with a slider and buttons above the scroll area (#3808), independent of document and Organize zoom. Accessible through ui.set thumbnail-zoom and ui.state active.thumbnail_zoom; retained on file reload, not persisted between sessions. The panel follows the current page (#2781): a page whose thumbnail is out of sight scrolls it into view, as little as it takes; a thumbnail already in view, or clicked, leaves the panel still, and a page change while the user scrolls the panel or drags thumbnails does not move it."
 
 [[feature]]
 id = "view.thumbnail-context-ops"
@@ -2885,7 +2885,7 @@ status = "shipped"
 commands = ["page.organize"]
 tools = []
 evidence = ["crates/ui-egui/tests/editing.rs::page_grid_zooms_with_its_buttons_keys_and_pinch", "crates/ui-egui/tests/editing.rs::a_zoomed_page_grid_still_inserts_and_moves_at_the_right_gap", "crates/ui-egui/tests/editing.rs::zoomed_pages_in_view_are_rendered_at_the_size_drawn"]
-notes = "Organize page grid: 50–300% with toolbar buttons (and a percentage that resets to 100%), trackpad pinch or Ctrl/⌘ + wheel about the page under the pointer, and ⌘+ / ⌘− / ⌘0; pages drawn larger than their thumbnails are rendered at the size drawn while they are in view (the thumbnail stands in until then, and after an edit), so text stays sharp however long the document is. Missing: a slider as in Acrobat; the size is per document view and not remembered between sessions; the Pages side panel has no size control."
+notes = "Organize page grid: 50–300% with toolbar buttons (and a percentage that resets to 100%), trackpad pinch or Ctrl/⌘ + wheel about the page under the pointer, and ⌘+ / ⌘− / ⌘0; pages drawn larger than their thumbnails are rendered at the size drawn while they are in view (the thumbnail stands in until then, and after an edit), so text stays sharp however long the document is. Missing in Organize: a slider as in Acrobat; the size is per document view and not remembered between sessions. The Pages inspector has its own 50–150% slider and buttons (#3808)."
 
 [[feature]]
 id = "organize.split-every-n"

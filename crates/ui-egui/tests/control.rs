@@ -87,6 +87,31 @@ fn ok(h: &mut Harness<'static, PdfCraftApp>, c: &ControlClient, method: &str, pa
 }
 
 #[test]
+fn thumbnail_size_is_settable_and_inspectable_through_the_control_channel() {
+    let (mut h, c) = harness();
+    ok(&mut h, &c, "ui.set", json!({"key": "panel", "value": "pages"}));
+    ok(&mut h, &c, "ui.set", json!({"key": "thumbnail-zoom", "value": "50"}));
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    assert_eq!(state["active"]["thumbnail_zoom"], 0.5);
+    assert_eq!(state["active"]["grid_zoom"], 1.0);
+    assert_eq!(state["documents"][0]["dirty"], false);
+    let controls = ok(&mut h, &c, "ui.inspect", json!({"query": "thumbnails"}));
+    let widgets = controls["widgets"].as_array().unwrap();
+    assert!(widgets.iter().any(|w| w["label"] == "Larger thumbnails"));
+    assert!(widgets.iter().any(|w| w["label"] == "Smaller thumbnails" && w["enabled"] == false));
+    assert!(call(&mut h, &c, "ui.set", json!({"key": "thumbnail-zoom", "value": "NaN"})).is_err());
+    ok(&mut h, &c, "ui.click", json!({"label": "Larger thumbnails"}));
+    h.run_steps(3);
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["active"]["thumbnail_zoom"], 0.75);
+    let sliders = ok(&mut h, &c, "ui.inspect", json!({"query": "Thumbnail size", "role": "Slider"}));
+    let slider = sliders["widgets"].as_array().unwrap().first().expect("the thumbnail size slider is labelled");
+    ok(&mut h, &c, "ui.focus", json!({"id": slider["id"]}));
+    ok(&mut h, &c, "ui.key", json!({"key": "ArrowRight"}));
+    h.run_steps(3);
+    assert!(ok(&mut h, &c, "ui.state", json!({}))["active"]["thumbnail_zoom"].as_f64().unwrap() > 0.75);
+}
+
+#[test]
 fn control_resize_reports_observed_dimensions_and_rejects_invalid_sizes() {
     let (mut h, c) = harness();
     for params in [

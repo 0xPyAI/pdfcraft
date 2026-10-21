@@ -563,6 +563,8 @@ pub struct DocView {
     /// The current page the Pages panel last followed: it scrolls to the current page's
     /// thumbnail only when the page changes.
     pub(crate) panel_followed: Option<usize>,
+    /// Scale of the thumbnails in the Pages inspector, independent of document and grid zoom.
+    thumbnail_zoom: f32,
     /// How large the page grid draws its pages (1.0 = the usual thumbnails).
     grid_zoom: f32,
     /// A zoom asked for this frame (toolbar, pinch, keys); the grid applies it once it has laid
@@ -601,6 +603,8 @@ pub struct DocView {
 
 /// The page grid's zoom range and the step of its buttons and keys.
 pub const GRID_ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.5..=3.0;
+/// Thumbnail size in the Pages inspector, relative to its usual size.
+pub const THUMBNAIL_ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.5..=1.5;
 const GRID_ZOOM_STEP: f32 = 1.25;
 /// How far a sharp grid render may be from the size drawn before it is redone: a pinch changes
 /// the size on every frame, and a slightly soft or slightly large image is fine meanwhile.
@@ -783,6 +787,7 @@ impl DocView {
             pages_panel: None,
             panel_gap: None,
             panel_followed: None,
+            thumbnail_zoom: 1.0,
             grid_zoom: 1.0,
             grid_zoom_request: None,
             grid_anchor: None,
@@ -859,6 +864,7 @@ impl DocView {
         fresh.current = self.current;
         fresh.organize = self.organize;
         fresh.grid_zoom = self.grid_zoom;
+        fresh.thumbnail_zoom = self.thumbnail_zoom;
         // Same document id, so the scroll offset egui keeps for it is still this document's.
         fresh.shown = self.shown;
         fresh.highlight_fields = self.highlight_fields;
@@ -1493,6 +1499,23 @@ impl DocView {
     /// How large the page grid draws its pages (1.0 = the usual thumbnails).
     pub fn grid_zoom(&self) -> f32 {
         self.grid_zoom
+    }
+
+    /// Scale of the thumbnails in the Pages inspector (1.0 is the usual size).
+    pub fn thumbnail_zoom(&self) -> f32 {
+        self.thumbnail_zoom
+    }
+
+    /// Resize the inspector thumbnails, keeping the current page in view after layout.
+    /// Out-of-range values are clamped; non-finite values are ignored.
+    pub fn set_thumbnail_zoom(&mut self, zoom: f32) {
+        if zoom.is_finite() {
+            let zoom = zoom.clamp(*THUMBNAIL_ZOOM_RANGE.start(), *THUMBNAIL_ZOOM_RANGE.end());
+            if zoom != self.thumbnail_zoom {
+                self.thumbnail_zoom = zoom;
+                self.panel_followed = None;
+            }
+        }
     }
 
     /// Zoom the page grid; out-of-range values are clamped and nonsense is ignored.
