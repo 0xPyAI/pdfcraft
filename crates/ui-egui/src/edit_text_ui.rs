@@ -158,7 +158,8 @@ pub struct LineEditor {
     max_width: f32,
     /// Current screen-space size. Recomputed from the current page transform before painting.
     size: f32,
-    focus: bool,
+    /// Take the keyboard focus on the next frame.
+    pub(crate) focus: bool,
     /// The Format text panel's values, and what the paragraph had (to send only changes).
     pub look: pdfcraft_engine::AddedText,
     look0: pdfcraft_engine::AddedText,
@@ -1101,6 +1102,7 @@ pub(crate) fn page_input(
             if let Some(old) = view.line_editor.take() {
                 let style = old.style();
                 if old.text != old.original || style != pdfcraft_engine::BlockStyle::default() {
+                    view.applied_editor = Some(old.clone());
                     view.pending_edit = Some(Edit::EditTextBlock { page: old.page, block: old.block, text: old.text, style });
                 }
             }
@@ -1422,7 +1424,11 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
     match done {
         Some(apply) => {
             let ed = view.line_editor.take()?;
-            if apply { finished_edit(ed) } else { None }
+            if !apply {
+                return None;
+            }
+            view.applied_editor = Some(ed.clone());
+            finished_edit(ed)
         }
         None => None,
     }

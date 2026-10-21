@@ -53,6 +53,7 @@ impl PdfCraftApp {
                 let Some(doc) = self.session.get(id) else { return true };
                 let info = &doc.info;
                 let view = &mut self.views[i];
+                view.applied_editor = None;
                 // A picture picked with the Select tool may be the one this edit removed or moved:
                 // drop its highlight now, not on the next frame (which only comes with the next input).
                 view.picked_image = None;
@@ -181,6 +182,15 @@ impl PdfCraftApp {
                 if let Some(view) = self.views.get_mut(i) {
                     // A drawing whose annotation wasn't added must not stay painted.
                     view.comments.drawings_refused();
+                    // A paragraph that couldn't be applied opens again with its typing, instead of
+                    // the box the click moved to.
+                    if let Edit::EditTextBlock { page, block, .. } = &edit
+                        && let Some(mut ed) = view.applied_editor.take().filter(|ed| (ed.page, ed.block) == (*page, *block))
+                    {
+                        ed.focus = true;
+                        view.line_editor = Some(ed);
+                        view.pending_text_open = None;
+                    }
                 }
                 let message = if matches!(edit, Edit::MoveObjects { .. }) { crate::object_ui::move_error(&e) } else { e.to_string() };
                 self.notify_fmt("{label} failed: {e}", &[("label", &crate::i18n::edit_label(&label)), ("e", &message)]);

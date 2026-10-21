@@ -499,6 +499,9 @@ pub struct DocView {
     /// line being edited.
     pub(crate) edit_lines: HashMap<usize, (u64, Vec<pdfcraft_engine::TextBlock>)>,
     pub line_editor: Option<crate::edit_text_ui::LineEditor>,
+    /// The paragraph editor whose edit was just queued. It opens again with its typing if the
+    /// edit fails, as a refused form field does.
+    pub(crate) applied_editor: Option<crate::edit_text_ui::LineEditor>,
     /// The box a click switched to while another paragraph was being edited: it opens once the
     /// queued edit has applied, so its index and geometry come from the document it now is (#2022).
     pub(crate) pending_text_open: Option<(usize, usize)>,
@@ -769,6 +772,7 @@ impl DocView {
             pending_edit: None,
             edit_lines: HashMap::new(),
             line_editor: None,
+            applied_editor: None,
             pending_text_open: None,
             text_background: Default::default(),
             move_background: Default::default(),
