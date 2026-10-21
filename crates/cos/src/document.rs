@@ -1933,9 +1933,11 @@ impl Document {
     /// that nothing else replaces. (A number no section lists is not evidence: it is a null
     /// object, §7.3.10, and valid files have them below an oversized `/Size`.) Viewers rebuild
     /// the table and show these objects; reading them as null would drop them from every copy.
-    /// When one of those shows, the file is scanned once for object headers, numbers without an
-    /// entry take the last header's location, and wrong offsets are looked up there (`load`).
-    /// Existing entries are never replaced: an object freed by an update stays freed.
+    /// When one of those shows, the file is scanned once for object headers, and wrong offsets
+    /// are looked up there (`load`). Only the numbers the damage leaves out take the last
+    /// header's location: one whose entry was set aside, or the last object of a subsection
+    /// numbered one too low. Any other unlisted number stays null, and existing
+    /// entries are never replaced: an object freed by an update stays freed.
     fn fill_xref_gaps(&mut self, log: &mut Vec<String>) {
         let entries = &self.entries;
         let shifted = matches!(entries.lookup(0, &self.data), Some(XrefEntry::InFile { .. }));
@@ -1948,9 +1950,22 @@ impl Document {
             located.insert(num, (offset, generation));
         }
         let mut filled = entries.to_map(&self.data);
+        // A subsection `0 N` whose rows are those of objects 1 to N leaves out object N, whatever
+        // newer sections say about its neighbours.
+        let past_shift: HashSet<u32> = if shifted {
+            self.revisions
+                .iter()
+                .filter(|r| !r.is_stream)
+                .filter_map(|r| usize::try_from(r.xref_offset).ok().map(|o| if r.header_relative { o.saturating_add(self.header_offset) } else { o }))
+                .filter_map(|at| shifted_subsection_end(&self.data, at))
+                .collect()
+        } else {
+            HashSet::new()
+        };
         let mut found = 0usize;
         for (&num, &(offset, generation)) in &located {
-            if num != 0 && !filled.contains_key(&num) {
+            let left_out = past_shift.contains(&num) || self.xref_oddities.iter().any(|(_, n)| *n == num);
+            if num != 0 && !filled.contains_key(&num) && left_out {
                 filled.insert(num, XrefEntry::InFile { offset, generation });
                 found += 1;
             }
@@ -2025,6 +2040,25 @@ impl Document {
         self.revisions = Arc::new(Vec::new());
         log.push(format!("rebuilt cross-reference index from {object_count} object headers"));
         Ok(())
+    }
+}
+
+/// For a classic table at `at` whose first subsection is `0 N` and opens with an in-use row
+/// (the rows of objects 1 to N), the number N its rows really end at.
+fn shifted_subsection_end(data: &[u8], at: usize) -> Option<u32> {
+    let mut lx = Lexer::new(data, at);
+    if !lx.eat_keyword(b"xref") {
+        return None;
+    }
+    let (Ok(Object::Int(0)), Ok(Object::Int(count))) = (lx.object(), lx.object()) else { return None };
+    lx.skip_ws();
+    let offset = std::str::from_utf8(lx.token()).ok().and_then(|s| s.parse::<u64>().ok());
+    lx.skip_ws();
+    lx.token();
+    lx.skip_ws();
+    match (offset, lx.token()) {
+        (Some(offset), b"n") if offset != 0 => u32::try_from(count).ok().filter(|n| *n > 0),
+        _ => None,
     }
 }
 
@@ -2464,6 +2498,54 @@ endobj
         assert!(matches!(&*doc.get(ObjRef::new(4, 0)), Object::Stream(_)), "the gap is filled");
         assert_eq!(*doc.get(ObjRef::new(5, 0)), Object::Null, "the freed image stays freed");
         assert_eq!(doc.xref_entry(5), Some(XrefEntry::Free { next_generation: 1 }));
+    }
+
+    /// Repairing a damaged table fills only the numbers the damage leaves out: an old body of a
+    /// number no section lists, under an oversized `/Size`, stays a null object.
+    #[test]
+    fn a_repaired_table_leaves_an_unlisted_number_null() {
+        let base = scanned_page();
+        let at = String::from_utf8_lossy(&base).rfind("\nxref\n").unwrap() + 1;
+        let entries = table_entries(&base);
+        let mut offset_zero = vec!["0 6".to_string()];
+        offset_zero.extend(entries.iter().cloned());
+        offset_zero[5] = "0000000000 00000 n ".into();
+        let mut off_by_one = vec!["0 5".to_string()];
+        off_by_one.extend(entries[1..6].iter().cloned());
+        for (name, table, found) in [("offset 0", offset_zero, 4), ("off by one", off_by_one, 5)] {
+            let bytes = [&base[..at], b"7 0 obj\n(stale)\nendobj\n", &base[at..]].concat();
+            let doc = Document::open(Arc::new(with_table(&bytes, &table, 9))).unwrap();
+            assert!(matches!(&*doc.get(ObjRef::new(found, 0)), Object::Stream(_)), "{name}: the gap is filled");
+            assert_eq!(*doc.get(ObjRef::new(7, 0)), Object::Null, "{name}: {:?}", doc.repair_log());
+            assert_eq!(doc.xref_entry(7), None, "{name}");
+        }
+    }
+
+    /// The last object of a subsection numbered one too low is filled from that subsection,
+    /// whatever later happens to the row before it: an incremental save that rewrites object 4,
+    /// or object 4's own row at offset 0.
+    #[test]
+    fn the_last_object_of_a_shifted_subsection_is_filled_whatever_its_neighbour_says() {
+        let base = scanned_page();
+        let entries = table_entries(&base);
+        let mut off_by_one = vec!["0 5".to_string()];
+        off_by_one.extend(entries[1..6].iter().cloned());
+        let shifted = with_table(&base, &off_by_one, 5);
+        let prev = String::from_utf8_lossy(&shifted).rfind("\nxref\n").unwrap() + 1;
+        let mut updated = shifted.clone();
+        let body = updated.len();
+        updated.extend_from_slice(b"4 0 obj\n<< /Length 21 >>\nstream\n10 0 0 10 0 0 cm /Im0 Do\nendstream\nendobj\n");
+        let section = updated.len();
+        updated.extend_from_slice(
+            format!("xref\n4 1\n{body:010} 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R /Prev {prev} >>\nstartxref\n{section}\n%%EOF\n").as_bytes(),
+        );
+        let mut neighbour_at_zero = off_by_one.clone();
+        neighbour_at_zero[5] = "0000000000 00000 n ".into();
+        for (name, bytes) in [("updated", updated), ("row 4 at offset 0", with_table(&base, &neighbour_at_zero, 5))] {
+            let doc = Document::open(Arc::new(bytes)).unwrap();
+            let image = doc.get(ObjRef::new(5, 0));
+            assert_eq!(image.as_dict().and_then(|d| d.name(b"Subtype")), Some(&b"Image"[..]), "{name}: {:?}", doc.repair_log());
+        }
     }
 
     /// The image the first page draws as `/Im1`, followed through the page tree.
