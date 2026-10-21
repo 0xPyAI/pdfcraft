@@ -2783,15 +2783,12 @@ fn a_paragraph_editor_opens_at_full_opacity() {
     h.drag_at(top.center());
     h.run_steps(1);
     h.drop_at(top.center());
-    let mut seen = 0;
+    let accent = egui::Color32::from_rgb(0x14, 0x73, 0xE6);
     for frame in 0..8 {
         h.step();
-        if let Some(color) = editor_frame_color(&h, top) {
-            assert_eq!(color, egui::Color32::from_rgb(0x14, 0x73, 0xE6), "frame {frame} after the click draws a faded frame");
-            seen += 1;
-        }
+        // The click's own frame opens it: the editor's frame is there from then on, at full colour.
+        assert_eq!(editor_frame_color(&h, top), Some(accent), "frame {frame} after the click");
     }
-    assert!(seen > 0, "the editor is drawn");
 }
 
 #[test]
