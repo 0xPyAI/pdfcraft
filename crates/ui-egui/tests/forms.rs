@@ -71,6 +71,33 @@ fn hovering_a_field_shows_its_tooltip() {
     assert!(h.query_by_label("Your name").is_none(), "another field doesn't keep the tooltip");
 }
 
+/// Give the `city` field these properties, as the Properties dialog would.
+fn set_city(h: &mut Harness<'static, PdfCraftApp>, props: pdfcraft_engine::FieldProps) {
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldProps { name: "city".into(), props: Box::new(props) });
+    h.run_steps(3);
+}
+
+/// A read-only field still shows its tooltip: it can't be filled, but it can be identified.
+#[test]
+fn a_read_only_fields_tooltip_shows_on_hover() {
+    let mut h = harness();
+    set_city(&mut h, pdfcraft_engine::FieldProps { tooltip: Some("Where you live".into()), read_only: Some(true), ..Default::default() });
+    rest_on_field(&mut h, "city");
+    assert!(h.query_by_label("Where you live").is_some());
+}
+
+/// A `/TU` of only spaces shows no tooltip (no empty box under the pointer).
+#[test]
+fn a_blank_tooltip_shows_nothing() {
+    let mut h = harness();
+    set_city(&mut h, pdfcraft_engine::FieldProps { tooltip: Some("   ".into()), ..Default::default() });
+    let s = h.state();
+    let doc = s.session.get(s.views[0].id).unwrap();
+    assert_eq!(doc.form.iter().find(|f| f.name == "city").unwrap().tooltip.as_deref(), Some("   "), "the blank /TU is in the file");
+    rest_on_field(&mut h, "city");
+    assert!(egui::Tooltip::seconds_since_last_tooltip(&h.ctx).is_infinite(), "no tooltip was shown");
+}
+
 #[test]
 fn typing_into_a_text_field_and_tabbing_on() {
     let mut h = harness();
