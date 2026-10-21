@@ -2723,6 +2723,133 @@ fn switching_from_a_narrow_editor_keeps_one_frame_and_a_wide_heading_on_one_line
     assert!(!dirty(&h));
 }
 
+/// Clicking a paragraph changes nothing on the page but the editor's frame and caret: the page's
+/// own text stays until something is typed. The editor used to cover the paragraph (white, or
+/// dark for pale text) until its textless background was ready, and drew it again in its own fonts.
+#[test]
+fn opening_a_paragraph_leaves_the_page_as_it_is() {
+    let bytes = source_font_fixture_with_text("0 0 0.45 rg 10 180 280 70 re f 1 1 1 rg BT /F2 20 Tf 20 205 Td (White on a banner) Tj ET");
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("banner.pdf", None, bytes).expect("opens");
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    for _ in 0..100 {
+        h.run_steps(1);
+        if !h.state().render_pending() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let page = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = page.width() / 300.0;
+    let block = h.state().session.get(h.state().views[0].id).unwrap().text_blocks(0)[0].rect;
+    let r = egui::Rect::from_min_max(
+        egui::pos2(page.left() + block[0] as f32 * k, page.top() + (300.0 - block[3] as f32) * k),
+        egui::pos2(page.left() + block[2] as f32 * k, page.top() + (300.0 - block[1] as f32) * k),
+    );
+    let at = egui::pos2(r.left() + 2.0, r.center().y);
+    h.hover_at(at);
+    h.run_steps(2);
+    let before = h.render().unwrap();
+    // Inside the paragraph, away from the caret (at the click) and the frame around it.
+    let inside = r.shrink(3.0);
+    let changed = |img: &image::RgbaImage| {
+        let mut n = 0;
+        for y in inside.top() as u32..inside.bottom() as u32 {
+            for x in inside.left() as u32..inside.right() as u32 {
+                if (x as f32 - at.x).abs() < 14.0 {
+                    continue;
+                }
+                let (a, b) = (img.get_pixel(x, y).0, before.get_pixel(x, y).0);
+                if a.iter().zip(b.iter()).take(3).any(|(p, q)| (i32::from(*p) - i32::from(*q)).abs() > 40) {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    h.drag_at(at);
+    h.run_steps(1);
+    h.drop_at(at);
+    for frame in 0..8 {
+        h.step();
+        let n = changed(&h.render().unwrap());
+        assert!(n < 20, "frame {frame} after the click changed {n} pixels of the paragraph");
+    }
+    assert_eq!(h.state().views[0].line_editor.as_ref().map(|e| e.text.as_str()), Some("White on a banner"));
+}
+
+/// A quick click (press and release in one frame) from an open, unchanged paragraph straight into
+/// another one: in no frame does the first paragraph lose its text, and the new editor's frame
+/// never spans the first one (it took the first paragraph's measured extent for a frame).
+#[test]
+fn a_quick_click_into_another_paragraph_keeps_both_in_place() {
+    let bytes = source_font_fixture_with_text("BT /F1 24 Tf 20 220 Td (Top) Tj ET BT /F2 24 Tf 20 120 Td (Bottom) Tj ET");
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("boxes.pdf", None, bytes).expect("opens");
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let page = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = page.width() / 300.0;
+    let mut blocks = {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().text_blocks(0)
+    };
+    blocks.sort_by(|a, b| b.rect[1].total_cmp(&a.rect[1]));
+    let screen = |b: &pdfcraft_engine::TextBlock| {
+        egui::Rect::from_min_max(
+            egui::pos2(page.left() + b.rect[0] as f32 * k, page.top() + (300.0 - b.rect[3] as f32) * k),
+            egui::pos2(page.left() + b.rect[2] as f32 * k, page.top() + (300.0 - b.rect[1] as f32) * k),
+        )
+    };
+    let (top, bottom) = (screen(&blocks[0]), screen(&blocks[1]));
+    click_at(&mut h, top.center());
+    for _ in 0..100 {
+        h.run_steps(1);
+        if !h.state().render_pending() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(h.state().views[0].line_editor.as_ref().map(|e| e.text.as_str()), Some("Top"));
+    let ink = |pixels: &image::RgbaImage, r: egui::Rect| {
+        (r.top() as u32..r.bottom() as u32)
+            .flat_map(|y| (r.left() as u32..r.right() as u32).map(move |x| (x, y)))
+            .filter(|(x, y)| pixels.get_pixel(*x, *y).0[..3].iter().all(|v| *v < 90))
+            .count()
+    };
+    h.hover_at(bottom.center());
+    h.run_steps(1);
+    let before = ink(&h.render().unwrap(), top.shrink(2.0));
+    assert!(before > 50, "the top paragraph shows");
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: bottom.center(), button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+    }
+    for frame in 0..4 {
+        h.step();
+        let now = ink(&h.render().unwrap(), top.shrink(2.0));
+        assert!(now * 2 > before, "frame {frame}: the top paragraph lost its text ({now} of {before} dark pixels)");
+        for shape in &h.output().shapes {
+            if let egui::Shape::Rect(r) = &shape.shape
+                && r.stroke.width == 1.5
+                && r.rect.contains(bottom.center())
+            {
+                assert!(!r.rect.intersects(top), "frame {frame}: the bottom editor's frame {:?} spans the top paragraph {top:?}", r.rect);
+            }
+        }
+    }
+    assert_eq!(h.state().views[0].line_editor.as_ref().map(|e| e.text.as_str()), Some("Bottom"));
+}
+
 /// #2022: clicking straight into another text box while one is open for typing must apply the
 /// open paragraph first; the typed text used to be dropped with the editor that switched away.
 #[test]
