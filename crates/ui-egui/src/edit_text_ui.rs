@@ -358,6 +358,9 @@ pub struct ImageSelection {
     drag: Option<(Pos2, Option<Pos2>)>,
     /// Crop mode (Acrobat's crop handles): the box kept so far.
     pub crop: Option<CropMode>,
+    /// A move or resize applied on release: the frame it had and the one it got, in the page's
+    /// 0..1 coordinates, while the page raster still has the picture where it was.
+    settled: Option<(Rect, Rect)>,
 }
 
 /// Cropping a page image: the handles trim instead of resizing, the part that will go is
@@ -533,6 +536,25 @@ impl ImageSelection {
     }
 }
 
+/// The page raster's picture of the box `from`, stretched into `to` over a blank where it was.
+fn stretched_picture(painter: &egui::Painter, xf: &PageXform, tex: egui::TextureId, from: Rect, to: Rect) {
+    let clipped = painter.with_clip_rect(painter.clip_rect().intersect(xf.rect));
+    clipped.rect_filled(from, CornerRadius::ZERO, Color32::WHITE);
+    let mut mesh = egui::Mesh::with_texture(tex);
+    for (a, b) in [
+        (from.left_top(), to.left_top()),
+        (from.right_top(), to.right_top()),
+        (from.right_bottom(), to.right_bottom()),
+        (from.left_bottom(), to.left_bottom()),
+    ] {
+        let (u, v) = xf.screen_to_norm(a);
+        mesh.vertices.push(egui::epaint::Vertex { pos: b, uv: Pos2::new(u, v), color: Color32::WHITE });
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    clipped.add(egui::Shape::mesh(mesh));
+}
+
 /// Once a selected corner is grabbed, text under it cannot take over the gesture. The same
 /// applies after the pointer leaves the image/page while dragging.
 pub(crate) fn image_owns_pointer(ui: &egui::Ui, xf: &PageXform, page: usize, info: &DocInfo, view: &DocView) -> bool {
@@ -697,6 +719,18 @@ pub(crate) fn image_input(
                 );
             }
         };
+        // Until the page is rendered again its raster has an applied move or resize's picture
+        // where it was: it stays blanked there and drawn where it went.
+        let (out_of_date, raster) = (view.page_out_of_date(page), view.page_raster(page));
+        if let Some(s) = view.image_selection.as_mut().filter(|s| s.drag.is_none()) {
+            match (s.settled, raster) {
+                (Some((from, to)), Some(tex)) if out_of_date => {
+                    let screen = |r: Rect| Rect::from_two_pos(xf.norm_to_screen(r.min.x, r.min.y), xf.norm_to_screen(r.max.x, r.max.y));
+                    stretched_picture(painter, xf, tex, screen(from), screen(to));
+                }
+                _ => s.settled = None,
+            }
+        }
         if view.image_selection.as_ref().is_some_and(|s| s.drag.is_none()) {
             painter.rect_stroke(b, CornerRadius::ZERO, Stroke::new(1.5, ACCENT), egui::StrokeKind::Outside);
             handles(b);
@@ -754,21 +788,7 @@ pub(crate) fn image_input(
                 if preview != b
                     && let Some(tex) = view.page_raster(page)
                 {
-                    let clipped = painter.with_clip_rect(painter.clip_rect().intersect(xf.rect));
-                    clipped.rect_filled(b, CornerRadius::ZERO, Color32::WHITE);
-                    let mut mesh = egui::Mesh::with_texture(tex);
-                    for (from, to) in [
-                        (b.left_top(), preview.left_top()),
-                        (b.right_top(), preview.right_top()),
-                        (b.right_bottom(), preview.right_bottom()),
-                        (b.left_bottom(), preview.left_bottom()),
-                    ] {
-                        let (u, v) = xf.screen_to_norm(from);
-                        mesh.vertices.push(egui::epaint::Vertex { pos: to, uv: Pos2::new(u, v), color: Color32::WHITE });
-                    }
-                    mesh.add_triangle(0, 1, 2);
-                    mesh.add_triangle(0, 2, 3);
-                    clipped.add(egui::Shape::mesh(mesh));
+                    stretched_picture(painter, xf, tex, b, preview);
                 }
                 painter.rect_filled(visible, CornerRadius::ZERO, ACCENT.gamma_multiply(0.04));
                 painter.rect_stroke(visible, CornerRadius::ZERO, Stroke::new(1.5, ACCENT), egui::StrokeKind::Outside);
@@ -777,6 +797,11 @@ pub(crate) fn image_input(
             if resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
                 if let Some(s) = view.image_selection.as_mut() {
                     s.drag = None;
+                    let norm = |r: Rect| {
+                        let ((u0, v0), (u1, v1)) = (xf.screen_to_norm(r.min), xf.screen_to_norm(r.max));
+                        Rect::from_two_pos(Pos2::new(u0, v0), Pos2::new(u1, v1))
+                    };
+                    s.settled = (preview != b).then(|| (norm(b), norm(preview)));
                 }
                 if preview != b {
                     view.pending_edit =
@@ -832,7 +857,7 @@ pub(crate) fn image_input(
         _ => egui::CursorIcon::PointingHand,
     });
     if resp.clicked() || resp.secondary_clicked() {
-        view.image_selection = Some(ImageSelection { page, index: hit, drag: None, crop: None });
+        view.image_selection = Some(ImageSelection { page, index: hit, drag: None, crop: None, settled: None });
     }
     if resp.secondary_clicked() {
         ui.ctx().data_mut(|d| d.insert_temp(menu_key, true));
