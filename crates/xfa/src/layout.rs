@@ -423,6 +423,12 @@ pub fn formatted_value(picture: &str, raw: &str) -> Option<String> {
     if !crate::data::date_tokens(&pattern).iter().all(shows) {
         return None;
     }
+    // Only the ISO date's own shape (`2026-10-20`): `2026-1-2` is not one, and stands.
+    let b = raw.as_bytes();
+    let iso = b.len() == 10 && b.iter().enumerate().all(|(i, c)| if i == 4 || i == 7 { *c == b'-' } else { c.is_ascii_digit() });
+    if !iso {
+        return None;
+    }
     let shown = iso_to_pattern(raw, &pattern);
     (shown != raw).then_some(shown)
 }
