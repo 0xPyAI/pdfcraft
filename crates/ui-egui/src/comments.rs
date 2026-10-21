@@ -1304,22 +1304,39 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, cx: &PageCx<'_>
 
 /// A selected line, connected lines, polygon or cloud: a handle on each end or corner and, while
 /// one is dragged (or its edit is on its way), the new shape over the old.
+/// The points a selected line, polygon or cloud is drawn with while it changes: an end or corner
+/// being dragged, the whole comment being moved by its body, or the edit just released (until the
+/// page is drawn again). `None` while it isn't changing.
+fn changing_points(
+    gesture: Option<&Gesture>,
+    pending: Option<&Edit>,
+    (page, index): (usize, usize),
+    points: &[[f64; 2]],
+    to_user: impl Fn(Pos2) -> [f64; 2],
+    pointer: Option<Pos2>,
+    shift: bool,
+) -> Option<Vec<[f64; 2]>> {
+    let shifted = |dx: f64, dy: f64| points.iter().map(|q| [q[0] + dx, q[1] + dy]).collect();
+    match (gesture, pending) {
+        (Some(Gesture::Reshape { page: p, index: i, point, points: from }), _) if (*p, *i) == (page, index) => {
+            pointer.map(|at| reshaped(from, *point, to_user(at), shift))
+        }
+        (Some(Gesture::Move { page: p, index: i, from }), _) if (*p, *i) == (page, index) => pointer.map(|at| {
+            let (a, b) = (to_user(*from), to_user(at));
+            shifted(b[0] - a[0], b[1] - a[1])
+        }),
+        (_, Some(Edit::ReshapeAnnotation { page: p, index: i, points: to })) if (*p, *i) == (page, index) => Some(to.clone()),
+        (_, Some(Edit::MoveAnnotation { page: p, index: i, dx, dy })) if (*p, *i) == (page, index) => Some(shifted(*dx, *dy)),
+        _ => None,
+    }
+}
+
 fn paint_points(painter: &egui::Painter, cx: &PageCx<'_>, view: &DocView, a: &Annotation, pointer: Option<Pos2>, shift: bool) {
     let cv = &view.comments;
-    let mut points: Vec<[f64; 2]> = a.points.iter().map(|q| [f64::from(q[0]), f64::from(q[1])]).collect();
-    let mut changed = false;
-    if let Some(Gesture::Reshape { page, index, point, points: from }) = &cv.gesture
-        && (*page, *index) == (cx.page, a.index)
-        && let Some(p) = pointer
-    {
-        points = reshaped(from, *point, cx.to_user(p), shift);
-        changed = true;
-    } else if let Some(Edit::ReshapeAnnotation { page, index, points: to }) = &view.pending_edit
-        && (*page, *index) == (cx.page, a.index)
-    {
-        points.clone_from(to);
-        changed = true;
-    }
+    let points: Vec<[f64; 2]> = a.points.iter().map(|q| [f64::from(q[0]), f64::from(q[1])]).collect();
+    let changing = changing_points(cv.gesture.as_ref(), view.pending_edit.as_ref(), (cx.page, a.index), &points, |p| cx.to_user(p), pointer, shift);
+    let changed = changing.is_some();
+    let points = changing.unwrap_or(points);
     let screen: Vec<Pos2> = points.iter().map(|q| cx.to_screen(*q)).collect();
     if changed {
         let stroke = Stroke::new(1.5, SELECT_BLUE);
@@ -2043,6 +2060,24 @@ pub fn status_badge(state: &str) -> Option<(&'static str, &'static str, Color32)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A selected line is drawn where it is going: moved by its body (both ends follow the
+    /// pointer), with an end dragged (that end alone), and as released until the page is drawn.
+    #[test]
+    fn a_moved_or_reshaped_line_is_drawn_at_its_new_points() {
+        let line = [[10.0, 10.0], [50.0, 10.0]];
+        let to_user = |p: Pos2| [f64::from(p.x), f64::from(p.y)];
+        let moving = Gesture::Move { page: 0, index: 3, from: pos2(20.0, 10.0) };
+        let at = Some(pos2(25.0, 30.0));
+        assert_eq!(changing_points(Some(&moving), None, (0, 3), &line, to_user, at, false), Some(vec![[15.0, 30.0], [55.0, 30.0]]));
+        assert_eq!(changing_points(Some(&moving), None, (0, 4), &line, to_user, at, false), None, "another comment's move");
+        let released = Edit::MoveAnnotation { page: 0, index: 3, dx: 5.0, dy: 20.0 };
+        assert_eq!(changing_points(None, Some(&released), (0, 3), &line, to_user, None, false), Some(vec![[15.0, 30.0], [55.0, 30.0]]));
+        let dragging = Gesture::Reshape { page: 0, index: 3, point: 1, points: line.to_vec() };
+        let to = Some(pos2(60.0, 10.0));
+        assert_eq!(changing_points(Some(&dragging), None, (0, 3), &line, to_user, to, false), Some(vec![[10.0, 10.0], [60.0, 10.0]]));
+        assert_eq!(changing_points(None, None, (0, 3), &line, to_user, to, false), None, "not changing");
+    }
     use pdfcraft_render::TextGlyph;
 
     /// One glyph per character, `w` points wide, on a line of `em`-point text whose baseline is at `y`, drawn
