@@ -1433,8 +1433,15 @@ pub fn with_missing_appearances(doc: &Document) -> Option<Document> {
 /// redrawing it. See [`AppearanceCache`] for when entries stay valid.
 pub fn with_missing_appearances_cached(doc: &Document, cache: &mut AppearanceCache) -> Option<Document> {
     let mut copy: Option<Document> = None;
+    // An annotation listed more than once, on one page or several, is drawn once. `has_normal`
+    // reads `doc`, which never gets the appearance, so every repeat used to add another stream to
+    // the copy, and the display bytes grew with the number of listings.
+    let mut seen = std::collections::HashSet::new();
     for page in page_refs(doc).ok()? {
         for r in annots(doc, page).iter().filter_map(Object::as_ref) {
+            if !seen.insert(r) {
+                continue;
+            }
             let d = annot_dict(doc, r);
             if matches!(d.name(b"Subtype"), None | Some(b"Link" | b"Widget" | b"Popup")) {
                 continue;
