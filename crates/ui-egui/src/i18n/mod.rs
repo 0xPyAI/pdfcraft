@@ -1182,6 +1182,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn brazilian_portuguese_covers_catalog_union() {
+        let pt = Lang::from_code("pt-br").expect("pt-br registered");
+        let pt_catalog = pt.catalog();
+        for language in LANGUAGES.iter().filter(|language| !language.source.is_empty()) {
+            let (entries, errors) = catalog::parse_entries(language.source, language.plural_forms());
+            assert!(errors.is_empty(), "{} catalog: {errors:?}", language.code);
+            for entry in entries {
+                let covered = match entry.context.as_str() {
+                    "" => pt_catalog.plain(&entry.source).is_some(),
+                    "@id" => pt_catalog.id(&entry.source).is_some(),
+                    "@plural" => {
+                        let (one, other) = entry.source.split_once('|').expect("validated plural source");
+                        pt_catalog.plural(one, other, 0).is_some()
+                    }
+                    context => pt_catalog.contextual(context, &entry.source).is_some(),
+                };
+                assert!(covered, "Brazilian Portuguese lacks {} / {:?}", entry.context, entry.source);
+            }
+        }
+    }
+
     /// Check direct lookups and multiline literals as well as ordinary tl!("literal") calls,
     /// following the complete-catalog check for Simplified Chinese.
     #[test]

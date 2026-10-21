@@ -132,8 +132,8 @@ What's strong and missing in each: [target-app-parity.md](docs/target-app-parity
 
 ## Languages
 
-Twelve key languages (historical % snapshot vs 2,143 keys, except Vietnamese vs the current
-union). Detail and script notes: [localization-parity.md](docs/localization-parity.md).
+Twelve key languages (historical % snapshot vs 2,143 keys, except Vietnamese and Brazilian
+Portuguese vs the current union). Detail and script notes: [localization-parity.md](docs/localization-parity.md).
 
 | Language | Code | Strings | Status |
 |---|---|---|---|
@@ -143,7 +143,7 @@ union). Detail and script notes: [localization-parity.md](docs/localization-pari
 | Hindi | `hi` | 0% | none |
 | Arabic | `ar` | 100% | partial (layout not mirrored) |
 | French | `fr` | 99.3% | partial |
-| Portuguese (Brazil) | `pt-br` | 99.4% | partial |
+| Portuguese (Brazil) | `pt-br` | 100% of current union | partial |
 | Indonesian | `id` | 0% | none |
 | Japanese | `ja` | 99.1% | partial |
 | German | `de` | 99.3% | partial |
@@ -171,6 +171,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 | 8 | 1.0 polish: performance, right-to-left, missing languages, keyboard-only (M14) | 55–95 |
 
 ## Progress log
+
+- **2026-10-21 (M14, Brazilian Portuguese):** Completed the `pt-br` catalog against the current 2,674-key union, including signature validation and accessibility messages; no build or compilation run. Localization remains partial because help and unpredictable engine/OS error details are not translated.
 
 - **2026-10-19 (M14, #3373):** The main menu and its long submenus scroll in short windows, keeping their commands reachable. Estimates unchanged.
 
