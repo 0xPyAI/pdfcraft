@@ -585,3 +585,78 @@ fn released_text_does_not_jump_back_before_the_page_is_redrawn() {
     let (old, new) = ink_at(&mut h, from, to);
     assert!(new > 20 && old == 0, "the redrawn page has the text in its new place ({old} old, {new} new)");
 }
+
+/// Red pixels in `r`: the test picture.
+fn red(pixels: &image::RgbaImage, r: egui::Rect) -> usize {
+    let (x0, y0, x1, y1) = (r.left().max(0.0) as u32, r.top().max(0.0) as u32, r.right() as u32, r.bottom() as u32);
+    (y0..y1.min(pixels.height()))
+        .flat_map(|y| (x0..x1.min(pixels.width())).map(move |x| (x, y)))
+        .filter(|(x, y)| matches!(pixels.get_pixel(*x, *y).0, [r, g, b, _] if r > 150 && g < 90 && b < 90))
+        .count()
+}
+
+/// Steps until no render is pending.
+fn settle(h: &mut Harness<'static, PdfCraftApp>) {
+    for _ in 0..200 {
+        h.run_steps(1);
+        if !h.state().render_pending() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("the page did not finish rendering");
+}
+
+/// An added picture resized by a corner is drawn at its new size while dragged and after the
+/// release until the page is rendered again. It used to stay at its old size under the outline for
+/// the whole drag, and to show there again after the release.
+#[test]
+fn a_resized_added_picture_shows_only_at_its_new_size() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let mut png = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut png, 60, 60);
+        enc.set_color(png::ColorType::Rgb);
+        let mut w = enc.write_header().unwrap();
+        w.write_image_data(&[200u8, 30, 30].repeat(3600)).unwrap();
+    }
+    h.state_mut().add_image("red.png".into(), png);
+    h.run_steps(3);
+    assert_eq!(h.state().views[0].content.selected, Some((0, 0)), "the picture is selected");
+    settle(&mut h);
+    let rect = added(&h)[0].content.rect();
+    let r = item_on_screen(&h, rect);
+    // The lower right corner to the middle: half the size, the upper left corner kept.
+    let (grip, to) = (r.expand(1.0).right_bottom(), r.center());
+    let kept = egui::Rect::from_min_max(r.min, r.center()).shrink(3.0);
+    let gone = egui::Rect::from_min_max(r.center() + egui::vec2(4.0, 4.0), r.max - egui::vec2(3.0, 3.0));
+    h.hover_at(grip);
+    h.run_steps(1);
+    h.drag_at(grip);
+    h.run_steps(1);
+    for k in 1..=4 {
+        h.hover_at(grip + (to - grip) * (k as f32 / 4.0));
+        h.run_steps(1);
+    }
+    settle(&mut h);
+    let pixels = h.render().unwrap();
+    assert!(red(&pixels, kept) > 100, "while dragged, the picture is drawn at its new size");
+    assert_eq!(red(&pixels, gone), 0, "while dragged, the picture shows at its old size");
+    assert_eq!(added(&h)[0].content.rect(), rect, "nothing is applied before release");
+    h.state_mut().views[0].hold_rasters = true;
+    h.drop_at(to);
+    for frame in 0..4 {
+        h.step();
+        let pixels = h.render().unwrap();
+        assert!(red(&pixels, kept) > 100, "frame {frame} after the release: the picture is not at its new size");
+        assert_eq!(red(&pixels, gone), 0, "frame {frame} after the release: the picture shows at its old size");
+    }
+    assert_ne!(added(&h)[0].content.rect(), rect, "the resize is applied");
+    h.state_mut().views[0].hold_rasters = false;
+    settle(&mut h);
+    h.run_steps(2);
+    let pixels = h.render().unwrap();
+    assert!(red(&pixels, kept) > 100 && red(&pixels, gone) == 0, "the page raster has the picture at its new size");
+}

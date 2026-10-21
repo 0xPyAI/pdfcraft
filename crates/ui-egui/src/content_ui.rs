@@ -109,8 +109,9 @@ impl ContentView {
     }
 }
 
-/// While an added item is moved, the page without it, rendered once per gesture: the item's own
-/// pixels follow the pointer over it instead of staying put until release (#1488).
+/// While an added item is moved, or a picture resized by a corner, the page without it, rendered
+/// once per gesture: the item's own pixels follow the pointer over it instead of staying put until
+/// release (#1488).
 #[derive(Default)]
 pub(crate) struct MoveBackground {
     key: Option<(u64, usize, usize)>,
@@ -119,6 +120,8 @@ pub(crate) struct MoveBackground {
     tag: Option<u64>,
     /// The item's display-space box when the gesture started.
     from: Option<[f64; 4]>,
+    /// The item is a picture: a corner stretches its pixels, and it keeps its whole applied box.
+    picture: bool,
     /// The applied move's box. The page raster on screen still has the item where it was until
     /// its replacement arrives, so the preview stays up until then.
     settling: Option<[f64; 4]>,
@@ -130,8 +133,11 @@ impl MoveBackground {
     }
 
     pub fn prepare(&mut self, ctx: &egui::Context, doc: &pdfcraft_engine::Document, cv: &ContentView, scale: f32) {
+        let picture = |page, index| on_page(doc.added(), page).into_iter().any(|(i, a)| i == index && matches!(a.content, AddedContent::Image(_)));
         let key = match (cv.grab, cv.selected) {
             (Some((gp, Grab::Move, _)), Some((sp, si))) if gp == sp => Some((doc.edit_generation(), sp, si)),
+            // Text resized by a corner rewraps, so only a picture's pixels can follow the corner.
+            (Some((gp, Grab::Corner(..), _)), Some((sp, si))) if gp == sp && picture(sp, si) => Some((doc.edit_generation(), sp, si)),
             _ => None,
         };
         if !(key.is_none() && self.settling.is_some()) && self.key != key {
@@ -139,6 +145,7 @@ impl MoveBackground {
             if let Some((_, page, index)) = key {
                 self.renderer = doc.added_content_preview(page, index).ok().map(|p| p.renderer());
                 self.from = on_page(doc.added(), page).into_iter().find(|(i, _)| *i == index).map(|(_, a)| a.content.rect());
+                self.picture = picture(page, index);
             }
         }
         if self.settling.is_some() {
@@ -208,22 +215,29 @@ impl MoveBackground {
             return;
         }
         let r = screen_rect(xf, info, page, from);
-        let d = if let Some((_, _, start)) = cv.grab {
+        let to = if let Some((_, grab, start)) = cv.grab {
             let Some(p) = ui.input(|i| i.pointer.hover_pos()) else { return };
-            p - start
+            dragged(r, grab, p - start, self.picture)
         } else if let Some(to) = self.settling {
+            let to = screen_rect(xf, info, page, to);
             // A moved text box keeps its top edge (its height follows its lines).
-            screen_rect(xf, info, page, to).left_top() - r.left_top()
+            if self.picture { to } else { r.translate(to.left_top() - r.left_top()) }
         } else {
             return;
         };
         let painter = painter.with_clip_rect(painter.clip_rect().intersect(xf.rect));
         xf.paint_image(&painter, background.id(), 0.0, 0.0, 1.0, 1.0);
-        let r = r.expand(1.0);
+        // A pixel around the box, so its edges come along.
+        let (r, to) = (r.expand(1.0), to.expand(1.0));
         let mut mesh = egui::Mesh::with_texture(page_tex);
-        for c in [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()] {
-            let (u, v) = xf.screen_to_norm(c);
-            mesh.vertices.push(egui::epaint::Vertex { pos: c + d, uv: Pos2::new(u, v), color: Color32::WHITE });
+        for (a, b) in [
+            (r.left_top(), to.left_top()),
+            (r.right_top(), to.right_top()),
+            (r.right_bottom(), to.right_bottom()),
+            (r.left_bottom(), to.left_bottom()),
+        ] {
+            let (u, v) = xf.screen_to_norm(a);
+            mesh.vertices.push(egui::epaint::Vertex { pos: b, uv: Pos2::new(u, v), color: Color32::WHITE });
         }
         mesh.add_triangle(0, 1, 2);
         mesh.add_triangle(0, 2, 3);
