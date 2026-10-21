@@ -1898,6 +1898,7 @@ impl DocView {
             self.pages.insert(page, PageTex { tag: r.request.tag, tex });
             self.signature_drag.page_received(page);
             self.move_background.page_received(page);
+            self.text_background.page_received(page);
             self.comments.page_rendered(page);
             self.waiting_since.remove(&page);
             if !self.stale_tiles.iter().any(|k| k.0 == page) {
