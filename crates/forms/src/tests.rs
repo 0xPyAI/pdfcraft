@@ -3073,3 +3073,37 @@ fn a_skipped_field_leaves_its_widget_to_the_next() {
     let widgets: Vec<(&str, usize)> = all.iter().map(|f| (f.name.as_str(), f.widgets.len())).collect();
     assert_eq!(widgets, [("b", 1)]);
 }
+
+/// #3926 / #3943 review: a password value can be inherited from an ancestor field or sit on a
+/// separate widget. Clearing removes both; an ancestor's value shared with a non-password field
+/// stays for that field, and the password field gets an empty value of its own instead.
+#[test]
+fn inherited_and_widget_password_values_are_cleared() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),                  // 1
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),  // 2
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R 9 0 R 11 0 R] >>".into(), // 3
+        "<< /Fields [5 0 R 8 0 R 10 0 R] /DA (/Helv 0 Tf 0 g) >>".into(),            // 4
+        "<< /T (acct) /FT /Tx /Ff 8192 /V (secret1) /Kids [6 0 R] >>".into(),        // 5 flag and value inherited
+        "<< /Type /Annot /Subtype /Widget /T (pin) /Parent 5 0 R /Rect [50 700 150 720] /P 3 0 R >>".into(), // 6
+        "<< /Type /Annot /Subtype /Widget /Parent 8 0 R /V (secret3) /Rect [50 650 150 670] /P 3 0 R >>".into(), // 7 value on the widget
+        "<< /FT /Tx /T (code) /Ff 8192 /Kids [7 0 R] >>".into(),                     // 8
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (pw) /Ff 8192 /Parent 10 0 R /Rect [50 600 150 620] /P 3 0 R >>".into(), // 9
+        "<< /T (grp) /V (shared2) /Kids [9 0 R 11 0 R] >>".into(),                   // 10 shared with a plain field
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (plain) /Parent 10 0 R /Rect [50 550 150 570] /P 3 0 R >>".into(), // 11
+    ];
+    let mut doc = document(&objs);
+    assert!(has_password_values(&doc));
+    let value = |doc: &Document, n: &str| fields(doc).into_iter().find(|f| f.name == n).map(|f| f.value).unwrap_or_default();
+    assert_eq!(value(&doc, "acct.pin"), ["secret1"], "inherited before");
+    assert_eq!(clear_password_values(&mut doc).unwrap(), 3);
+    assert!(!has_password_values(&doc));
+    for n in ["acct.pin", "code", "grp.pw"] {
+        assert!(value(&doc, n).iter().all(|v| v.is_empty()), "{n} cleared");
+    }
+    assert_eq!(value(&doc, "grp.plain"), ["shared2"], "the shared value stays for the plain field");
+    let has_v = |doc: &Document, n: u32| doc.get(pdfcraft_cos::ObjRef { num: n, generation: 0 }).as_dict().is_some_and(|d| d.get(b"V").is_some());
+    assert!(!has_v(&doc, 5), "an ancestor only password fields inherit from loses its value");
+    assert!(!has_v(&doc, 7), "a widget's value is removed");
+    assert!(has_v(&doc, 10), "a shared ancestor keeps its value");
+}

@@ -1293,28 +1293,84 @@ pub(crate) fn ask_viewers_to_redraw(doc: &mut Document) -> Result<(), FormError>
     Ok(())
 }
 
-/// Whether any text field with the Password flag holds a value (`/V`) in `doc`.
-pub fn has_password_values(doc: &Document) -> bool {
-    fields(doc).iter().any(|f| f.kind == FieldKind::Text && f.has(flags::PASSWORD) && doc.get(f.obj).as_dict().is_some_and(|d| d.get(b"V").is_some()))
+/// Text fields with the Password flag (inherited or their own) whose value (`/V`, inherited or
+/// their own) is not empty, or one of whose separate widgets carries a `/V`.
+fn password_fields(doc: &Document) -> Vec<Field> {
+    let on_widget = |f: &Field| f.widgets.iter().any(|w| w.obj != f.obj && doc.get(w.obj).as_dict().is_some_and(|d| d.get(b"V").is_some()));
+    fields(doc)
+        .into_iter()
+        .filter(|f| f.kind == FieldKind::Text && f.has(flags::PASSWORD) && (f.value.iter().any(|v| !v.is_empty()) || on_widget(f)))
+        .collect()
 }
 
-/// Remove the value (`/V`) of every text field with the Password flag, for a copy of the
-/// document about to be written to a file (#3926). ISO 32000-2 §12.7.5.3, Table 231, Password
-/// flag, note: "it is imperative that PDF processors never store the value of the text field in
-/// the PDF file if this flag is set". The appearance keeps its masking characters. Returns how
-/// many values were removed.
+/// Whether any text field with the Password flag holds a value in `doc`.
+pub fn has_password_values(doc: &Document) -> bool {
+    !password_fields(doc).is_empty()
+}
+
+/// `r` and its field ancestors (`/Parent`), nearest first, at most 32 deep and without repeats.
+fn field_chain(doc: &Document, r: ObjRef) -> Vec<ObjRef> {
+    let mut chain = vec![r];
+    let mut cur = r;
+    while chain.len() < 32 {
+        let Some(Object::Ref(parent)) = doc.get(cur).as_dict().and_then(|d| d.get(b"Parent").cloned()) else { break };
+        if chain.contains(&parent) {
+            break;
+        }
+        chain.push(parent);
+        cur = parent;
+    }
+    chain
+}
+
+/// Remove the values of the text fields with the Password flag, for a copy of the document about
+/// to be written to a file (#3926). ISO 32000-2 §12.7.5.3, Table 231, Password flag, note: "it is
+/// imperative that PDF processors never store the value of the text field in the PDF file if
+/// this flag is set". The appearance keeps its masking characters.
+///
+/// A value can sit on the field, on one of its widgets, or on an ancestor it inherits from
+/// (`/V` is inheritable). Each is removed; an ancestor's only when every field inheriting from it
+/// is such a password field. Where an ancestor's value is shared with other fields and stays, the
+/// password field gets an empty value of its own so it no longer inherits it. Returns how many
+/// fields were cleared.
 pub fn clear_password_values(doc: &mut Document) -> Result<usize, FormError> {
-    let holders: Vec<ObjRef> = fields(doc)
-        .into_iter()
-        .filter(|f| f.kind == FieldKind::Text && f.has(flags::PASSWORD) && doc.get(f.obj).as_dict().is_some_and(|d| d.get(b"V").is_some()))
-        .map(|f| f.obj)
-        .collect();
-    for r in &holders {
-        doc.update_dict(*r, |d| {
+    let targets = password_fields(doc);
+    if targets.is_empty() {
+        return Ok(0);
+    }
+    let all = fields(doc);
+    let is_password = |f: &Field| f.kind == FieldKind::Text && f.has(flags::PASSWORD);
+    for f in &targets {
+        let chain = field_chain(doc, f.obj);
+        for w in &f.widgets {
+            if w.obj != f.obj {
+                doc.update_dict(w.obj, |d| {
+                    d.remove(b"V");
+                })?;
+            }
+        }
+        doc.update_dict(f.obj, |d| {
             d.remove(b"V");
         })?;
+        let mut shared_value_kept = false;
+        for a in chain.iter().skip(1) {
+            if doc.get(*a).as_dict().is_none_or(|d| d.get(b"V").is_none()) {
+                continue;
+            }
+            let exclusive = all.iter().filter(|g| field_chain(doc, g.obj).contains(a)).all(is_password);
+            if exclusive {
+                doc.update_dict(*a, |d| {
+                    d.remove(b"V");
+                })?;
+            } else {
+                shared_value_kept = true;
+            }
+        }
+        if shared_value_kept {
+            doc.update_dict(f.obj, |d| d.set(b"V".to_vec(), PdfString::text("")))?;
+        }
     }
-    Ok(holders.len())
+    Ok(targets.len())
 }
 
 /// Whether the form asks viewers to draw its fields' appearances themselves (`/NeedAppearances`).
