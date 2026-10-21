@@ -4518,6 +4518,12 @@ fn a_resized_image_keeps_its_new_size_until_the_page_is_redrawn() {
         h.hover_at(grip + (to - grip) * (k as f32 / 4.0));
         h.run_steps(1);
     }
+    // While dragged, no outline stays where the picture was.
+    let old = egui::Rect::from_two_pos(at(60.0, 40.0), at(140.0, 120.0));
+    let trailing = h.output().shapes.iter().any(|shape| {
+        matches!(&shape.shape, egui::Shape::Rect(r) if r.stroke.width == 0.75 && (r.rect.min - old.min).length() < 2.0 && (r.rect.max - old.max).length() < 2.0)
+    });
+    assert!(!trailing, "the dragged picture's outline trails behind it");
     h.state_mut().views[0].hold_rasters = true;
     h.drop_at(to);
     for frame in 0..4 {

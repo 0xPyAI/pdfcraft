@@ -677,14 +677,17 @@ pub(crate) fn image_input(
     // hovered boxes, so a ~1000-image CAD page stays interactive in Edit text & images.
     // Fully clipped placements (empty visible frames) get no outline.
     let faint_all = boxes.len() <= MAX_OUTLINES;
+    // The picture being dragged has its frame at the pointer; its outline where it was would
+    // trail behind until the release.
+    let moving = selected.filter(|_| dragging);
     if faint_all {
-        for b in boxes.iter().filter(|b| b.is_positive()) {
+        for (_, b) in boxes.iter().enumerate().filter(|(i, b)| b.is_positive() && moving != Some(*i)) {
             painter.rect_stroke(*b, CornerRadius::ZERO, Stroke::new(0.75, ACCENT.gamma_multiply(0.35)), egui::StrokeKind::Outside);
         }
     }
     let hovered_box = hover_pos.and_then(|p| boxes.iter().enumerate().rposition(|(i, b)| b.is_positive() && b.contains(p) && image_contains(i, p)));
     if !faint_all {
-        for i in selected.into_iter().chain(hovered_box.filter(|h| Some(*h) != selected)) {
+        for i in selected.filter(|_| moving.is_none()).into_iter().chain(hovered_box.filter(|h| Some(*h) != selected)) {
             if let Some(b) = boxes.get(i).filter(|b| b.is_positive()) {
                 painter.rect_stroke(*b, CornerRadius::ZERO, Stroke::new(0.75, ACCENT.gamma_multiply(0.35)), egui::StrokeKind::Outside);
             }
