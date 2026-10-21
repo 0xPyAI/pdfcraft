@@ -4469,6 +4469,20 @@ fn xfa_scripts_of_one_event_see_the_form_as_the_engine_holds_it() {
     assert_eq!(value(&s, "summary"), vec!["Country: CA".to_string()]);
 }
 
+/// A row of dates worked out the way leave forms do it: the calculation checks that the raw value
+/// is a whole ISO date, then adds days to the date as `formattedValue` shows it (`YYYYMMDD`).
+#[test]
+fn xfa_date_arithmetic_reads_the_date_as_its_display_picture_shows_it() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::date_row_template()));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("row.pdf", None, bytes, None).expect("opens");
+    let value = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).map(|f| f.value.clone()).unwrap_or_default();
+    s.apply(id, Edit::SetFieldValue { name: "from".into(), value: FieldValue::Text("20261020".into()) }).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "days".into(), value: FieldValue::Text("3".into()) }).unwrap();
+    let out = s.take_js_output(id);
+    assert_eq!(value(&s, "to"), ["20261022"], "{:?}", out.errors);
+}
+
 #[test]
 fn xfa_scripts_initialize_calculate_validate_toggle_and_add_rows() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));

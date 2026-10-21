@@ -336,6 +336,32 @@ fn dates_convert_between_iso_and_acrobat_patterns() {
     assert_eq!(pattern_to_iso("hello", "mm/dd/yyyy"), None);
 }
 
+/// What scripts read as `formattedValue`: a date display picture shows the ISO value in its
+/// pattern (the first of several alternatives); other kinds of picture, and values that aren't
+/// ISO dates, leave the raw value.
+#[test]
+fn formatted_values_follow_date_display_pictures() {
+    assert_eq!(crate::formatted_value("date{YYYYMMDD}", "2026-10-20").as_deref(), Some("20261020"));
+    assert_eq!(crate::formatted_value("date{MM/DD/YYYY}", "2026-10-20").as_deref(), Some("10/20/2026"));
+    assert_eq!(crate::formatted_value("date{YYYYMMDD}|date{DDMMMYY}", "2026-10-20").as_deref(), Some("20261020"));
+    assert_eq!(crate::formatted_value("date{YYYY-MM-DD}", "2026-10-20"), None, "shown as it is");
+    assert_eq!(crate::formatted_value("num{zzz9}", "2026-10-20"), None);
+    assert_eq!(crate::formatted_value("date{YYYYMMDD}", "20261020"), None, "not an ISO date");
+    assert_eq!(crate::formatted_value("date{YYYYMMDD}", ""), None);
+}
+
+/// A field's `<format><picture>` is its display picture, kept apart from its `<ui>` edit
+/// picture; a field without one has none.
+#[test]
+fn display_pictures_are_parsed_apart_from_edit_pictures() {
+    let (tpl, _) = parse(&crate::fixtures::date_row_template()).unwrap();
+    let Node::Subform(page) = &tpl.root.children[0] else { panic!() };
+    let Node::Field(from) = &page.children[0] else { panic!() };
+    assert_eq!((from.picture.as_deref(), from.display_picture.as_deref()), (Some("date{YYYYMMDD}"), Some("date{YYYYMMDD}")));
+    let Node::Field(days) = &page.children[1] else { panic!() };
+    assert_eq!(days.display_picture, None);
+}
+
 #[test]
 fn data_fills_the_fields_and_adds_rows() {
     let form = layout_xml(&template_with_data(1, DATA)).unwrap();

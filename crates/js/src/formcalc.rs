@@ -1100,7 +1100,11 @@ impl Interp<'_> {
     fn node_member(&mut self, i: usize, name: &str) -> R<Val> {
         let Some(n) = self.node(i) else { return Ok(Val::Null) };
         Ok(match name {
-            "rawValue" | "value" | "formattedValue" => self.node_value(i),
+            "formattedValue" => match &n.formatted {
+                Some(f) => Val::Str(f.clone()),
+                None => self.node_value(i),
+            },
+            "rawValue" | "value" => self.node_value(i),
             "name" => Val::Str(n.name.clone()),
             "somExpression" => Val::Str(n.som.clone()),
             "className" => Val::Str(n.kind.class_name().into()),

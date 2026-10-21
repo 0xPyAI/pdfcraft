@@ -405,6 +405,20 @@ fn date_pattern(picture: Option<&str>) -> String {
     inner.replace('E', "d").to_ascii_lowercase()
 }
 
+/// What scripts read as a field's `formattedValue` when its display picture is `picture`: the
+/// ISO date `raw` shown in a date picture (`date{YYYYMMDD}` turns `2026-10-20` into
+/// `20261020`; of several alternatives, the first). `None` for other kinds of picture, for a
+/// clause this can't read and for a value that isn't an ISO date: the raw value stands then.
+pub fn formatted_value(picture: &str, raw: &str) -> Option<String> {
+    let first = picture.split('|').next()?.trim();
+    let rest = first.strip_prefix("date")?;
+    if !rest.starts_with(['{', '(']) {
+        return None;
+    }
+    let shown = iso_to_pattern(raw, &date_pattern(Some(first)));
+    (shown != raw).then_some(shown)
+}
+
 fn button_action(scripts: &[Script]) -> Option<Action> {
     let s = scripts.iter().find(|s| s.activity == "click")?;
     let t = &s.text;

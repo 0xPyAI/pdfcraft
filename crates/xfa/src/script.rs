@@ -44,6 +44,8 @@ pub struct FormNode {
     pub occur_max: Option<usize>,
     pub index: usize,
     pub children: Vec<FormNode>,
+    /// Fields: the display picture (see [`Field::display_picture`]), for `formattedValue`.
+    pub display_picture: Option<String>,
 }
 
 /// A script the template runs for an event of one node instance.
@@ -261,6 +263,7 @@ impl Walker<'_> {
             occur_max: Some(1),
             index,
             children: Vec::new(),
+            display_picture: f.display_picture.clone(),
         }
     }
 
@@ -314,6 +317,7 @@ impl Walker<'_> {
                             occur_max: sf.occur.max,
                             index,
                             children,
+                            display_picture: None,
                         });
                     }
                 }

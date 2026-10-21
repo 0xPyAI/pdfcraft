@@ -475,6 +475,7 @@ fn parse_field(n: XmlNode, warnings: &mut Vec<String>) -> Field {
         validate: validate_el.and_then(|v| child(v, "script")).map(|s| parse_script(s, "validate")),
         validate_message,
         numeric,
+        display_picture: child(n, "format").and_then(|f| child(f, "picture")).map(text_of).map(|p| p.trim().to_string()).filter(|p| !p.is_empty()),
     }
 }
 

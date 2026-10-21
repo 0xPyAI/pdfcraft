@@ -64,6 +64,9 @@ pub struct XfaNode {
     /// This instance's index among its same-named siblings.
     pub index: usize,
     pub children: Vec<XfaNode>,
+    /// Fields: the value shown in the field's display picture, what `formattedValue` reads;
+    /// `None` when the picture doesn't change it (the raw value is read then).
+    pub formatted: Option<String>,
 }
 
 /// The event a script runs for.
@@ -205,6 +208,8 @@ pub(crate) struct HNode {
     pub(crate) children: Vec<usize>,
     /// Removed by `removeInstance`: skipped everywhere.
     pub(crate) gone: bool,
+    /// See [`XfaNode::formatted`]; dropped when a script sets the value, which it no longer shows.
+    pub(crate) formatted: Option<String>,
 }
 
 /// The form as a script sees and changes it, with the effects it records.
@@ -346,6 +351,7 @@ impl XHost {
         // the snapshot stays bounded however often a long value is written.
         let (text, cut) = clip_value(text);
         n.value = text.clone();
+        n.formatted = None;
         let som = n.som.clone();
         if cut {
             self.clipped_values += 1;
@@ -381,6 +387,7 @@ fn flatten(n: &XfaNode, parent: Option<usize>, out: &mut Vec<HNode>, depth: usiz
         parent,
         children: Vec::new(),
         gone: false,
+        formatted: n.formatted.clone(),
     });
     let mut kids = Vec::new();
     for c in &n.children {
@@ -618,6 +625,8 @@ fn clone_subtree(h: &mut XHost, src: usize, parent: Option<usize>, depth: usize)
                 parent,
                 children: Vec::new(),
                 gone: false,
+                // The copy holds no value, so nothing is shown in its picture either.
+                formatted: None,
             },
             n.children.clone(),
         )
@@ -853,7 +862,7 @@ fn node_get(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValu
     Ok(match key.as_str() {
         IDX => JsValue::from(idx as f64),
         "rawValue" | "value" => host(ctx)?.borrow().nodes.get(idx).map_or(JsValue::null(), value_js),
-        "formattedValue" => s(&value),
+        "formattedValue" => s(&host(ctx)?.borrow().nodes.get(idx).and_then(|n| n.formatted.clone()).unwrap_or(value)),
         "name" => s(&name),
         "somExpression" => s(&som),
         "className" => s(kind.class_name()),

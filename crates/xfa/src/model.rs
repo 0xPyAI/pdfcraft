@@ -503,6 +503,9 @@ pub struct Field {
     pub validate_message: Option<String>,
     /// Numeric fields (numericEdit, or a decimal/integer/float value) give scripts numbers.
     pub numeric: bool,
+    /// The display picture clause (`<format><picture>`), e.g. `date{YYYYMMDD}`: how the value
+    /// shows when not being edited, and what scripts read as `formattedValue`.
+    pub display_picture: Option<String>,
 }
 
 impl Field {
