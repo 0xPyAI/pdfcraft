@@ -2646,3 +2646,6 @@ certificate	Key usage	Utilizzo chiave
 certificate	Self-signed	Autofirmato
 certificate	SHA-1 digest	Impronta SHA-1
 certificate	SHA-256 digest	Impronta SHA-256
+
+# Entries the other catalogs had and Italian lacked (2026-10-21)
+	The password must have at least 8 characters.	La password deve contenere almeno 8 caratteri.
