@@ -2445,5 +2445,12 @@ animation effects	Off	Ανενεργά
 	Attaching files is not available on the web yet	Η επισύναψη αρχείων δεν είναι ακόμη διαθέσιμη στον ιστό
 	Attach {name}	Επισύναψη {name}
 	Delete attachment {key}	Διαγραφή συνημμένου {key}
+	Font	Γραμματοσειρά
+	Bulleted list	Λίστα με κουκκίδες
+	Numbered list	Αριθμημένη λίστα
+	Alignment	Στοίχιση
+	Superscript	Εκθέτης
+	Subscript	Δείκτης
+	Paragraph spacing	Απόσταση παραγράφων
 	Less	Λιγότερα
 	Other options	Άλλες επιλογές

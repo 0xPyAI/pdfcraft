@@ -2690,5 +2690,11 @@ theme	Appearance	Išvaizda
 	Attaching files is not available on the web yet	Failų pridėjimas žiniatinklyje dar negalimas
 	Attach {name}	Pridėti {name}
 	Delete attachment {key}	Ištrinti priedą {key}
+	Bulleted list	Sąrašas su ženkleliais
+	Numbered list	Numeruotas sąrašas
+	Alignment	Lygiuotė
+	Superscript	Viršutinis indeksas
+	Subscript	Apatinis indeksas
+	Paragraph spacing	Tarpas tarp pastraipų
 	Less	Mažiau
 	Other options	Kitos parinktys

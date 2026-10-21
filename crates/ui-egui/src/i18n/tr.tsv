@@ -2435,5 +2435,12 @@ animation effects	Off	Kapalı
 	Attaching files is not available on the web yet	Dosya eklemek web'de henüz kullanılamıyor
 	Attach {name}	{name} ekle
 	Delete attachment {key}	{key} ekini sil
+	Font	Yazı tipi
+	Bulleted list	Madde işaretli liste
+	Numbered list	Numaralı liste
+	Alignment	Hizalama
+	Superscript	Üst simge
+	Subscript	Alt simge
+	Paragraph spacing	Paragraf aralığı
 	Less	Daha az
 	Other options	Diğer seçenekler

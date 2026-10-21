@@ -2440,5 +2440,12 @@ animation effects	Off	Aus
 	Attaching files is not available on the web yet	Dateien anhängen ist im Web noch nicht verfügbar
 	Attach {name}	{name} anhängen
 	Delete attachment {key}	Anhang {key} löschen
+	Font	Schrift
+	Bulleted list	Aufzählung
+	Numbered list	Nummerierte Liste
+	Alignment	Ausrichtung
+	Superscript	Hochgestellt
+	Subscript	Tiefgestellt
+	Paragraph spacing	Absatzabstand
 	Less	Weniger
 	Other options	Weitere Optionen

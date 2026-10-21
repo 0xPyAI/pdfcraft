@@ -2415,5 +2415,12 @@ animation effects	Off	Wyłączone
 	Attaching files is not available on the web yet	Dołączanie plików nie jest jeszcze dostępne w wersji webowej
 	Attach {name}	Dołącz {name}
 	Delete attachment {key}	Usuń załącznik {key}
+	Font	Czcionka
+	Bulleted list	Lista punktowana
+	Numbered list	Lista numerowana
+	Alignment	Wyrównanie
+	Superscript	Indeks górny
+	Subscript	Indeks dolny
+	Paragraph spacing	Odstęp między akapitami
 	Less	Mniej
 	Other options	Inne opcje

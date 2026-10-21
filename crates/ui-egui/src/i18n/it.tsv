@@ -2651,5 +2651,12 @@ certificate	SHA-256 digest	Impronta SHA-256
 	Attaching files is not available on the web yet	Allegare file non è ancora disponibile sul web
 	Attach {name}	Allega {name}
 	Delete attachment {key}	Elimina allegato {key}
+	Font	Carattere
+	Bulleted list	Elenco puntato
+	Numbered list	Elenco numerato
+	Alignment	Allineamento
+	Superscript	Apice
+	Subscript	Pedice
+	Paragraph spacing	Spaziatura paragrafi
 	Less	Meno
 	Other options	Altre opzioni

@@ -2513,5 +2513,12 @@ animation effects	Off	Vypnuto
 	Attaching files is not available on the web yet	Připojování souborů zatím na webu není k dispozici
 	Attach {name}	Připojit {name}
 	Delete attachment {key}	Odstranit přílohu {key}
+	Font	Písmo
+	Bulleted list	Odrážkový seznam
+	Numbered list	Číslovaný seznam
+	Alignment	Zarovnání
+	Superscript	Horní index
+	Subscript	Dolní index
+	Paragraph spacing	Mezera mezi odstavci
 	Less	Méně
 	Other options	Další možnosti

@@ -2437,5 +2437,12 @@ animation effects	Off	Өшірулі
 	Attaching files is not available on the web yet	Вебте файл тіркеу әзірге қолжетімсіз
 	Attach {name}	{name} тіркеу
 	Delete attachment {key}	{key} тіркемесін жою
+	Font	Қаріп
+	Bulleted list	Таңбалауыш тізім
+	Numbered list	Нөмірленген тізім
+	Alignment	Туралау
+	Superscript	Жоғарғы индекс
+	Subscript	Төменгі индекс
+	Paragraph spacing	Абзац аралығы
 	Less	Азырақ
 	Other options	Басқа параметрлер

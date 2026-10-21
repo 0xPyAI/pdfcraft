@@ -2439,5 +2439,12 @@ animation effects	Off	オフ
 	Attaching files is not available on the web yet	Web 版ではまだファイルを添付できません
 	Attach {name}	{name} を添付
 	Delete attachment {key}	添付ファイル {key} を削除
+	Font	フォント
+	Bulleted list	箇条書き
+	Numbered list	番号付きリスト
+	Alignment	配置
+	Superscript	上付き
+	Subscript	下付き
+	Paragraph spacing	段落間隔
 	Less	折りたたむ
 	Other options	その他のオプション

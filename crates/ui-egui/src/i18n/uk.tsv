@@ -2461,5 +2461,12 @@ animation effects	Off	Вимкнено
 	Attaching files is not available on the web yet	Прикріплення файлів у веб-версії поки недоступне
 	Attach {name}	Прикріпити {name}
 	Delete attachment {key}	Видалити вкладення {key}
+	Font	Шрифт
+	Bulleted list	Маркований список
+	Numbered list	Нумерований список
+	Alignment	Вирівнювання
+	Superscript	Надрядковий
+	Subscript	Підрядковий
+	Paragraph spacing	Інтервал між абзацами
 	Less	Менше
 	Other options	Інші параметри
