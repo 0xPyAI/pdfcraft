@@ -129,6 +129,7 @@ pub(crate) struct XfaRun<'a> {
     pub ran_away: bool,
 }
 
+/// The live form node `n`, with its descendants, as the script engine's snapshot of it.
 fn to_js(n: &FormNode) -> XfaNode {
     XfaNode {
         name: n.name.clone(),

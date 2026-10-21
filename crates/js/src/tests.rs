@@ -380,12 +380,15 @@ mod xfa_model {
         }
     }
 
+    /// Run the JavaScript `script` for `activity` on the test form, from the node at `target`.
     fn go(script: &str, target: &str, activity: &str) -> XfaOutcome {
         let ev = XfaEvent { activity: activity.into(), target: target.into(), ..Default::default() };
         let doc = XfaDoc { file_name: "f.pdf".into(), page: 1, page_count: 3 };
         run_xfa(script, &ev, &doc, &form(), Limits::default())
     }
 
+    /// A calculate script finds its siblings by name and yields its last expression, and a
+    /// value it sets comes back as an effect.
     #[test]
     fn calculate_scripts_see_siblings_by_name_and_yield_their_last_expression() {
         let o = go("qty.rawValue * price.rawValue", "form1[0].page1[0].total[0]", "calculate");
@@ -427,6 +430,7 @@ mod xfa_model {
         assert_eq!(o.result.as_deref(), Some("2026-10-21"));
     }
 
+    /// Long values a script sets, and long results, are cut where they are stored, with a note.
     #[test]
     fn long_values_and_results_are_cut_where_they_are_stored() {
         // The value kept for later reads is the one the effect saves.
@@ -654,6 +658,7 @@ mod formcalc {
         assert_eq!(o.result.as_deref(), Some("2026-10-21"));
     }
 
+    /// FormCalc arithmetic, string conversion and comparisons follow FormCalc's own rules.
     #[test]
     fn arithmetic_strings_and_comparisons_follow_formcalc_rules() {
         assert_eq!(calc("1 + 2 * 3"), "7");

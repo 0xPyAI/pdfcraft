@@ -1097,6 +1097,8 @@ impl Interp<'_> {
         self.charge(1)
     }
 
+    /// Property `name` of form object `i` as FormCalc reads it: its value, attributes,
+    /// relatives and children by name.
     fn node_member(&mut self, i: usize, name: &str) -> R<Val> {
         let Some(n) = self.node(i) else { return Ok(Val::Null) };
         Ok(match name {

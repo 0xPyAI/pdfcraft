@@ -419,6 +419,8 @@ pub fn formatted_value(picture: &str, raw: &str) -> Option<String> {
     (shown != raw).then_some(shown)
 }
 
+/// The native PDF action a button's click script amounts to (a reset, print, save or link),
+/// else the script itself to run; `None` without a click script.
 fn button_action(scripts: &[Script]) -> Option<Action> {
     let s = scripts.iter().find(|s| s.activity == "click")?;
     let t = &s.text;

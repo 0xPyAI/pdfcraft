@@ -363,10 +363,13 @@ impl XHost {
 
 type Shared = RefCell<XHost>;
 
+/// The form host of the script running in `ctx`.
 fn host(ctx: &Context) -> JsResult<&Shared> {
     ctx.get_data::<Shared>().ok_or_else(|| error("the XFA script host is not set up"))
 }
 
+/// The snapshot `n` and its descendants flattened into `out` under `parent` (to [`MAX_DEPTH`]
+/// and [`MAX_NODES`]): the index of `n`'s node, `None` past the limits.
 fn flatten(n: &XfaNode, parent: Option<usize>, out: &mut Vec<HNode>, depth: usize) -> Option<usize> {
     if depth > MAX_DEPTH || out.len() >= MAX_NODES {
         return None;
@@ -826,6 +829,8 @@ pub(crate) fn resolve_som(h: &XHost, from: usize, expr: &str) -> Vec<usize> {
     cur
 }
 
+/// The live descendants of node `from` named `name` (`from..name` in a SOM path), in document
+/// order, to [`MAX_DEPTH`].
 pub(crate) fn descendants_named(h: &XHost, from: usize, name: &str, depth: usize) -> Vec<usize> {
     let mut out = Vec::new();
     if depth > MAX_DEPTH {
@@ -846,6 +851,8 @@ pub(crate) fn descendants_named(h: &XHost, from: usize, name: &str, depth: usize
     out
 }
 
+/// A property read on a form node's Proxy: its value (and `formattedValue` as its picture shows
+/// it), attributes, relatives, methods, instance managers and children by name.
 fn node_get(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let idx = node_index(&arg(args, 0), ctx)?;
     let key = arg(args, 1);

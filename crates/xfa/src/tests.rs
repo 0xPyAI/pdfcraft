@@ -310,6 +310,7 @@ fn jpeg_headers_give_the_size() {
 
 const DATA: &str = "<form><head><familyName>Singh</familyName><agree>1</agree><born>2001-02-03</born><answer>N</answer></head><table><row><from0>2019</from0><what0>Studied</what0><where0>Delhi</where0></row><row><from0>2021</from0><what0>Worked</what0><where0>Toronto</where0></row><row><from0>2023</from0><what0>Moved</what0><where0>Ottawa</where0></row></table></form>";
 
+/// The datasets packet parses into a tree whose nodes the fields' data paths find.
 #[test]
 fn datasets_parse_into_a_tree_and_som_paths_find_their_nodes() {
     let d = parse_datasets(&template_with_data(1, DATA)).expect("datasets");
@@ -323,6 +324,8 @@ fn datasets_parse_into_a_tree_and_som_paths_find_their_nodes() {
     assert!(parse_datasets("<xdp:xdp xmlns:xdp=\"x\"/>").is_none());
 }
 
+/// ISO dates convert to and from the date patterns fields show; text that isn't a date is left
+/// alone or refused.
 #[test]
 fn dates_convert_between_iso_and_acrobat_patterns() {
     assert_eq!(iso_to_pattern("2001-02-03", "yyyy-mm-dd"), "2001-02-03");
@@ -362,6 +365,7 @@ fn display_pictures_are_parsed_apart_from_edit_pictures() {
     assert_eq!(days.display_picture, None);
 }
 
+/// The datasets fill the fields they bind to and add the rows the data holds.
 #[test]
 fn data_fills_the_fields_and_adds_rows() {
     let form = layout_xml(&template_with_data(1, DATA)).unwrap();
