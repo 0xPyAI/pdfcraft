@@ -4160,8 +4160,8 @@ milestone = "M5"
 status = "shipped"
 commands = ["comment.export"]
 tools = ["doc_export_data"]
-evidence = ["crates/xfdf/src/tests.rs::xfdf_round_trips_comments_and_values", "crates/xfdf/src/tests.rs::fdf_round_trips_values_and_comments", "crates/automation/tests/automation.rs::comments_and_form_data_travel_as_xfdf_fdf_and_text", "crates/xfdf/src/tests.rs::xfdf_exports_preserve_whitespace_in_comment_attributes"]
-notes = "XFDF exports retain tabs and line breaks in comment identities and metadata."
+evidence = ["crates/xfdf/src/tests.rs::fdf_export_nulls_nested_page_links_without_copying_the_source_page_tree", "crates/xfdf/src/tests.rs::fdf_export_bounds_indirect_type_alias_lookups", "crates/xfdf/src/tests.rs::fdf_export_preserves_metadata_with_stale_type_references", "crates/xfdf/src/tests.rs::fdf_export_keeps_indirect_values_nested_in_annotation_properties", "crates/xfdf/src/tests.rs::fdf_export_preserves_shared_cycles_and_nested_streams_without_expansion", "crates/xfdf/src/tests.rs::fdf_export_refuses_excessive_direct_depth_values_and_payload", "crates/xfdf/src/tests.rs::fdf_export_refuses_aliases_before_cloning_large_annotation_values", "crates/xfdf/src/tests.rs::fdf_export_refuses_repeated_saved_annotations_after_cache_eviction", "crates/automation/tests/automation.rs::fdf_nested_comment_values_survive_export_import_and_save_through_tools", "crates/automation/tests/automation.rs::refused_fdf_export_keeps_the_destination_and_source_through_tools", "crates/xfdf/src/tests.rs::xfdf_round_trips_comments_and_values", "crates/xfdf/src/tests.rs::fdf_round_trips_values_and_comments", "crates/automation/tests/automation.rs::comments_and_form_data_travel_as_xfdf_fdf_and_text", "crates/xfdf/src/tests.rs::xfdf_exports_preserve_whitespace_in_comment_attributes"]
+notes = "FDF preserves shared/cyclic nested values. Discovery keeps lazy array owners and annotation positions; retained entries are budgeted before cloning, including after saved-PDF cache eviction. Copied-graph limits are 100,000 comments/objects/values, 64 direct levels and a conservative 64 MiB data budget; refusal precedes writing. Source parsing and page discovery retain existing COS/parser limits, with no total source-memory bound. Source /Page and /Pages dictionaries become null at every copy depth; indirect Type names check each reference generation with iterative cycle detection and a 64-reference limit; stale Type references preserve unrelated metadata; a saved/reopened three-page fixture verifies small output and retained unrelated metadata. Appearances and source-document links are not carried; FDF import semantics are unchanged. XFDF exports retain tabs and line breaks in comment identities and metadata."
 
 [[feature]]
 id = "comment.export-selected"
@@ -4692,8 +4692,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.export_data"]
 tools = ["doc_export_data"]
-evidence = ["crates/xfdf/src/tests.rs::xfdf_round_trips_comments_and_values", "crates/automation/tests/automation.rs::comments_and_form_data_travel_as_xfdf_fdf_and_text", "crates/xfdf/src/tests.rs::xml_exports_preserve_whitespace_in_field_names"]
-notes = "XFDF, FDF; XFA forms also export their data as XML or XDP (form.xfa-data); XML/XFDF exports retain tabs and line breaks in field identities through character references."
+evidence = ["crates/xfdf/src/tests.rs::fdf_export_counts_emitted_field_values_before_allocating_lists", "crates/xfdf/src/tests.rs::xfdf_round_trips_comments_and_values", "crates/automation/tests/automation.rs::comments_and_form_data_travel_as_xfdf_fdf_and_text", "crates/xfdf/src/tests.rs::xml_exports_preserve_whitespace_in_field_names"]
+notes = "XFDF, FDF; FDF counts emitted field values, including every multi-select list entry, before allocating the output list and refuses exports beyond its shared 100,000-value budget. Existing source-field parsing limits remain unchanged. XFA forms also export their data as XML or XDP (form.xfa-data). XML/XFDF exports retain tabs and line breaks in field identities through character references."
 
 [[feature]]
 id = "form.data-xml-csv-txt"
