@@ -351,6 +351,9 @@ fn formatted_values_follow_date_display_pictures() {
     assert_eq!(crate::formatted_value("num{zzz9}", "2026-10-20"), None);
     assert_eq!(crate::formatted_value("date{YYYYMMDD}", "20261020"), None, "not an ISO date");
     assert_eq!(crate::formatted_value("date{YYYYMMDD}", ""), None);
+    // Month and weekday names aren't shown yet: the raw value stands rather than `20 mmm 2026`.
+    assert_eq!(crate::formatted_value("date{DD MMM YYYY}", "2026-10-20"), None);
+    assert_eq!(crate::formatted_value("date{EEE MM/DD/YYYY}", "2026-10-20"), None);
 }
 
 /// A field's `<format><picture>` is its display picture, kept apart from its `<ui>` edit

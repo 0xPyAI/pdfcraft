@@ -408,14 +408,22 @@ fn date_pattern(picture: Option<&str>) -> String {
 /// What scripts read as a field's `formattedValue` when its display picture is `picture`: the
 /// ISO date `raw` shown in a date picture (`date{YYYYMMDD}` turns `2026-10-20` into
 /// `20261020`; of several alternatives, the first). `None` for other kinds of picture, for a
-/// clause this can't read and for a value that isn't an ISO date: the raw value stands then.
+/// clause this can't read or show (month and weekday names) and for a value that isn't an ISO
+/// date: the raw value stands then.
 pub fn formatted_value(picture: &str, raw: &str) -> Option<String> {
     let first = picture.split('|').next()?.trim();
     let rest = first.strip_prefix("date")?;
     if !rest.starts_with(['{', '(']) {
         return None;
     }
-    let shown = iso_to_pattern(raw, &date_pattern(Some(first)));
+    let pattern = date_pattern(Some(first));
+    // A picture with parts this can't show yet (month or weekday names, `MMM` or `EEE`) would
+    // leave them as letters: the raw value stands then.
+    let shows = |t: &String| !t.chars().all(|c| c.is_ascii_alphabetic()) || matches!(t.as_str(), "yyyy" | "yy" | "mm" | "m" | "dd" | "d");
+    if !crate::data::date_tokens(&pattern).iter().all(shows) {
+        return None;
+    }
+    let shown = iso_to_pattern(raw, &pattern);
     (shown != raw).then_some(shown)
 }
 
