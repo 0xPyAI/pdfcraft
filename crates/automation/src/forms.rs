@@ -386,11 +386,23 @@ impl Automation {
         } else {
             edits.pop().ok_or_else(|| bad("give a field name"))?
         };
+        // A rename also renames the field in the formulas that read it.
+        let before = if a.get("name").is_some() { Some(self.doc(a)?.form.clone()) } else { None };
         let mut out = self.apply(a, edit)?;
         if bulk {
             out["fields"] = json!(names);
         } else {
             out["field"] = json!(new_name);
+        }
+        if let Some(before) = before {
+            let after = &self.doc(a)?.form;
+            // The renamed field itself, found by object: the name stored can differ from the
+            // argument (trimmed, kept under its parent's prefix).
+            let own =
+                names.first().and_then(|n| before.iter().find(|f| &f.name == n)).and_then(|f| after.iter().find(|g| g.obj == f.obj)).map(|g| &g.name);
+            let mut updated = pdfcraft_engine::form_calculations_changed(&before, after);
+            updated.retain(|f| Some(f) != own);
+            out["formulas_updated"] = json!(updated);
         }
         Ok(out)
     }

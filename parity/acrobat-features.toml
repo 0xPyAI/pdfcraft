@@ -1094,8 +1094,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["view.read_mode"]
 tools = []
-evidence = ["crates/ui-egui/tests/control.rs::inspect_and_click_by_label_and_id", "crates/ui-egui/tests/commands.rs::every_registered_command_is_implemented", "crates/ui-egui/tests/view.rs::switching_modes_keeps_the_current_page_at_fixed_zoom"]
-notes = "Switching between Read and the docking workspace preserves the document’s current scroll position at fixed zoom; each tab keeps its own position"
+evidence = ["crates/ui-egui/tests/control.rs::inspect_and_click_by_label_and_id", "crates/ui-egui/tests/commands.rs::every_registered_command_is_implemented", "crates/ui-egui/tests/ui.rs::the_mode_bar_has_no_read_tab", "crates/ui-egui/tests/view.rs::switching_modes_keeps_the_current_page_at_fixed_zoom"]
+notes = "View ▸ Read mode (and the Read mode workspace) hides the panes and tool chrome. The mode bar has no Read tab, as in Acrobat, where reading is the viewer with no tool in use: its tabs are All tools, Edit, Convert and E-Sign. Switching between Read and the docking workspace preserves the document’s current scroll position at fixed zoom; each tab keeps its own position"
 
 [[feature]]
 id = "view.full-screen"
@@ -1986,8 +1986,8 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text"]
 tools = ["text_edit"]
-evidence = ["crates/edit/src/tests.rs::justify_underline_and_spacing", "crates/edit/src/tests.rs::paragraphs_take_new_formatting", "crates/ui-egui/tests/editing.rs::the_format_panel_restyles_the_paragraph_being_edited"]
-notes = "character spacing in points and horizontal scaling in percent for a paragraph (Tc, Tz), rewrapped"
+evidence = ["crates/edit/src/tests.rs::justify_underline_and_spacing", "crates/edit/src/tests.rs::paragraphs_take_new_formatting", "crates/ui-egui/tests/editing.rs::the_format_panel_restyles_the_paragraph_being_edited", "crates/ui-egui/tests/editing.rs::the_format_panel_takes_any_scale_and_character_spacing"]
+notes = "character spacing in points (-5 to 50) and horizontal scaling in percent (10 to 400) for a paragraph (Tc, Tz), rewrapped; Format text takes any value in those ranges typed, or a common one from its list"
 
 [[feature]]
 id = "edit.lists"
@@ -2592,8 +2592,8 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text"]
 tools = ["text_edit"]
-evidence = ["crates/edit/src/tests.rs::paragraphs_take_new_formatting", "crates/ui-egui/tests/editing.rs::the_format_panel_restyles_the_paragraph_being_edited", "crates/automation/tests/automation.rs::editing_existing_text_through_tools"]
-notes = "Edit a PDF ▸ Format text shows the paragraph being edited (family, bold/italic guessed from its font, size) and applies changes at once as one undo step each, keeping the paragraph open"
+evidence = ["crates/edit/src/tests.rs::paragraphs_take_new_formatting", "crates/ui-egui/tests/editing.rs::the_format_panel_restyles_the_paragraph_being_edited", "crates/automation/tests/automation.rs::editing_existing_text_through_tools", "crates/ui-egui/tests/content.rs::format_text_panel_sets_alignment_and_lists_planned_controls_disabled", "crates/ui-egui/tests/content.rs::format_text_rows_line_up_and_fit_the_panel"]
+notes = "Edit a PDF ▸ Format text, laid out as Acrobat's panel, for the paragraph being edited and for added text: font (the source font kept, the document's fonts, families, installed or loaded font files), size, colour, alignment, bold and italic, line spacing, horizontal scale and character spacing; each change applies at once as one undo step, keeping the paragraph open. Shown disabled with a Planned tooltip until they exist: bulleted and numbered lists (edit.lists), superscript and subscript (edit.text-super-subscript), paragraph spacing, and underline on added text."
 
 [[feature]]
 id = "edit.adobe-express-edits"
@@ -2884,8 +2884,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["page.organize"]
 tools = []
-evidence = ["crates/ui-egui/tests/editing.rs::page_grid_zooms_with_its_buttons_keys_and_pinch", "crates/ui-egui/tests/editing.rs::a_zoomed_page_grid_still_inserts_and_moves_at_the_right_gap", "crates/ui-egui/tests/editing.rs::zoomed_pages_in_view_are_rendered_at_the_size_drawn"]
-notes = "Organize page grid: 50–300% with toolbar buttons (and a percentage that resets to 100%), trackpad pinch or Ctrl/⌘ + wheel about the page under the pointer, and ⌘+ / ⌘− / ⌘0; pages drawn larger than their thumbnails are rendered at the size drawn while they are in view (the thumbnail stands in until then, and after an edit), so text stays sharp however long the document is. Missing: a slider as in Acrobat; the size is per document view and not remembered between sessions; the Pages side panel has no size control."
+evidence = ["crates/ui-egui/tests/editing.rs::page_grid_zooms_with_its_buttons_keys_and_pinch", "crates/ui-egui/tests/editing.rs::a_zoomed_page_grid_still_inserts_and_moves_at_the_right_gap", "crates/ui-egui/tests/editing.rs::zoomed_pages_in_view_are_rendered_at_the_size_drawn", "crates/ui-egui/tests/editing.rs::page_grid_size_is_remembered_for_every_document_and_restart"]
+notes = "Organize page grid: 50–300% with toolbar buttons (and a percentage that resets to 100%), trackpad pinch or Ctrl/⌘ + wheel about the page under the pointer, and ⌘+ / ⌘− / ⌘0; pages drawn larger than their thumbnails are rendered at the size drawn while they are in view (the thumbnail stands in until then, and after an edit), so text stays sharp however long the document is. As in Acrobat, the size last chosen is one for every document and kept in the settings across restarts (also set by --grid-zoom). Missing: a slider as in Acrobat; the Pages side panel has no size control."
 
 [[feature]]
 id = "organize.split-every-n"
@@ -4968,8 +4968,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.field.properties"]
 tools = ["form_set_props", "form_fill"]
-evidence = ["crates/ui-egui/tests/prepare.rs::format_validate_and_calculate_tabs", "crates/automation/tests/automation.rs::form_formats_and_calculations_through_tools"]
-notes = "sum/product/average/min/max of picked fields, simplified field notation; custom script pending"
+evidence = ["crates/ui-egui/tests/prepare.rs::format_validate_and_calculate_tabs", "crates/automation/tests/automation.rs::form_formats_and_calculations_through_tools", "crates/forms/src/tests.rs::renaming_a_field_renames_it_in_the_calculations_that_read_it", "crates/forms/src/tests.rs::a_rename_reaches_every_stored_form_of_a_calculation", "crates/automation/tests/automation.rs::renaming_a_field_keeps_the_formulas_that_read_it", "crates/ui-egui/tests/prepare.rs::renaming_a_field_says_how_many_calculations_now_use_the_new_name"]
+notes = "sum/product/average/min/max of picked fields, simplified field notation; custom script pending. Renaming a field renames it in the calculations that read it (field lists, notation, and getField calls naming it in a string literal), in the rename's undo step; Field Properties says how many changed and form_set_props lists them. Not rewritten: names built at run time, other events' scripts, document-level scripts. Whether Acrobat does this is not observed."
 
 [[feature]]
 id = "form.props-selection-change"
