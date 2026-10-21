@@ -2588,6 +2588,7 @@ certificate	SHA-256 digest	Giá trị băm SHA-256
 @plural	{n} field name collides with earlier files and will be renamed: {list}|{n} field names collide with earlier files and will be renamed: {list}	{n} tên trường trùng với các tệp trước và sẽ được đổi tên: {list}
 @plural	{n} object selected|{n} objects selected	Đã chọn {n} đối tượng
 @plural	Downloaded {n} PDF|Downloaded {n} PDFs	Đã tải xuống {n} PDF
+@plural	{n} calculation now uses the new name.|{n} calculations now use the new name.	{n} phép tính giờ dùng tên mới.
 key	Ctrl	Ctrl
 key	Shift	Shift
 key	Delete	Delete
@@ -2683,6 +2684,14 @@ key	Space	Space
 	Words	Từ
 	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	“{name}” đã thay đổi trên đĩa sau khi được mở hoặc lưu lần cuối. Lưu lúc này sẽ thay thế phiên bản mới hơn đó bằng phiên bản này.
 @id	file.word_count	Đếm từ…
+	Bulleted list	Danh sách dấu đầu dòng
+	Numbered list	Danh sách đánh số
+	Alignment	Căn lề
+	Paragraph spacing	Khoảng cách đoạn
+	Superscript	Chỉ số trên
+	Subscript	Chỉ số dưới
+	Less	Ít hơn
+	Other options	Tùy chọn khác
 
 # Historical snapshot notice bar (View signed version / View revision).
 	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	Bạn đang xem phiên bản đã ký của “{from}” (bản sửa đổi {rev}). Đây là ảnh nhanh: các thay đổi ở đây không được áp dụng đến bản gốc.

@@ -2204,6 +2204,7 @@ animation effects	Off	關
 	no unused output name	沒有可用的輸出檔名
 	no output folder was chosen	未選擇輸出資料夾
 @plural	Downloaded {n} PDF|Downloaded {n} PDFs	已下載 {n} 個 PDF
+@plural	{n} calculation now uses the new name.|{n} calculations now use the new name.	{n} 個計算已改用新名稱。
 	Scan	掃描
 	Sign a sheet of white paper and take a photo of it in bright, even light (use the flash). Choose the photo or drop it here: PdfCraft finds the signature and removes the paper.	在白紙上簽名，並在明亮、均勻的光線下拍照（使用閃光燈）。選擇相片或將其拖放到此處：PdfCraft 會找到簽名並去除紙張背景。
 	Choose photo…	選擇相片…
@@ -2384,3 +2385,12 @@ animation effects	Off	關
 	Make properties default	將內容設為預設
 	Pages selected	選取的頁面
 	Page properties	頁面屬性
+	Font	字型
+	Bulleted list	項目符號清單
+	Numbered list	編號清單
+	Alignment	對齊
+	Superscript	上標
+	Subscript	下標
+	Paragraph spacing	段落間距
+	Less	收起
+	Other options	其他選項
