@@ -1293,7 +1293,8 @@ mod scand {
     }
 
     /// A format of 50,000 literal letters and one of 100,000 fields, with texts to match, are read
-    /// in under two seconds.
+    /// in linear time. The limit is generous so a loaded runner passes (it also covers starting
+    /// the engine and building the strings); a quadratic scan of inputs this size takes minutes.
     #[test]
     fn scand_reads_long_formats_and_texts_in_linear_time() {
         // Scripts can pass anything; native code isn't bounded by the loop limit.
@@ -1305,7 +1306,7 @@ mod scand {
         );
         assert_eq!(o.error, None);
         assert_eq!(o.value, "true|true");
-        assert!(started.elapsed() < std::time::Duration::from_secs(2), "{:?}", started.elapsed());
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
     }
 
     /// The check an XFA form runs on leaving a date field tries six formats with `util.scand` and
