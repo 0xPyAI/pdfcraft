@@ -326,13 +326,19 @@ fn page_fonts(doc: &Document, page: &pdfcraft_model::Page) -> Dict {
 }
 
 /// A name in `fonts` for the standard face `base` that can't take over a font the page already
-/// draws with: `preferred` when it is free or already names that face, otherwise the first such
-/// `preferred_1`, `preferred_2`… (one of the first `fonts.len() + 1` always is).
+/// draws with: `preferred` when it is free or already names exactly the dictionary
+/// [`add_page_resources`] writes for that face, otherwise the first such `preferred_1`,
+/// `preferred_2`… (one of the first `fonts.len() + 1` always is). A font with anything more
+/// (`/ToUnicode`, `/Widths`…) is someone else's, even in the same face.
 fn free_font_name(doc: &Document, fonts: &Dict, preferred: &str, base: &str) -> String {
     let usable = |name: &str| match fonts.get(name.as_bytes()) {
         None => true,
         Some(font) => doc.resolve(font).as_dict().is_some_and(|d| {
-            d.name(b"Subtype") == Some(b"Type1") && d.name(b"BaseFont") == Some(base.as_bytes()) && d.name(b"Encoding") == Some(b"WinAnsiEncoding")
+            d.len() == 4
+                && d.name(b"Type") == Some(b"Font")
+                && d.name(b"Subtype") == Some(b"Type1")
+                && d.name(b"BaseFont") == Some(base.as_bytes())
+                && d.name(b"Encoding") == Some(b"WinAnsiEncoding")
         }),
     };
     if usable(preferred) {
@@ -729,7 +735,10 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
         let mut content = begin(MarkKind::HeaderFooter, "Header", page.view_matrix(doc)).into_bytes();
         content.extend(body);
         content.extend_from_slice(END.as_bytes());
-        add_page_resources(doc, page, None, &[(resource.into_bytes(), base)])?;
+        // A name already there is that very font (see `free_font_name`): left as it is.
+        if !page_fonts(doc, page).contains(resource.as_bytes()) {
+            add_page_resources(doc, page, None, &[(resource.into_bytes(), base)])?;
+        }
         let page = &page_list(doc)[i];
         place(doc, page, MarkKind::HeaderFooter, content, false)?;
     }

@@ -168,6 +168,26 @@ fn a_header_never_takes_over_a_font_name_the_page_already_draws_with() {
     assert!(streams(&doc, 0).last().unwrap().contains("/PCTimes_1 8 Tf"));
     assert_eq!(base_of(&doc, b"PCTimes_2"), None, "no new name on update");
     assert_eq!(base_of(&doc, b"PCTimes").as_deref(), Some(&b"Helvetica-Bold"[..]));
+    // The same face with more to it (here a /ToUnicode map) is the page's own too: kept whole.
+    let mut doc = fixture();
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    let map = doc.add(Object::Stream(pdfcraft_cos::Stream::flate(Dict::new(), b"/CIDInit /ProcSet findresource begin")));
+    let mut theirs = Dict::new();
+    for (k, v) in [("Type", "Font"), ("Subtype", "Type1"), ("BaseFont", "Times-Roman"), ("Encoding", "WinAnsiEncoding")] {
+        theirs.set(k.as_bytes().to_vec(), Object::name(v));
+    }
+    theirs.set(b"ToUnicode".to_vec(), Object::Ref(map));
+    let mut fonts = Dict::new();
+    fonts.set(b"PCTimes".to_vec(), Object::Dict(theirs));
+    let mut res = Dict::new();
+    res.set(b"Font".to_vec(), Object::Dict(fonts));
+    doc.update_dict(page, |d| d.set(b"Resources".to_vec(), Object::Dict(res))).unwrap();
+    add_header_footer(&mut doc, &[0], &hf, false, &cx()).unwrap();
+    let doc = reopen(&doc);
+    let fonts = page_fonts(&doc, &pdfcraft_model::pages(&doc)[0]);
+    let kept = doc.resolve(fonts.get(b"PCTimes").unwrap()).as_dict().cloned().unwrap();
+    assert!(kept.contains(b"ToUnicode"), "the page's map is kept");
+    assert!(streams(&doc, 0).last().unwrap().contains("/PCTimes_1 8 Tf"));
 }
 
 #[test]
