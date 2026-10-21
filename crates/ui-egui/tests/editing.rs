@@ -2735,6 +2735,65 @@ fn switching_straight_to_another_box_applies_the_open_paragraph() {
     assert_eq!(ed.text, "Bottom");
 }
 
+/// Two boxes, "Top" and "Bottom", in Edit text, with egui's animations on: the window animates
+/// unless the system asks for less motion, and the test harness turns them off.
+fn two_boxes_animated() -> (Harness<'static, PdfCraftApp>, [egui::Rect; 2]) {
+    let bytes = source_font_fixture_with_text("BT /F1 24 Tf 20 220 Td (Top) Tj ET BT /F2 24 Tf 20 120 Td (Bottom) Tj ET");
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_step_dt(1.0 / 60.0).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("boxes.pdf", None, bytes).expect("opens");
+        app
+    });
+    h.ctx.all_styles_mut(|s| s.animation_time = 0.2);
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = r.width() / 300.0;
+    let mut blocks = {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().text_blocks(0)
+    };
+    blocks.sort_by(|a, b| b.rect[1].partial_cmp(&a.rect[1]).unwrap_or(std::cmp::Ordering::Equal));
+    let on_screen = |b: &pdfcraft_engine::TextBlock| {
+        egui::Rect::from_min_max(
+            egui::pos2(r.left() + b.rect[0] as f32 * k, r.top() + (300.0 - b.rect[3] as f32) * k),
+            egui::pos2(r.left() + b.rect[2] as f32 * k, r.top() + (300.0 - b.rect[1] as f32) * k),
+        )
+    };
+    (h, [on_screen(&blocks[0]), on_screen(&blocks[1])])
+}
+
+/// The colour of the editor's frame (the accent stroke around `r`) this frame, if it is painted.
+fn editor_frame_color(h: &Harness<'static, PdfCraftApp>, r: egui::Rect) -> Option<egui::Color32> {
+    h.output().shapes.iter().find_map(|shape| match &shape.shape {
+        egui::Shape::Rect(rect) if rect.stroke.width == 1.5 && rect.rect.contains(r.center()) => Some(rect.stroke.color),
+        _ => None,
+    })
+}
+
+/// A paragraph opens at once: it used to fade in over a fifth of a second, its frame dimmed and
+/// the page's own copy of the text showing through the editor's cover.
+#[test]
+fn a_paragraph_editor_opens_at_full_opacity() {
+    let (mut h, [top, _]) = two_boxes_animated();
+    h.hover_at(top.center());
+    h.run_steps(1);
+    h.drag_at(top.center());
+    h.run_steps(1);
+    h.drop_at(top.center());
+    let mut seen = 0;
+    for frame in 0..8 {
+        h.step();
+        if let Some(color) = editor_frame_color(&h, top) {
+            assert_eq!(color, egui::Color32::from_rgb(0x14, 0x73, 0xE6), "frame {frame} after the click draws a faded frame");
+            seen += 1;
+        }
+    }
+    assert!(seen > 0, "the editor is drawn");
+}
+
 #[test]
 fn editing_existing_text_in_place() {
     let mut h = harness(1, |_| {});

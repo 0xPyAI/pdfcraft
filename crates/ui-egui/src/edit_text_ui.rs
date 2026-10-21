@@ -1337,9 +1337,12 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
     let font = editor_font(&ed.look, smallest.map_or(ed.size, |s| (s * scale * 0.5).clamp(1.0, 300.0).min(ed.size)));
     let text_color = color32(ed.look.color);
     let mut done = None;
-    egui::Area::new(egui::Id::new("edit-text-line")).order(egui::Order::Foreground).fixed_pos(Pos2::new(ed.rect.left(), ed.rect.top())).show(
-        ctx,
-        |ui| {
+    // No fade-in: while it faded, the page's own copy of the text showed through the cover.
+    egui::Area::new(egui::Id::new("edit-text-line"))
+        .order(egui::Order::Foreground)
+        .fade_in(false)
+        .fixed_pos(Pos2::new(ed.rect.left(), ed.rect.top()))
+        .show(ctx, |ui| {
             // The editor opens at the source size. Once text changes, show the real draft
             // extent: single rows grow toward the page edge, paragraphs rewrap at their
             // source width, and the visible frame grows/shrinks vertically with their rows.
@@ -1417,8 +1420,7 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
                     done = Some(true);
                 }
             });
-        },
-    );
+        });
     match done {
         Some(apply) => {
             let ed = view.line_editor.take()?;

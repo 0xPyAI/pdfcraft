@@ -497,7 +497,9 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
     match f.kind {
         FormFieldKind::Text => {
             let multiline = f.has(field_flags::MULTILINE);
-            egui::Area::new(egui::Id::new(("form-editor", view.id.0))).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
+            // Shown at once, like the paragraph editor: a fade-in shows the field's value through it.
+            let area = egui::Area::new(egui::Id::new(("form-editor", view.id.0))).fade_in(false);
+            area.order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
                 ui.set_min_size(rect.size());
                 let Some(fx) = view.forms.focus.as_mut() else { return };
                 // Sized from the text being typed, so an auto-sized field shrinks to keep it in view.
