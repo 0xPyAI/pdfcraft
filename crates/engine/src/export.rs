@@ -205,10 +205,14 @@ impl ImageFormat {
     }
 }
 
-/// Checks that `premultiplied` is exactly `width × height` RGBA pixels, before any encoder
-/// sees it: `as_chunks` drops a partial trailing pixel, so the rest would be written as a valid
-/// image, and the JPEG and TIFF encoders panic on a buffer that doesn't fit the size.
+/// Checks that `premultiplied` is exactly `width × height` RGBA pixels, and at least one,
+/// before any encoder sees it: `as_chunks` drops a partial trailing pixel, so the rest would be
+/// written as a valid image, and the JPEG and TIFF encoders panic on a buffer that doesn't fit
+/// the size.
 fn check_raster(width: u32, height: u32, premultiplied: &[u8]) -> Result<(), String> {
+    if width == 0 || height == 0 {
+        return Err(format!("a {width}×{height} raster has no pixels"));
+    }
     let expected = usize::try_from(width).ok().zip(usize::try_from(height).ok()).and_then(|(w, h)| w.checked_mul(h)?.checked_mul(4));
     match expected {
         Some(n) if n == premultiplied.len() => Ok(()),
@@ -347,12 +351,14 @@ mod raster_tests {
         }
     }
 
-    /// A raster of no pixels is the right length, and still an error in every format.
+    /// A raster of no pixels is the right length (no bytes), and refused before any encoder sees
+    /// it, in every format.
     #[test]
     fn rasters_of_no_pixels_are_an_error() {
         for format in FORMATS {
             for (width, height) in [(0, 0), (0, 3), (3, 0)] {
-                assert!(encode_image(width, height, &[], format, 72.0).is_err(), "{}, {width}×{height}", format.label());
+                let refused = encode_image(width, height, &[], format, 72.0).err();
+                assert_eq!(refused, Some(format!("a {width}×{height} raster has no pixels")), "{}", format.label());
             }
         }
     }
