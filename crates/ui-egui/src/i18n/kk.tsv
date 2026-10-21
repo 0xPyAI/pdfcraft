@@ -123,6 +123,7 @@
 	Next page	Келесі бет
 	Previous page	Алдыңғы бет
 	Current page — type a page number or label (such as iv) and press Enter	Ағымдағы бет — бет нөмірін немесе белгісін (мысалы, iv) теріңіз де, Enter пернесін басыңыз
+	Zoom — type a percentage and press Enter	Масштаб — пайызды енгізіп, Enter пернесін басыңыз
 	Welcome to PdfCraft	PdfCraft-ге қош келдіңіз
 	An open-source PDF workbench — local, private, and scriptable.	Ашық бастапқы кодты PDF жұмыс орны — жергілікті, жеке әрі скрипттерді қолдайтын.
 	Join the ArtCraft community	ArtCraft қауымдастығына қосылыңыз
@@ -1634,6 +1635,7 @@
 	Couldn't use {name}: {e}	{name} файлын пайдалану мүмкін болмады: {e}
 	Couldn't extract pages: {e}	Беттерді шығарып алу мүмкін болмады: {e}
 	Couldn't write {name}: {e}	{name} файлына жазу мүмкін болмады: {e}
+	the name is not a plain file name	атау қарапайым файл атауы емес
 	Wrote 1 file to {dir}	1 файл {dir} ішіне жазылды
 	Wrote {n} files to {dir}	{n} файл {dir} ішіне жазылды
 	No pages match those choices	Ешбір бет бұл таңдауларға сәйкес келмейді

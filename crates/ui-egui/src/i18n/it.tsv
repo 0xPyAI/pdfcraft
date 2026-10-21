@@ -159,6 +159,7 @@
 	Next page	Pagina successiva
 	Previous page	Pagina precedente
 	Current page — type a page number or label (such as iv) and press Enter	Pagina corrente: digita un numero o un'etichetta di pagina (ad esempio iv) e premi Invio
+	Zoom — type a percentage and press Enter	Zoom: digita una percentuale e premi Invio
 	Welcome to PdfCraft	Benvenuto in PdfCraft
 	An open-source PDF workbench — local, private, and scriptable.	Un banco di lavoro PDF open source: locale, riservato e programmabile.
 	Join the ArtCraft community	Unisciti alla community di ArtCraft
@@ -1709,6 +1710,7 @@
 	Couldn't use {name}: {e}	Impossibile usare {name}: {e}
 	Couldn't extract pages: {e}	Impossibile estrarre le pagine: {e}
 	Couldn't write {name}: {e}	Impossibile scrivere {name}: {e}
+	the name is not a plain file name	il nome non è un semplice nome file
 	Wrote 1 file to {dir}	Scritto 1 file in {dir}
 	Wrote {n} files to {dir}	Scritti {n} file in {dir}
 	No pages match those choices	Nessuna pagina corrisponde a queste scelte
