@@ -69,6 +69,9 @@ fn hovering_a_field_shows_its_tooltip() {
     assert!(h.query_by_label("Your name").is_some(), "the name field's /TU shows on hover");
     rest_on_field(&mut h, "city");
     assert!(h.query_by_label("Your name").is_none(), "another field doesn't keep the tooltip");
+    // Nor shows one of its own: none has been shown since the pointer left `name` (well past the
+    // tooltip delay), so this isn't only the old label going away.
+    assert!(egui::Tooltip::seconds_since_last_tooltip(&h.ctx) > 0.3, "a field without /TU shows no tooltip");
 }
 
 /// Give the `city` field these properties, as the Properties dialog would.
