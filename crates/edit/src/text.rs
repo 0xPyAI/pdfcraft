@@ -22,7 +22,10 @@ use crate::EditError;
 
 #[path = "text_regions.rs"]
 mod regions;
+#[path = "text_session.rs"]
+mod session;
 use regions::{group_blocks, rewrite_styled_block};
+pub use session::TextSession;
 
 /// One line of existing text.
 #[derive(Clone, Debug, PartialEq)]
@@ -152,11 +155,20 @@ pub struct TextEditLayout {
 }
 
 pub fn text_edit_layout(doc: &Document, page: usize, block: usize, text: &str, style: &BlockStyle) -> Result<TextEditLayout, EditError> {
-    // This runs on every keystroke: read the page once for the paragraphs, the untouched runs
-    // and the rewrite, which starts from the same unchanged page.
-    let lines = text_lines(doc, page)?;
-    let original = group_blocks(&lines);
-    let source = original.get(block).ok_or(EditError::Invalid("text block does not exist".into()))?;
+    TextSession::open(doc, page, block)?.layout(text, style)
+}
+
+/// A draft of paragraph `source` (number `block` among the page's `lines`) laid out by the rewrite
+/// Apply runs, on a copy of `doc`.
+fn layout_draft(
+    doc: &Document,
+    page: usize,
+    lines: &[TextLine],
+    source: &TextBlock,
+    block: usize,
+    text: &str,
+    style: &BlockStyle,
+) -> Result<TextEditLayout, EditError> {
     if text == source.editor_text && *style == BlockStyle::default() {
         return Ok(TextEditLayout { source_rect: source.rect, draft_rect: Some(source.rect), overflow: false });
     }
@@ -171,7 +183,7 @@ pub fn text_edit_layout(doc: &Document, page: usize, block: usize, text: &str, s
         }
     }
     let mut draft = doc.clone();
-    rewrite_block_from(&mut draft, page, lines, block, Some(text), style, MAX_TYPE3_GLYPHS)?;
+    rewrite_block_from(&mut draft, page, lines.to_vec(), block, Some(text), style, MAX_TYPE3_GLYPHS)?;
     let mut rect: Option<[f64; 4]> = None;
     for line in text_lines(&draft, page)? {
         if let Some(count) = untouched.get_mut(&key(&line))
@@ -2189,8 +2201,7 @@ pub(crate) fn rewrite_block_with_limit(
     style: &BlockStyle,
     max_glyphs: usize,
 ) -> Result<LineEdit, EditError> {
-    let lines = text_lines(doc, page)?;
-    rewrite_block_from(doc, page, lines, block, text, style, max_glyphs)
+    TextSession::open(doc, page, block)?.commit_with_limit(doc, text, style, max_glyphs)
 }
 
 /// [`rewrite_block_with_limit`] with the page's [`text_lines`], read from `doc` as it is now.
