@@ -682,6 +682,13 @@ fn a_dead_options_read_wakes_an_idle_dialog() {
     d.driver_options_loading = Some("Office".into());
     d.read_options_for = Some("Office".into());
     d.show_driver_options = true;
+    // The preview's page rasters render on the pool and ask for frames until they arrive; on a
+    // loaded machine that outlasts `run`'s step budget, so the dialog is idle only after them.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while h.state().render_pending() && std::time::Instant::now() < deadline {
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     h.run();
     assert!(!h.ctx.has_requested_repaint(), "the dialog is idle while the read waits");
     drop(hold);
