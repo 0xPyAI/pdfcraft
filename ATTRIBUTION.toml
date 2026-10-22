@@ -2425,14 +2425,13 @@ kind = "font"
 usage = "egui fallback fonts (eframe feature default_fonts)"
 sha256 = "f426bec371f484646d002717e2c555a95cd5145e635d83a48bbef83f3abf18ca"
 
-[[bundled]]
-crate = "hayro-cmap"
-version = "0.1.0"
-path = "assets/cmaps.brotli"
+[[asset]]
+path = "vendor/hayro-cmap/assets/cmaps.brotli"
 title = "Adobe CMap resources (predefined CJK CMaps)"
 author = "Adobe"
-source = "https://github.com/adobe-type-tools/cmap-resources (via hayro-cmap)"
+source = "https://github.com/adobe-type-tools/cmap-resources (via hayro-cmap 0.1.0 assets/)"
 licence = "BSD-3-Clause"
+licence_file = "vendor/hayro-cmap/assets/LICENSE.txt"
 kind = "data"
 adobe_data = true
 usage = "Character-code mapping tables required to read CJK PDFs. Non-visual data, allowed by AGENTS.md §1.1"
