@@ -675,6 +675,34 @@ fn sticky_note_composer_posts_and_returns_to_select() {
     assert_eq!(comments(&h).len(), 1);
 }
 
+/// The composer leaves with its comment when the page scrolls it out of the document, and comes
+/// back with the draft (#4021). It used to be pushed back into the window, over the mode bar and
+/// the toolbar, while its comment was out of sight.
+#[test]
+fn the_composer_hides_while_its_comment_is_scrolled_away() {
+    let mut h = harness(|app| app.set_option("quick", "note").unwrap());
+    click_pt(&mut h, (250.0, 180.0));
+    field(&h, "Add a comment").type_text("Draft");
+    h.run_steps(2);
+    let editors = |h: &Harness<'static, PdfCraftApp>| -> Vec<egui::Rect> {
+        h.query_all_by(|n| n.role() == egui::accesskit::Role::MultilineTextInput).map(|n| n.rect()).collect()
+    };
+    let viewport = h.state().views[0].viewport_rect();
+    assert!(editors(&h).iter().any(|r| viewport.contains(r.center())), "the composer opens in the document");
+    // The page scrolled up: it still shows, the comment near its top doesn't.
+    h.state_mut().views[0].goto = Some((0, 0.4));
+    h.run_steps(4);
+    assert!(h.state().views[0].page_screen_rect(0).is_some_and(|r| r.bottom() > viewport.top()), "page 1 still shows");
+    assert!(at(&h, 250.0, 180.0).y < viewport.top(), "the comment is scrolled away");
+    let shown = editors(&h);
+    assert!(shown.is_empty(), "the composer stays with its comment, not over the toolbar: {shown:?} (document {viewport:?})");
+    // Back again, the draft is still there.
+    h.state_mut().views[0].goto = Some((0, 0.0));
+    h.run_steps(4);
+    assert!(editors(&h).iter().any(|r| viewport.contains(r.center())), "the composer is back");
+    assert_eq!(h.state().views[0].comments.composer.as_ref().map(|c| c.text.as_str()), Some("Draft"));
+}
+
 /// The rectangle of the comment whose text starts with `text`.
 fn rect_of(h: &Harness<'static, PdfCraftApp>, text: &str) -> [f32; 4] {
     let c = comments(h);
