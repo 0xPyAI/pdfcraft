@@ -98,7 +98,6 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
         });
     });
     if let Some(id) = chosen {
-        app.all_tools_full = false;
         app.left_open = true;
         app.select_tool(id);
     }

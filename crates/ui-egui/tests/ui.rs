@@ -208,6 +208,39 @@ fn opening_a_document_puts_the_expanded_all_tools_away() {
 }
 
 #[test]
+fn choosing_a_tool_puts_the_expanded_all_tools_away() {
+    use pdfcraft_ui_egui::LeftPanel;
+    let mut h = harness(|app| app.set_option("tools", "full").unwrap());
+    h.state_mut().set_option("tool", "organize").unwrap();
+    h.run_steps(3);
+    assert!(!h.state().all_tools_full, "the tool's panel shows, not the catalogue");
+    assert_eq!(h.state().left, LeftPanel::Tool("organize"));
+}
+
+#[test]
+fn another_tab_coming_forward_puts_the_expanded_all_tools_away() {
+    // Home, through the control option.
+    let mut h = harness(|app| app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens"));
+    h.state_mut().set_option("tools", "full").unwrap();
+    h.run_steps(3);
+    assert!(h.state().all_tools_full, "the document's own tab keeps it");
+    h.state_mut().set_option("home", "").unwrap();
+    h.run_steps(3);
+    assert!(!h.state().all_tools_full);
+    h.get_by_label_contains("Welcome to PdfCraft");
+    // Another document's tab.
+    let mut h = harness(|app| {
+        app.open_bytes("one.pdf", None, FIXTURE.to_vec()).expect("fixture opens");
+        app.open_bytes("two.pdf", None, FIXTURE.to_vec()).expect("fixture opens");
+    });
+    h.state_mut().set_option("tools", "full").unwrap();
+    h.run_steps(3);
+    h.state_mut().active = Some(0);
+    h.run_steps(3);
+    assert!(!h.state().all_tools_full, "one.pdf shows, not the catalogue over it");
+}
+
+#[test]
 fn expanding_all_tools_from_read_mode_restores_the_right_panel() {
     use pdfcraft_ui_egui::{Mode, RightPanel};
     let mut h = harness(|app| app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens"));

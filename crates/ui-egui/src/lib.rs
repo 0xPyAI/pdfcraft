@@ -583,6 +583,9 @@ pub struct PdfCraftApp {
     /// The All tools view fills the workspace (its sidebar's expand button).
     pub all_tools_full: bool,
     pub all_tools_query: String,
+    /// The tab that showed when the expanded All tools view opened ([`Self::shown_tab`]). Another
+    /// tab coming to the front (Home, a document, Combine files) puts the view away.
+    all_tools_tab: (Option<DocId>, bool),
     pub recent: Vec<RecentFile>,
     /// Preferences: reopen the files that were open when PdfCraft last closed (#442).
     pub reopen_last_session: bool,
@@ -987,6 +990,7 @@ impl PdfCraftApp {
             all_tools_expanded: false,
             all_tools_full: false,
             all_tools_query: String::new(),
+            all_tools_tab: (None, false),
             recent: Vec::new(),
             reopen_last_session: false,
             last_session: Default::default(),
@@ -2256,6 +2260,8 @@ impl PdfCraftApp {
     /// Enter a tool from the catalogue, Home, palette or control channel. Organize is a
     /// workspace, so opening its panel also opens the page grid (without toggling it off).
     pub(crate) fn select_tool(&mut self, id: &'static str) {
+        // The tool's panel shows, not the expanded All tools view over it.
+        self.all_tools_full = false;
         self.left = LeftPanel::Tool(id);
         self.reveal_tools();
         if let Some(view) = self.active.and_then(|i| self.views.get_mut(i)) {
@@ -2313,6 +2319,12 @@ impl PdfCraftApp {
             self.switch_mode(Mode::AllTools, true);
         }
         self.all_tools_full = true;
+        self.all_tools_tab = self.shown_tab();
+    }
+
+    /// The tab at the front: the active document, or else whether Combine files shows over Home.
+    fn shown_tab(&self) -> (Option<DocId>, bool) {
+        (self.active.and_then(|i| self.views.get(i)).map(|v| v.id), self.combine_showing())
     }
 
     /// Back to the Select tool from an editing tool. A paragraph still open in the editor is
@@ -3399,6 +3411,10 @@ impl eframe::App for PdfCraftApp {
                     .frame(egui::Frame::NONE)
                     .show(ui, |ui| panels::right_panel(self, ui));
             }
+        }
+        // Whichever way another tab came to the front, it shows instead of the expanded view.
+        if self.all_tools_full && self.all_tools_tab != self.shown_tab() {
+            self.all_tools_full = false;
         }
         let t = theme::Tokens::get(&ctx);
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.pasteboard)).show(ui, |ui| {
