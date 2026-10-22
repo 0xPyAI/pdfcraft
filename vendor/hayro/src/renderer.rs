@@ -444,10 +444,10 @@ pub(crate) struct Renderer {
     /// PdfCraft patch (17): while the page's annotations are being drawn, paints keep their
     /// colours — reading colours replace document colours, never annotation colours.
     in_annotations: bool,
-    /// PdfCraft patch (19): one entry per transparency group pushed, whether it is a knockout
+    /// PdfCraft patch (22): one entry per transparency group pushed, whether it is a knockout
     /// group (`Device::set_knockout`).
     knockout: Vec<bool>,
-    /// PdfCraft patch (19): inside a knockout erase pass (`Device::begin_knockout_erase`), and
+    /// PdfCraft patch (22): inside a knockout erase pass (`Device::begin_knockout_erase`), and
     /// how many transparency groups were skipped in it (nothing is layered while erasing).
     erasing: bool,
     erase_groups: usize,
@@ -474,7 +474,7 @@ enum ImagePixelFormat {
 }
 
 impl Renderer {
-    /// PdfCraft patch (19): whether the innermost transparency group is a knockout group.
+    /// PdfCraft patch (22): whether the innermost transparency group is a knockout group.
     fn in_knockout(&self) -> bool {
         self.knockout.last().copied().unwrap_or(false)
     }
@@ -1101,7 +1101,7 @@ impl Renderer {
 
     #[must_use]
     fn set_paint(&mut self, paint: &Paint<'_>, path: &BezPath, is_stroke: bool) -> PaintSetup {
-        // PdfCraft patch (19): in a knockout erase pass every paint clears what is under its
+        // PdfCraft patch (22): in a knockout erase pass every paint clears what is under its
         // shape (a transparent fill with `Compose::Copy`, weighted by coverage).
         if self.erasing {
             self.ctx.set_blend_mode(knockout_blend_mode());
@@ -1516,7 +1516,7 @@ impl Renderer {
 
 impl<'a> Device<'a> for Renderer {
     fn draw_image(&mut self, image: hayro_interpret::Image<'a, '_>, mut transform: Affine) {
-        // PdfCraft patch (19): an erase pass paints nothing; an unmasked image's rectangle was
+        // PdfCraft patch (22): an erase pass paints nothing; an unmasked image's rectangle was
         // cleared by `knockout_shape`, and a masked image's shape is left alone.
         if self.erasing {
             return;
@@ -1698,7 +1698,7 @@ impl<'a> Device<'a> for Renderer {
         mask: Option<SoftMask<'_>>,
         blend_mode: BlendMode,
     ) {
-        // PdfCraft patch (19): nothing is layered in a knockout erase pass.
+        // PdfCraft patch (22): nothing is layered in a knockout erase pass.
         if self.erasing {
             self.erase_groups += 1;
             return;
@@ -1746,7 +1746,7 @@ impl<'a> Device<'a> for Renderer {
         self.ctx.pop_layer();
     }
 
-    /// PdfCraft patch (19): the group just pushed is a knockout group. Its elements are drawn
+    /// PdfCraft patch (22): the group just pushed is a knockout group. Its elements are drawn
     /// with `Compose::Copy`, which (weighted by coverage) replaces what earlier elements drew
     /// where the element's shape is, so each element composites with the group's initial
     /// backdrop (transparent: an isolated group, and the non-isolated approximation every
@@ -1763,7 +1763,7 @@ impl<'a> Device<'a> for Renderer {
         }
     }
 
-    /// PdfCraft patch (19): in a knockout group, clear what the group drew under `shape` (a
+    /// PdfCraft patch (22): in a knockout group, clear what the group drew under `shape` (a
     /// transparent fill with `Compose::Copy`, weighted by coverage) before an element drawn into
     /// a layer of its own composites there, so the element replaces it.
     fn knockout_erase_wanted(&mut self) -> bool {
@@ -1920,7 +1920,7 @@ impl<'a> Device<'a> for Renderer {
     }
 
     fn set_blend_mode(&mut self, blend_mode: BlendMode) {
-        // PdfCraft patch (19): inside a knockout group every element replaces what it covers.
+        // PdfCraft patch (22): inside a knockout group every element replaces what it covers.
         let mode = if self.in_knockout() {
             knockout_blend_mode()
         } else {
@@ -2107,7 +2107,7 @@ fn convert_fill_rule(fill_rule: FillRule) -> Fill {
     }
 }
 
-/// PdfCraft patch (19): how an element of a knockout group is drawn (see `set_knockout`).
+/// PdfCraft patch (22): how an element of a knockout group is drawn (see `set_knockout`).
 fn knockout_blend_mode() -> peniko::BlendMode {
     peniko::BlendMode::new(Mix::Normal, Compose::Copy)
 }
