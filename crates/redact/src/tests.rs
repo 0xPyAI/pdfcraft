@@ -1210,6 +1210,130 @@ fn hidden_information_is_counted_and_removed() {
     assert!(shown, "the field's value stays visible as page content");
 }
 
+/// A one-page document whose catalog names an outline root (object 5). `items` are the outline
+/// items, objects 6 onward.
+fn outlined_document(items: Vec<Vec<u8>>) -> Document {
+    let mut objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /Outlines 5 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R >>".to_vec(),
+        stream("", b"BT ET"),
+        b"<< /Type /Outlines /First 6 0 R >>".to_vec(),
+    ];
+    objs.extend(items);
+    pdf(objs)
+}
+
+/// An outline of `levels` levels with two items each. Both items of a level name the first item
+/// of the next level as their /First, so each of those items has two parents, and a walk that
+/// follows every path takes 2^levels steps. Items a and b of level k are objects 6 + 2k and 7 + 2k.
+fn hostile_outline(levels: usize) -> Document {
+    let mut items = Vec::new();
+    for k in 0..levels {
+        let (a, b) = (6 + 2 * k, 7 + 2 * k);
+        let child = if k + 1 < levels { format!(" /First {} 0 R", a + 2) } else { String::new() };
+        items.push(format!("<< /Title (a) /Next {b} 0 R{child} >>").into_bytes());
+        items.push(format!("<< /Title (b){child} /Parent {a} 0 R >>").into_bytes());
+    }
+    outlined_document(items)
+}
+
+/// Runs `work` on another thread and returns its result. A walk that spins fails the test after
+/// `bound` instead of hanging the whole run; the thread stays behind and ends with the process.
+fn finishes_within<T: Send + 'static>(bound: std::time::Duration, work: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(work());
+    });
+    match rx.recv_timeout(bound) {
+        Ok(out) => out,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            panic!("the walk did not finish within {bound:?}: it is spinning on shared outline items")
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => panic!("the walk panicked"),
+    }
+}
+
+/// Generous for a slow machine: the bounded walk takes a few milliseconds.
+const WALK_BOUND: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// An outline whose items name shared children is counted item by item, each item once, and the
+/// walk ends. Counting along every path instead takes 2^60 steps.
+#[test]
+fn an_outline_whose_items_share_children_is_counted_without_spinning() {
+    use crate::sanitize::{Hidden, scan};
+    let doc = hostile_outline(60);
+    let counts = finishes_within(WALK_BOUND, move || scan(&doc));
+    assert_eq!(counts.iter().find(|c| c.0 == Hidden::Bookmarks), Some(&(Hidden::Bookmarks, 120)), "60 levels of two distinct items");
+}
+
+/// Removing the bookmarks counts them through the same walk first, so it must finish too, and
+/// it must take the outline out of the catalog.
+#[test]
+fn removing_bookmarks_from_an_outline_whose_items_share_children_finishes() {
+    use crate::sanitize::{Hidden, remove_hidden};
+    let mut doc = hostile_outline(60);
+    let (done, outlines_left) = finishes_within(WALK_BOUND, move || {
+        let done = remove_hidden(&mut doc, &[Hidden::Bookmarks]);
+        let root = doc.root().unwrap();
+        let left = doc.get(root).as_dict().is_some_and(|c| c.contains(b"Outlines"));
+        (done, left)
+    });
+    assert_eq!(done.unwrap(), [(Hidden::Bookmarks, 120)]);
+    assert!(!outlines_left, "the outline is removed from the catalog");
+}
+
+/// Nesting and siblings: every item of an ordinary outline is counted once, as before.
+#[test]
+fn a_nested_outline_is_counted_item_by_item() {
+    use crate::sanitize::{Hidden, scan};
+    let doc = outlined_document(vec![
+        b"<< /Title (Chapter 1) /Parent 5 0 R /First 7 0 R /Last 8 0 R /Next 9 0 R >>".to_vec(),
+        b"<< /Title (1.1) /Parent 6 0 R /Next 8 0 R >>".to_vec(),
+        b"<< /Title (1.2) /Parent 6 0 R /Prev 7 0 R >>".to_vec(),
+        b"<< /Title (Chapter 2) /Parent 5 0 R /Prev 6 0 R /First 10 0 R >>".to_vec(),
+        b"<< /Title (2.1) /Parent 9 0 R >>".to_vec(),
+    ]);
+    assert_eq!(scan(&doc).iter().find(|c| c.0 == Hidden::Bookmarks), Some(&(Hidden::Bookmarks, 5)));
+}
+
+/// Two levels of 60,000 distinct items: each level is under the per-level cap, so only the total
+/// cap stops the count at 100,000 (without it the count would be 120,000).
+#[test]
+fn an_outline_counts_no_more_items_than_its_total_budget() {
+    use crate::sanitize::{Hidden, scan};
+    let per_level = 60_000;
+    let mut items = Vec::with_capacity(2 * per_level);
+    // Item j is object 6 + j. Level one is items 0..per_level; its first item leads to level two.
+    for i in 0..per_level {
+        let next = if i + 1 < per_level { format!(" /Next {} 0 R", 7 + i) } else { String::new() };
+        let first = if i == 0 { format!(" /First {} 0 R", 6 + per_level) } else { String::new() };
+        items.push(format!("<< /Title (a){next}{first} >>").into_bytes());
+    }
+    for i in 0..per_level {
+        let next = if i + 1 < per_level { format!(" /Next {} 0 R", 7 + per_level + i) } else { String::new() };
+        items.push(format!("<< /Title (b){next} >>").into_bytes());
+    }
+    let doc = outlined_document(items);
+    assert_eq!(scan(&doc).iter().find(|c| c.0 == Hidden::Bookmarks), Some(&(Hidden::Bookmarks, 100_000)));
+}
+
+/// Items written inline (not as indirect objects) count towards the total budget too. Each of
+/// 60,000 indirect siblings has one inline child, so 120,000 items are reached, and the total must
+/// still stop at 100,000.
+#[test]
+fn inline_outline_children_count_towards_the_total_budget() {
+    use crate::sanitize::{Hidden, scan};
+    let siblings = 60_000;
+    let mut items = Vec::with_capacity(siblings);
+    for i in 0..siblings {
+        let next = if i + 1 < siblings { format!(" /Next {} 0 R", 7 + i) } else { String::new() };
+        items.push(format!("<< /Title (a){next} /First << /Title (c) >> >>").into_bytes());
+    }
+    let doc = outlined_document(items);
+    assert_eq!(scan(&doc).iter().find(|c| c.0 == Hidden::Bookmarks), Some(&(Hidden::Bookmarks, 100_000)));
+}
+
 /// Issue #2447: in a tagged PDF the structure tree points at the link and the comment it tags
 /// (`/OBJR`). Removing them must drop those references too, or the full rewrite keeps the
 /// annotations, the URL and the comment text included, while the page no longer lists them.
