@@ -1841,7 +1841,15 @@ pub(crate) fn attachment_items(ui: &mut egui::Ui, view: &mut DocView, info: &Doc
 }
 
 /// Items of the canvas context menu for the selected comment (or the page).
-pub(crate) fn context_menu(ui: &mut egui::Ui, view: &mut DocView, info: &DocInfo, prefs: &CommentPrefs, allowed: bool) -> Option<CanvasAction> {
+/// `can_modify`: the document's pages may change (Flatten comments draws into them).
+pub(crate) fn context_menu(
+    ui: &mut egui::Ui,
+    view: &mut DocView,
+    info: &DocInfo,
+    prefs: &CommentPrefs,
+    allowed: bool,
+    can_modify: bool,
+) -> Option<CanvasAction> {
     let mut action = None;
     let selected = view.comments.selected.and_then(|(p, i)| info.annotations.iter().find(|a| a.page == p && a.index == i && a.in_reply_to.is_none()));
     match selected {
@@ -1923,6 +1931,16 @@ pub(crate) fn context_menu(ui: &mut egui::Ui, view: &mut DocView, info: &DocInfo
                 action = Some(CanvasAction::OpenComments);
                 ui.close();
             }
+        }
+    }
+    // Every comment of the document into its pages, as Comment ▸ Flatten comments does: signed
+    // or reviewed pages whose comments should no longer move.
+    if !info.annotations.is_empty() {
+        ui.separator();
+        if ui.add_enabled(can_modify, egui::Button::new(tl!("Flatten comments"))).clicked() {
+            view.comments.selected = None;
+            action = Some(CanvasAction::Edit(Box::new(Edit::Flatten { comments: true, fields: false })));
+            ui.close();
         }
     }
     action
