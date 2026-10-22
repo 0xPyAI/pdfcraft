@@ -2821,3 +2821,40 @@ fn rotate_repeated_indices_accumulate_from_the_current_page_value() {
         }
     }
 }
+
+#[test]
+fn a_bookmark_can_go_to_a_point_on_its_page_and_survives_save() {
+    let mut d = doc_a();
+    // No position: as before, `/XYZ null null null`, the page top at the reader's zoom.
+    crate::add_bookmark(&mut d, &[], 9, "Top", 0).unwrap();
+    // Only a height (a bookmark made at the top of the window), a full point, and only a left.
+    assert_eq!(crate::add_bookmark_at(&mut d, &[], 9, "Section", 1, None, Some(612.25)).unwrap(), vec![1]);
+    crate::add_bookmark_at(&mut d, &[], 9, "Table", 1, Some(72.5), Some(300.0)).unwrap();
+    crate::add_bookmark_at(&mut d, &[1], 9, "Inside", 2, Some(10.0), None).unwrap();
+    let view = |d: &Document, title: &str| crate::bookmarks(d).into_iter().find(|b| b.title == title).unwrap().view;
+    let xyz = |left, top| Some((b"XYZ".to_vec(), vec![left, top, None]));
+    let check = |d: &Document| {
+        assert_eq!(view(d, "Top"), xyz(None, None));
+        assert_eq!(view(d, "Section"), xyz(None, Some(612.25)));
+        assert_eq!(view(d, "Table"), xyz(Some(72.5), Some(300.0)));
+        assert_eq!(view(d, "Inside"), xyz(Some(10.0), None));
+        let page_of = |title: &str| crate::bookmarks(d).into_iter().find(|b| b.title == title).unwrap().page;
+        assert_eq!((page_of("Top"), page_of("Section"), page_of("Table"), page_of("Inside")), (Some(0), Some(1), Some(1), Some(2)));
+    };
+    check(&d);
+    check(&full_roundtrip(&d));
+}
+
+#[test]
+fn a_bookmark_position_that_is_not_a_number_is_refused_and_changes_nothing() {
+    let mut d = doc_a();
+    crate::add_bookmark(&mut d, &[], 9, "Keep", 0).unwrap();
+    for (left, top) in [(Some(f64::NAN), None), (None, Some(f64::INFINITY)), (Some(1.0), Some(f64::NEG_INFINITY))] {
+        assert_eq!(crate::add_bookmark_at(&mut d, &[], 9, "Bad", 0, left, top), Err(crate::OutlineError::BadPosition), "{left:?} {top:?}");
+    }
+    assert_eq!(titles(&crate::bookmarks(&d)), ["Keep"]);
+    // The page is still checked, and so is the title.
+    assert!(crate::add_bookmark_at(&mut d, &[], 9, "Nowhere", 7, Some(1.0), Some(1.0)).is_err());
+    assert_eq!(crate::add_bookmark_at(&mut d, &[], 9, " ", 0, Some(1.0), Some(1.0)), Err(crate::OutlineError::EmptyTitle));
+    assert_eq!(titles(&crate::bookmarks(&d)), ["Keep"]);
+}

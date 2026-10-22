@@ -1328,11 +1328,16 @@ pub enum Edit {
         field_conflicts: pdfcraft_organize::FieldConflicts,
     },
     /// Add a bookmark to `page` as child `index` of the bookmark at `parent` (`[]` = top level).
+    /// It goes to the user-space point (`left`, `top`) of the page at the reader's zoom, and
+    /// either may be `None` to keep the reader's position that way (both `None` is the page top).
+    /// A coordinate that is not finite fails the edit.
     AddBookmark {
         parent: Vec<usize>,
         index: usize,
         title: String,
         page: usize,
+        left: Option<f64>,
+        top: Option<f64>,
     },
     RenameBookmark {
         path: Vec<usize>,
@@ -2370,8 +2375,8 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
             let outcome = pdfcraft_organize::insert_file_pages(doc, &src, &title, &pages, *at, *field_conflicts)?;
             cx.renamed_fields = outcome.renamed_fields;
         }
-        Edit::AddBookmark { parent, index, title, page } => {
-            pdfcraft_organize::add_bookmark(doc, parent, *index, title, *page)?;
+        Edit::AddBookmark { parent, index, title, page, left, top } => {
+            pdfcraft_organize::add_bookmark_at(doc, parent, *index, title, *page, *left, *top)?;
         }
         Edit::RenameBookmark { path, title } => pdfcraft_organize::rename_bookmark(doc, path, title)?,
         Edit::DeleteBookmark { path } => pdfcraft_organize::delete_bookmark(doc, path)?,
