@@ -30,6 +30,9 @@ real_name = "Eduardo Soares"
 display_name = "Eduardo Soares"
 sync_github_name = false
 
+[people.guillehr2]
+real_name = "Guillem Hermida"
+
 [people.jcl-bit]
 real_name = "James Locke"
 display_name = "James Locke"

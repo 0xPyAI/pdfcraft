@@ -664,6 +664,9 @@ impl<'a> Inspector<'a> {
             .ok()
             .and_then(|o| self.dict(o))
             .and_then(|m| m.get(b"Marked").ok())
+            // Any value may be written as an indirect reference, `/Marked 9 0 R` included, so the
+            // flag is resolved before it is read as a boolean (#3671).
+            .map(|o| self.resolve(o))
             .and_then(|o| o.as_bool().ok())
             .unwrap_or(false);
         match self.page_labels(catalog, &mut info.pages) {

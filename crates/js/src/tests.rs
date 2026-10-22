@@ -771,6 +771,9 @@ mod formcalc {
         assert_eq!(calc(r#"Num2Date(45350, "YYYY-MM-DD")"#), "2024-02-29");
         assert_eq!(calc(r#"Num2Date(Date2Num("2024-02-29") + 1, "MMMM D, YYYY")"#), "March 1, 2024");
         assert_eq!(calc(r#"Time2Num("01:00:00")"#), "3600000");
+        assert_eq!(calc(r#"IsoTime2Num("12:30:45Z")"#), "45045000");
+        assert_eq!(calc(r#"IsoTime2Num("12:30:45.250")"#), "45045250");
+        assert_eq!(calc(r#"IsoTime2Num("T12:30:45")"#), "45045000");
         assert_eq!(calc(r#"Num2Time(3661000)"#), "01:01:01");
         assert_eq!(calc("Round(Pmt(10000, 0.01, 12), 2)"), "888.49");
         assert_eq!(calc("Round(FV(100, 0.01, 12), 2)"), "1268.25");
@@ -781,6 +784,15 @@ mod formcalc {
         assert_eq!(calc(r#"Decode("a%20b", "url")"#), "a b");
         assert!(go(r#"Get("http://example.com")"#, "form1[0].page1[0].total[0]", "calculate").error.unwrap().contains("network"));
         assert!(go("Nope(1)", "form1[0].page1[0].total[0]", "calculate").error.unwrap().contains("unknown function"));
+    }
+
+    #[test]
+    fn format_nine_pads_the_integer_part() {
+        assert_eq!(calc(r#"Format("99999", 42)"#), "00042");
+        assert_eq!(calc(r#"Format("9999", 5)"#), "0005");
+        assert_eq!(calc(r#"Format("999.99", 4.5)"#), "004.50");
+        assert_eq!(calc(r#"Format("zzz9", 42)"#), "42");
+        assert_eq!(calc(r#"Format("99", 12345)"#), "12345");
     }
 
     #[test]
@@ -1194,4 +1206,38 @@ mod session {
         let o = s.run(slow);
         assert!(o.abandoned || o.error.as_deref().is_some_and(|e| e.contains("too long")), "{o:?}");
     }
+}
+
+#[test]
+fn shared_field_snapshots_isolate_writes_errors_and_script_globals() {
+    let initial = Arc::new(fields());
+    let before = initial.as_ref().clone();
+    let event = Event::field("Calculate", "total", "");
+    let write = run_shared(
+        "var scriptLocal = 1; getField('qty').value = 9; getField('agree').checkThisBox(0, true); event.value = getField('qty').value;",
+        &event,
+        &doc(),
+        Arc::clone(&initial),
+        &[],
+        Limits::default(),
+    );
+    assert_eq!(write.error, None);
+    assert_eq!(write.value, "9");
+    assert_eq!(write.changed.iter().find(|f| f.name == "qty").unwrap().value, ["9"]);
+    assert_eq!(write.changed.iter().find(|f| f.name == "agree").unwrap().value, ["Yes"]);
+    assert_eq!(*initial, before, "script writes cannot mutate the caller's snapshot");
+    let failed = run_shared("getField('qty').value = 99; throw new Error('rejected');", &event, &doc(), Arc::clone(&initial), &[], Limits::default());
+    assert!(failed.error.is_some());
+    assert_eq!(*initial, before, "an exception cannot leak partial writes into the initial snapshot");
+    let read = run_shared(
+        "event.value = typeof scriptLocal + ':' + getField('qty').value + ':' + getField('agree').isBoxChecked(0);",
+        &event,
+        &doc(),
+        initial,
+        &[],
+        Limits::default(),
+    );
+    assert_eq!(read.error, None);
+    assert_eq!(read.value, "undefined:4:false");
+    assert!(read.changed.is_empty());
 }

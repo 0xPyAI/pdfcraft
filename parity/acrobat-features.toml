@@ -178,8 +178,8 @@ milestone = "M1"
 status = "shipped"
 commands = ["file.open"]
 tools = ["doc_open"]
-evidence = ["crates/ui-egui/tests/editing.rs::password_prompt_opens_and_security_tab_reports_the_details", "crates/crypt/src/tests.rs::empty_user_password_opens_without_asking", "crates/ui-egui/src/open_worker_tests.rs::a_chosen_tool_survives_wrong_password_retry_and_runs_after_unlock", "crates/ui-egui/src/open_worker_tests.rs::startup_intake_waits_for_local_authentication_and_keeps_its_own_background_password_prompt"]
-notes = ""
+evidence = ["crates/ui-egui/tests/editing.rs::password_prompt_opens_and_security_tab_reports_the_details", "crates/crypt/src/tests.rs::empty_user_password_opens_without_asking", "crates/ui-egui/src/open_worker_tests.rs::a_chosen_tool_survives_wrong_password_retry_and_runs_after_unlock", "crates/ui-egui/src/open_worker_tests.rs::startup_intake_waits_for_local_authentication_and_keeps_its_own_background_password_prompt", "crates/ui-egui/tests/pickers.rs::the_open_password_can_be_typed_through_an_input_method_however_the_file_is_opened"]
+notes = "the field takes typing through the platform input method, which typed keys go through on Linux, however the file was opened (#2818); checked with synthetic input-method events, not on a Linux desktop"
 
 [[feature]]
 id = "core.unicode-passwords"
@@ -202,7 +202,7 @@ milestone = "M1"
 status = "shipped"
 commands = ["protect.unlock"]
 tools = ["doc_open"]
-evidence = ["crates/engine/src/tests.rs::restricted_documents_refuse_changes_unless_opened_by_the_owner", "crates/engine/src/tests.rs::owner_password_of_older_revisions_opens_the_viewer_too", "crates/crypt/src/tests.rs::owner_authentication_recovers_the_user_password", "crates/engine/src/tests.rs::the_permissions_password_unlocks_an_open_document", "crates/ui-egui/tests/editing.rs::the_security_notice_unlocks_with_the_permissions_password", "crates/ui-egui/tests/editing.rs::remove_security_asks_for_the_permissions_password_first"]
+evidence = ["crates/engine/src/tests.rs::restricted_documents_refuse_changes_unless_opened_by_the_owner", "crates/engine/src/tests.rs::owner_password_of_older_revisions_opens_the_viewer_too", "crates/crypt/src/tests.rs::owner_authentication_recovers_the_user_password", "crates/engine/src/tests.rs::the_permissions_password_unlocks_an_open_document", "crates/ui-egui/tests/editing.rs::the_security_notice_unlocks_with_the_permissions_password", "crates/ui-egui/tests/editing.rs::remove_security_asks_for_the_permissions_password_first", "crates/ui-egui/tests/pickers.rs::the_permissions_password_can_be_typed_through_an_input_method"]
 notes = "at open (the password prompt takes either password), or after opening a restricted file that needed no password (#995, #1077): Unlock… on the security notice and in Properties ▸ Security, and changing security asks for it first. Not yet: an automation tool to unlock an open document (reopen with doc_open and the password instead)"
 
 [[feature]]
@@ -2680,8 +2680,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["page.delete"]
 tools = ["page_delete"]
-evidence = ["crates/organize/src/tests.rs::delete_keeps_inherited_attributes_on_survivors", "crates/organize/src/tests.rs::cannot_delete_every_page_or_missing_pages", "crates/ui-egui/tests/editing.rs::delete_is_refused_when_it_would_remove_every_page"]
-notes = ""
+evidence = ["crates/organize/src/tests.rs::delete_keeps_inherited_attributes_on_survivors", "crates/organize/src/tests.rs::cannot_delete_every_page_or_missing_pages", "crates/ui-egui/tests/editing.rs::delete_is_refused_when_it_would_remove_every_page", "crates/organize/src/tests.rs::deleting_a_page_keeps_sixty_thousand_named_destinations_usable", "crates/automation/tests/automation.rs::page_delete_handles_deep_destination_trees_with_history_and_reopen", "crates/automation/tests/automation.rs::page_delete_handles_sixty_thousand_destinations_with_history_and_reopen"]
+notes = "Named-destination pruning is iterative and visits shared/cyclic indirect nodes once, without a name-count work limit. Deep trees and 60,000 named destinations retain surviving targets through delete, undo/redo and full/incremental save/reopen. No new destination-tree repair is attempted."
 
 [[feature]]
 id = "organize.move-pages"
@@ -4620,7 +4620,7 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.field.properties", "form.calculation_order"]
 tools = ["form_set_props", "form_fill", "form_calculation_order"]
-evidence = ["crates/forms/src/tests.rs::formats_validation_and_calculations_run_like_acrobat", "crates/forms/src/tests.rs::the_calculation_order_is_checked_fixed_and_kept", "crates/forms/src/tests.rs::a_calculation_order_with_gaps_and_extra_entries", "crates/forms/src/tests.rs::two_fields_with_one_name_keep_their_places_in_the_order", "crates/engine/src/tests.rs::setting_the_calculation_order_recalculates_and_undoes", "crates/automation/tests/automation.rs::the_calculation_order_is_read_fixed_and_set", "crates/ui-egui/tests/prepare.rs::the_calculation_order_is_moved_dragged_and_fixed"]
+evidence = ["crates/forms/src/tests.rs::formats_validation_and_calculations_run_like_acrobat", "crates/forms/src/tests.rs::the_calculation_order_is_checked_fixed_and_kept", "crates/forms/src/tests.rs::a_calculation_order_with_gaps_and_extra_entries", "crates/forms/src/tests.rs::two_fields_with_one_name_keep_their_places_in_the_order", "crates/engine/src/tests.rs::setting_the_calculation_order_recalculates_and_undoes", "crates/automation/tests/automation.rs::the_calculation_order_is_read_fixed_and_set", "crates/ui-egui/tests/prepare.rs::the_calculation_order_is_moved_dragged_and_fixed", "crates/engine/src/tests.rs::checkbox_and_rank_changes_recalculate_ordered_dependents", "crates/engine/src/tests.rs::dynamic_calculation_reads_and_side_effects_reach_later_fields"]
 notes = "/CO order, then other calculated fields; recalculated after every fill and Clear form. Order editing: Prepare a form ▸ Calculation order lists the calculated fields in order with their formulas and values, Up/Down arrows (as Acrobat's Set Field Calculation Order dialog), Alt+Up/Down and drag, says which fields read a field calculated later, which read each other in a loop and which /CO leaves out, and Fix order moves only what must move; on the page it numbers each calculated field's step and draws arrows from the fields the focused field reads and to the fields that read it; form_calculation_order reads, sets, moves and fixes it. A new calculation joins the end of /CO and an edited one keeps its place. Acrobat's dialog is known from Adobe's help summary only, not yet observed."
 
 [[feature]]
@@ -8624,8 +8624,8 @@ milestone = "M12"
 status = "shipped"
 commands = ["a11y.check"]
 tools = ["accessibility_check"]
-evidence = ["crates/a11y/src/tests.rs::scans_identity_fonts_and_long_documents"]
-notes = "rule character-encoding: ToUnicode, a standard encoding, or a predefined CJK collection; each font once"
+evidence = ["crates/a11y/src/tests.rs::scans_identity_fonts_and_long_documents", "crates/a11y/src/tests.rs::character_encoding_accepts_identity_cjk_collections", "crates/a11y/src/tests.rs::character_encoding_accepts_predefined_cmaps_without_a_known_collection", "crates/a11y/src/tests.rs::character_encoding_rejects_unknown_cmaps_and_foreign_collections", "crates/a11y/src/tests.rs::character_encoding_resolves_indirect_cid_metadata", "crates/automation/tests/automation.rs::accessibility_character_encoding_accepts_identity_cjk_through_tools"]
+notes = "rule character-encoding: ToUnicode, a standard encoding, a predefined non-Identity CJK CMap, or Adobe GB1/CNS1/Japan1/Korea1/KR; Identity-H/V accepted for those collections (#3673), indirect metadata resolved and unknown CMaps/foreign registries refused; each font once. Font-level declarations only: ToUnicode contents and every used glyph are not validated; embedded-font extraction gaps remain separate."
 
 [[feature]]
 id = "a11y.rule-tagged-multimedia"
@@ -9816,8 +9816,8 @@ milestone = "M14"
 status = "partial"
 commands = ["app.preferences"]
 tools = ["js_enabled"]
-evidence = ["crates/ui-egui/tests/javascript.rs::document_scripts_and_preferences", "crates/ui-egui/tests/ui.rs::preferences_selects_default_workspace_for_next_open", "crates/ui-egui/tests/control.rs::control_default_workspace_and_session_override", "apps/pdfcraft/src/settings.rs::xdg_preferences_use_config_instead_of_data", "apps/pdfcraft/src/settings.rs::migration_preserves_preferences_and_other_data"]
-notes = "Preferences dialog with Interface language, Documents and view (persistent default workspace with session override), Identity, Fill & Sign (flatten on save, off by default) and JavaScript; other categories still live in their tools, and it isn't generated from a schema yet. XDG desktops store app.ron under XDG_CONFIG_HOME/pdfcraft or ~/.config/pdfcraft; existing data-folder preferences are copied without replacing configured preferences, with fallback on migration errors. Logs and recovery retain data locations. Portable/non-XDG locations are unchanged."
+evidence = ["crates/ui-egui/tests/javascript.rs::document_scripts_and_preferences", "crates/ui-egui/tests/ui.rs::preferences_selects_default_workspace_for_next_open", "crates/ui-egui/tests/control.rs::control_default_workspace_and_session_override", "apps/pdfcraft/src/settings.rs::xdg_preferences_use_config_instead_of_data", "apps/pdfcraft/src/settings.rs::migration_preserves_preferences_and_other_data", "crates/ui-egui/tests/preferences_layout.rs::ok_is_on_screen_without_scrolling_at_any_window_height", "crates/ui-egui/tests/preferences_layout.rs::ok_closes_the_dialog_in_a_short_window_and_the_settings_still_scroll"]
+notes = "Preferences dialog with Interface language, Documents and view (persistent default workspace with session override), Identity, Fill & Sign (flatten on save, off by default) and JavaScript; other categories still live in their tools, and it isn't generated from a schema yet. XDG desktops store app.ron under XDG_CONFIG_HOME/pdfcraft or ~/.config/pdfcraft; existing data-folder preferences are copied without replacing configured preferences, with fallback on migration errors. Logs and recovery retain data locations. Portable/non-XDG locations are unchanged. The settings scroll when the window is short (down to a 60 pt scroll area, so OK stays on screen in the smallest window at the largest interface size) and the OK row stays below them, in reach (#3557); the dialog still has no Cancel, and a window shorter than the dialog's title, one row and OK would still clip it."
 
 [[feature]]
 id = "misc.prefs-general"
