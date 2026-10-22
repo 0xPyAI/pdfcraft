@@ -5022,3 +5022,100 @@ fn read_mode_shortcut_applies_the_open_paragraph() {
     assert!(s.views[0].line_editor.is_none(), "no editor stays open in Read mode");
     assert_eq!(s.session.get(s.views[0].id).unwrap().text_lines(0)[0].text, "Chapter One", "the edit is applied");
 }
+
+/// Where a mode bar tab is, by its label.
+fn mode_tab(h: &Harness<'static, PdfCraftApp>, label: &str) -> egui::Rect {
+    h.get_all_by_role_and_label(Role::Button, label).map(|n| n.rect()).find(|r| r.bottom() < 120.0).expect("a mode tab")
+}
+
+/// The cursor over each mode bar tab that page 1's text lies under, once that text is scrolled
+/// up under the bar. With the All tools panel closed it lies under Read, Edit, Convert and E-Sign.
+fn mode_tab_cursors(h: &mut Harness<'static, PdfCraftApp>, text: egui::Rect) -> [(&'static str, egui::CursorIcon); 4] {
+    h.state_mut().views[0].goto = Some((0, 0.5));
+    h.run_steps(4);
+    let offset = h.state().views[0].page_screen_rect(0).expect("on screen").top();
+    ["Read", "Edit", "Convert", "E-Sign"].map(|label| {
+        let at = mode_tab(h, label).center();
+        assert!(text.translate(egui::vec2(0.0, offset)).contains(at), "the text lies under {label}");
+        h.hover_at(at);
+        h.run_steps(2);
+        (label, h.output().platform_output.cursor_icon)
+    })
+}
+
+const HAND_ON_EVERY_TAB: [(&str, egui::CursorIcon); 4] = [
+    ("Read", egui::CursorIcon::PointingHand),
+    ("Edit", egui::CursorIcon::PointingHand),
+    ("Convert", egui::CursorIcon::PointingHand),
+    ("E-Sign", egui::CursorIcon::PointingHand),
+];
+
+/// Page 1's text block on screen, relative to the page's top edge, in the window as it is now.
+fn page_text(h: &Harness<'static, PdfCraftApp>) -> egui::Rect {
+    let id = h.state().views[0].id;
+    let block = h.state().session.get(id).unwrap().text_blocks(0)[0].clone();
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = r.width() / 200.0;
+    let at = |x: f64, y: f64| egui::pos2(r.left() + x as f32 * k, (300.0 - y as f32) * k);
+    egui::Rect::from_two_pos(at(block.rect[0], block.rect[1]), at(block.rect[2], block.rect[3]))
+}
+
+/// Text scrolled up under the mode bar leaves its tabs the hand (#2755). The Select tool's
+/// text layer showed its I-beam there, over chrome that hides the page.
+#[test]
+fn mode_tabs_keep_the_hand_over_page_text_scrolled_under_them() {
+    let mut h = harness(2, |app| app.set_option("left", "closed").unwrap());
+    let text = page_text(&h);
+    // Where the page shows, its text takes the I-beam, once the page's text has arrived.
+    h.state_mut().views[0].goto = Some((0, 0.3));
+    h.run_steps(4);
+    let top = h.state().views[0].page_screen_rect(0).expect("on screen").top();
+    let mut cursor = egui::CursorIcon::Default;
+    for _ in 0..50 {
+        h.hover_at(text.center() + egui::vec2(0.0, top));
+        h.run_steps(2);
+        cursor = h.output().platform_output.cursor_icon;
+        if cursor == egui::CursorIcon::Text {
+            break;
+        }
+    }
+    assert_eq!(cursor, egui::CursorIcon::Text);
+    assert_eq!(mode_tab_cursors(&mut h, text), HAND_ON_EVERY_TAB);
+}
+
+/// Edit text, then the All tools panel closed, as reported (#2755): a paragraph scrolled up
+/// under the mode bar gave its tabs the four-way arrow, or the I-beam once a paragraph was open.
+/// The open paragraph's editor also covered the tabs and took their clicks.
+#[test]
+fn mode_tabs_keep_the_hand_over_a_paragraph_scrolled_under_them() {
+    let mut h = harness(2, |_| {});
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.state_mut().set_option("left", "closed").unwrap();
+    h.run_steps(4);
+    let text = page_text(&h);
+    assert_eq!(mode_tab_cursors(&mut h, text), HAND_ON_EVERY_TAB, "a closed paragraph under the tabs");
+    // Open it, where it shows.
+    h.state_mut().views[0].goto = Some((0, 0.3));
+    h.run_steps(4);
+    let top = h.state().views[0].page_screen_rect(0).expect("on screen").top();
+    click_at(&mut h, text.center() + egui::vec2(0.0, top));
+    assert!(h.state().views[0].line_editor.is_some());
+    assert_eq!(mode_tab_cursors(&mut h, text), HAND_ON_EVERY_TAB, "the open paragraph under the tabs");
+    // Nor does the editor's frame, with the paragraph's top edge just under a tab (the frame
+    // reaches 2 to 6 points outside it).
+    let convert = mode_tab(&h, "Convert").center();
+    h.state_mut().views[0].goto = Some((0, 0.0));
+    h.run_steps(4);
+    let page = h.state().views[0].page_screen_rect(0).expect("on screen");
+    h.state_mut().views[0].goto = Some((0, (page.top() - (convert.y + 4.0 - text.top())) / page.height()));
+    h.run_steps(4);
+    let page = h.state().views[0].page_screen_rect(0).expect("on screen");
+    assert!((page.top() + text.top() - convert.y - 4.0).abs() < 1.0, "Convert lies on the paragraph's frame");
+    h.hover_at(convert);
+    h.run_steps(2);
+    assert_eq!(h.output().platform_output.cursor_icon, egui::CursorIcon::PointingHand, "the open paragraph's frame under a tab");
+    h.state_mut().views[0].goto = Some((0, 0.5));
+    h.run_steps(4);
+    click_at(&mut h, convert);
+    assert_eq!(h.state().mode, pdfcraft_ui_egui::Mode::Convert, "the tab takes the click, not the paragraph's editor");
+}
