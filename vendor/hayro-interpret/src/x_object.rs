@@ -162,7 +162,38 @@ pub(crate) fn draw_form_xobject<'a, 'b>(
             && state.soft_mask.is_none()
             && state.blend_mode == BlendMode::Normal
     };
-    let own_layer = x_object.is_transparency_group && !neutral;
+    // PdfCraft patch (39): a group drawn as an element of a knockout group replaces what that
+    // group drew under its shape, the union of its own elements' shapes (#2971). The shape is
+    // cleared by drawing the group's content once in the device's erase mode; the group then
+    // composites over the cleared area in a layer of its own (also when it would otherwise be
+    // drawn straight onto its parent, where its elements would knock each other out).
+    let knockout_element = x_object.is_transparency_group && device.knockout_erase_wanted();
+    if knockout_element {
+        context.save_state();
+        device.begin_knockout_erase();
+        device.push_clip_path(&ClipPath {
+            path: context.get().ctm
+                * Rect::new(
+                    x_object.bbox[0] as f64,
+                    x_object.bbox[1] as f64,
+                    x_object.bbox[2] as f64,
+                    x_object.bbox[3] as f64,
+                )
+                .to_path(0.1),
+            fill: FillRule::NonZero,
+        });
+        interpret(
+            TypedIter::new(x_object.decoded.as_ref()),
+            &Resources::from_parent(x_object.resources.clone(), resources.clone()),
+            context,
+            device,
+        );
+        device.pop_clip_path();
+        device.end_knockout_erase();
+        context.restore_state(device);
+        context.path_mut().truncate(0);
+    }
+    let own_layer = x_object.is_transparency_group && (!neutral || knockout_element);
 
     if own_layer {
         device.push_transparency_group(
@@ -173,6 +204,10 @@ pub(crate) fn draw_form_xobject<'a, 'b>(
 
         context.get_mut().graphics_state.non_stroke_alpha = 1.0;
         context.get_mut().graphics_state.stroke_alpha = 1.0;
+        // PdfCraft patch (39): its elements knock each other out (#2971).
+        if x_object.is_knockout {
+            device.set_knockout();
+        }
     }
 
     device.set_soft_mask(context.get().graphics_state.soft_mask.clone());
@@ -252,6 +287,17 @@ pub(crate) fn draw_image_xobject<'a, 'b>(
     // If image has smask, the soft mask from the graphics state should be discarde.
     if has_alpha {
         soft_mask = None;
+    }
+
+    // PdfCraft patch (39): an image without a mask covers its whole placement rectangle, so in
+    // a knockout group it replaces what the group drew there (#2971). A stencil's or a masked
+    // image's shape is its mask; those composite as before (exact where the mask is opaque or
+    // transparent, which is what masks mostly are). Only an image the device draws clears: one
+    // that doesn't decode (over `MAX_IMAGE_PIXELS`, damaged data) or that it skips (a preview's
+    // tiny image) replaces nothing. The device decides, at its own draw size (review on #2974:
+    // a full-size decode here cost a second decode of every downscaled image).
+    if !x_object.is_mask && !has_alpha && device.in_knockout_group() {
+        device.knockout_image(&RasterImage(x_object.clone()), transform);
     }
 
     device.push_transparency_group(

@@ -6338,6 +6338,152 @@ trailer << /Root 1 0 R >>
         }
     }
 
+    /// #2971: in a knockout transparency group (`/K true`) each element composites with the
+    /// group's initial backdrop, not with the elements drawn before it in the group, over the
+    /// element's shape. A blue square at 50 % opacity over a red one at 50 % shows only the blue
+    /// where they overlap; without `/K` the two blend. The same holds for an image (its shape
+    /// is its rectangle; a soft-masked image's shape is its mask, so its transparent part leaves
+    /// what is under it) and for a nested group (its shape is the union of its elements'
+    /// shapes, while its own elements still blend with each other).
+    #[test]
+    fn knockout_groups_replace_what_their_elements_cover() {
+        let render_as = |group: &str, form: &str, preview: bool| {
+            let pdf = format!(
+                "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /XObject << /Fm1 5 0 R >> /ExtGState << /G << /ca 0.5 >> >> >> >> endobj
+4 0 obj << /Length 39 >> stream
+/Fm1 Do /G gs 0 1 0 rg 10 10 30 30 re f
+endstream endobj
+5 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency {group} >> /Resources << /ExtGState << /A << /ca 0.5 >> >> /XObject << /In 6 0 R /Msk 7 0 R /Neu 8 0 R /Img 9 0 R /Sm 10 0 R /Nimg 12 0 R /Deep 13 0 R /Shg 16 0 R /Big 17 0 R >> >> /Length {} >> stream
+{form}
+endstream endobj
+6 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /A << /ca 0.5 >> >> >> /Length 34 >> stream
+/A gs 0 0 1 rg 100 50 150 120 re f
+endstream endobj
+7 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 2 /ImageMask true /Filter /ASCIIHexDecode /Length 5 >> stream
+0000>
+endstream endobj
+8 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /H << /ca 0.5 >> >> >> /Length 62 >> stream
+/H gs 0 1 0 rg 80 40 100 100 re f 0 0 1 rg 130 80 100 100 re f
+endstream endobj
+9 0 obj << /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 7 >> stream
+0000FF>
+endstream endobj
+10 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask 11 0 R /Filter /ASCIIHexDecode /Length 13 >> stream
+0000FF0000FF>
+endstream endobj
+11 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 5 >> stream
+00FF>
+endstream endobj
+12 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /H << /ca 0.5 >> >> /XObject << /Img 9 0 R >> >> /Length 38 >> stream
+/H gs q 160 0 0 100 60 50 cm /Img Do Q
+endstream endobj
+13 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /H << /ca 0.5 >> >> /XObject << /In3 14 0 R >> >> /Length 13 >> stream
+/H gs /In3 Do
+endstream endobj
+14 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Length 28 >> stream
+0 0 1 rg 100 50 150 120 re f
+endstream endobj
+15 0 obj << /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 1 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [0 0 1] /C1 [0 0 1] /N 1 >> /Extend [true true] /BBox [100 50 140 170] >> >> endobj
+16 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /Pattern << /P 15 0 R >> >> /Length 38 >> stream
+/Pattern cs /P scn 100 50 150 120 re f
+endstream endobj
+17 0 obj << /Type /XObject /Subtype /Image /Width 20000 /Height 20000 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 7 >> stream
+0000FF>
+endstream endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+                form.len()
+            );
+            let p = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default()).render(RenderRequest {
+                page: 0,
+                kind: RequestKind::Pixels,
+                tile: None,
+                scale: 1.0,
+                tag: 0,
+                preview,
+            });
+            assert!(p.error.is_none(), "{group} {form}: {:?}", p.error);
+            p
+        };
+        let render = |group: &str, form: &str| render_as(group, form, false);
+        // Pixel rows run top down: PDF (x, y) is pixel (x, 200 - y).
+        let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((200 - y) * p.width + x) as usize * 4..][..3].to_vec();
+        let check = |p: &RenderedPage, x: u32, y: u32, want: [u8; 3], what: &str| {
+            let got = px(p, x, y);
+            assert!(got.iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 2), "{what}: {got:?}, expected {want:?}");
+        };
+        let red = "/A gs 1 0 0 rg 20 20 150 150 re f ";
+        let ko = "/I true /K true";
+
+        let squares = render(ko, &format!("{red}0 0 1 rg 100 50 150 120 re f"));
+        check(&squares, 130, 100, [128, 128, 255], "knocked out");
+        check(&squares, 50, 40, [255, 128, 128], "red alone");
+        check(&squares, 210, 100, [128, 128, 255], "blue alone");
+        check(&squares, 280, 190, [255, 255, 255], "paper");
+        // Page content after the group composites normally again: green at 50 % over the red.
+        check(&squares, 30, 30, [128, 191, 64], "after the group");
+        let plain = render("/I true", &format!("{red}0 0 1 rg 100 50 150 120 re f"));
+        check(&plain, 130, 100, [128, 64, 191], "blended without /K");
+
+        // An image at 50 % replaces the red under its rectangle.
+        let image = render(ko, &format!("{red}q 160 0 0 100 60 50 cm /Img Do Q"));
+        check(&image, 100, 100, [128, 128, 255], "image knocks out");
+        check(&image, 40, 40, [255, 128, 128], "red beside the image");
+        // A soft-masked image: its transparent left half leaves the red, its opaque half replaces it.
+        let masked = render(ko, "1 0 0 rg 20 20 150 150 re f q 160 0 0 100 60 50 cm /Sm Do Q");
+        check(&masked, 100, 100, [255, 0, 0], "under the transparent half");
+        check(&masked, 155, 100, [0, 0, 255], "under the opaque half");
+
+        // A nested group entered at 50 % (blue at 25 % in all) replaces the red under its shape.
+        let nested = render(ko, &format!("{red}/In Do"));
+        check(&nested, 130, 100, [191, 191, 255], "nested group knocks out");
+        check(&nested, 50, 40, [255, 128, 128], "red beside the nested group");
+        // A nested group at full opacity: it knocks out the red as a whole, and its own two
+        // squares at 50 % still blend with each other where they overlap.
+        let neutral = render(ko, "1 0 0 rg 20 20 150 150 re f /Neu Do");
+        check(&neutral, 100, 60, [128, 255, 128], "green over the knocked-out red");
+        check(&neutral, 150, 110, [64, 128, 191], "the nested squares blend");
+        check(&neutral, 40, 40, [255, 0, 0], "red beside the nested group");
+
+        // An image inside a nested group is drawn once (blue at 50 %), over the knocked-out red.
+        let nested_image = render(ko, "1 0 0 rg 20 20 150 150 re f /Nimg Do");
+        check(&nested_image, 100, 100, [128, 128, 255], "image in a nested group");
+        // A group inside a nested group knocks out the red as well.
+        let deep = render(ko, "1 0 0 rg 20 20 150 150 re f /Deep Do");
+        check(&deep, 130, 100, [128, 128, 255], "group in a nested group");
+        check(&deep, 40, 40, [255, 0, 0], "red beside it");
+
+        // A stencil mask must not erase the red beside it.
+        let stencil = render(ko, &format!("{red}0 0 1 rg q 150 0 0 120 100 50 cm /Msk Do Q"));
+        check(&stencil, 50, 40, [255, 128, 128], "red beside a stencil");
+        // Where the stencil paints (every sample 0), its blue is drawn (review on #2974: the check
+        // above alone passed even if the stencil drew nothing). A stencil composites as it did
+        // before rather than knocking the red out, and its exact colour also depends on #2975 (a
+        // stencil's fill opacity applied twice), so only "blue was drawn here" is pinned.
+        let under = px(&stencil, 130, 100);
+        assert!(under != [255, 128, 128] && under[2] >= 150 && under[0] < 230, "stencil drew nothing: {under:?}");
+
+        // A shading's /BBox clips it (ISO 32000-2 Table 77), so a shading fill's shape is its path
+        // inside the box: the erase pass must clear only that, or the red outside the box but
+        // inside the path stays erased (review on #2974).
+        let shaded = render(ko, &format!("{red}/Shg Do"));
+        check(&shaded, 120, 100, [128, 128, 255], "the shading inside its box");
+        check(&shaded, 155, 100, [255, 128, 128], "red outside the shading's box");
+
+        // An image that isn't decoded (here over the renderer's pixel limit) draws nothing, so it
+        // must not clear what is under its rectangle either (review on #2974).
+        let undecoded = render(ko, &format!("{red}q 160 0 0 100 60 50 cm /Big Do Q"));
+        check(&undecoded, 100, 100, [255, 128, 128], "red under an image that isn't drawn");
+        // Nor one a preview skips for covering only a few device pixels (review on #2974): the
+        // red under a 3 x 3 image stays in a preview, and a final render knocks it out.
+        let tiny = format!("{red}q 3 0 0 3 100 100 cm /Img Do Q");
+        check(&render_as(ko, &tiny, true), 101, 101, [255, 128, 128], "red under a preview's skipped image");
+        check(&render_as(ko, &tiny, false), 101, 101, [128, 128, 255], "the tiny image in a final render");
+    }
+
     /// Reading colours replace *document* colours, never annotation colours (issue #1548): a
     /// highlight keeps its `/C`, so on a dark background the content under it shows through the
     /// Multiply blend in the highlight's colour instead of being darkened into invisibility.
