@@ -1434,7 +1434,7 @@ fn paint_gesture(painter: &egui::Painter, cx: &PageCx<'_>, view: &DocView) {
 fn paint_draw(painter: &egui::Painter, cx: &PageCx<'_>, tool: &CommentTool, points: &[[f64; 2]]) {
     {
         let style = cx.prefs.style(*tool);
-        let zoom = cx.xf.rect.width() / cx.xf.pw.max(1.0);
+        let zoom = cx.xf.zoom();
         let stroke = Stroke::new((style.width as f32 * zoom).max(1.0), color32(style.color));
         let pts: Vec<Pos2> = points.iter().map(|p| cx.to_screen(*p)).collect();
         match tool {
@@ -1442,7 +1442,9 @@ fn paint_draw(painter: &egui::Painter, cx: &PageCx<'_>, tool: &CommentTool, poin
                 painter.add(egui::Shape::line(pts, stroke));
             }
             CommentTool::Eraser => {
-                painter.add(egui::Shape::line(pts, Stroke::new(12.0, Color32::from_gray(128).gamma_multiply(0.35))));
+                // As wide as what it rubs out (see `erase`).
+                let width = (2.0 * eraser_radius_px(style.width)) as f32;
+                painter.add(egui::Shape::line(pts, Stroke::new(width, Color32::from_gray(128).gamma_multiply(0.35))));
             }
             CommentTool::Line | CommentTool::Arrow if pts.len() == 2 => {
                 painter.line_segment([pts[0], pts[1]], stroke);
@@ -1511,10 +1513,23 @@ fn drawn_shape(tool: CommentTool, points: &[[f64; 2]]) -> Option<Shape> {
     }
 }
 
-/// Eraser: rub out drawings along `path` (user space); one undo step for all of them.
+/// The eraser's radius on screen, in pixels, from its thickness setting (#3747): three pixels
+/// per point, so the default 2 pt keeps the 12-pixel eraser it always had, and the thickness
+/// slider's 0.5–12 pt gives 3 to 72 pixels across. A setting that isn't a number is the default.
+fn eraser_radius_px(width: f64) -> f64 {
+    3.0 * if width.is_finite() { width.clamp(0.5, 12.0) } else { 2.0 }
+}
+
+/// Eraser: rub out drawings along `path` (user space); one undo step for all of them. It rubs
+/// as wide on screen as its preview, whatever the zoom.
 fn erase(cx: &PageCx<'_>, path: &[[f64; 2]]) -> Option<Edit> {
-    let zoom = (cx.xf.rect.width() / cx.xf.pw.max(1.0)) as f64;
-    let radius = (6.0 / zoom).max(1.0);
+    let zoom = f64::from(cx.xf.zoom());
+    // A page with no size on screen has nothing to rub out (and no finite radius).
+    if !(zoom.is_finite() && zoom > 0.0) {
+        return None;
+    }
+    // Exactly the preview's width: no floor, which at a high zoom rubbed past it.
+    let radius = eraser_radius_px(cx.prefs.style(CommentTool::Eraser).width) / zoom;
     let b = path.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |r, p| [r[0].min(p[0]), r[1].min(p[1]), r[2].max(p[0]), r[3].max(p[1])]);
     let mut hits: Vec<usize> = cx
         .comments()

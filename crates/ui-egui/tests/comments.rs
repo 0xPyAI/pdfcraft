@@ -1652,6 +1652,69 @@ fn erasing_part_of_a_drawing() {
 }
 
 #[test]
+fn the_eraser_rubs_as_wide_as_its_thickness_setting() {
+    // #3747: the eraser's size changed nothing; it always rubbed 6 pixels either side.
+    let stroke_near = |width: f64| {
+        let mut h = harness(|app| app.set_option("quick", "ink").unwrap());
+        drag_pt(&mut h, (40.0, 60.0), (260.0, 60.0));
+        assert_eq!(comments(&h).len(), 1);
+        let zoom = h.state().views[0].page_screen_rect(0).expect("page 1 on screen").width() / 300.0;
+        let app = h.state_mut();
+        app.comment_prefs.set_width(pdfcraft_ui_egui::comments::CommentTool::Eraser, width);
+        app.set_option("quick", "eraser").unwrap();
+        // Along the whole drawing, 20 pixels above it: out of reach of the default eraser
+        // (6 pixels), within reach of the largest (36).
+        let y = 60.0 + 20.0 / zoom;
+        drag_pt(&mut h, (30.0, y), (270.0, y));
+        comments(&h).len()
+    };
+    assert_eq!(stroke_near(2.0), 1, "the default eraser passes by");
+    assert_eq!(stroke_near(12.0), 0, "the largest rubs the drawing out");
+}
+
+/// The widths of the eraser preview's strokes drawn in the last frame.
+fn eraser_preview_widths(h: &Harness<'static, PdfCraftApp>) -> Vec<f32> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<f32>) {
+        let preview = egui::Color32::from_gray(128).gamma_multiply(0.35);
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            egui::Shape::Path(p) if p.stroke.color == egui::epaint::ColorMode::Solid(preview) => out.push(p.stroke.width),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &h.output().shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+#[test]
+fn the_eraser_preview_is_as_wide_as_it_rubs() {
+    // #3747: while the eraser is held, its preview stroke is as wide as what it rubs out
+    // (twice its radius, three pixels per point of thickness): 12 pixels by default, 72 at 12 pt.
+    for (width, across) in [(2.0, 12.0), (12.0, 72.0)] {
+        let mut h = harness(move |app| {
+            app.comment_prefs.set_width(pdfcraft_ui_egui::comments::CommentTool::Eraser, width);
+            app.set_option("quick", "eraser").unwrap();
+        });
+        let (from, to) = (at(&h, 60.0, 100.0), at(&h, 240.0, 100.0));
+        h.hover_at(from);
+        h.run_steps(1);
+        h.drag_at(from);
+        h.run_steps(1);
+        for k in 1..=3 {
+            h.hover_at(from + (to - from) * (k as f32 / 4.0));
+            h.run_steps(1);
+        }
+        assert_eq!(eraser_preview_widths(&h), [across], "{width} pt: the preview while held");
+        h.drop_at(to);
+        h.run_steps(3);
+        assert!(eraser_preview_widths(&h).is_empty(), "{width} pt: gone once released");
+    }
+}
+
+#[test]
 fn hovering_a_comment_shows_its_author_and_text() {
     // A square comment by Ada over the first page's text.
     let pdf = String::from_utf8_lossy(TEXT_FIXTURE).replace("/Contents 5 0 R /Resources", "/Contents 5 0 R /Annots [8 0 R] /Resources").replace(

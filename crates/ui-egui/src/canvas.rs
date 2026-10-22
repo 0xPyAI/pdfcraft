@@ -2124,6 +2124,13 @@ pub struct PageXform {
 }
 
 impl PageXform {
+    /// Screen pixels per page point. The view's rotation swaps the rectangle's sides, so a page
+    /// turned a quarter shows its width down the screen.
+    pub(crate) fn zoom(&self) -> f32 {
+        let across = if self.rot % 180 == 90 { self.rect.height() } else { self.rect.width() };
+        across / self.pw.max(1.0)
+    }
+
     /// Draw an image in the PDF user-space `rect` as a custom stamp's appearance draws it: turned
     /// back by `turn` (the page /Rotate it was placed for), so with the page's own rotation it
     /// reads upright as displayed.
@@ -5496,6 +5503,18 @@ mod tests {
         let signatures: Vec<_> = hostile.into_iter().map(|rect| signature(true, true, Some(0), Some(rect))).collect();
         let badges = signature_badges(&signatures, 0);
         assert_eq!(badges.len(), 1);
+    }
+
+    #[test]
+    fn page_zoom_reads_the_side_the_page_width_is_on() {
+        // A 200 x 100 pt page at 2 pixels per point: 400 x 200 on screen, or 200 x 400 turned.
+        let xf = |rot: u16, size: Vec2| PageXform { rect: Rect::from_min_size(Pos2::ZERO, size), rot, pw: 200.0, ph: 100.0 };
+        for rot in [0, 180] {
+            assert_eq!(xf(rot, vec2(400.0, 200.0)).zoom(), 2.0, "{rot}");
+        }
+        for rot in [90, 270] {
+            assert_eq!(xf(rot, vec2(200.0, 400.0)).zoom(), 2.0, "{rot}: the width runs down the screen");
+        }
     }
 
     #[test]
