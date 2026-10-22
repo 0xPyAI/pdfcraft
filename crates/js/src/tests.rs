@@ -380,12 +380,15 @@ mod xfa_model {
         }
     }
 
+    /// Run the JavaScript `script` for `activity` on the test form, from the node at `target`.
     fn go(script: &str, target: &str, activity: &str) -> XfaOutcome {
         let ev = XfaEvent { activity: activity.into(), target: target.into(), ..Default::default() };
         let doc = XfaDoc { file_name: "f.pdf".into(), page: 1, page_count: 3 };
         run_xfa(script, &ev, &doc, &form(), Limits::default())
     }
 
+    /// A calculate script finds its siblings by name and yields its last expression, and a
+    /// value it sets comes back as an effect.
     #[test]
     fn calculate_scripts_see_siblings_by_name_and_yield_their_last_expression() {
         let o = go("qty.rawValue * price.rawValue", "form1[0].page1[0].total[0]", "calculate");
@@ -395,6 +398,39 @@ mod xfa_model {
         assert_eq!(o.effects, vec![XfaEffect::SetValue { som: "form1[0].page1[0].total[0]".into(), value: "5".into() }]);
     }
 
+    /// A form whose one field `d` holds the ISO date 2026-10-20, shown as 20261020.
+    pub(super) fn dated_form() -> XfaNode {
+        let d = XfaNode { formatted: Some("20261020".into()), ..field("d", "form1[0].page1[0].d[0]", "2026-10-20", false) };
+        XfaNode {
+            name: "form1".into(),
+            som: "form1[0]".into(),
+            kind: Some(XfaKind::Subform),
+            children: vec![XfaNode {
+                name: "page1".into(),
+                som: "form1[0].page1[0]".into(),
+                kind: Some(XfaKind::Subform),
+                children: vec![d],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// `formattedValue` reads the value as the field's picture shows it, and `rawValue` the
+    /// value itself; once the script sets the value, `formattedValue` gives that value.
+    #[test]
+    fn formatted_value_reads_the_shown_value_until_the_script_sets_one() {
+        let ev = XfaEvent { activity: "calculate".into(), target: "form1[0].page1[0].d[0]".into(), ..Default::default() };
+        let doc = XfaDoc::default();
+        let run = |script: &str| run_xfa(script, &ev, &doc, &dated_form(), Limits::default());
+        let o = run("this.formattedValue + ' ' + this.rawValue");
+        assert_eq!(o.error, None, "{o:?}");
+        assert_eq!(o.result.as_deref(), Some("20261020 2026-10-20"));
+        let o = run("this.rawValue = '2026-10-21'; this.formattedValue");
+        assert_eq!(o.result.as_deref(), Some("2026-10-21"));
+    }
+
+    /// Long values a script sets, and long results, are cut where they are stored, with a note.
     #[test]
     fn long_values_and_results_are_cut_where_they_are_stored() {
         // The value kept for later reads is the one the effect saves.
@@ -607,6 +643,22 @@ mod formcalc {
         o.result.unwrap_or_default()
     }
 
+    /// FormCalc reads `formattedValue` as the field's picture shows it too, until the script
+    /// sets the value.
+    #[test]
+    fn formcalc_formatted_value_reads_the_shown_value_until_the_script_sets_one() {
+        let ev = XfaEvent { activity: "calculate".into(), target: "form1[0].page1[0].d[0]".into(), ..Default::default() };
+        let doc = XfaDoc::default();
+        let run = |script: &str| run_formcalc(script, &ev, &doc, &super::xfa_model::dated_form(), Limits::default());
+        let o = run("Concat($.formattedValue, \" \", $.rawValue)");
+        assert_eq!(o.error, None, "{o:?}");
+        assert_eq!(o.result.as_deref(), Some("20261020 2026-10-20"));
+        let o = run("$.rawValue = \"2026-10-21\"\n$.formattedValue");
+        assert_eq!(o.error, None, "{o:?}");
+        assert_eq!(o.result.as_deref(), Some("2026-10-21"));
+    }
+
+    /// FormCalc arithmetic, string conversion and comparisons follow FormCalc's own rules.
     #[test]
     fn arithmetic_strings_and_comparisons_follow_formcalc_rules() {
         assert_eq!(calc("1 + 2 * 3"), "7");

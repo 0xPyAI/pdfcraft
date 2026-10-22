@@ -4437,6 +4437,43 @@ fn dynamic_xfa_forms_open_with_the_values_and_rows_of_their_data() {
     assert!(!doc.dirty);
 }
 
+/// #3180: an XFA form with no fields whose configuration says `dynamicRender` is `forbidden` is a
+/// static form: its pages are the form. Opening it used to lay the template out into new pages
+/// and write them as a revision, so even a save with no change replaced the pages.
+#[test]
+fn an_xfa_form_without_fields_that_forbids_dynamic_rendering_keeps_its_pages() {
+    // The fixture's own config packet gains `acrobat/acrobat7/dynamicRender`.
+    let template = pdfcraft_xfa::fixtures::template(1);
+    let forbidden = "<acrobat><acrobat7><dynamicRender>forbidden</dynamicRender></acrobat7></acrobat><present>";
+    let with_config = template.replacen("<present>", forbidden, 1);
+    assert_ne!(with_config, template, "the fixture has a config packet");
+    // The fixture shell without /NeedsRendering (blanked in place, so the offsets stay right).
+    let shell = |xdp: &str| {
+        let bytes = pdfcraft_xfa::fixtures::shell(xdp);
+        let at = bytes.windows(20).position(|w| w == b"/NeedsRendering true").expect("the fixture sets it");
+        let mut bytes = bytes;
+        bytes.splice(at..at + 20, *b"                    ");
+        Arc::new(bytes)
+    };
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let original = shell(&with_config);
+    let id = s.open("static.pdf", None, original.clone(), None).expect("opens");
+    let doc = s.get(id).unwrap();
+    assert_eq!(doc.info.xfa, Some(pdfcraft_render::Xfa::Static));
+    assert!(doc.xfa.is_none(), "nothing was laid out");
+    assert_eq!(doc.bytes[..], original[..], "no revision was appended on open");
+    assert_eq!(doc.info.pages.len(), 1);
+    // The same form without the config is still taken to be dynamic: laid out from the template
+    // into an appended revision.
+    let plain = shell(&template);
+    let id = s.open("dynamic.pdf", None, plain.clone(), None).expect("opens");
+    let doc = s.get(id).unwrap();
+    assert!(doc.xfa.is_some(), "laid out from the template");
+    assert!(doc.bytes.len() > plain.len() && doc.bytes.starts_with(&plain[..]), "the layout is a revision");
+}
+
+/// A static XFA form's fields take their values from the datasets on opening, and edits are
+/// written back there.
 #[test]
 fn static_xfa_forms_take_their_values_from_the_datasets_and_write_them_back() {
     let original = Arc::new(pdfcraft_xfa::fixtures::static_shell("<form1><page1><name>Ada</name><agree>1</agree></page1></form1>"));
@@ -4466,6 +4503,56 @@ fn static_xfa_forms_take_their_values_from_the_datasets_and_write_them_back() {
     assert!(!d2.info.warnings.iter().any(|w| w.contains("taken from this form's XFA data")), "nothing was rewritten");
 }
 
+/// A date goes into the XFA data in the field's data picture (`<bind><picture>`), as other
+/// viewers write and read it, and comes back from there when the form is opened again. It used
+/// to be written as an ISO date whatever the picture said.
+#[test]
+fn xfa_dates_are_written_and_read_back_in_their_data_picture() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::bound_date_template("")));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("form.pdf", None, bytes, None).expect("opens");
+    s.apply(id, Edit::SetFieldValue { name: "due".into(), value: FieldValue::Text("10/18/2026".into()) }).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "when".into(), value: FieldValue::Text("10/18/2026".into()) }).unwrap();
+    let saved = s.save_bytes(id).unwrap();
+    let cos = pdfcraft_cos::Document::open(saved.clone()).unwrap();
+    let data = pdfcraft_xfa::parse_datasets(&pdfcraft_xfa::read_packets(&cos).unwrap().unwrap().xdp).unwrap();
+    assert_eq!(data.text_at(&pdfcraft_xfa::som_to_path("form[0].page[0].due[0]")), Some("20261018"), "in the field's data picture");
+    assert_eq!(data.text_at(&pdfcraft_xfa::som_to_path("form[0].page[0].when[0]")), Some("2026-10-18"), "ISO without one");
+    let id2 = s.open("again.pdf", None, saved, None).unwrap();
+    let d2 = s.get(id2).unwrap();
+    let value = |n: &str| d2.form.iter().find(|f| f.name == n).unwrap_or_else(|| panic!("no field {n}")).value.clone();
+    assert_eq!(value("due"), vec!["10/18/2026".to_string()]);
+    assert_eq!(value("when"), vec!["10/18/2026".to_string()]);
+}
+
+/// Same-named date fields are each written in their own data picture, and a data picture
+/// without a day keeps the ISO date.
+#[test]
+fn each_xfa_date_field_is_written_in_its_own_data_picture_and_a_partial_one_keeps_iso() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::sibling_date_template("")));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("form.pdf", None, bytes, None).expect("opens");
+    // Two siblings named `due` (laid out as `due` and `due_2`) and a field bound `YYYYMM`.
+    for name in ["due", "due_2", "month"] {
+        s.apply(id, Edit::SetFieldValue { name: name.into(), value: FieldValue::Text("10/18/2026".into()) }).unwrap();
+    }
+    let saved = s.save_bytes(id).unwrap();
+    let cos = pdfcraft_cos::Document::open(saved.clone()).unwrap();
+    let data = pdfcraft_xfa::parse_datasets(&pdfcraft_xfa::read_packets(&cos).unwrap().unwrap().xdp).unwrap();
+    let at = |som: &str| data.text_at(&pdfcraft_xfa::som_to_path(som)).map(str::to_string);
+    assert_eq!(at("form[0].page[0].due[0]").as_deref(), Some("20261018"), "the first sibling's data picture");
+    assert_eq!(at("form[0].page[0].due[1]").as_deref(), Some("18102026"), "the second sibling's own");
+    // A data picture without a day would drop the one the field shows: the data keeps ISO.
+    assert_eq!(at("form[0].page[0].month[0]").as_deref(), Some("2026-10-18"));
+    let id2 = s.open("again.pdf", None, saved, None).unwrap();
+    let d2 = s.get(id2).unwrap();
+    for name in ["due", "due_2", "month"] {
+        let f = d2.form.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("no field {name}"));
+        assert_eq!(f.value, vec!["10/18/2026".to_string()], "{name} reads back");
+    }
+}
+
+/// Data no field binds to (other namespaces, history) survives an edit and a save.
 #[test]
 fn xfa_data_no_field_binds_to_survives_an_edit_and_save() {
     // Regression: editing a field replaced the whole data element with the fields' values.
@@ -4561,6 +4648,8 @@ fn xfa_choice_lists_signature_and_picture_fields_open_fill_script_and_save() {
     assert!(taken[0].contains("langs") && !taken[0].contains("country"), "{}", taken[0]);
 }
 
+/// A form's data exports, imports and takes pictures through the session, and what it holds
+/// comes back the same.
 #[test]
 fn xfa_data_exports_imports_and_pictures_round_trip_through_the_session() {
     use pdfcraft_xfa::som_to_path;
@@ -4619,6 +4708,11 @@ fn xfa_data_exports_imports_and_pictures_round_trip_through_the_session() {
     assert!(pdfcraft_xfa::read_packets(&cos).unwrap().unwrap().xdp.contains("xfa:contentType=\"image/gif\""));
     assert_eq!(s.get(id).unwrap().page_images(0).len(), 2, "the field's picture (now the GIF) and the logo");
     // Only pictures the form can show; only image fields.
+    for (data, declared) in [(pdfcraft_xfa::fixtures::tiny_bmp(false), "image/bmp"), (pdfcraft_xfa::fixtures::tiny_tiff(false), "image/tiff")] {
+        s.apply(id, Edit::SetFieldImage { name: "photo".into(), image: Arc::new(data) }).unwrap();
+        let cos = pdfcraft_cos::Document::open(s.save_bytes(id).unwrap()).unwrap();
+        assert!(pdfcraft_xfa::read_packets(&cos).unwrap().unwrap().xdp.contains(&format!("xfa:contentType=\"{declared}\"")));
+    }
     assert!(s.apply(id, Edit::SetFieldImage { name: "photo".into(), image: Arc::new(b"BM\0\0\0\0".to_vec()) }).is_err());
     assert!(s.apply(id, Edit::SetFieldImage { name: "country".into(), image: Arc::new(pdfcraft_xfa::fixtures::TINY_GIF.to_vec()) }).is_err());
     // One datasets stream per edit, however many steps it took.
@@ -4642,6 +4736,8 @@ fn xfa_data_exports_imports_and_pictures_round_trip_through_the_session() {
     assert_eq!(d2.page_images(0).len(), 2);
 }
 
+/// Importing data into a static form replaces every value, emptying the fields the file
+/// doesn't name, and pictures chosen for it reach its data.
 #[test]
 fn xfa_data_import_on_a_static_form_replaces_every_value_and_pictures_reach_its_data() {
     let original = Arc::new(pdfcraft_xfa::fixtures::static_shell("<form1><page1><name>Ada</name><agree>1</agree></page1></form1>"));
@@ -4662,6 +4758,8 @@ fn xfa_data_import_on_a_static_form_replaces_every_value_and_pictures_reach_its_
     assert!(xml.contains("<name>Bob</name>") && !xml.contains("<agree>1</agree>"), "{xml}");
 }
 
+/// Importing data into a dynamic form adds and removes the rows of its repeating subform to
+/// match, and the calculations over them run again.
 #[test]
 fn xfa_data_import_adds_and_removes_rows_of_a_dynamic_form() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));
@@ -4694,6 +4792,8 @@ fn xfa_data_import_adds_and_removes_rows_of_a_dynamic_form() {
     assert!(String::from_utf8_lossy(&out).contains("<item>only</item>"));
 }
 
+/// Hundreds of calculations, in JavaScript and FormCalc, run on opening in one engine within
+/// the opening's budget, and a change recalculates them within the event's.
 #[test]
 fn hundreds_of_xfa_calculations_run_in_one_engine_within_the_open_budget() {
     let (sections, rows) = (10, 20);
@@ -4724,11 +4824,15 @@ fn hundreds_of_xfa_calculations_run_in_one_engine_within_the_open_budget() {
     eprintln!("recalculated after a change in {:?}", started.elapsed());
 }
 
+/// The scripts of one event share the form as the engine holds it: a failed script's
+/// half-done writes reach nobody, and a script reads the saved value a choice list was given
+/// by its shown text.
 #[test]
 fn xfa_scripts_of_one_event_see_the_form_as_the_engine_holds_it() {
     // In document order: `a` holds 1; `b`'s calculate writes `a` then fails; `c`'s calculate
-    // reads `a`. A failed script's half-done changes reach nobody. And `d` sets a choice list
-    // by its shown text: the next script reads the saved value the engine kept.
+    // reads `a`. A failed script keeps what it changed before the error, and the next script
+    // sees it. And `d` sets a choice list by its shown text: the next script reads the saved
+    // value the engine kept.
     let tpl = pdfcraft_xfa::fixtures::fields_template("<form><page1><country>JP</country></page1></form>").replace(
         r#"<field name="summary" w="3in" h="0.3in" access="readOnly"><ui><textEdit/></ui>"#,
         r#"<field name="a" w="1in" h="0.3in"><ui><numericEdit/></ui><value><integer>1</integer></value></field>
@@ -4744,11 +4848,151 @@ fn xfa_scripts_of_one_event_see_the_form_as_the_engine_holds_it() {
     let value = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).map(|f| f.value.clone()).unwrap_or_default();
     let out = s.take_js_output(id);
     assert!(out.errors.iter().any(|e| e.contains("boom")), "{out:?}");
-    assert_eq!(value(&s, "a"), vec!["1".to_string()], "the failed script's write reached nothing");
-    assert_eq!(value(&s, "c"), vec!["2".to_string()]);
+    assert_eq!(value(&s, "a"), vec!["99".to_string()], "the failed script's write before the error stands");
+    assert_eq!(value(&s, "c"), vec!["100".to_string()]);
     assert_eq!(value(&s, "country"), vec!["CA".to_string()], "shown text mapped to the saved value");
     assert_eq!(value(&s, "e"), vec!["CA".to_string()], "the next script reads the saved value");
     assert_eq!(value(&s, "summary"), vec!["Country: CA".to_string()]);
+}
+
+/// A row of dates worked out the way leave forms do it: the calculation checks that the raw value
+/// is a whole ISO date, then adds days to the date as `formattedValue` shows it (`YYYYMMDD`).
+#[test]
+fn xfa_date_arithmetic_reads_the_date_as_its_display_picture_shows_it() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::date_row_template()));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("row.pdf", None, bytes, None).expect("opens");
+    let value = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).map(|f| f.value.clone()).unwrap_or_default();
+    s.apply(id, Edit::SetFieldValue { name: "from".into(), value: FieldValue::Text("20261020".into()) }).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "days".into(), value: FieldValue::Text("3".into()) }).unwrap();
+    let out = s.take_js_output(id);
+    assert_eq!(value(&s, "to"), ["20261022"], "{:?}", out.errors);
+}
+
+#[test]
+fn filling_growable_xfa_text_reflows_and_undo_restores_the_layout() {
+    let text: String = (0..150).map(|i| format!("Row{i:03} {}sample\n", "sample ".repeat(8))).collect();
+    assert_eq!(text.len(), 10_500);
+    for scripted in [false, true] {
+        let template = pdfcraft_xfa::fixtures::growable_text_template(scripted);
+        let mut s = Session::new();
+        let id = s.open("growing.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&template)), None).unwrap();
+        assert_eq!(s.get(id).unwrap().info.pages.len(), 2);
+        s.apply(id, Edit::SetFieldValue { name: "ACTIVIDADES".into(), value: FieldValue::Text(text.clone()) }).unwrap();
+        assert_eq!(s.get(id).unwrap().info.pages.len(), 3, "scripted={scripted}");
+        let data = pdfcraft_xfa::data_of(&s.get(id).unwrap().editor.as_ref().unwrap().cos).unwrap();
+        assert_eq!(data.text_at(&pdfcraft_xfa::som_to_path("form[0].Page3[0].ACTIVIDADES[0]")), Some(text.as_str()));
+        s.undo(id).unwrap();
+        assert_eq!(s.get(id).unwrap().info.pages.len(), 2);
+        assert_eq!(s.get(id).unwrap().form.iter().find(|f| f.name == "ACTIVIDADES").unwrap().value, vec!["Short"]);
+        s.redo(id).unwrap();
+        assert_eq!(s.get(id).unwrap().info.pages.len(), 3);
+    }
+}
+
+#[test]
+fn xfa_text_growth_refreshes_widget_geometry_but_fixed_height_fields_keep_their_widgets() {
+    for fixed in [false, true] {
+        let size = if fixed { r#"h="30pt""# } else { r#"minH="20pt""# };
+        let template = pdfcraft_xfa::fixtures::growable_text_template(false).replace(r#"minH="207.017mm""#, size);
+        let mut s = Session::new();
+        let id = s.open("geometry.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&template)), None).unwrap();
+        let field = |s: &Session| s.get(id).unwrap().form.iter().find(|f| f.name == "ACTIVIDADES").unwrap().clone();
+        let before = field(&s);
+        s.apply(id, Edit::SetFieldValue { name: "ACTIVIDADES".into(), value: FieldValue::Text("Line\n".repeat(10)) }).unwrap();
+        let after = field(&s);
+        assert_eq!(s.get(id).unwrap().info.pages.len(), 2);
+        if fixed {
+            assert_eq!(before.obj, after.obj, "fixed-height fields must not trigger layout");
+            assert_eq!(before.widgets[0].rect, after.widgets[0].rect);
+        } else {
+            assert_ne!(before.obj, after.obj);
+            assert!(after.widgets[0].rect[3] - after.widgets[0].rect[1] > before.widgets[0].rect[3] - before.widgets[0].rect[1]);
+            assert_eq!(
+                s.get(id).unwrap().info.fields.iter().find(|f| f.name == "ACTIVIDADES").unwrap().value.as_deref(),
+                Some("Line\n".repeat(10).trim_end())
+            );
+        }
+        s.undo(id).unwrap();
+        assert_eq!(field(&s).widgets[0].rect, before.widgets[0].rect);
+        s.redo(id).unwrap();
+        assert_eq!(field(&s).widgets[0].rect, after.widgets[0].rect);
+    }
+}
+
+#[test]
+fn xfa_text_that_cannot_sync_to_structured_data_is_not_replaced_by_a_relayout() {
+    let template = pdfcraft_xfa::fixtures::growable_text_template(false)
+        .replace("<ACTIVIDADES>Short</ACTIVIDADES>", "<ACTIVIDADES><nested>Short</nested></ACTIVIDADES>");
+    let mut s = Session::new();
+    let id = s.open("structured.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&template)), None).unwrap();
+    let text = "Keep this accepted value\n".repeat(150);
+    s.apply(id, Edit::SetFieldValue { name: "ACTIVIDADES".into(), value: FieldValue::Text(text.clone()) }).unwrap();
+    let doc = s.get(id).unwrap();
+    assert_eq!(doc.info.pages.len(), 2);
+    assert_eq!(doc.form.iter().find(|f| f.name == "ACTIVIDADES").unwrap().value, vec![text]);
+    assert!(doc.xfa_warnings.iter().any(|w| w.contains("structured content")));
+}
+
+#[test]
+fn xfa_structured_data_whitespace_edits_survive_without_stale_relayout() {
+    let template = pdfcraft_xfa::fixtures::growable_text_template(false)
+        .replace("<ACTIVIDADES>Short</ACTIVIDADES>", "<ACTIVIDADES><nested>Short</nested></ACTIVIDADES>");
+    for text in ["Short\n", "\nShort", " Short ", "\tShort\t"] {
+        let mut s = Session::new();
+        let id = s.open("structured.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&template)), None).unwrap();
+        let field = |s: &Session| s.get(id).unwrap().form.iter().find(|f| f.name == "ACTIVIDADES").unwrap().clone();
+        let before = field(&s);
+        s.apply(id, Edit::SetFieldValue { name: "ACTIVIDADES".into(), value: FieldValue::Text(text.into()) }).unwrap();
+        assert_eq!(field(&s).value, vec![text], "the accepted whitespace must not be replaced from stale datasets");
+        assert_eq!(field(&s).obj, before.obj, "a skipped data write must not rebuild the widgets");
+        let doc = s.get(id).unwrap();
+        assert!(doc.dirty);
+        assert!(doc.xfa_warnings.iter().any(|w| w.contains("structured content")), "{:?}", doc.xfa_warnings);
+        let cos = pdfcraft_cos::Document::open(doc.bytes.clone()).unwrap();
+        let xdp = pdfcraft_xfa::read_packets(&cos).unwrap().unwrap().xdp;
+        assert!(xdp.contains("<ACTIVIDADES><nested>Short</nested></ACTIVIDADES>"));
+        s.undo(id).unwrap();
+        assert_eq!(field(&s).value, before.value);
+        s.redo(id).unwrap();
+        assert_eq!(field(&s).value, vec![text]);
+    }
+}
+
+/// A script that fails partway keeps what it did before the error, as JavaScript does: a form
+/// whose check box opens the next boxes and then trips over an object the form no longer has
+/// still opens them (DA Form 31's leave types).
+#[test]
+fn an_xfa_script_that_fails_partway_keeps_what_it_changed_before_the_error() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::partly_failing_script_template()));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("form.pdf", None, bytes, None).expect("opens");
+    let field = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).cloned();
+    assert!(field(&s, "leave").is_some_and(|f| f.flags & 1 != 0), "protected until `kind` is checked");
+    assert!(field(&s, "details").is_none(), "invisible: not laid out");
+    s.take_js_output(id);
+    s.apply(id, Edit::SetFieldValue { name: "kind".into(), value: FieldValue::Check(true) }).unwrap();
+    let out = s.take_js_output(id);
+    assert!(out.errors.iter().any(|e| e.contains("kind") && e.contains("change")), "the error is still reported: {out:?}");
+    assert!(field(&s, "leave").is_some_and(|f| f.flags & 1 == 0), "opened before the error");
+    assert!(field(&s, "details").is_some(), "shown before the error");
+    s.apply(id, Edit::SetFieldValue { name: "leave".into(), value: FieldValue::Check(true) }).expect("can be checked now");
+}
+
+/// A scripted form end to end: initialize and calculate on open, recalculation after a change,
+/// a failing validation's message, buttons that add and remove rows and show messages, a check
+/// box that shows a subform (undoable), FormCalc, and a save and reopen that keep it all.
+#[test]
+fn repeated_xfa_print_buttons_run_their_click_script() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::repeated_print_button_template()));
+    let mut s = Session::new();
+    let id = s.open("print.pdf", None, bytes, None).unwrap();
+    assert_eq!(s.get(id).unwrap().info.pages.len(), 3);
+    for name in ["PrintButton1", "PrintButton1_2", "PrintButton1_3"] {
+        let out = s.run_javascript(id, "throw new Error('AcroForm fallback ran')", Some(name)).unwrap();
+        assert_eq!(out.error, None, "{name}: {out:?}");
+        assert_eq!(out.requests, vec![pdfcraft_js::Request::Print], "{name}: {out:?}");
+    }
 }
 
 #[test]

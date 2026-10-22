@@ -5880,6 +5880,38 @@ fn xfa_data_files_export_and_import_through_tools() {
 }
 
 #[test]
+fn xfa_rich_text_max_length_is_reported_and_enforced_through_tools() {
+    let dir = workdir("xfa-rich-limit");
+    let template = pdfcraft_xfa::fixtures::template_with_data(0, "<form><head><familyName>Old</familyName></head></form>")
+        .replace(r#"<text maxChars="30"/>"#, r#"<exData contentType="text/html" maxLength="5"/>"#)
+        .replace("<textEdit>", "<textEdit allowRichText=\"1\">");
+    std::fs::write(dir.join("rich.pdf"), pdfcraft_xfa::fixtures::shell(&template)).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "rich.pdf" }))["doc"].as_u64().unwrap();
+    let fields = ok(&mut a, "form_fields", json!({ "doc": doc }));
+    let family = fields["fields"].as_array().unwrap().iter().find(|f| f["name"] == "familyName").unwrap();
+    assert_eq!(family["max_length"], 5);
+
+    // The boundary counts Unicode characters, not UTF-8 bytes.
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "familyName": "éàöüñ" } }));
+    ok(&mut a, "doc_export_data", json!({ "doc": doc, "path": "before.xml", "what": "fields" }));
+    let before = std::fs::read(dir.join("before.xml")).unwrap();
+    assert!(std::str::from_utf8(&before).unwrap().contains("<familyName>éàöüñ</familyName>"));
+    let error = a.call("form_fill", &json!({ "doc": doc, "values": { "familyName": "éàöüñX" } })).unwrap_err();
+    assert!(error.to_string().contains("at most 5 characters"), "{error}");
+    ok(&mut a, "doc_export_data", json!({ "doc": doc, "path": "after.xml", "what": "fields" }));
+    assert_eq!(std::fs::read(dir.join("after.xml")).unwrap(), before, "refused edits leave the XFA data unchanged");
+
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "out.pdf" }));
+    ok(&mut a, "doc_close", json!({ "doc": doc }));
+    let doc = ok(&mut a, "doc_open", json!({ "path": "out.pdf" }))["doc"].as_u64().unwrap();
+    let fields = ok(&mut a, "form_fields", json!({ "doc": doc }));
+    let family = fields["fields"].as_array().unwrap().iter().find(|f| f["name"] == "familyName").unwrap();
+    assert_eq!(family["max_length"], 5);
+    assert_eq!(family["value"], "éàöüñ");
+}
+
+#[test]
 fn dynamic_xfa_forms_open_render_fill_and_save_through_tools() {
     let dir = workdir("xfa");
     std::fs::write(dir.join("xfa.pdf"), pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::template(2))).unwrap();
@@ -6074,6 +6106,65 @@ fn measurement_snap_tool_covers_all_targets() {
     }
     assert!(ok(&mut a, "measure_snap", json!({"doc":doc,"page":1,"at":[180,180]}))["snap"].is_null());
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn growable_xfa_text_paginates_after_fill_save_and_print() {
+    let dir = workdir("xfa-growable-text");
+    let text: String = (0..150).map(|i| format!("Row{i:03} {}sample\n", "sample ".repeat(8))).collect();
+    assert_eq!(text.len(), 10_500);
+    for scripted in [false, true] {
+        let template = pdfcraft_xfa::fixtures::growable_text_template(scripted);
+        std::fs::write(dir.join("growing.pdf"), pdfcraft_xfa::fixtures::shell(&template)).unwrap();
+        let mut a = auto(&dir);
+        let opened = ok(&mut a, "doc_open", json!({ "path": "growing.pdf" }));
+        let doc = opened["doc"].as_u64().unwrap();
+        assert_eq!(opened["pages"], 2);
+        let filled = ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "ACTIVIDADES": text } }));
+        assert_eq!(filled["pages"], 3, "scripted={scripted}: {filled}");
+        ok(&mut a, "doc_export_data", json!({ "doc": doc, "path": "data.xml", "what": "fields" }));
+        let data = std::fs::read_to_string(dir.join("data.xml")).unwrap();
+        assert!(data.contains(text.trim_end()), "the full value remains in the datasets");
+        ok(&mut a, "doc_save", json!({ "doc": doc, "path": "saved.pdf" }));
+        ok(&mut a, "doc_close", json!({ "doc": doc }));
+        let reopened = ok(&mut a, "doc_open", json!({ "path": "saved.pdf" }));
+        assert_eq!(reopened["pages"], 3);
+        let doc = reopened["doc"].as_u64().unwrap();
+        ok(&mut a, "doc_print", json!({ "doc": doc, "path": "printed.pdf" }));
+        let printed = ok(&mut a, "doc_open", json!({ "path": "printed.pdf" }));
+        assert_eq!(printed["pages"], 3);
+        let output = ok(&mut a, "text_extract", json!({ "doc": printed["doc"] }));
+        let printed_text = output["pages"].as_array().unwrap().iter().map(|p| p["text"].as_str().unwrap()).collect::<Vec<_>>().join("\n");
+        let expected = format!("{text}\nFollowing section");
+        assert_eq!(printed_text.split_whitespace().collect::<Vec<_>>(), expected.split_whitespace().collect::<Vec<_>>(), "scripted={scripted}");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn repeated_xfa_print_buttons_work_through_tools_and_after_reopen() {
+    let dir = workdir("xfa-print-buttons");
+    let template = pdfcraft_xfa::fixtures::repeated_print_button_template();
+    std::fs::write(dir.join("print.pdf"), pdfcraft_xfa::fixtures::shell(&template)).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "print.pdf" }))["doc"].as_u64().unwrap();
+    let check = |a: &mut Automation, doc| {
+        let fields = ok(a, "form_fields", json!({ "doc": doc }));
+        let buttons: Vec<_> = fields["fields"].as_array().unwrap().iter().filter(|f| f["type"] == "button").collect();
+        assert_eq!(buttons.len(), 3);
+        for (index, field) in buttons.iter().enumerate() {
+            assert_eq!(field["page"], index + 1);
+            let out = ok(a, "js_run", json!({ "doc": doc, "field": field["name"], "script": "throw new Error('AcroForm fallback ran')" }));
+            assert!(out["error"].is_null(), "{out}");
+            assert_eq!(out["requests"], json!([{ "print": true }]), "{out}");
+            assert_eq!(out["alerts"], json!([]));
+        }
+    };
+    check(&mut a, doc);
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "saved.pdf" }));
+    ok(&mut a, "doc_close", json!({ "doc": doc }));
+    let doc = ok(&mut a, "doc_open", json!({ "path": "saved.pdf" }))["doc"].as_u64().unwrap();
+    check(&mut a, doc);
 }
 
 #[test]
