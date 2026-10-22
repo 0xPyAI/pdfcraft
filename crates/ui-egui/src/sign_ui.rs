@@ -577,6 +577,9 @@ impl PdfCraftApp {
                 self.session.set_reading_colors(new, self.reading_colors);
                 let Some(doc) = self.session.get(new) else { return };
                 let mut view = DocView::new(new, &doc.info, self.view_defaults);
+                if self.full_screen {
+                    view.enter_presentation();
+                }
                 view.snapshot = Some(Snapshot { kind: SnapshotKind::Revision, revision: n, from });
                 self.views.push(view);
                 self.active = Some(self.views.len() - 1);
@@ -626,6 +629,9 @@ impl PdfCraftApp {
                 self.session.set_reading_colors(new, self.reading_colors);
                 let Some(doc) = self.session.get(new) else { return };
                 let mut view = DocView::new(new, &doc.info, self.view_defaults);
+                if self.full_screen {
+                    view.enter_presentation();
+                }
                 view.snapshot = Some(Snapshot { kind: SnapshotKind::SignedVersion, revision, from });
                 self.views.push(view);
                 self.active = Some(self.views.len() - 1);
