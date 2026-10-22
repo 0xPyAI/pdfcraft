@@ -43,11 +43,14 @@ pub fn typed_date(tpl: &Template, som: &str, text: &str) -> Option<String> {
     if reads(&first).is_some() {
         return None;
     }
-    let iso = alternatives(picture).into_iter().skip(1).filter(|a| is_date_clause(a)).filter_map(date_letters).find_map(|p| reads(&p))?;
-    // Written in the first pattern only when it reads back as the same date: a year a two-digit
-    // year can't hold would otherwise become another century's.
-    let shown = iso_to_pattern(&iso, &first);
-    (pattern_to_iso(&shown, &first).as_deref() == Some(iso.as_str())).then_some(shown)
+    // The first later date pattern that reads the text and gives a date the first pattern keeps:
+    // written in the first, it must read back as the same date (a two-digit year can't hold 1901
+    // or 1203), else the next pattern is tried.
+    alternatives(picture).into_iter().skip(1).filter(|a| is_date_clause(a)).filter_map(date_letters).find_map(|p| {
+        let iso = reads(&p)?;
+        let shown = iso_to_pattern(&iso, &first);
+        (pattern_to_iso(&shown, &first).as_deref() == Some(iso.as_str())).then_some(shown)
+    })
 }
 
 /// Whether picture clause `clause` is a date pattern: a `date{…}` clause (with or without a

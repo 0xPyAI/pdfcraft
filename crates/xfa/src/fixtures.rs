@@ -507,7 +507,8 @@ pub fn fields_template(data: &str) -> String {
 
 /// Date fields whose edit pictures list alternatives, as forms let a date be typed several ways
 /// (`date{YYYYMMDD}|date{YYMMDD}|…`); one with a single pattern; a text field; `code`, whose
-/// only alternative is a text clause; and `short`, whose first pattern has a two-digit year.
+/// only alternative is a text clause; `short`, whose first pattern has a two-digit year; and
+/// `pick`, where two later patterns read some dates and only one gives a year the first keeps.
 pub fn date_alternatives_template() -> String {
     r##"<?xml version="1.0" encoding="UTF-8"?>
 <xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
@@ -519,6 +520,7 @@ pub fn date_alternatives_template() -> String {
  <field name="name" w="2in" h="0.3in"><ui><textEdit/></ui></field>
  <field name="code" w="2in" h="0.3in"><ui><dateTimeEdit/><picture>date{YYYYMMDD}|text{YYMMDD}</picture></ui><value><date/></value></field>
  <field name="short" w="2in" h="0.3in"><ui><dateTimeEdit/><picture>date{YYMMDD}|date{YYYYMMDD}</picture></ui><value><date/></value></field>
+ <field name="pick" w="2in" h="0.3in"><ui><dateTimeEdit/><picture>date{YYMMDD}|date{DDMMYYYY}|date{YYYYMMDD}</picture></ui><value><date/></value></field>
 </subform>
 </template>
 </xdp:xdp>
