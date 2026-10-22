@@ -38,6 +38,22 @@ impl TextFilter {
 
 mod search;
 
+/// Whether `(x, y)` lies in or on the convex quadrilateral `quad`, whichever way it winds. A
+/// quad with a NaN corner, or no area, holds nothing.
+fn quad_contains(quad: &[[f32; 2]; 4], x: f32, y: f32) -> bool {
+    let (mut positive, mut negative) = (false, false);
+    for (k, a) in quad.iter().enumerate() {
+        let b = quad[(k + 1) % 4];
+        let cross = (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]);
+        positive |= cross > 0.0;
+        negative |= cross < 0.0;
+        if cross.is_nan() {
+            return false;
+        }
+    }
+    positive != negative
+}
+
 /// One glyph on the page.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextGlyph {
@@ -160,7 +176,26 @@ impl PageText {
     }
 
     /// Index of the glyph nearest to a view-space point (for selection anchors).
+    ///
+    /// A glyph whose drawn em box (`quad`) holds the point wins. Skewed or turned text has bounding
+    /// boxes wider than the glyphs, so the box of the letter before overlaps this one and would
+    /// otherwise be found first (#3693). Failing that, the nearest bounding box wins, and a tie
+    /// goes to the glyph whose centre is closer.
     pub fn nearest(&self, x: f32, y: f32) -> Option<usize> {
+        let centre_distance = |g: &TextGlyph| {
+            let (cx, cy) = (g.quad.iter().map(|q| q[0]).sum::<f32>() / 4.0, g.quad.iter().map(|q| q[1]).sum::<f32>() / 4.0);
+            (cx - x).powi(2) + (cy - y).powi(2)
+        };
+        let inside = self
+            .glyphs
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| quad_contains(&g.quad, x, y))
+            .min_by(|a, b| centre_distance(a.1).total_cmp(&centre_distance(b.1)))
+            .map(|(i, _)| i);
+        if inside.is_some() {
+            return inside;
+        }
         self.glyphs
             .iter()
             .enumerate()
@@ -180,10 +215,10 @@ impl PageText {
                     0.0
                 };
                 // Prefer the same line: vertical distance weighs more.
-                (i, dx + dy * 3.0)
+                (i, dx + dy * 3.0, centre_distance(g))
             })
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(i, _)| i)
+            .min_by(|a, b| a.1.total_cmp(&b.1).then(a.2.total_cmp(&b.2)))
+            .map(|(i, _, _)| i)
     }
 
     /// The word around glyph `i` as its first and last glyph (double-click): it stops at word
@@ -2130,6 +2165,62 @@ mod tests {
     fn g(t: &str, x0: f32, y0: f32, x1: f32) -> TextGlyph {
         let rect = [x0, y0, x1, y0 + 10.0];
         TextGlyph { text: t.into(), rect, quad: [[x0, y0], [x1, y0], [x1, rect[3]], [x0, rect[3]]], direction: [1.0, 0.0] }
+    }
+
+    /// A glyph whose em box is `w` × `h` at `origin`, advancing along `dir` with its up edge along
+    /// `up` (a unit step of each), as a sheared or turned text matrix draws it.
+    fn tilted(t: &str, origin: [f32; 2], dir: [f32; 2], up: [f32; 2], w: f32, h: f32) -> TextGlyph {
+        let p = |a: f32, b: f32| [origin[0] + dir[0] * a + up[0] * b, origin[1] + dir[1] * a + up[1] * b];
+        let quad = [p(0.0, 0.0), p(w, 0.0), p(w, h), p(0.0, h)];
+        let xs = quad.map(|q| q[0]);
+        let ys = quad.map(|q| q[1]);
+        let rect = [
+            xs.iter().copied().fold(f32::MAX, f32::min),
+            ys.iter().copied().fold(f32::MAX, f32::min),
+            xs.iter().copied().fold(f32::MIN, f32::max),
+            ys.iter().copied().fold(f32::MIN, f32::max),
+        ];
+        TextGlyph { text: t.into(), rect, quad, direction: dir }
+    }
+
+    /// #3693: pointing at the middle of a glyph in sheared or turned text finds that glyph, not
+    /// the one before it whose bounding box overlaps it.
+    #[test]
+    fn nearest_finds_the_glyph_under_the_pointer_in_sheared_and_turned_text() {
+        let s = std::f32::consts::FRAC_1_SQRT_2;
+        // (writing direction, up edge) in view space (y down): upright, sheared 0.35, turned 45°.
+        for (dir, up) in [([1.0, 0.0], [0.0, -1.0]), ([1.0, 0.0], [0.35, -1.0]), ([s, -s], [-s, -s])] {
+            let mut advance = 0.0;
+            let glyphs: Vec<TextGlyph> = "film in the list of tiny jilt flit"
+                .chars()
+                .map(|c| {
+                    let w = if "filjt ".contains(c) { 3.0 } else { 6.0 };
+                    let g = tilted(&c.to_string(), [50.0 + dir[0] * advance, 300.0 + dir[1] * advance], dir, up, w, 14.0);
+                    advance += w;
+                    g
+                })
+                .collect();
+            let t = layout(glyphs.clone());
+            assert_eq!(t.glyphs.len(), glyphs.len(), "layout kept every glyph");
+            for (i, g) in glyphs.iter().enumerate() {
+                let cx = g.quad.iter().map(|q| q[0]).sum::<f32>() / 4.0;
+                let cy = g.quad.iter().map(|q| q[1]).sum::<f32>() / 4.0;
+                assert_eq!(t.nearest(cx, cy), Some(i), "dir {dir:?} up {up:?}: glyph {i} ({})", g.text);
+            }
+            // Past either end of the line, the end glyph is still the nearest.
+            let (first, last) = (&glyphs[0], &glyphs[glyphs.len() - 1]);
+            assert_eq!(t.nearest(first.quad[0][0] - dir[0] * 8.0, first.quad[0][1] - dir[1] * 8.0), Some(0));
+            assert_eq!(t.nearest(last.quad[1][0] + dir[0] * 8.0, last.quad[1][1] + dir[1] * 8.0), Some(glyphs.len() - 1));
+        }
+    }
+
+    #[test]
+    fn a_degenerate_or_nan_quad_holds_no_point() {
+        assert!(!quad_contains(&[[1.0, 1.0]; 4], 1.0, 1.0));
+        assert!(!quad_contains(&[[0.0, 0.0], [1.0, 0.0], [f32::NAN, 1.0], [0.0, 1.0]], 0.5, 0.5));
+        assert!(quad_contains(&[[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]], 4.0, 2.0));
+        // Wound the other way.
+        assert!(quad_contains(&[[0.0, 0.0], [0.0, 4.0], [4.0, 4.0], [4.0, 0.0]], 2.0, 2.0));
     }
 
     #[test]
