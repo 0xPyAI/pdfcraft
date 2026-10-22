@@ -769,6 +769,9 @@ impl Layouter<'_> {
         self.warn_truncated(node, &ctx.som, instances);
         let ctx_parent = ctx;
         for i in 0..instances {
+            // Every instance spends budget, so nested repeats that place nothing still stop.
+            self.measures.set(self.measures.get().saturating_add(1));
+            self.check_measures()?;
             let ctx = ctx_parent.with_som(&sf.common, sib + i);
             let (rect, _, _) = self.cursor();
             let (x, w) = avail.unwrap_or((rect.x, rect.w));

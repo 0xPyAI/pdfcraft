@@ -405,6 +405,18 @@ fn repeated_pictures_are_bounded_in_total_bytes() {
 }
 
 #[test]
+fn empty_repeating_subforms_spend_the_layout_budget() {
+    // Four nested levels of 50 empty instances are 6.25 million instances that place nothing
+    // and measure nothing; each one counts against the layout budget.
+    let level = "<subform layout=\"tb\"><occur initial=\"50\" max=\"-1\"/>";
+    let tpl = format!("<template><subform layout=\"tb\">{}{}</subform></template>", level.repeat(4), "</subform>".repeat(4));
+    assert!(matches!(layout_xml(&tpl), Err(XfaError::TooLarge(_))));
+    // Three levels (125,000 instances) still lay out.
+    let tpl = format!("<template><subform layout=\"tb\">{}{}</subform></template>", level.repeat(3), "</subform>".repeat(3));
+    assert!(layout_xml(&tpl).is_ok());
+}
+
+#[test]
 fn the_packets_can_be_one_stream_or_named_parts() {
     // Named parts, with the template split from the rest.
     let doc = Document::open(Arc::new(shell(&template(0)))).unwrap();
