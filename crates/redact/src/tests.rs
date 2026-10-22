@@ -1242,6 +1242,89 @@ fn flattened_widgets_and_far_pop_ups_leave_the_structure_tree() {
     assert!(!field_left, "the flattened field didn't survive the save through the structure tree");
 }
 
+/// Issue #2874: applying redactions removes the comment and the form field under a mark, and
+/// with them the structure tree's object references (`/OBJR`) to them, so a full rewrite of a
+/// tagged PDF can't keep the comment's text or the field's value. The field's widget on another
+/// page goes with it; a comment outside the mark keeps its reference.
+#[test]
+fn applied_redactions_drop_structure_tree_references_to_what_they_remove() {
+    let objs: Vec<Vec<u8>> = vec![
+        // 1 catalog with a form and a structure tree
+        b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [6 0 R] >> /MarkInfo << /Marked true >> /StructTreeRoot 9 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 16 0 R] /Count 2 >>".to_vec(),
+        // 3 page 1: a label, a text field's widget and a comment under the mark, a comment outside
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [7 0 R 8 0 R 15 0 R] /StructParents 0 >>".to_vec(),
+        stream("", b"BT /F1 10 Tf 10 230 Td (Name:) Tj ET"),
+        FONT.replace("95 0 R", "14 0 R").into_bytes(),
+        // 6 the field, 7 its widget on page 1 (17 is its widget on page 2), 8 the comment
+        b"<< /FT /Tx /T (name) /V (FIELDSECRETVALUE) /Kids [7 0 R 17 0 R] >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Widget /Parent 6 0 R /P 3 0 R /Rect [50 225 200 240] /StructParent 1 /AP << /N 13 0 R >> >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Text /P 3 0 R /Rect [200 200 220 220] /StructParent 2 /Contents (COMMENTSECRETNOTE) >>".to_vec(),
+        // 9 struct tree root, 10 document, 11 form element (direct OBJRs to both widgets),
+        // 12 annotation element (OBJR to the comment), 18 annotation element for the kept comment
+        b"<< /Type /StructTreeRoot /K 10 0 R /ParentTree << /Nums [1 11 0 R 2 12 0 R 3 18 0 R 4 11 0 R] >> /ParentTreeNextKey 5 >>".to_vec(),
+        b"<< /Type /StructElem /S /Document /P 9 0 R /K [11 0 R 12 0 R 18 0 R] >>".to_vec(),
+        b"<< /Type /StructElem /S /Form /P 10 0 R /Pg 3 0 R /Alt (FIELDSECRETVALUE) /K [<< /Type /OBJR /Obj 7 0 R /Pg 3 0 R >> << /Type /OBJR /Obj 17 0 R /Pg 16 0 R >>] >>".to_vec(),
+        b"<< /Type /StructElem /S /Annot /P 10 0 R /Pg 3 0 R /K [<< /Type /OBJR /Obj 8 0 R /Pg 3 0 R >>] >>".to_vec(),
+        stream("/Type /XObject /Subtype /Form /BBox [0 0 150 15] /Resources << /Font << /F1 5 0 R >> >>", b"BT /F1 10 Tf 2 3 Td (FIELDSECRETVALUE) Tj ET"),
+        widths(),
+        // 15 the comment outside the mark
+        b"<< /Type /Annot /Subtype /Text /P 3 0 R /Rect [250 10 270 30] /StructParent 3 /Contents (Kept note) >>".to_vec(),
+        // 16 page 2, with the field's second widget
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Annots [17 0 R] /StructParents 4 >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Widget /Parent 6 0 R /P 16 0 R /Rect [50 50 200 65] /StructParent 4 /AP << /N 13 0 R >> >>".to_vec(),
+        b"<< /Type /StructElem /S /Annot /P 10 0 R /Pg 3 0 R /K [<< /Type /OBJR /Obj 15 0 R /Pg 3 0 R >>] >>".to_vec(),
+    ];
+    let mut doc = pdf(objs);
+    mark(&mut doc, 0, &[[40.0, 190.0, 230.0, 245.0]], "");
+    let report = apply(&mut doc, None).unwrap();
+    assert_eq!((report.annotations, report.fields), (1, 1), "{report:?}");
+    assert!(report.tags >= 3, "the three references to the comment and both widgets are counted: {report:?}");
+    // Without object streams, whose compression would hide the strings from the search.
+    let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
+    let has = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
+    assert!(has(b"(Name:)") && has(b"(Kept note)"), "the search sees the saved objects");
+    assert!(!has(b"COMMENTSECRETNOTE"), "the redacted comment's text survived the save through the structure tree");
+    assert!(!has(b"FIELDSECRETVALUE"), "the redacted field's value survived the save through the structure tree");
+    let saved = Document::open(Arc::new(bytes)).unwrap();
+    let widget_left = saved
+        .object_numbers()
+        .into_iter()
+        .any(|n| saved.get(ObjRef::new(n, saved.generation(n))).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Widget")));
+    assert!(!widget_left, "neither of the field's widgets survived the save");
+    // The kept comment is still tagged.
+    let kept = saved.object_numbers().into_iter().any(|n| {
+        saved.get(ObjRef::new(n, saved.generation(n))).as_dict().and_then(|d| d.get(b"K")).is_some_and(|k| match &*saved.resolve(k) {
+            Object::Array(a) => a.iter().any(|x| {
+                saved.resolve(x).as_dict().and_then(|d| d.get(b"Obj")).and_then(Object::as_ref).is_some_and(|r| {
+                    saved.get(r).as_dict().and_then(|d| d.get(b"Contents")).and_then(Object::as_string).is_some_and(|s| s.to_text() == "Kept note")
+                })
+            }),
+            _ => false,
+        })
+    });
+    assert!(kept, "the comment outside the mark keeps its structure reference");
+}
+
+/// #2874: a structure element written in place that tags a comment under a mark can't be edited
+/// without rewriting what holds it, so applying is refused rather than leaving the comment
+/// reachable (fail-closed, as in Sanitize).
+#[test]
+fn applying_redactions_refuses_an_in_place_element_tagging_a_removed_comment() {
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 6 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Annots [4 0 R] >>".to_vec(),
+        b"<< /Type /Annot /Subtype /Text /Rect [200 200 220 220] /StructParent 0 /Contents (COMMENTSECRETNOTE) >>".to_vec(),
+        b"<< >>".to_vec(),
+        // 6 the root's only kid, an annotation element written in place
+        b"<< /Type /StructTreeRoot /K [<< /Type /StructElem /S /Annot /K [<< /Type /OBJR /Obj 4 0 R >>] >>] >>".to_vec(),
+    ];
+    let mut doc = pdf(objs);
+    mark(&mut doc, 0, &[[190.0, 190.0, 230.0, 230.0]], "");
+    assert!(matches!(apply(&mut doc, None), Err(RedactError::Tags)));
+}
+
 /// #2532 review: a structure tree larger than the walk's limit can't be searched in full, so a
 /// reference the walk never reached could keep a removed annotation. Then it is an error, and
 /// nothing is changed, rather than success with references left behind (removing only the tree

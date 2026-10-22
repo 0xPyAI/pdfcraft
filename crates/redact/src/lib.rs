@@ -127,7 +127,8 @@ pub struct Report {
     pub annotations: usize,
     pub fields: usize,
     pub replacement_text: usize,
-    /// Structure elements that lost alternate/actual text or emptied marked content.
+    /// Structure elements that lost alternate/actual text or emptied marked content, and
+    /// structure references to removed annotations.
     pub tags: usize,
     /// The form was an AcroForm+XFA form and its `/XFA` packets (which still held redacted field
     /// values, and from which a relayout could rebuild them) were removed.
@@ -151,6 +152,12 @@ fn color(doc: &Document, d: &Dict, key: &[u8]) -> Option<Rgb> {
 
 pub(crate) fn annots_of(doc: &Document, page: &Dict) -> Vec<Object> {
     page.get(b"Annots").map(|a| doc.resolve(a)).and_then(|a| a.as_array().cloned()).unwrap_or_default()
+}
+
+/// Every annotation the pages list. Compared before and after a removal, what is no longer listed
+/// leaves the structure tree too ([`tags::drop_object_refs`]).
+pub(crate) fn listed_annotations(doc: &Document) -> HashSet<ObjRef> {
+    pdfcraft_model::pages(doc).iter().flat_map(|p| annots_of(doc, &p.dict)).filter_map(|a| a.as_ref()).collect()
 }
 
 /// Every redaction mark in the document, page by page.
@@ -351,6 +358,7 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
     let mut retired_properties = Vec::new();
     let widget_owner: Vec<(ObjRef, String)> =
         pdfcraft_forms::fields(doc).into_iter().flat_map(|f| f.widgets.iter().map(|w| (w.obj, f.name.clone())).collect::<Vec<_>>()).collect();
+    let listed_before = listed_annotations(doc);
 
     for &(pi, page_marks) in &groups {
         let page = pdfcraft_model::pages(doc).swap_remove(pi);
@@ -522,6 +530,12 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
             report.fields += 1;
         }
     }
+
+    // 3a. A tagged PDF's structure tree still points at the removed comments and widgets
+    // (`/OBJR`, #2874): drop those references, or a full rewrite keeps them reachable, the
+    // comment text and the field value included. Widgets of a removed field on other pages count.
+    let gone: HashSet<ObjRef> = listed_before.difference(&listed_annotations(doc)).copied().collect();
+    report.tags += tags::drop_object_refs(doc, &gone)?;
 
     // 3b. An XFA form mirrors its field values in the /XFA datasets packet, and a relayout
     // rebuilds fields and pages from that packet, so deleting the AcroForm field alone leaves the

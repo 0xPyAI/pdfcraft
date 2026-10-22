@@ -42,7 +42,11 @@ the document. Reduce the marked area, disable repeated text, or apply fewer page
 This limits appearance generation; it is not a limit on the input PDF or the whole process's memory.
 
 Structure cleanup resolves named MCIDs and indirect content references. Form content
-references are updated to the cleaned copy; unchanged sibling descriptions remain.
+references are updated to the cleaned copy; unchanged sibling descriptions remain. The structure
+tree's object references (`/OBJR`) to the annotations and form fields `apply` removes are dropped,
+as Sanitize drops them, so a full rewrite of a tagged PDF can't keep a removed comment or field value.
+A tree where that can't be done (an element written in place, or one too large to walk) makes
+`apply` fail with `RedactError::Tags` rather than leave the annotation reachable.
 
 Replacement descriptions are removed only from marked-content spans changed by cleanup.
 Unchanged spans retain their descriptions; unused property entries are retired during redaction
