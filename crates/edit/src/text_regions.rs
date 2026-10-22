@@ -64,6 +64,39 @@ fn same_style(a: &TextLine, b: &TextLine) -> bool {
         && (a.size - b.size).abs() < 0.01
 }
 
+/// Does a row open with a list marker? A bullet or a dash, or an ordered marker — digits (or a
+/// single letter) followed by `.` or `)` and then a space or the row's end, so prose such as
+/// `1.5` or `Dr. Smith` is left alone.
+fn opens_with_marker(text: &str) -> bool {
+    let Some(first) = text.chars().next() else { return false };
+    if matches!(first, '•' | '◦' | '▪' | '‣' | '⁃' | '*' | '-' | '–' | '—') {
+        return true;
+    }
+    if !first.is_ascii_digit() && !first.is_ascii_alphabetic() {
+        return false;
+    }
+    let digits = text.chars().take_while(|c| c.is_ascii_digit()).count();
+    let letters = text.chars().take_while(|c| c.is_ascii_alphabetic()).count();
+    // Both runs are ASCII characters, so their length in characters is their length in bytes:
+    // the slice below starts on a character boundary.
+    let rest = if digits > 0 {
+        &text[digits..]
+    } else if letters == 1 {
+        &text[1..]
+    } else {
+        return false;
+    };
+    let mut after = rest.chars();
+    matches!(after.next(), Some('.' | ')')) && after.next().is_none_or(|c| c.is_whitespace())
+}
+
+/// A row that opens with a list marker opens its own item: joining it to the row above is what
+/// let an edit of one paragraph delete every item after it (#2564). The other error, splitting
+/// an ordinary paragraph, costs one more paragraph to click and never any text — so err this way.
+fn starts_list_item(row: &[usize], lines: &[TextLine]) -> bool {
+    row.iter().filter_map(|i| lines.get(*i)).map(|l| l.text.trim_start()).find(|t| !t.is_empty()).is_some_and(opens_with_marker)
+}
+
 fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
     let mut rows: Vec<Vec<usize>> = Vec::new();
     for (i, line) in lines.iter().enumerate() {
@@ -98,13 +131,28 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
         let Some(first) = row.first().and_then(|i| lines.get(*i)) else { continue };
         let (Some(rect), Some(frame)) = (row_rect(&row, lines), frame_row_rect(&row, lines)) else { continue };
         let joins = blocks.last().is_some_and(|block| {
+            // A bullet of its own opens a list item (#2564): such a row is a new paragraph, and
+            // letting it join is what made an edit of the row above delete this item and the ones
+            // after it.
+            if starts_list_item(&row, lines) {
+                return false;
+            }
             let Some(prev_row) = block.rows.last() else { return false };
             let Some(prev) = prev_row.first().and_then(|i| lines.get(*i)) else { return false };
             let Some(pr) = frame_row_rect(prev_row, lines) else { return false };
             let gap = prev.frame_origin().1 - first.frame_origin().1;
             let tol = prev.size.max(first.size).max(1.0);
-            let aligned =
-                (pr[0] - frame[0]).abs() < tol || ((pr[0] + pr[2] - frame[0] - frame[2]) / 2.0).abs() < tol || (pr[2] - frame[2]).abs() < tol;
+            // The block opens with a list marker and this row sits further right: the item's text
+            // is at a hanging indent, so the row it wrapped onto continues it (#2564). A row at
+            // the block's own left edge is already covered by the match on `pr[0]`. Both boxes are
+            // in the frame, as the rest of this comparison is, so turned text matches too.
+            let hanging = frame[0] > pr[0]
+                && frame[0] - pr[0] <= tol * 3.0
+                && block.lines.first().and_then(|&i| lines.get(i)).is_some_and(|l| opens_with_marker(l.text.trim_start()));
+            let aligned = (pr[0] - frame[0]).abs() < tol
+                || ((pr[0] + pr[2] - frame[0] - frame[2]) / 2.0).abs() < tol
+                || (pr[2] - frame[2]).abs() < tol
+                || hanging;
             // OCR lines stay apart: the scan fixes where each one is, so they never rewrap together.
             (!mixed || !(invisible(prev) || invisible(first)))
                 && (mixed || same_style(prev, first))

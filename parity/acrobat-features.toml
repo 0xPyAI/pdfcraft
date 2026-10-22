@@ -1902,8 +1902,8 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text"]
 tools = ["text_paragraphs"]
-evidence = ["crates/edit/src/tests.rs::paragraphs_are_found_and_rewrapped", "crates/edit/src/tests.rs::text_lines_are_found_and_replaced_in_place", "crates/ui-egui/tests/editing.rs::editing_existing_text_in_place", "crates/automation/tests/automation.rs::editing_existing_text_through_tools"]
-notes = "lines grouped into paragraphs by stream, font, size, left alignment and regular baseline spacing; hyphenated line ends are joined"
+evidence = ["crates/edit/src/tests.rs::paragraphs_are_found_and_rewrapped", "crates/edit/src/tests.rs::text_lines_are_found_and_replaced_in_place", "crates/edit/src/tests.rs::a_wrapped_list_item_keeps_its_continuation_and_the_items_after_it", "crates/ui-egui/tests/editing.rs::editing_existing_text_in_place", "crates/automation/tests/automation.rs::editing_existing_text_through_tools"]
+notes = "lines grouped into paragraphs by stream, font, size, left alignment and regular baseline spacing; hyphenated line ends are joined; a row opening with a list marker starts its own item, and the row a list item wraps onto continues it at its hanging indent, so editing one item never takes the items after it"
 
 [[feature]]
 id = "edit.font-reuse-substitution"

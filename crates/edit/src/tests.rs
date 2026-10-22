@@ -2036,6 +2036,36 @@ fn paragraphs_are_found_and_rewrapped() {
     assert_eq!((blocks[0].text.as_str(), blocks[0].lines.len()), ("Short.", 1));
 }
 
+/// A list whose bullet is its own text object at the margin and whose text sits at a hanging
+/// indent: the wrapped first item is one paragraph, and editing it keeps the items after it
+/// (#2564, the edit that deleted its neighbours).
+#[test]
+fn a_wrapped_list_item_keeps_its_continuation_and_the_items_after_it() {
+    let mut doc = text_page(
+        "BT /F1 12 Tf 1 0 0 1 72 700 Tm (\\225) Tj ET \
+         BT /F1 12 Tf 14.4 TL 1 0 0 1 86 700 Tm (First item of the list that wraps) Tj T* (onto a second row.) Tj ET \
+         BT /F1 12 Tf 1 0 0 1 72 671.2 Tm (\\225) Tj ET \
+         BT /F1 12 Tf 14.4 TL 1 0 0 1 86 671.2 Tm (Second item, one row.) Tj ET \
+         BT /F1 12 Tf 1 0 0 1 72 656.8 Tm (\\225) Tj ET \
+         BT /F1 12 Tf 14.4 TL 1 0 0 1 86 656.8 Tm (Third item, one row.) Tj ET",
+    );
+    let items = ["• First item of the list that wraps onto a second row.", "• Second item, one row.", "• Third item, one row."];
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    let texts: Vec<&str> = blocks.iter().map(|b| b.text.as_str()).collect();
+    assert_eq!(texts, items, "one paragraph per item, the continuation with its first row");
+    // Editing the paragraph the wrapped row belongs to must not take the items after it with it.
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    let wrapped = blocks.iter().position(|b| b.text.contains("onto a second row.")).unwrap();
+    text::replace_block(&mut doc, 0, wrapped, "• First item of the list that wraps onto a second row, edited.").unwrap();
+    let blocks = text::text_blocks(&reopen(&doc), 0).unwrap();
+    let texts: Vec<&str> = blocks.iter().map(|b| b.text.as_str()).collect();
+    assert_eq!(
+        texts,
+        ["• First item of the list that wraps onto a second row, edited.", "• Second item, one row.", "• Third item, one row."],
+        "the items after the edited one are still on the page"
+    );
+}
+
 fn page_content_bytes(doc: &Document, page: usize) -> Vec<u8> {
     let p = pdfcraft_model::pages(doc).swap_remove(page);
     let c = p.dict.get(b"Contents").unwrap();
