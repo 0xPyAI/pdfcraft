@@ -7238,4 +7238,36 @@ trailer << /Root 1 0 R >>
             assert!(render(glyph, 3).as_chunks::<4>().0.iter().all(|p| p[..3] == [255, 255, 255]), "{glyph}: 3 Tr hides the glyph");
         }
     }
+
+    /// #3109 / #3116: clipping-only text (`7 Tr`) installs a clip for subsequent painting
+    /// but draws no pixels itself.
+    #[test]
+    fn test_clip_only_text_raster_preserves_clipping_without_painting() {
+        let pdf_bytes = |content: &str| {
+            Arc::new(
+                format!(
+                    "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\n4 0 obj << /Length {} >> stream\n{content}\nendstream endobj\n5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF",
+                    content.len()
+                )
+                .into_bytes(),
+            )
+        };
+        let render = |content: &str| {
+            let mut r = PageRenderer::new(pdf_bytes(content), RenderConfig::default());
+            let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(p.error.is_none(), "{content}: {:?}", p.error);
+            p
+        };
+        let white = [255, 255, 255, 255];
+
+        // The text alone paints nothing.
+        let p = render("BT /F1 40 Tf 7 Tr 20 60 Td (Hi) Tj ET");
+        assert!(p.rgba.as_chunks::<4>().0.iter().all(|c| *c == white), "7 Tr alone leaves the page blank");
+
+        // A fill afterwards shows only through the text-shaped clip.
+        let p = render("q BT /F1 40 Tf 7 Tr 20 60 Td (Hi) Tj ET 0 0 1 rg 0 0 200 100 re f Q");
+        let pixels = p.rgba.as_chunks::<4>().0;
+        assert!(pixels.contains(&[0, 0, 255, 255]), "fill shows through the 7 Tr clip");
+        assert!(pixels.contains(&white), "the clip is text-shaped, not the whole page");
+    }
 }
