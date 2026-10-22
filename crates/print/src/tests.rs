@@ -871,3 +871,5 @@ fn driver_options_take_the_ppds_own_names_in_the_ui_language() {
         assert_eq!(other == parsed, lang != "bg-", "{lang:?}");
     }
 }
+
+mod appearances;
