@@ -96,6 +96,11 @@ pub struct PrintDraft {
     pub crops: Vec<Option<print::Crop>>,
     /// The pages `crops` were read for, so a changed page selection reads them again.
     pub crop_pages: Option<Vec<usize>>,
+    /// The printer whose options are being read in the background (CUPS runs `lpoptions`,
+    /// which a stuck CUPS can hold up; #1818). The panel says so meanwhile.
+    pub driver_options_loading: Option<String>,
+    /// Properties… asked for this printer's options; the app starts the read on the next frame.
+    pub read_options_for: Option<String>,
 }
 
 impl Default for PrintDraft {
@@ -142,6 +147,8 @@ impl Default for PrintDraft {
             label_flip: false,
             crops: Vec::new(),
             crop_pages: None,
+            driver_options_loading: None,
+            read_options_for: None,
         }
     }
 }
@@ -244,6 +251,10 @@ impl PrintDraft {
 /// the network. Without a source the dialog reads them as it opens, so tests stay deterministic.
 pub type PrinterSource = std::sync::Arc<dyn Fn() -> Vec<spool::Printer> + Send + Sync>;
 
+/// Where a printer's driver options come from: the spooler's (`spool::printer_options`) unless a
+/// test stands in. Called off the GUI thread.
+pub type OptionsSource = std::sync::Arc<dyn Fn(&str) -> Vec<spool::PrinterOption> + Send + Sync>;
+
 /// The system spooler's printers, as the desktop app's [`PrinterSource`].
 pub fn system_printers() -> PrinterSource {
     std::sync::Arc::new(spool::printers)
@@ -260,6 +271,9 @@ pub(crate) struct PrintTasks {
     /// The progress card is showing a print job (it is shared with other long jobs).
     #[cfg(not(target_arch = "wasm32"))]
     showing_progress: bool,
+    /// The driver options being read, per printer (`read_options_in_background`).
+    #[cfg(not(target_arch = "wasm32"))]
+    options: Vec<(String, std::sync::mpsc::Receiver<Vec<spool::PrinterOption>>)>,
     /// The browser print being drawn, a sheet a frame (`web_print`).
     #[cfg(target_arch = "wasm32")]
     web_job: Option<crate::web_print::WebPrintJob>,
@@ -321,6 +335,22 @@ fn default_printer(printers: &[spool::Printer]) -> Option<String> {
 /// Whether `printer` can still be chosen from `printers`: Save as PDF (`None`) always can.
 fn offered(printer: Option<&str>, printers: &[spool::Printer]) -> bool {
     printer.is_none_or(|name| printers.iter().any(|p| p.name == name))
+}
+
+/// Asks for a frame when a worker thread ends, also when it panics: [`PdfCraftApp::poll_print`]
+/// then sees the answer, or the disconnected channel of a worker that died, without waiting
+/// for some other event to draw (#2108 review). Declared before the worker's sender, so the
+/// sender is dropped first and the frame finds the channel closed.
+#[cfg(not(target_arch = "wasm32"))]
+struct WakeOnExit(Option<egui::Context>);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for WakeOnExit {
+    fn drop(&mut self) {
+        if let Some(ctx) = &self.0 {
+            ctx.request_repaint();
+        }
+    }
 }
 
 impl PdfCraftApp {
@@ -417,23 +447,76 @@ impl PdfCraftApp {
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
-        let ctx = self.ctx.clone();
+        let wake = WakeOnExit(self.ctx.clone());
         std::thread::spawn(move || {
+            let _wake = wake;
+            let tx = tx;
             // The receiver may be gone (the app quit): nothing to report to then.
             let _ = tx.send(source());
-            if let Some(ctx) = ctx {
-                ctx.request_repaint();
-            }
         });
         self.print_tasks.printers = Some(rx);
     }
 
-    /// Pick up a printer list or a spooled job that finished (each frame).
+    /// Read `printer`'s driver options off the GUI thread (#1818); `poll_print` picks them up.
+    /// A read already under way for the same printer is left to finish.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn read_options_in_background(&mut self, printer: String) {
+        if self.print_tasks.options.iter().any(|(p, _)| *p == printer) {
+            return;
+        }
+        let source: OptionsSource = self.options_source.clone().unwrap_or_else(|| std::sync::Arc::new(|p: &str| spool::printer_options(p)));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let wake = WakeOnExit(self.ctx.clone());
+        let name = printer.clone();
+        let spawned = std::thread::Builder::new().name("printer options".into()).spawn(move || {
+            let _wake = wake;
+            let tx = tx;
+            // The receiver may be gone (the app quit): nothing to report to then.
+            let _ = tx.send(source(&name));
+        });
+        match spawned {
+            Ok(_) => self.print_tasks.options.push((printer, rx)),
+            // No thread to read them on: the printer offers nothing this time.
+            Err(_) => self.receive_options(printer, Vec::new()),
+        }
+    }
+
+    /// The options read for `printer` arrived, or the read died. A read that a later click
+    /// superseded (another printer's is awaited) is dropped.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn receive_options(&mut self, printer: String, options: Vec<spool::PrinterOption>) {
+        let d = &mut self.print_draft;
+        if d.driver_options_loading.as_deref() == Some(printer.as_str()) {
+            d.driver_options_loading = None;
+            d.driver_options = Some((printer, options));
+        }
+    }
+
+    /// Pick up a printer list, driver options or a spooled job that finished (each frame).
     pub(crate) fn poll_print(&mut self) {
         #[cfg(target_arch = "wasm32")]
         self.poll_web_print();
         #[cfg(not(target_arch = "wasm32"))]
         {
+            if let Some(printer) = self.print_draft.read_options_for.take() {
+                self.read_options_in_background(printer);
+            }
+            let mut arrived = Vec::new();
+            self.print_tasks.options.retain(|(printer, rx)| match rx.try_recv() {
+                Ok(options) => {
+                    arrived.push((printer.clone(), options));
+                    false
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => true,
+                // A read that died offers nothing; the panel says so rather than wait.
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    arrived.push((printer.clone(), Vec::new()));
+                    false
+                }
+            });
+            for (printer, options) in arrived {
+                self.receive_options(printer, options);
+            }
             if let Some(rx) = &self.print_tasks.printers {
                 let printers = match rx.try_recv() {
                     Ok(p) => Some(p),
@@ -893,9 +976,12 @@ pub(crate) fn body(
                         if spool::HAS_PRINTER_PREFERENCES {
                             d.driver_error = spool::open_printer_preferences(&p).err().map(|e| e.to_string());
                         } else {
-                            if d.driver_options.as_ref().is_none_or(|(read_for, _)| *read_for != p) {
-                                d.driver_options = Some((p.clone(), spool::printer_options(&p)));
+                            if d.driver_options.as_ref().is_none_or(|(read_for, _)| *read_for != p) && d.driver_options_loading.as_deref() != Some(p.as_str()) {
+                                // Read off the GUI thread (#1818): `poll_print` starts it next frame.
+                                d.driver_options = None;
                                 d.driver_choices.clear();
+                                d.driver_options_loading = Some(p.clone());
+                                d.read_options_for = Some(p);
                             }
                             d.show_driver_options = !d.show_driver_options;
                         }
@@ -973,7 +1059,11 @@ pub(crate) fn body(
                 ui.label(egui::RichText::new(crate::i18n::fmt(tl!("Couldn't open the printer's preferences: {e}"), &[("e", e)])).small().color(t.text_muted));
             }
             if d.show_driver_options {
-                driver_options_panel(ui, d, t);
+                if d.driver_options.is_none() && d.driver_options_loading.is_some() {
+                    ui.label(egui::RichText::new(tl!("Reading the printer's settings…")).small().color(t.text_muted));
+                } else {
+                    driver_options_panel(ui, d, t);
+                }
             }
             if let Some(&source) = sizes.get(d.current_page) {
                 ui.horizontal_wrapped(|ui| {

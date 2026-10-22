@@ -27,6 +27,10 @@ spool::submit(&pdf, &spool::Job { printer: None, copies: 2, ..Default::default()
 - **Poster**: tile scale, overlap shared by neighbouring tiles, cut marks.
 - **Comments & forms**: document, + markups, + stamps, or form fields only; annotations print
   only with their Print flag, drawn from their appearance streams (Algorithm 8.1).
+- **Properties… on CUPS** reads the queue's PPD and its current defaults (`lpoptions -l`) off
+  the GUI thread, and gives `lpoptions` ten seconds: a CUPS that has stopped answering leaves
+  the PPD's own defaults in force instead of holding the dialog (#1818; `spool::output_within`
+  kills and reaps the command at the deadline).
 
 Each source page becomes a Form XObject (its content wrapped in q/Q, plus the printable
 annotations); sheets place them with a clip. The result is a fresh, unencrypted,
