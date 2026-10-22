@@ -1504,3 +1504,25 @@ fn typed_signature_uses_nonzero_winding_fill() {
     assert!(ap.ends_with("h\nf\n"), "expected non-zero winding fill (`f`), got: {ap}");
     assert!(!ap.contains("f*"), "must not use even-odd fill (`f*`): {ap}");
 }
+
+/// Many page tree nodes sharing one `/Kids` array read it once, not once per node.
+#[test]
+fn page_walk_reads_a_shared_kids_array_once() {
+    let mut doc = fixture();
+    let root = ObjRef { num: 2, generation: 0 };
+    let (first, second) = (ObjRef { num: 3, generation: 0 }, ObjRef { num: 4, generation: 0 });
+    let shared = doc.add(Object::Array([Object::Ref(first), Object::Ref(second)].into_iter().cycle().take(2_000).collect()));
+    let nodes: Vec<Object> = (0..1_000)
+        .map(|_| {
+            let mut d = Dict::new();
+            d.set(b"Type".to_vec(), Object::name("Pages"));
+            d.set(b"Kids".to_vec(), Object::Ref(shared));
+            Object::Ref(doc.add(d))
+        })
+        .collect();
+    doc.update_dict(root, |d| d.set(b"Kids".to_vec(), Object::Array(nodes))).unwrap();
+    let mut walk = PageWalk::new(&doc, root);
+    let pages: Vec<ObjRef> = walk.by_ref().collect();
+    assert_eq!(pages, [first, second]);
+    assert!(walk.examined <= 10_000, "{} kids entries read", walk.examined);
+}
