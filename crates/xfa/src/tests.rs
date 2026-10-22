@@ -2675,3 +2675,16 @@ fn a_date_typed_by_another_of_its_edit_pictures_patterns_is_written_in_the_first
     assert_eq!(typed("form[0].born[0]", "181026"), None, "one pattern: nothing else to try");
     assert_eq!(typed("form[0].name[0]", "261018"), None, "not a date field");
 }
+
+/// Only date clauses are other ways to type a date, and a date is rewritten only when the first
+/// pattern keeps it: a later `text{…}` clause is no date pattern, and a year a two-digit first
+/// pattern can't hold leaves the text as typed instead of becoming another date.
+#[test]
+fn a_typed_date_is_rewritten_only_by_date_clauses_into_a_first_pattern_that_keeps_it() {
+    let (tpl, _) = crate::parse(&crate::fixtures::date_alternatives_template()).unwrap();
+    let typed = |som: &str, text: &str| crate::typed_date(&tpl, som, text);
+    assert_eq!(typed("form[0].code[0]", "261018"), None, "text{{YYMMDD}} is not a date alternative");
+    let short = "form[0].short[0]";
+    assert_eq!(typed(short, "20261018").as_deref(), Some("261018"), "a year the first pattern keeps");
+    assert_eq!(typed(short, "19011018"), None, "1901 as 01 would read back as 2001");
+}
