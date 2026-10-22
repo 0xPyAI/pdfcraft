@@ -32,6 +32,9 @@ pub(crate) struct TextBackground {
     received: Option<u64>,
     draft_key: Option<(String, pdfcraft_engine::BlockStyle)>,
     draft_rect: Option<[f64; 4]>,
+    /// This frame's place for the textless page under the open paragraph's editor. It stays
+    /// empty, so the page shows its own text, until the paragraph is changed ([`Self::reveal`]).
+    slot: Option<(egui::Painter, egui::layers::ShapeIdx, egui::Shape)>,
 }
 
 impl TextBackground {
@@ -50,6 +53,7 @@ impl TextBackground {
         let key = editor
             .map(|ed| (doc.edit_generation(), ed.page, TextTarget::Block(ed.block)))
             .or_else(|| draft.and_then(|d| d.index.map(|index| (doc.edit_generation(), d.page, TextTarget::Added(index)))));
+        self.slot = None;
         if self.key != key {
             *self = Self { key, ..Default::default() };
             if let Some((_, page, target)) = key {
@@ -101,6 +105,11 @@ impl TextBackground {
         }
     }
 
+    /// The draft's measured extent, when it was measured for paragraph `block` on `page`.
+    pub fn draft_rect_for(&self, page: usize, block: usize) -> Option<[f64; 4]> {
+        self.draft_rect.filter(|_| self.key.is_some_and(|(_, p, target)| (p, target) == (page, TextTarget::Block(block))))
+    }
+
     pub fn ready(&self, page: usize, block: usize) -> bool {
         self.key.is_some_and(|(_, p, target)| (p, target) == (page, TextTarget::Block(block))) && self.texture.is_some()
     }
@@ -110,15 +119,15 @@ impl TextBackground {
     }
 
     pub fn paint(
-        &self,
+        &mut self,
         painter: &egui::Painter,
         xf: &PageXform,
         page: usize,
         editor: Option<&LineEditor>,
         draft: Option<&crate::content_ui::TextDraft>,
     ) {
-        let ready = editor.is_some_and(|ed| ed.page == page && self.ready(page, ed.block))
-            || draft.is_some_and(|d| d.page == page && d.index.is_some_and(|index| self.ready_added(page, index)));
+        let for_editor = editor.is_some_and(|ed| ed.page == page && self.ready(page, ed.block));
+        let ready = for_editor || draft.is_some_and(|d| d.page == page && d.index.is_some_and(|index| self.ready_added(page, index)));
         if !ready {
             return;
         }
@@ -126,7 +135,27 @@ impl TextBackground {
         // Font metrics can underestimate the actual glyph ink. Paint the complete textless
         // page so overhanging glyphs cannot remain outside the estimated source rectangle.
         let painter = painter.with_clip_rect(painter.clip_rect().intersect(xf.rect));
-        xf.paint_image(&painter, tex.id(), 0.0, 0.0, 1.0, 1.0);
+        if for_editor {
+            // Its place under everything drawn on the page later; the editor fills it once the
+            // paragraph changes (an unchanged paragraph looks as the page draws it).
+            let mut mesh = egui::Mesh::with_texture(tex.id());
+            for (u, v) in [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)] {
+                mesh.vertices.push(egui::epaint::Vertex { pos: xf.norm_to_screen(u, v), uv: Pos2::new(u, v), color: Color32::WHITE });
+            }
+            mesh.add_triangle(0, 1, 2);
+            mesh.add_triangle(0, 2, 3);
+            let idx = painter.add(egui::Shape::Noop);
+            self.slot = Some((painter, idx, egui::Shape::mesh(mesh)));
+        } else {
+            xf.paint_image(&painter, tex.id(), 0.0, 0.0, 1.0, 1.0);
+        }
+    }
+
+    /// The open paragraph has changed: show the textless page under its editor this frame.
+    pub fn reveal(&mut self) {
+        if let Some((painter, idx, shape)) = self.slot.take() {
+            painter.set(idx, shape);
+        }
     }
 }
 
@@ -221,7 +250,12 @@ impl LineEditor {
     }
 
     pub(crate) fn has_changes(&self) -> bool {
-        self.text != self.original || self.look != self.look0 || self.extras != self.extras0 || self.family_chosen
+        self.changes_with(&self.text)
+    }
+
+    /// Whether the paragraph with `text` in it differs from what was opened.
+    fn changes_with(&self, text: &str) -> bool {
+        text != self.original || self.look != self.look0 || self.extras != self.extras0 || self.family_chosen
     }
 
     /// Extra width permitted by the editor. Source containers now remain fixed.
@@ -1310,6 +1344,16 @@ fn editor_job(ui: &egui::Ui, ed: &LineEditor, text: &str, scale: f32, width: f32
     job
 }
 
+/// `galley` drawn in no colour: its rows still place the caret and the selection.
+fn unseen(mut galley: Arc<egui::Galley>) -> Arc<egui::Galley> {
+    for placed in &mut Arc::make_mut(&mut galley).rows {
+        for vertex in &mut Arc::make_mut(&mut placed.row).visuals.mesh.vertices {
+            vertex.color = Color32::TRANSPARENT;
+        }
+    }
+    galley
+}
+
 /// Align the editable galley's baselines to the source rows instead of egui's interface
 /// leading. Glyphs, meshes, caret and selection receive the same transform.
 fn editor_galley(ui: &egui::Ui, ed: &LineEditor, text: &str, scale: f32, width: f32) -> Arc<egui::Galley> {
@@ -1394,7 +1438,13 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
         .line_editor
         .as_ref()
         .is_some_and(|ed| view.text_background.ready(ed.page, ed.block) && !ed.source.as_ref().is_some_and(|(b, _)| b.invisible));
-    let draft_rect = view.text_background.draft_rect.map(|r| xf.user_rect(info, page, r.map(|v| v as f32)));
+    // The measured extent of this paragraph's draft: a click straight from another paragraph
+    // opens this one after the frame's measuring, which was the other one's.
+    let draft_rect = view
+        .line_editor
+        .as_ref()
+        .and_then(|ed| view.text_background.draft_rect_for(ed.page, ed.block))
+        .map(|r| xf.user_rect(info, page, r.map(|v| v as f32)));
     let ed = view.line_editor.as_mut()?;
     if hold {
         ed.focus = true;
@@ -1419,6 +1469,7 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
     let font = editor_font(&ed.look, smallest.map_or(ed.size, |s| (s * scale * 0.5).clamp(1.0, 300.0).min(ed.size)));
     let text_color = color32(ed.look.color);
     let mut done = None;
+    let mut reveal = false;
     egui::Area::new(egui::Id::new("edit-text-line")).order(egui::Order::Foreground).fixed_pos(Pos2::new(ed.rect.left(), ed.rect.top())).show(
         ctx,
         |ui| {
@@ -1453,20 +1504,27 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
             // White, unless the text is too pale to read on white (white text from a coloured
             // banner, #913): then a dark box, with a caret that shows on it.
             let fill = if background_ready { Color32::TRANSPARENT } else { editor_fill(text_color) };
-            // Until the background worker finishes, cover the entire source box, including
-            // lines the draft no longer occupies. Shrinking the text must never expose a copy.
-            if !background_ready {
-                ui.painter().rect_filled(ed.rect.expand(1.0), CornerRadius::ZERO, fill);
-            }
-            egui::Frame::NONE.fill(fill).show(ui, |ui| {
-                // A textless PDF preview keeps its real page background through the transparent editor.
-                // The temporary opaque cover uses the shared caret-contrast rule.
-                ui.visuals_mut().text_cursor.stroke.color =
-                    if background_ready { if luminance(text_color) < 0.5 { Color32::BLACK } else { Color32::WHITE } } else { caret_color_on(fill) };
+            // An unchanged paragraph is the page's own text: the editor draws only its frame and
+            // caret over it. Once it changes, the textless page goes under the editor's text or,
+            // until that background is ready, a cover over the entire source box, including lines
+            // the draft no longer occupies. Shrinking the text must never expose a copy. Both are
+            // decided after this frame's typing, in places kept under the editor's text.
+            let cover = ui.painter().add(egui::Shape::Noop);
+            let unchanged = !ed.has_changes();
+            egui::Frame::NONE.show(ui, |ui| {
+                // A textless PDF preview, or the page itself, keeps its real background through
+                // the transparent editor. The temporary opaque cover uses the shared caret-contrast rule.
+                ui.visuals_mut().text_cursor.stroke.color = if background_ready || unchanged {
+                    if luminance(text_color) < 0.5 { Color32::BLACK } else { Color32::WHITE }
+                } else {
+                    caret_color_on(fill)
+                };
                 let rows = 1;
                 let snapshot = ed.clone();
-                let mut layouter =
-                    |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| editor_galley(ui, &snapshot, text.as_str(), scale, wrap_width);
+                let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
+                    let galley = editor_galley(ui, &snapshot, text.as_str(), scale, wrap_width);
+                    if snapshot.changes_with(text.as_str()) { galley } else { unseen(galley) }
+                };
                 let output = egui::TextEdit::multiline(&mut ed.text)
                     .id(egui::Id::new("edit-text-line-input"))
                     .font(font.clone())
@@ -1477,6 +1535,13 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
                     .desired_width(width)
                     .desired_rows(rows)
                     .show(ui);
+                if ed.has_changes() {
+                    if background_ready {
+                        reveal = true;
+                    } else {
+                        ui.painter().set(cover, egui::Shape::rect_filled(ed.rect.expand(1.0).union(output.response.rect), CornerRadius::ZERO, fill));
+                    }
+                }
                 if let Some(cursor) = output.cursor_range {
                     let selected = cursor.as_sorted_char_range();
                     let byte = |index| ed.text.char_indices().nth(index).map_or(ed.text.len(), |(at, _)| at);
@@ -1501,6 +1566,9 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
             });
         },
     );
+    if reveal {
+        view.text_background.reveal();
+    }
     match done {
         Some(apply) => {
             let ed = view.line_editor.take()?;
