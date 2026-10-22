@@ -12,6 +12,7 @@ use pdfcraft_render::DocInfo;
 
 use crate::canvas::{DocView, PageXform};
 use crate::comments;
+use crate::page_pointer::PagePointer;
 use crate::theme;
 use crate::widgets;
 
@@ -242,6 +243,7 @@ pub(crate) fn page_input(
     ui: &egui::Ui,
     resp: &egui::Response,
     xf: &PageXform,
+    ptr: &PagePointer,
     page: usize,
     info: &DocInfo,
     form: &[FormField],
@@ -250,7 +252,7 @@ pub(crate) fn page_input(
     view: &mut DocView,
 ) -> Outcome {
     let mut out = Outcome { consumed: false, properties: false, placed: false, table: None };
-    let pointer = ui.input(|i| i.pointer.hover_pos().or(i.pointer.interact_pos()));
+    let pointer = ptr.pos;
     let prep = &mut view.prepare;
 
     if prep.marquee_before.is_some() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -337,7 +339,7 @@ pub(crate) fn page_input(
     if let Some(tool) = tool {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
         if resp.drag_started() || resp.clicked() {
-            let origin = ui.input(|i| i.pointer.press_origin()).filter(|o| xf.rect.contains(*o)).unwrap_or(p);
+            let origin = ptr.origin.filter(|o| xf.rect.contains(*o)).unwrap_or(p);
             prep.grab = Some((page, Grab::Draw(origin), origin));
             out.consumed = true;
             if resp.clicked() {
@@ -393,7 +395,7 @@ pub(crate) fn page_input(
         ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
     }
     if resp.drag_started() {
-        let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(p);
+        let origin = ptr.origin.unwrap_or(p);
         if let Some((_, left, top)) = selected_rect.and_then(|r| handles(r).into_iter().find(|(c, ..)| c.distance(origin) <= 6.0)) {
             prep.grab = Some((page, Grab::Corner(left, top), origin));
             out.consumed = true;
@@ -538,10 +540,19 @@ pub fn arrange(form: &[FormField], anchor: &(String, usize), others: &[(String, 
 }
 
 /// Fields with their light-blue fill and name tags, the selection with its handles, and the
-/// rectangle being drawn or dragged.
-pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform, page: usize, info: &DocInfo, form: &[FormField], view: &DocView) {
+/// rectangle being drawn or dragged to the pages' `pointer`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn paint_page(
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    xf: &PageXform,
+    page: usize,
+    info: &DocInfo,
+    form: &[FormField],
+    view: &DocView,
+    pointer: Option<Pos2>,
+) {
     let prep = &view.prepare;
-    let pointer = ui.input(|i| i.pointer.hover_pos());
     let grab = prep.grab.filter(|(gp, ..)| *gp == page);
     let zoom = xf.zoom().clamp(0.5, 3.0);
     for f in form {

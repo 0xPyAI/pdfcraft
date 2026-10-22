@@ -17,6 +17,7 @@ use pdfcraft_engine::{Edit, LineEnding, Markup, NewAnnotation, NoteIcon, ReviewS
 use pdfcraft_render::{Annotation, DocInfo, PageInfo, PageText};
 
 use crate::canvas::{DocView, PageXform};
+use crate::page_pointer::PagePointer;
 use crate::theme::{self, Tokens};
 use crate::{QuickTool, icons};
 
@@ -594,6 +595,8 @@ pub enum SortBy {
 pub(crate) struct PageCx<'a> {
     pub page: usize,
     pub xf: &'a PageXform,
+    /// The pointer as the pages see it this frame.
+    pub ptr: &'a PagePointer,
     pub info: &'a DocInfo,
     pub tool: QuickTool,
     pub prefs: &'a CommentPrefs,
@@ -808,8 +811,7 @@ pub(crate) fn resized(r: Rect, (hx, hy): (i8, i8), d: egui::Vec2, aspect_ratio: 
 /// Comment input on one page, before text selection runs. Returns `true` when the pointer
 /// gesture belongs to commenting (text selection must ignore it).
 pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, cx: &PageCx<'_>, view: &mut DocView) -> bool {
-    let pointer = ui.input(|i| i.pointer.hover_pos());
-    let origin = ui.input(|i| i.pointer.press_origin());
+    let (pointer, origin) = (cx.ptr.pos, cx.ptr.origin);
     let page_rect = cx.xf.rect;
     let pressed_here = origin.is_some_and(|o| page_rect.contains(o));
     let over_page = pointer.is_some_and(|p| page_rect.contains(p));
@@ -1129,8 +1131,8 @@ fn grabs(ui: &egui::Ui, cx: &PageCx<'_>, view: &DocView, pick: impl Fn(&Annotati
 /// Where a gesture on this page is decided: the press while the button is down, otherwise the
 /// pointer (egui clears the press origin on release). `None` off the page.
 fn press_point(ui: &egui::Ui, cx: &PageCx<'_>) -> Option<Pos2> {
-    let (pointer, origin, down) = ui.input(|i| (i.pointer.hover_pos(), i.pointer.press_origin(), i.pointer.any_down()));
-    (if down { origin } else { pointer }).filter(|p| cx.xf.rect.contains(*p))
+    let down = ui.input(|i| i.pointer.any_down());
+    (if down { cx.ptr.origin } else { cx.ptr.pos }).filter(|p| cx.xf.rect.contains(*p))
 }
 
 /// Whether `p` is on a resize handle of the selected comment, when it is a resizable `pick`.
@@ -1320,7 +1322,7 @@ pub(crate) fn page_after_text(resp: &egui::Response, cx: &PageCx<'_>, view: &mut
 /// Paint comment selection, hover and gesture previews on a page.
 pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, cx: &PageCx<'_>, view: &DocView) {
     let cv = &view.comments;
-    let pointer = ui.input(|i| i.pointer.hover_pos());
+    let pointer = cx.ptr.pos;
     // A redaction mark shows its fill while the pointer is over it, as Acrobat's does, so the
     // marked area reads before anything is applied.
     if cv.gesture.is_none()
@@ -1471,7 +1473,7 @@ fn paint_draw(painter: &egui::Painter, cx: &PageCx<'_>, tool: &CommentTool, poin
             CommentTool::Polygon | CommentTool::PolyLine | CommentTool::Cloud => {
                 // The vertices so far, and a rubber band to the pointer.
                 let mut line = pts.clone();
-                if let Some(p) = painter.ctx().input(|i| i.pointer.hover_pos()) {
+                if let Some(p) = cx.ptr.pos {
                     line.push(p);
                 }
                 painter.add(egui::Shape::line(line, stroke));
@@ -1582,7 +1584,17 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
         }
         return None;
     };
-    let cx = PageCx { page, xf: &xf, info, tool: QuickTool::Select, prefs, allowed: true, hidden: false, redact_mark: ([0.89, 0.13, 0.13], 1.0) };
+    let cx = PageCx {
+        page,
+        xf: &xf,
+        ptr: &PagePointer::default(),
+        info,
+        tool: QuickTool::Select,
+        prefs,
+        allowed: true,
+        hidden: false,
+        redact_mark: ([0.89, 0.13, 0.13], 1.0),
+    };
     let anchor = cx.to_screen(c.at);
     let viewport = view.viewport_rect();
     let t = Tokens::get(ctx);
@@ -2326,6 +2338,7 @@ mod tests {
             let cx = PageCx {
                 page: 0,
                 xf: &xf,
+                ptr: &PagePointer::default(),
                 info: &info,
                 tool: QuickTool::Select,
                 prefs: &prefs,

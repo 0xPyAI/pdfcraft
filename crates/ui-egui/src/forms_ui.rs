@@ -9,11 +9,12 @@
 
 use std::collections::HashSet;
 
-use egui::{Color32, CornerRadius, Rect, Stroke, vec2};
+use egui::{Color32, CornerRadius, Pos2, Rect, Stroke, vec2};
 use pdfcraft_engine::{Edit, FieldValue, FormField, FormFieldKind, FormWidget, field_flags, form_appearance};
 use pdfcraft_render::DocInfo;
 
 use crate::canvas::{DocView, PageXform};
+use crate::page_pointer::PagePointer;
 use crate::theme::Tokens;
 
 const FOCUS_BLUE: Color32 = Color32::from_rgb(0x14, 0x73, 0xE6);
@@ -165,14 +166,14 @@ pub(crate) fn page_input(
     ui: &egui::Ui,
     resp: &egui::Response,
     xf: &PageXform,
+    ptr: &PagePointer,
     page: usize,
     info: &DocInfo,
     form: &[FormField],
     allowed: bool,
     view: &mut DocView,
 ) -> FieldPointer {
-    let pointer = ui.input(|i| i.pointer.hover_pos());
-    let Some(p) = pointer.filter(|p| xf.rect.contains(*p)) else { return FieldPointer::Away };
+    let Some(p) = ptr.within(xf.rect) else { return FieldPointer::Away };
     let hit = form.iter().find_map(|f| {
         f.widgets
             .iter()
@@ -475,9 +476,16 @@ fn calendar(ctx: &egui::Context, view: &mut DocView, field: egui::Rect, fmt: &st
     picked
 }
 
-/// Paint focus and hover frames on a page.
-pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform, page: usize, info: &DocInfo, form: &[FormField], view: &DocView) {
-    let pointer = ui.input(|i| i.pointer.hover_pos());
+/// Paint focus and hover frames on a page, the pages' `pointer` over it.
+pub(crate) fn paint_page(
+    painter: &egui::Painter,
+    xf: &PageXform,
+    page: usize,
+    info: &DocInfo,
+    form: &[FormField],
+    view: &DocView,
+    pointer: Option<Pos2>,
+) {
     for f in form {
         for (wi, w) in f.widgets.iter().enumerate().filter(|(_, w)| w.page == Some(page) && !w.hidden) {
             let r = widget_rect(xf, info, page, w.rect);
