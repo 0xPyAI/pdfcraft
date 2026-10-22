@@ -1166,6 +1166,9 @@ impl<'a> Inspector<'a> {
         // first of them (§12.5.2 allows one page per annotation).
         let mut seen = HashSet::new();
         let mut kept = 0usize;
+        // Once the comment budget is spent, comments are no longer built, but links and attachments
+        // are still listed.
+        let mut comments_full = false;
         for (id, page) in pages {
             let Ok(page_dict) = self.doc.get_dictionary(id) else { continue };
             if let Ok(Object::Reference(r)) = page_dict.get(b"Annots")
@@ -1202,6 +1205,9 @@ impl<'a> Inspector<'a> {
                 // `pdfcraft_annot::is_comment_subtype`).
                 if matches!(subtype.as_str(), "Widget" | "Popup" | "Screen" | "Movie" | "RichMedia" | "3D" | "PrinterMark" | "TrapNet" | "Watermark")
                 {
+                    continue;
+                }
+                if comments_full {
                     continue;
                 }
                 let rect = rect4(self.resolve(d.get(b"Rect").unwrap_or(&Object::Null)));
@@ -1265,12 +1271,10 @@ impl<'a> Inspector<'a> {
                 };
                 kept = kept.saturating_add(retained(&annotation));
                 if kept > MAX_ANNOTATION_BYTES {
-                    break;
+                    comments_full = true;
+                    continue;
                 }
                 info.annotations.push(annotation);
-            }
-            if kept > MAX_ANNOTATION_BYTES {
-                break;
             }
         }
         info.annotations.sort_by(|a, b| a.page.cmp(&b.page).then(b.rect[3].total_cmp(&a.rect[3])));
@@ -2650,6 +2654,31 @@ trailer << /Root 1 0 R >>
         assert!(notes.iter().all(|a| a.page == 0), "the shared array is the first page's");
         assert!(notes.len() > 1);
         assert!(notes.iter().map(retained).sum::<usize>() <= MAX_ANNOTATION_BYTES);
+    }
+
+    /// Links and attachments after the comment budget fills are still listed, and a JavaScript link
+    /// among them still marks the document.
+    #[test]
+    fn links_and_attachments_past_the_comment_budget_are_listed() {
+        let small = "<< /Subtype /Text /Rect [0 0 1 1] /Contents 6 0 R >> ".repeat(1100);
+        let pdf = format!(
+            "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+             2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj\n\
+             3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [{small} \
+             << /Subtype /Link /Rect [0 0 1 1] /A << /S /JavaScript /JS (1) >> >>] >> endobj\n\
+             4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [\
+             << /Subtype /FileAttachment /Rect [0 0 1 1] /FS << /Type /Filespec /F (a.txt) >> >>] >> endobj\n\
+             6 0 obj ({}) endobj\ntrailer << /Root 1 0 R >>\n%%EOF",
+            "x".repeat(64 << 10),
+        );
+        let doc = Document::load_mem(pdf.as_bytes()).expect("loads");
+        let page = PageInfo { width: 200.0, height: 200.0, crop: [0.0, 0.0, 200.0, 200.0], rotation: 0, label: String::new() };
+        let mut info = DocInfo { pages: vec![page.clone(), page], ..Default::default() };
+        Inspector::new(&doc).fill(&mut info);
+        assert!(info.annotations.len() < 1100, "the comment budget filled");
+        assert_eq!(info.links.len(), 1);
+        assert!(info.has_javascript);
+        assert_eq!(info.attachments.len(), 1);
     }
 
     /// Widgets without `/P` are placed on the page that lists them with one pass over the pages'
