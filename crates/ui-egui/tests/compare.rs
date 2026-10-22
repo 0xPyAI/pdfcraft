@@ -96,6 +96,7 @@ fn pdfa_dialog_verifies_and_converts() {
     assert!(h.state_mut().execute("standards.pdfa"));
     h.run_steps(2);
     h.get_by_label("Declared conformance: none");
+    assert!(h.query_by_label("Remove PDF/A identification").is_none(), "nothing to remove yet");
     h.get_by_label("Verify").click();
     h.run_steps(3);
     h.get_by_label("The document has no XMP metadata");
@@ -106,6 +107,10 @@ fn pdfa_dialog_verifies_and_converts() {
     assert!(issues.iter().all(|i| !i.fixable), "{issues:?}");
     let id = h.state().active_ids().unwrap().1;
     assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Save as PDF/A-2b"));
+    h.get_by_label("Remove PDF/A identification").click();
+    h.run_steps(3);
+    h.get_by_label("Declared conformance: none");
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Remove PDF/A identification"));
 }
 
 /// A one-page PDF whose XMP declares the given `pdfaid`/`pdfuaid` attributes.

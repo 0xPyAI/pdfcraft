@@ -7893,11 +7893,11 @@ title = "Remove PDF/A or PDF/X identification"
 area = "K"
 tier = "P2"
 milestone = "M11"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "shipped"
+commands = ["standards.pdfa"]
+tools = ["standards_remove_id"]
+evidence = ["crates/organize/src/tests.rs::removing_the_pdfx_identification_keeps_the_output_intent_and_other_claims", "crates/organize/src/tests.rs::removing_the_pdfa_identification_removes_its_xmp_properties_in_either_form", "crates/automation/tests/automation.rs::pdfa_through_tools", "crates/ui-egui/tests/compare.rs::pdfa_dialog_verifies_and_converts"]
+notes = "Standards ▸ PDF/A ▸ Remove PDF/A identification, and the standards_remove_id tool (pdfa or pdfx): removes the pdfaid: XMP properties, or GTS_PDFXVersion and GTS_PDFXConformance from the document information and the pdfxid: XMP properties. Output intents and other claims (PDF/UA) stay; a packet that can't be edited safely is left as it is. Not yet: PDF/X removal in the interface (there is no PDF/X dialog yet)"
 
 [[feature]]
 id = "optimize.pdfx5-reference-xobjects"
