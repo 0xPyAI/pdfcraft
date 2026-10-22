@@ -916,3 +916,16 @@ fn text_direction_stops_at_the_form_budget() {
     text_direction(&doc, "/X Do ".repeat(20).as_bytes(), &res, Matrix::IDENTITY, 0, &mut score, &mut DecodeBudget::page());
     assert!(score > 0 && score <= pdfcraft_cos::MAX_PAGE_FORMS as i64, "score {score}");
 }
+
+/// A form refused by the spent budget is left out; the text drawn after it still counts.
+#[test]
+fn text_direction_reads_on_past_a_refused_form() {
+    let mut doc = Document::new_empty();
+    let form = doc.add(Stream::from_raw([(b"Subtype".to_vec(), Object::Name(b"Form".to_vec()))].into_iter().collect(), Vec::new()));
+    let xobjects: Dict = [(b"X".to_vec(), Object::Ref(form))].into_iter().collect();
+    let res: Dict = [(b"XObject".to_vec(), Object::Dict(xobjects))].into_iter().collect();
+    let mut score = 0;
+    let content = b"/X Do BT 0 1 -1 0 0 0 Tm (a) Tj ET";
+    text_direction(&doc, content, &res, Matrix::IDENTITY, 0, &mut score, &mut DecodeBudget::new(1 << 20, 0));
+    assert_eq!(score, 1);
+}

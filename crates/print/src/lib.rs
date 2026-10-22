@@ -362,7 +362,7 @@ fn text_direction(doc: &Document, data: &[u8], res: &Dict, base: Matrix, depth: 
                 let m = form.dict.get(b"Matrix").and_then(|m| doc.resolve(m).as_array().and_then(|a| Matrix::from_operands(a))).unwrap_or_default();
                 let inner = form.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_else(|| res.clone());
                 if !budget.enter_form() {
-                    return;
+                    continue;
                 }
                 if let Ok(body) = budget.decode(form) {
                     text_direction(doc, &body, &inner, m.then(&ctm), depth + 1, score, budget);
