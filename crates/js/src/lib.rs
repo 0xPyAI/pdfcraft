@@ -181,6 +181,9 @@ pub struct Outcome {
     pub requests: Vec<Request>,
     /// The script's error (syntax error, exception, or a limit reached), if it failed.
     pub error: Option<String>,
+    /// Errors in the document-level scripts that ran first. Each failing one stops where it
+    /// failed; the others and the script itself still run, as in Acrobat (#3940).
+    pub doc_errors: Vec<String>,
     /// The script's completion value (what the console prints), unless undefined.
     pub result: Option<String>,
 }
@@ -1281,8 +1284,13 @@ fn run_here(script: &str, event: &Event, doc: &DocInfo, fields: Arc<Vec<FieldSta
         install(&mut ctx)?;
         let ev = event_object(&mut ctx, event);
         ctx.register_global_property(js_string!("event"), ev.clone(), Attribute::all())?;
-        for d in doc_scripts {
-            ctx.eval(Source::from_bytes(d))?;
+        // One document script that throws (calling a method PdfCraft lacks, say) must not keep
+        // every field script in the form from running: what it defined before the error, and
+        // the other scripts, stay available (#3940).
+        for (i, d) in doc_scripts.iter().enumerate() {
+            if let Err(e) = ctx.eval(Source::from_bytes(d)) {
+                out.doc_errors.push(format!("document script {}: {e}", i.saturating_add(1)));
+            }
         }
         let r = ctx.eval(Source::from_bytes(script))?;
         if !r.is_undefined() {

@@ -297,6 +297,34 @@ fn document_level_functions_are_available() {
     assert_eq!(o.value, "8");
 }
 
+/// #3940: a document script that throws after defining a helper (here calling an Acrobat method
+/// PdfCraft lacks) still leaves the helper, and the later scripts, to the field script.
+#[test]
+fn a_failing_document_script_does_not_stop_the_field_script() {
+    let docs = [
+        "function double(x) { return x * 2; }\nthis.getField('qty').buttonSetIcon(null);\nvar after = 1;".to_string(),
+        "function plus(x) { return x + 1; }".to_string(),
+        "this is not javascript".to_string(),
+    ];
+    let o = run(
+        "event.value = plus(double(getField('qty').value));",
+        &Event::field("Calculate", "total", ""),
+        &doc(),
+        &fields(),
+        &docs,
+        Limits::default(),
+    );
+    assert_eq!((o.error.as_deref(), o.value.as_str()), (None, "9"));
+    assert_eq!(o.doc_errors.len(), 2, "{:?}", o.doc_errors);
+    assert!(o.doc_errors[0].starts_with("document script 1: TypeError"), "{:?}", o.doc_errors);
+    assert!(o.doc_errors[1].starts_with("document script 3: SyntaxError"), "{:?}", o.doc_errors);
+    // The failing script stopped where it failed.
+    let o = run("event.value = typeof after;", &Event::field("Calculate", "total", ""), &doc(), &fields(), &docs, Limits::default());
+    assert_eq!(o.value, "undefined");
+    // Working document scripts report nothing.
+    assert!(go("event.value = 1;", &Event::field("Calculate", "total", "")).doc_errors.is_empty());
+}
+
 #[test]
 fn errors_and_runaway_scripts_are_contained() {
     let o = go("event.value = nosuch.thing;", &Event::field("Calculate", "total", "keep"));

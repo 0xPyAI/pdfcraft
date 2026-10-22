@@ -31,6 +31,13 @@ impl JsOutput {
         self.console.extend(o.console.iter().cloned());
         self.requests.extend(o.requests.iter().cloned());
         self.errors.extend(o.error.iter().cloned());
+        // The document scripts run before every field script, so a failing one would repeat
+        // once per calculation; it is reported once.
+        for e in &o.doc_errors {
+            if !self.errors.contains(e) {
+                self.errors.push(e.clone());
+            }
+        }
     }
 
     pub(crate) fn append(&mut self, other: JsOutput) {
