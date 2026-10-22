@@ -133,8 +133,8 @@ What's strong and missing in each: [target-app-parity.md](docs/target-app-parity
 
 ## Languages
 
-Twelve key languages (historical % snapshot vs 2,143 keys, except Vietnamese vs the current
-union). Detail and script notes: [localization-parity.md](docs/localization-parity.md).
+Twelve key languages (historical % snapshot vs 2,143 keys, except Vietnamese and Brazilian
+Portuguese vs the current union). Detail and script notes: [localization-parity.md](docs/localization-parity.md).
 
 | Language | Code | Strings | Status |
 |---|---|---|---|
@@ -144,7 +144,7 @@ union). Detail and script notes: [localization-parity.md](docs/localization-pari
 | Hindi | `hi` | 0% | none |
 | Arabic | `ar` | 100% | partial (layout not mirrored) |
 | French | `fr` | 99.3% | partial |
-| Portuguese (Brazil) | `pt-br` | 99.4% | partial |
+| Portuguese (Brazil) | `pt-br` | 100% of current union | partial |
 | Indonesian | `id` | 0% | none |
 | Japanese | `ja` | 99.1% | partial |
 | German | `de` | 99.3% | partial |
@@ -173,6 +173,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-21 (M14, Brazilian Portuguese):** Completed the `pt-br` catalog against the current 2,674-key union, including signature validation and accessibility messages; no build or compilation run. Localization remains partial because help and unpredictable engine/OS error details are not translated.
 - **2026-10-20 (M6, calculation order page):** Prepare a form ▸ Calculation order, a page of its own, lists the calculated fields in the order they calculate with their formulas and values, moved with Up/Down arrows (as Acrobat's Set Field Calculation Order), Alt+↑/↓ or by dragging. A card says what is wrong with the order and holds Fix order; a loop has a card of its own that opens one of its formulas. On the page, each calculated field shows its step, and arrows show what the field in focus reads and what reads it. Estimates unchanged.
 - **2026-10-20 (M6, calculation order):** The order a form's fields calculate in (`/CO`) is read, checked, fixed and set headlessly with `form_calculation_order`: it says which fields read one calculated later (they show stale values), which read each other in a loop, and which the PDF's order leaves out; Fix order moves only what must move, in one undo step, and the form recalculates. Editing a formula no longer moves its field to the end of the order, and a field the order lists twice calculates once. Estimates unchanged.
 - **2026-10-19 (M6, renames keep formulas):** Renaming a field renames it in every calculation that reads it, in the same undo step: `AFSimple_Calculate` field lists, simplified field notation (the comment and the JavaScript after it) and `getField` calls naming it in one string literal; the rest of each script is kept as written. A sum used to drop the renamed field, notation read it as 0 and a script kept a stale value. Field Properties says how many formulas changed and `form_set_props` lists them as `formulas_updated`. Names built at run time and other events' scripts are not rewritten. Estimates unchanged.
