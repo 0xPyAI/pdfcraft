@@ -592,3 +592,13 @@ fn reading_blocks_respect_stream_comments_and_split_operands() {
         assert_eq!(text, "Replacement text", "{}", String::from_utf8_lossy(s1));
     }
 }
+
+/// The current path is not graphics state: a rectangle built before `Q` and filled after it
+/// paints the box, so it is a cover.
+#[test]
+fn rectangle_filled_after_restore_is_a_cover() {
+    let content = b"BT /F1 24 Tf 100 700 Td (SECRET DATA 123) Tj ET\n0 g\nq 100 688 220 32 re Q f\n";
+    let findings = audit_redactions(&open(one_page(content, ""))).expect("audit must run");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert!(findings[0].covered_text.contains("SECRET"), "{findings:?}");
+}
