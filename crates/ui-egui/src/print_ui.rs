@@ -240,7 +240,7 @@ impl PrintDraft {
             }
             .into_iter()
             // The sheet the PDF was laid out on, not the queue's default paper.
-            .chain(print::cups_media(self.paper).map(|m| ("media".to_string(), m.to_string())))
+            .chain(print::media_option(self.paper))
             .collect(),
         }
     }

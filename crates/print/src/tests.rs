@@ -675,6 +675,34 @@ fn paper_matching_accepts_rounded_metric_sizes_but_not_custom_or_invalid_sizes()
 }
 
 #[test]
+fn every_paper_reaches_the_spooler_by_a_name_of_its_size() {
+    // #3752: 13 of the 21 sizes had no media name, so their jobs went out on the queue's default
+    // paper (A4 on the report's queue) whatever the sheets were laid out on.
+    let ppd_keywords = ["Letter", "Legal", "Tabloid", "A3", "A4", "A5", "w288h432", "Env10"];
+    for (i, (name, (w, h))) in PAPERS.iter().enumerate() {
+        let media = cups_media(i).unwrap_or_else(|| panic!("{name} has no media name"));
+        assert_eq!(media_option(i), Some(("media".to_string(), media.to_string())));
+        let args = lp_args(&Job { options: media_option(i).into_iter().collect(), ..Job::default() });
+        assert!(args.contains(&format!("media={media}")), "{name}: lp is given it: {args:?}");
+        if ppd_keywords.contains(&media) {
+            continue;
+        }
+        // The rest are PWG 5101.1 names, which end in their dimensions: CUPS feeds the driver's
+        // size of those dimensions, so they must be the paper's.
+        let dims = media.rsplit('_').next().unwrap_or_default();
+        let (dims, points_per_unit) = match (dims.strip_suffix("mm"), dims.strip_suffix("in")) {
+            (Some(mm), _) => (mm, 72.0 / 25.4),
+            (_, Some(inches)) => (inches, 72.0),
+            _ => panic!("{name}: {media} is not a PWG name"),
+        };
+        let (pw, ph) = dims.split_once('x').unwrap_or_else(|| panic!("{name}: {media} has no dimensions"));
+        let (pw, ph) = (pw.parse::<f64>().unwrap() * points_per_unit, ph.parse::<f64>().unwrap() * points_per_unit);
+        assert!((pw - w).abs() < 0.5 && (ph - h).abs() < 0.5, "{name}: {media} is {pw:.2} x {ph:.2} pt, not {w} x {h}");
+    }
+    assert_eq!((cups_media(PAPERS.len()), media_option(PAPERS.len())), (None, None));
+}
+
+#[test]
 fn us_number_10_envelope_is_offered_and_fed_by_name() {
     // 4.125 × 9.5 in (#2734).
     let index = matching_paper((684.0, 297.0)).unwrap();
