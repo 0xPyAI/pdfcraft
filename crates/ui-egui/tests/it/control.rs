@@ -254,6 +254,41 @@ fn control_quit_preserves_dirty_documents_and_cancel_keeps_them_open() {
     assert!(!close_requested(&h));
 }
 
+/// Run one frame and return the attention requests it sent to the window.
+fn step_attention(h: &mut Harness<'static, PdfCraftApp>) -> Vec<egui::UserAttentionType> {
+    h.step();
+    let commands = h.output().viewport_output.values().flat_map(|v| v.commands.iter());
+    commands.filter_map(|c| if let egui::ViewportCommand::RequestUserAttention(a) = c { Some(*a) } else { None }).collect()
+}
+
+/// Send a request, run frames until it is answered and three more, and collect every attention
+/// request those frames sent.
+fn attention_during(h: &mut Harness<'static, PdfCraftApp>, c: &ControlClient, method: &str, params: Value) -> Vec<egui::UserAttentionType> {
+    let rx = c.send(method, params);
+    let mut sent = Vec::new();
+    for _ in 0..30 {
+        sent.extend(step_attention(h));
+        if rx.try_recv().is_ok() {
+            (0..3).for_each(|_| sent.extend(step_attention(h)));
+            return sent;
+        }
+    }
+    panic!("{method}: no reply after 30 frames");
+}
+
+/// An agent quits while another app is in front, then answers the prompt itself: the request is
+/// withdrawn, so the taskbar or the window list stops flagging a window with nothing to ask.
+#[test]
+fn a_save_prompt_answered_in_the_background_withdraws_its_attention_request() {
+    use egui::UserAttentionType::{Critical, Reset};
+    let (mut h, c) = harness();
+    ok(&mut h, &c, "ui.command", json!({"id": "page.insert_blank"}));
+    h.input_mut().focused = false;
+    assert_eq!(attention_during(&mut h, &c, "ui.quit", json!({})), [Critical]);
+    assert_eq!(attention_during(&mut h, &c, "ui.click", json!({"label": "Cancel"})), [Reset]);
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["close_prompt"], false);
+}
+
 #[test]
 fn control_quit_clean_document_requests_normal_window_close() {
     for params in [json!({}), Value::Null] {

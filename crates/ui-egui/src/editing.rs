@@ -960,6 +960,28 @@ impl PdfCraftApp {
             self.shutdown_recovery();
         }
     }
+
+    /// Ask for the user's attention when the "save changes?" question opens while PdfCraft is in
+    /// the background (Quit in the Dock menu, logging out, or an agent quitting), and withdraw the
+    /// request once the user comes back or the question is answered.
+    ///
+    /// The question holds up the quit the user asked for, so the request is critical, as AppKit
+    /// makes it for a modal panel that an inactive app presents: the Dock icon bounces until
+    /// PdfCraft is active, Windows flashes the taskbar button until the window is in front, and
+    /// X11 sets the urgency hint, which stays until it is reset. A question that opens in front
+    /// asks nothing, and neither does leaving it open: the user has seen it.
+    pub(crate) fn attend_save_prompt(&mut self, ctx: &egui::Context) {
+        let open = self.close_request.is_some();
+        let focused = ctx.input(|i| i.focused);
+        if open && !self.save_prompt_was_open && !focused {
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Critical));
+            self.save_prompt_attention = true;
+        } else if self.save_prompt_attention && (focused || !open) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Reset));
+            self.save_prompt_attention = false;
+        }
+        self.save_prompt_was_open = open;
+    }
 }
 
 /// The single page a content edit changes (`None` for other edits). Like comment edits,
