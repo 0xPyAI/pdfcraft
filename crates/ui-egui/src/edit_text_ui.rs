@@ -560,7 +560,7 @@ fn crop_input(
         max.x = max.x.clamp(min.x + min_w, b.max.x);
         max.y = max.y.clamp(min.y + min_h, b.max.y);
         mode.keep = user_box(xf, info, page, Rect::from_min_max(min, max));
-        if resp.drag_stopped() || !ui.input(|inp| inp.pointer.primary_down()) {
+        if resp.drag_stopped() || !ptr.primary_down {
             mode.drag = None;
         }
     }
@@ -674,7 +674,7 @@ pub(crate) fn image_owns_pointer(ui: &egui::Ui, xf: &PageXform, ptr: &PagePointe
     let Some(image) = view.edit_images.get(&page).and_then(|(_, images)| images.get(selection.index)) else { return false };
     let Some(rect) = image.visible_rect else { return false };
     let b = xf.user_rect(info, page, rect.map(|v| v as f32));
-    let p = if ui.input(|i| i.pointer.primary_down()) { ptr.origin } else { ptr.pos };
+    let p = if ptr.primary_down { ptr.origin } else { ptr.pos };
     let knob = rotate_knob(b, ui.clip_rect()).0;
     p.is_some_and(|p| [b.left_top(), b.right_top(), b.left_bottom(), b.right_bottom(), knob].iter().any(|c| c.distance(p) < 8.0))
 }
@@ -944,7 +944,7 @@ pub(crate) fn image_input(
             painter.rect(label, CornerRadius::same(3), Color32::WHITE, Stroke::new(1.0, ACCENT), egui::StrokeKind::Middle);
             painter.galley(label.center() - galley.size() / 2.0, galley, ACCENT);
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-            if resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
+            if resp.drag_stopped() || !ptr.primary_down {
                 if let Some(s) = view.image_selection.as_mut() {
                     s.drag = None;
                     s.turning = false;
@@ -1002,7 +1002,7 @@ pub(crate) fn image_input(
                 painter.rect_stroke(visible, CornerRadius::ZERO, Stroke::new(1.5, ACCENT), egui::StrokeKind::Outside);
                 handles(preview);
             }
-            if resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
+            if resp.drag_stopped() || !ptr.primary_down {
                 if let Some(s) = view.image_selection.as_mut() {
                     s.drag = None;
                     let norm = |r: Rect| {
@@ -1272,7 +1272,7 @@ pub(crate) fn page_input(
             draw_handles(preview);
         }
         ui.ctx().set_cursor_icon(if resizing { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::Move });
-        if resp.drag_stopped() || !ui.input(|i| i.pointer.any_down()) {
+        if resp.drag_stopped() || !ptr.any_down {
             view.block_drag = None;
             let (from, to) = (user_box(xf, info, page, b), user_box(xf, info, page, preview));
             let edit = if resizing {

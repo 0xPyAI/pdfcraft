@@ -815,8 +815,8 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, cx: &PageCx<'_>, 
     let page_rect = cx.xf.rect;
     let pressed_here = origin.is_some_and(|o| page_rect.contains(o));
     let over_page = pointer.is_some_and(|p| page_rect.contains(p));
-    let fill_grab = fill_grabs(ui, cx, view);
-    let draw_grab = draw_grabs(ui, cx, view);
+    let fill_grab = fill_grabs(cx, view);
+    let draw_grab = draw_grabs(cx, view);
     let caret_text = if cx.tool == QuickTool::Comment(CommentTool::Caret) { view.page_text(cx.page) } else { None };
     let cv = &mut view.comments;
     if cv.gesture.is_some() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -1085,20 +1085,20 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, cx: &PageCx<'_>, 
 /// moves it and the selected one's handles resize it. Elsewhere the tool places its mark. While
 /// the button is down the press decides; otherwise the pointer (egui clears the press origin on
 /// release, so a click is located by the pointer).
-pub(crate) fn fill_grabs(ui: &egui::Ui, cx: &PageCx<'_>, view: &DocView) -> bool {
-    matches!(cx.tool, QuickTool::Fill(_)) && grabs(ui, cx, view, |a| a.fill_sign)
+pub(crate) fn fill_grabs(cx: &PageCx<'_>, view: &DocView) -> bool {
+    matches!(cx.tool, QuickTool::Fill(_)) && grabs(cx, view, |a| a.fill_sign)
 }
 
 /// With the Select tool, a comment that would move (not text markup) is picked up before a form
 /// field under it, so a signature placed over a field can still be dragged off it.
-pub(crate) fn select_grabs(ui: &egui::Ui, cx: &PageCx<'_>, view: &DocView) -> bool {
-    cx.tool == QuickTool::Select && grabs(ui, cx, view, |a| !is_markup(&a.subtype))
+pub(crate) fn select_grabs(cx: &PageCx<'_>, view: &DocView) -> bool {
+    cx.tool == QuickTool::Select && grabs(cx, view, |a| !is_markup(&a.subtype))
 }
 
 /// With a shape tool (rectangle, oval, line, polygon…), the selected comment's resize handles
 /// are picked up as with the Select tool, so the shape just drawn can be resized straight away
 /// (#2338). Only the handles: a press anywhere else, the shape itself included, still draws.
-pub(crate) fn draw_grabs(ui: &egui::Ui, cx: &PageCx<'_>, view: &DocView) -> bool {
+pub(crate) fn draw_grabs(cx: &PageCx<'_>, view: &DocView) -> bool {
     let QuickTool::Comment(tool) = cx.tool else { return false };
     if !(tool.draws() || tool.clicks_points()) || tool == CommentTool::Eraser || cx.hidden {
         return false;
@@ -1111,12 +1111,12 @@ pub(crate) fn draw_grabs(ui: &egui::Ui, cx: &PageCx<'_>, view: &DocView) -> bool
     if cv.gesture.is_some() {
         return false;
     }
-    press_point(ui, cx).is_some_and(|p| on_handle(cx, view, p, |_| true))
+    press_point(cx).is_some_and(|p| on_handle(cx, view, p, |_| true))
 }
 
 /// Whether the press (or, with no button down, the pointer) is on a `pick` comment or on the
 /// selected one's resize handles.
-fn grabs(ui: &egui::Ui, cx: &PageCx<'_>, view: &DocView, pick: impl Fn(&Annotation) -> bool) -> bool {
+fn grabs(cx: &PageCx<'_>, view: &DocView, pick: impl Fn(&Annotation) -> bool) -> bool {
     if cx.hidden {
         return false;
     }
@@ -1124,15 +1124,14 @@ fn grabs(ui: &egui::Ui, cx: &PageCx<'_>, view: &DocView, pick: impl Fn(&Annotati
     {
         return true;
     }
-    let Some(p) = press_point(ui, cx) else { return false };
+    let Some(p) = press_point(cx) else { return false };
     on_handle(cx, view, p, &pick) || cx.hit(p).is_some_and(pick)
 }
 
 /// Where a gesture on this page is decided: the press while the button is down, otherwise the
 /// pointer (egui clears the press origin on release). `None` off the page.
-fn press_point(ui: &egui::Ui, cx: &PageCx<'_>) -> Option<Pos2> {
-    let down = ui.input(|i| i.pointer.any_down());
-    (if down { cx.ptr.origin } else { cx.ptr.pos }).filter(|p| cx.xf.rect.contains(*p))
+fn press_point(cx: &PageCx<'_>) -> Option<Pos2> {
+    (if cx.ptr.any_down { cx.ptr.origin } else { cx.ptr.pos }).filter(|p| cx.xf.rect.contains(*p))
 }
 
 /// Whether `p` is on a resize handle of the selected comment, when it is a resizable `pick`.

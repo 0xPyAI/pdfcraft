@@ -250,7 +250,7 @@ pub(crate) fn page_input(
     if let Some((dp, start)) = view.redact_drag
         && dp == page
     {
-        if resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
+        if resp.drag_stopped() || !ptr.primary_down {
             view.redact_drag = None;
             let end = pointer.unwrap_or(start);
             let r = Rect::from_two_pos(start, end).intersect(xf.rect);

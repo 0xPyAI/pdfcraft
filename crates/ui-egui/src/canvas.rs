@@ -2836,11 +2836,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // Full screen: a click on the document goes forward a page and a shift-click back, as in
     // Acrobat, unless the click did something else (a link, a word selected). Decided below,
     // once the pages have had the click.
-    let present_click = view.presentation.is_some()
-        && navigation_enabled
-        && ui.rect_contains_pointer(navigation_rect)
-        && ui.input(|i| i.pointer.primary_clicked())
-        && app.quick_tool == QuickTool::Select;
+    let present_click =
+        view.presentation.is_some() && navigation_enabled && presentation_click(ui, navigation_rect) && app.quick_tool == QuickTool::Select;
     // Shift as held now, or as the click's own event carried it (a synthetic click).
     let present_back = present_click
         && ui.input(|i| {
@@ -2851,7 +2848,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         });
     if zoom_delta.is_finite() && zoom_delta > 0.0 && zoom_delta != 1.0 && navigation_enabled && ui.rect_contains_pointer(navigation_rect) {
         let z = view.zoom * zoom_delta;
-        match ui.input(|i| i.pointer.hover_pos()) {
+        match zoom_anchor(ui) {
             Some(p) => view.zoom_at(z, p),
             None => view.set_zoom(z),
         }
@@ -2867,7 +2864,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // Drawing a comment: the pointer in a band along any edge (or just past it) scrolls the view
     // that way, so a point beyond what is shown can be reached without letting go of the tool.
     let edge_delta = if unobstructed && matches!(view.comments.gesture, Some(comments::Gesture::Draw { .. })) {
-        let (pointer, dt) = ui.input(|i| (if i.pointer.any_down() { i.pointer.latest_pos() } else { i.pointer.hover_pos() }, i.stable_dt));
+        let (pointer, dt) = drawing_edge_pointer(ui);
         crate::autoscroll::edge_scroll(pointer, avail, dt)
     } else {
         Vec2::ZERO
@@ -3007,7 +3004,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let may_glide = !paging_owns_vertical && !middle_gesture && navigation_enabled && unobstructed && animates;
     let over_page = ui.rect_contains_pointer(avail);
     ui.input(|i| view.fling.read(&i.events, now, may_glide && over_page));
-    let interrupted = ui.input(|i| i.pointer.any_pressed() || i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })));
+    let interrupted = glide_interrupted(ui);
     if !may_glide || interrupted || key_scroll != 0.0 || auto_delta != Vec2::ZERO || zoom_delta != 1.0 {
         view.fling.stop();
     }
@@ -3260,7 +3257,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         // A press on a page makes it the current one (as in Acrobat), so a page command with
         // no selection (Rotate, Delete) acts on the page the reader pointed at, not on a page
         // gone to earlier that still shows whole beside it.
-        let pressed = unobstructed && ui.input(|i| i.pointer.primary_pressed()) && ui.rect_contains_pointer(avail);
+        let pressed = unobstructed && ptr.pressed().is_some();
         let mut pressed_page = None;
         if resp.secondary_clicked() {
             // Set again below when the right-click lands on a link.
@@ -3477,7 +3474,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             // Over a mark already placed, the Fill & Sign tool picks it up (comments, below).
             if let QuickTool::Fill(ft) = tool
                 && allowed
-                && !comments::fill_grabs(ui, &pcx, view)
+                && !comments::fill_grabs(&pcx, view)
             {
                 match crate::fill_sign::page_input(
                     ui,
@@ -3536,7 +3533,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 use crate::forms_ui::FieldPointer;
                 let field = if tool == QuickTool::Select
                     && !(editing_content && can_modify && crate::content_ui::select_grabs(&xf, &ptr, i, info, &added, view))
-                    && !comments::select_grabs(ui, &pcx, view)
+                    && !comments::select_grabs(&pcx, view)
                 {
                     crate::forms_ui::page_input(ui, &resp, &xf, &ptr, i, info, &form, can_fill, view)
                 } else {
@@ -3851,7 +3848,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 }
                 if calc_order {
                     let selected = view.prepare.selected.as_ref().map(|(name, _)| name.as_str());
-                    if let Some(name) = crate::calc_order_ui::paint_page(ui, painter, &xf, i, info, &form, &view.calc_order, generation, selected) {
+                    if let Some(name) =
+                        crate::calc_order_ui::paint_page(painter, &xf, i, info, &form, &view.calc_order, generation, selected, pointer)
+                    {
                         calc_hover = Some(name);
                     }
                 }
@@ -4714,6 +4713,31 @@ fn set_layers(app: &mut PdfCraftApp, index: usize, changes: &[(LayerOp, (u32, u1
     if app.session.set_layer_state(id, changes, preserve_rb) {
         app.views[index].invalidate_content();
     }
+}
+
+/// Where a pinch or ⌘-scroll zooms the view about: the pointer, wherever it is over the view. Not
+/// page input: it is read before the pages' widget exists, once `rect_contains_pointer` has found
+/// the view under the pointer.
+fn zoom_anchor(ui: &egui::Ui) -> Option<Pos2> {
+    ui.input(|i| i.pointer.hover_pos())
+}
+
+/// The pointer and frame time that scroll the view while a comment is drawn. Not page input: it is
+/// read before the pages' widget exists, and the pointer may be past the view's edge.
+fn drawing_edge_pointer(ui: &egui::Ui) -> (Option<Pos2>, f32) {
+    ui.input(|i| (i.pointer.latest_pos(), i.stable_dt))
+}
+
+/// A press anywhere, or a key, stops the touchpad's glide (#531).
+fn glide_interrupted(ui: &egui::Ui) -> bool {
+    ui.input(|i| i.pointer.any_pressed() || i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })))
+}
+
+/// Full screen's click on the document, which turns the page: a primary click this frame with the
+/// view on top under it in `area`. Not page input: it is read before the pages' widget exists, and
+/// the turn waits until the pages have had the click.
+fn presentation_click(ui: &egui::Ui, area: Rect) -> bool {
+    ui.rect_contains_pointer(area) && ui.input(|i| i.pointer.primary_clicked())
 }
 
 /// Whether `p` lies in the bottom-left quadrant of `area`, where the page size shows (#1855).

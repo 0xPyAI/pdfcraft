@@ -203,7 +203,7 @@ pub(crate) fn page_input(
     }
     // A text field opens on the press rather than the click, so a drag that starts on it
     // selects its text (#2213).
-    let pressed = f.kind == FormFieldKind::Text && usable && resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed());
+    let pressed = f.kind == FormFieldKind::Text && usable && resp.is_pointer_button_down_on() && ptr.pressed().is_some();
     if pressed && view.forms.focus.as_ref().is_none_or(|x| x.name != f.name || x.widget != wi) {
         commit(view, form);
         view.forms.focus = Some(Focus { press: Some(p), ..open_focus(f, wi) });
@@ -235,7 +235,7 @@ pub(crate) fn page_input(
         // The press already committed the previous field and opened this one (above), unless
         // press and release came in one frame. Committing again would re-run a validation that
         // refused the value on the press.
-        FormFieldKind::Text if !ui.input(|i| i.pointer.primary_pressed()) => {
+        FormFieldKind::Text if ptr.pressed().is_none() => {
             // An editor opened by the press cannot be hit until a frame has laid it out: the
             // release lands on the page and would take its focus away.
             if let Some(x) = view.forms.focus.as_mut().filter(|x| x.name == f.name && x.widget == wi) {

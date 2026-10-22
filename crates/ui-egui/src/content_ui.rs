@@ -340,7 +340,7 @@ pub(crate) fn page_input(
         && gp == page
     {
         consumed = true;
-        if resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
+        if resp.drag_stopped() || !ptr.primary_down {
             cv.grab = None;
             let end = pointer.unwrap_or(start);
             if let Some((sp, si)) = cv.selected

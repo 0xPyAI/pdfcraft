@@ -171,11 +171,10 @@ pub(crate) fn page_input(
     }
     if view.content.draft.is_some() || view.line_editor.as_ref().is_some_and(|e| e.has_changes()) {
         let blocked = view.objects.blocked_page == Some(page);
-        let modifier_press =
-            ui.input(|i| i.pointer.primary_pressed()) && modified(ui) && ptr.pos.is_some_and(|p| xf.rect.contains(p) && ui.clip_rect().contains(p));
+        let modifier_press = ptr.pressed().is_some() && modified(ui) && ptr.pos.is_some_and(|p| xf.rect.contains(p) && ui.clip_rect().contains(p));
         if blocked || modifier_press {
             view.objects.hold_editor = true;
-            view.objects.blocked_page = ui.input(|i| i.pointer.primary_down()).then_some(page);
+            view.objects.blocked_page = ptr.primary_down.then_some(page);
             if modifier_press {
                 view.objects.notice = Some(tl!("Finish or discard the text being edited before selecting several objects.").into());
             }
@@ -201,7 +200,7 @@ fn input(
     view: &mut DocView,
 ) -> bool {
     let pointer = ptr.pos;
-    let (pressed, down) = ui.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_down()));
+    let (pressed, down) = (ptr.pressed().is_some(), ptr.primary_down);
     let info = &doc.info;
     if s.page == Some(page)
         && let Some(mut gesture) = s.gesture
