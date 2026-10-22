@@ -336,9 +336,60 @@ fn a_deeply_nested_form_keeps_the_text_nobody_marked() {
 
     // Past what any reader follows, the form is still removed: the fail-safe, and nothing the
     // renderer draws is lost because it stops at 50 too.
-    let mut doc = page_with_chain(51);
+    let mut doc = page_with_chain(crate::interp::MAX_DEPTH + 1);
     mark(&mut doc, 0, &[[5.0, 275.0, 60.0, 295.0]], "");
-    assert_eq!(apply(&mut doc, None).unwrap().forms_removed, 1, "a chain past 50 is removed");
+    assert_eq!(apply(&mut doc, None).unwrap().forms_removed, 1, "a chain past the limit is removed");
+}
+
+/// Depth alone does not bound the walk: a form that draws the next level twice, or a cycle of two
+/// forms, costs 2^depth interpretations, which at a depth limit of 50 is a hang on a file anyone
+/// can send. The pass also counts the forms it enters, and a page past that budget is treated as
+/// one it cannot read.
+#[test]
+fn a_form_that_fans_out_or_loops_is_bounded_by_the_visit_budget() {
+    /// A page drawing `Fm1`, where each of `n` forms draws the next **twice** and the last draws
+    /// text: 2^n paths if nothing stops the walk. With `looping`, the last form draws the first
+    /// one again instead, so the chain has no end at all.
+    fn fan_out(n: usize, looping: bool) -> Document {
+        let first = 7;
+        let mut objs: Vec<Vec<u8>> = vec![
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R                  /Resources << /Font << /F1 5 0 R >> /XObject << /Fm1 {first} 0 R >> >> >>"
+            )
+            .into_bytes(),
+            stream("", b"BT /F1 10 Tf 10 280 Td (HEAD) Tj ET /Fm1 Do"),
+            FONT.replace("95 0 R", "6 0 R").into_bytes(),
+            widths(),
+        ];
+        for k in 1..=n {
+            let (next, body) = if k < n {
+                (first + k, format!("/Fm{0} Do /Fm{0} Do", k + 1))
+            } else if looping {
+                (first, "/Fm1 Do /Fm1 Do".to_string())
+            } else {
+                (first, "BT /F1 10 Tf 10 150 Td (DEEP) Tj ET".to_string())
+            };
+            let name = if k < n { format!("/Fm{}", k + 1) } else { "/Fm1".to_string() };
+            let res = format!("/Resources << /Font << /F1 5 0 R >> /XObject << {name} {next} 0 R >> >>");
+            objs.push(stream(&format!("/Type /XObject /Subtype /Form /BBox [0 0 300 300] {res}"), body.as_bytes()));
+        }
+        pdf(objs)
+    }
+
+    for looping in [false, true] {
+        let start = std::time::Instant::now();
+        let mut doc = fan_out(crate::interp::MAX_DEPTH, looping);
+        mark(&mut doc, 0, &[[5.0, 275.0, 60.0, 295.0]], "");
+        let report = apply(&mut doc, None).unwrap();
+        let took = start.elapsed();
+        assert!(took < std::time::Duration::from_secs(20), "looping {looping}: the walk took {took:?}");
+        // The page was still redacted, and the budget stopped the walk rather than the pass.
+        assert!(report.forms_removed > 0, "looping {looping}: the forms past the budget are removed");
+        let c = content(&doc, 0);
+        assert!(!c.contains("(HEAD)"), "looping {looping}: the marked text is gone: {c}");
+    }
 }
 
 #[test]
