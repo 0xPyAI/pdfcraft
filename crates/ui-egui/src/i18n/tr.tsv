@@ -2316,6 +2316,8 @@ key	Space	Boşluk
 	Printer paper and scaling may differ. Check driver settings.	Yazıcı kâğıdı ve ölçekleme farklı olabilir. Sürücü ayarlarını kontrol edin.
 	Drawing scale changes. Use Actual size for full-scale plans.	Çizim ölçeği değişir. Tam ölçekli planlar için Gerçek boyutu kullanın.
 	Reload documents when their files change on disk	Diskteki dosyaları değiştiğinde belgeleri yeniden yükle
+	Don't show again	Bir daha gösterme
+	Show a notice when a document is secured	Bir belge güvenli olduğunda bildirim göster
 	Always use my default zoom and page layout	Her zaman varsayılan yakınlaştırmamı ve sayfa düzenimi kullan
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Bu dosya diskte değişti. Yeniden yükle yeni sürümü gösterir ve kaydedilmemiş değişikliklerinizi atar; Kaydet onu bu sürümle değiştirir.
 	Reload	Yeniden yükle

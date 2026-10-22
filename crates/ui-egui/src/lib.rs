@@ -589,6 +589,9 @@ pub struct PdfCraftApp {
     quit_session: Option<last_session::LastSession>,
     /// Preferences: reload a document when its file changes on disk (#431).
     pub reload_changed_files: bool,
+    /// Preferences: tell the user, above the pages, that a document is secured (its security
+    /// settings restrict changes). Off only hides that notice (#4035); kept in the settings.
+    pub show_secured_notice: bool,
     /// Preferences: open every document at Default zoom and Default page display, whatever
     /// layout or zoom it asks for (#1618).
     pub always_default_view: bool,
@@ -986,6 +989,7 @@ impl PdfCraftApp {
             last_session: Default::default(),
             quit_session: None,
             reload_changed_files: true,
+            show_secured_notice: true,
             always_default_view: false,
             #[cfg(not(target_arch = "wasm32"))]
             watch: Default::default(),
@@ -2426,6 +2430,7 @@ impl PdfCraftApp {
         v["redact_prefs"] = self.redact_defaults.to_json();
         // Set outside json! above, which is at serde_json's macro recursion limit.
         v["hide_empty_highlight_hover"] = serde_json::Value::Bool(self.comment_prefs.hide_empty_highlight_hover);
+        v["show_secured_notice"] = serde_json::Value::Bool(self.show_secured_notice);
         v["organize_zoom"] = serde_json::json!(self.organize_zoom);
         // Canonical names survive changes to the order of PAPERS and do not depend on UI language.
         v["print_paper"] = serde_json::json!(pdfcraft_engine::print::PAPERS.get(self.print_draft.paper).map(|(name, _)| *name));
@@ -2470,6 +2475,9 @@ impl PdfCraftApp {
         }
         if let Some(on) = v["reload_changed_files"].as_bool() {
             self.reload_changed_files = on;
+        }
+        if let Some(on) = v["show_secured_notice"].as_bool() {
+            self.show_secured_notice = on;
         }
         self.pinned.restore(&v["pinned_folders"]);
         if let Ok(preference) = serde_json::from_value::<ThemePreference>(v["theme"].clone()) {
@@ -2899,6 +2907,14 @@ impl PdfCraftApp {
                 };
             }
             ("ui-scale", _) => self.ui_scale = ui_scale::parse(value)?,
+            // `--secured-notice false`: no notice above the pages that a document is secured.
+            ("secured-notice", _) => {
+                self.show_secured_notice = match value {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err("secured-notice must be true or false".into()),
+                };
+            }
             ("system-title-bar", _) => {
                 self.system_title_bar = match value {
                     "true" => true,

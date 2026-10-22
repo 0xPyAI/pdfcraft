@@ -2348,6 +2348,61 @@ fn the_security_notice_unlocks_with_the_permissions_password() {
     assert!(!h.state().session.get(h.state().active_ids().unwrap().1).unwrap().dirty, "unlocking is not an edit");
 }
 
+/// #4035: the secured-document notice can be turned off for good. "Don't show again" hides it
+/// in every document, the choice is kept in the settings and turned back on in Preferences (or
+/// `--secured-notice`); the document stays restricted and Properties ▸ Security still opens.
+#[test]
+fn the_security_notice_can_be_turned_off_for_good() {
+    let open = |settings: Option<String>| {
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+            let mut app = PdfCraftApp::new();
+            if let Some(s) = &settings {
+                app.restore(s);
+            }
+            app.set_option("language", "en").unwrap();
+            app.open_bytes("locked.pdf", None, protected("", "owner", 0b0100)).unwrap();
+            app
+        });
+        h.run_steps(4);
+        h
+    };
+    let mut h = open(None);
+    assert!(h.state().show_secured_notice, "on by default");
+    h.get_by_label_contains("This document is secured");
+    h.get_by_label("Don't show again").click();
+    h.run_steps(2);
+    assert!(h.query_by_label_contains("This document is secured").is_none());
+    assert!(!h.state().show_secured_notice);
+    let id = h.state().active_ids().unwrap().1;
+    assert!(h.state().session.get(id).unwrap().security_summary().is_some_and(|s| !s.owner), "still restricted");
+    h.state_mut().set_option("dialog", "properties").unwrap();
+    h.run_steps(2);
+    h.get_by_label("Security").click();
+    h.run_steps(3);
+    h.get_by_label("Password security");
+    h.get_by_label("User password");
+    // Kept in the settings: a later session opens the same file without the notice.
+    let saved = h.state().persist();
+    let mut h = open(Some(saved));
+    assert!(h.query_by_label_contains("This document is secured").is_none(), "remembered across a restart");
+    // Back on from Preferences.
+    h.state_mut().set_option("dialog", "preferences").unwrap();
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::CheckBox, "Show a notice when a document is secured").scroll_to_me();
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::CheckBox, "Show a notice when a document is secured").click();
+    h.run_steps(2);
+    assert!(h.state().show_secured_notice);
+    h.state_mut().dialog = None;
+    h.run_steps(2);
+    h.get_by_label_contains("This document is secured");
+    // Scriptable, with a clear refusal for anything else.
+    let app = h.state_mut();
+    app.set_option("secured-notice", "false").unwrap();
+    assert!(!app.show_secured_notice);
+    assert_eq!(app.set_option("secured-notice", "maybe"), Err("secured-notice must be true or false".into()));
+}
+
 /// Changing a restricted document's security asks for its permissions password first (Acrobat
 /// does too), then carries on.
 #[test]

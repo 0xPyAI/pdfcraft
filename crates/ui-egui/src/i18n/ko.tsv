@@ -2250,6 +2250,8 @@ key	Space	스페이스
 	Printer paper and scaling may differ. Check driver settings.	프린터 용지와 배율이 다를 수 있습니다. 드라이버 설정을 확인하세요.
 	Drawing scale changes. Use Actual size for full-scale plans.	도면 축척이 변경됩니다. 실제 크기 도면에는 '실제 크기'를 사용하세요.
 	Reload documents when their files change on disk	파일이 디스크에서 변경되면 문서 다시 불러오기
+	Don't show again	다시 표시 안 함
+	Show a notice when a document is secured	문서가 보호되어 있으면 알림 표시
 	This file changed on disk. Reload it to see the new version; your unsaved changes will be lost.	이 파일이 디스크에서 변경되었습니다. 새 버전을 보려면 다시 불러오세요. 저장하지 않은 변경 내용은 손실됩니다.
 	Reload	다시 불러오기
 	Couldn't reload {name}: {e}	{name}을(를) 다시 불러올 수 없습니다: {e}

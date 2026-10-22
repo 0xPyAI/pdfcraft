@@ -2250,6 +2250,8 @@ key	Space	Space
 	Printer paper and scaling may differ. Check driver settings.	प्रिंटर का काग़ज़ और स्केलिंग अलग हो सकते हैं। ड्राइवर सेटिंग्स जाँचें।
 	Drawing scale changes. Use Actual size for full-scale plans.	रेखाचित्र पैमाना बदल जाता है। पूर्ण-पैमाने योजनाओं के लिए “वास्तविक आकार” चुनें।
 	Reload documents when their files change on disk	जब उनकी फ़ाइलें डिस्क पर बदलें तो दस्तावेज़ दोबारा लोड करें
+	Don't show again	फिर से न दिखाएँ
+	Show a notice when a document is secured	दस्तावेज़ सुरक्षित होने पर सूचना दिखाएँ
 	This file changed on disk. Reload it to see the new version; your unsaved changes will be lost.	यह फ़ाइल डिस्क पर बदल गई है। नया संस्करण देखने के लिए उसे दोबारा लोड करें; आपके असहेजे बदलाव खो जाएँगे।
 	Reload	दोबारा लोड करें
 	Couldn't reload {name}: {e}	{name} दोबारा लोड नहीं हो सका: {e}
