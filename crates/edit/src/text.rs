@@ -113,10 +113,12 @@ pub fn text_editor_fonts(doc: &Document, page: usize) -> Result<Vec<TextEditorFo
     let resources = p.dict.get(b"Resources").and_then(|o| doc.dict(o)).unwrap_or_default();
     let fonts = resources.get(b"Font").and_then(|o| doc.dict(o)).unwrap_or_default();
     let mut budget = 32_usize << 20;
+    // Every program decoded counts, usable or not, so aliases of one program can't repeat the work.
+    let mut decode = DecodeBudget::new(2 * budget, 0);
     let mut result = Vec::new();
     for (name, font) in fonts.iter().take(128) {
         let Some(font) = doc.dict(font) else { continue };
-        let Some(bytes) = pdfcraft_fonts::pdf::embedded_sfnt(doc, &font) else { continue };
+        let Some(bytes) = pdfcraft_fonts::pdf::embedded_sfnt_within(doc, &font, &mut decode) else { continue };
         if bytes.len() > budget {
             continue;
         }
