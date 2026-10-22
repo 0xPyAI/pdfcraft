@@ -2472,3 +2472,20 @@ fn a_tj_surplus_arrays_undrawn_glyphs_are_not_seen_under_a_mark() {
     assert_eq!(under(&mut doc, 0, &[[45.0, 95.0, 50.0, 110.0]]), 0, "nothing is drawn past LASTARR's 35pt width");
     assert_eq!(under(&mut doc, 0, &[[10.0, 95.0, 45.0, 110.0]]), 7, "LASTARR's 7 glyphs, the one the page draws");
 }
+
+#[test]
+fn form_entries_share_one_budget_per_page() {
+    // 20 draws of a form that draws the next 20 times, four levels down: 160,000 glyphs from a
+    // few hundred bytes.
+    let draws = "/X Do ".repeat(20);
+    let mut objs = vec![stream("/Type /XObject /Subtype /Form /Resources << /Font << /F1 5 0 R >> >>", b"BT /F1 10 Tf 10 100 Td (A) Tj ET")];
+    for inner in 7..10 {
+        objs.push(stream(&format!("/Type /XObject /Subtype /Form /Resources << /XObject << /X {inner} 0 R >> >>"), draws.as_bytes()));
+    }
+    let mut doc = one_page(draws.as_bytes(), "/XObject << /X 10 0 R >>", objs);
+    let residue = under(&mut doc, 0, &[[0.0, 90.0, 50.0, 120.0]]);
+    assert!(residue > 0 && residue <= pdfcraft_cos::MAX_PAGE_FORMS, "{residue} glyphs counted");
+    // Applying refuses the page rather than leave forms past the budget unread.
+    mark(&mut doc, 0, &[[0.0, 90.0, 50.0, 120.0]], "");
+    assert!(apply(&mut doc, None).is_err());
+}

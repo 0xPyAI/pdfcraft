@@ -219,7 +219,8 @@ pub(crate) fn marks_checked(doc: &Document) -> (Vec<Mark>, Vec<usize>) {
     (out, unreadable)
 }
 
-/// A page's content streams: (the references or inline objects as listed, their decoded data).
+/// A page's content streams: (the references or inline objects as listed, their decoded data),
+/// decoded within one page's [`pdfcraft_cos::DecodeBudget`].
 pub(crate) fn page_streams(doc: &Document, page: &Dict, index: usize) -> Result<(Vec<Object>, Vec<Vec<u8>>), RedactError> {
     let list: Vec<Object> = match page.get(b"Contents") {
         None => Vec::new(),
@@ -229,9 +230,10 @@ pub(crate) fn page_streams(doc: &Document, page: &Dict, index: usize) -> Result<
         },
     };
     let mut data = Vec::new();
+    let mut budget = pdfcraft_cos::DecodeBudget::page();
     for o in &list {
         match &*doc.resolve(o) {
-            Object::Stream(s) => data.push(s.decoded().map_err(|_| RedactError::Unreadable(index + 1))?),
+            Object::Stream(s) => data.push(budget.decode(s).map_err(|_| RedactError::Unreadable(index + 1))?),
             Object::Null => data.push(Vec::new()),
             _ => return Err(RedactError::Unreadable(index + 1)),
         }
