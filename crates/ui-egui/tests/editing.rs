@@ -2895,6 +2895,67 @@ fn switching_straight_to_another_box_applies_the_open_paragraph() {
     assert_eq!(ed.text, "Bottom");
 }
 
+/// Dark pixels in `r`: glyph ink on a white page.
+fn ink(pixels: &image::RgbaImage, r: egui::Rect) -> usize {
+    let (x0, y0, x1, y1) = (r.left().max(0.0) as u32, r.top().max(0.0) as u32, r.right() as u32, r.bottom() as u32);
+    (y0..y1.min(pixels.height()))
+        .flat_map(|y| (x0..x1.min(pixels.width())).map(move |x| (x, y)))
+        .filter(|(x, y)| pixels.get_pixel(*x, *y).0[..3].iter().all(|v| *v < 90))
+        .count()
+}
+
+/// Applying a paragraph changes the page, whose raster still has the old text until it is
+/// rendered again. Until then the paragraph keeps the look it had in the editor; the old text
+/// used to come back under the new outline for those frames and then jump to the new one.
+#[test]
+fn an_applied_paragraph_keeps_its_edited_look_until_the_page_is_redrawn() {
+    let bytes = source_font_fixture_with_text("BT /F1 24 Tf 20 220 Td (Topmost) Tj ET BT /F2 24 Tf 20 120 Td (Bottom) Tj ET");
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("boxes.pdf", None, bytes).expect("opens");
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = r.width() / 300.0;
+    let top = {
+        let s = h.state();
+        let blocks = s.session.get(s.views[0].id).unwrap().text_blocks(0);
+        let b = blocks.iter().find(|b| b.text == "Topmost").expect("the top box").rect;
+        egui::Rect::from_min_max(
+            egui::pos2(r.left() + b[0] as f32 * k, r.top() + (300.0 - b[3] as f32) * k),
+            egui::pos2(r.left() + b[2] as f32 * k, r.top() + (300.0 - b[1] as f32) * k),
+        )
+    };
+    // "T" stays; the rest of the word goes.
+    let head = egui::Rect::from_min_max(top.min, egui::pos2(top.left() + top.width() * 0.12, top.bottom()));
+    let tail = egui::Rect::from_min_max(egui::pos2(top.left() + top.width() * 0.3, top.top()), top.max).shrink(2.0);
+    click_at(&mut h, top.center());
+    support::wait_until(&mut h, "the editor's textless page", |app| !app.render_pending());
+    h.state_mut().views[0].line_editor.as_mut().expect("the top box is open").text = "T".into();
+    h.run_steps(2);
+    h.state_mut().views[0].hold_rasters = true;
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    for frame in 0..4 {
+        h.step();
+        assert!(h.state().views[0].line_editor.is_none(), "applied");
+        let pixels = h.render().unwrap();
+        assert!(ink(&pixels, head) > 20, "frame {frame} after applying shows no text");
+        assert_eq!(ink(&pixels, tail), 0, "frame {frame} after applying shows the old text again");
+    }
+    h.state_mut().views[0].hold_rasters = false;
+    support::wait_until(&mut h, "the page drawn with the edit", |app| !app.render_pending());
+    h.run_steps(2);
+    let pixels = h.render().unwrap();
+    assert!(ink(&pixels, head) > 20, "the page draws the applied text");
+    assert_eq!(ink(&pixels, tail), 0, "and not the old one");
+    let s = h.state();
+    assert_eq!(s.session.get(s.views[0].id).unwrap().text_blocks(0).iter().map(|b| b.text.clone()).collect::<Vec<_>>(), ["T", "Bottom"]);
+}
+
 #[test]
 fn editing_existing_text_in_place() {
     let mut h = harness(1, |_| {});

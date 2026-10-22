@@ -35,11 +35,56 @@ pub(crate) struct TextBackground {
     /// This frame's place for the textless page under the open paragraph's editor. It stays
     /// empty, so the page shows its own text, until the paragraph is changed ([`Self::reveal`]).
     slot: Option<(egui::Painter, egui::layers::ShapeIdx, egui::Shape)>,
+    /// How the open paragraph looked in its editor last frame.
+    look: Option<EditorLook>,
+    /// An applied paragraph's last look. The page raster still has the old text until the page
+    /// is rendered again, so the textless page and this look stay up until then.
+    settling: Option<EditorLook>,
+}
+
+/// A paragraph editor's text as last drawn: its laid-out rows, where they were on the page (in
+/// the page's 0..1 coordinates), and the page's width and turn on screen then.
+struct EditorLook {
+    page: usize,
+    block: usize,
+    galley: Arc<egui::Galley>,
+    at: (f32, f32),
+    color: Color32,
+    page_width: f32,
+    rot: u16,
 }
 
 impl TextBackground {
     pub fn pending(&self) -> bool {
         self.renderer.is_some() && self.received != self.tag
+    }
+
+    /// The open paragraph's editor drew `galley` at `pos` this frame.
+    pub fn remember(&mut self, xf: &PageXform, page: usize, block: usize, galley: Arc<egui::Galley>, pos: Pos2, color: Color32) {
+        self.look = Some(EditorLook { page, block, galley, at: xf.screen_to_norm(pos), color, page_width: xf.rect.width(), rot: xf.rot });
+    }
+
+    /// An edit was applied. When it is the open paragraph's, its last look stays up over the
+    /// textless page until the page is rendered again; any other edit ends both.
+    pub fn committed(&mut self, edit: &Edit) {
+        let look = self.look.take().filter(|look| {
+            matches!(edit, Edit::EditTextBlock { page, block, .. } if (look.page, look.block) == (*page, *block))
+                && self.key.is_some_and(|(_, page, target)| (page, target) == (look.page, TextTarget::Block(look.block)))
+                && self.texture.is_some()
+        });
+        match look {
+            Some(look) => {
+                self.renderer = None;
+                self.settling = Some(look);
+            }
+            None => *self = Self::default(),
+        }
+    }
+
+    pub fn page_received(&mut self, page: usize) {
+        if self.settling.as_ref().is_some_and(|look| look.page == page) {
+            *self = Self::default();
+        }
     }
 
     pub fn prepare(
@@ -54,6 +99,9 @@ impl TextBackground {
             .map(|ed| (doc.edit_generation(), ed.page, TextTarget::Block(ed.block)))
             .or_else(|| draft.and_then(|d| d.index.map(|index| (doc.edit_generation(), d.page, TextTarget::Added(index)))));
         self.slot = None;
+        if key.is_none() && self.settling.is_some() {
+            return;
+        }
         if self.key != key {
             *self = Self { key, ..Default::default() };
             if let Some((_, page, target)) = key {
@@ -127,7 +175,13 @@ impl TextBackground {
         draft: Option<&crate::content_ui::TextDraft>,
     ) {
         let for_editor = editor.is_some_and(|ed| ed.page == page && self.ready(page, ed.block));
-        let ready = for_editor || draft.is_some_and(|d| d.page == page && d.index.is_some_and(|index| self.ready_added(page, index)));
+        // A zoom or a turn of the view since the paragraph was applied would misplace its rows:
+        // the page raster (with the old text) shows until the new one arrives instead.
+        let settled =
+            self.settling.as_ref().filter(|look| look.page == page && look.rot == xf.rot && (look.page_width - xf.rect.width()).abs() < 0.5);
+        let ready = for_editor
+            || draft.is_some_and(|d| d.page == page && d.index.is_some_and(|index| self.ready_added(page, index)))
+            || settled.is_some();
         if !ready {
             return;
         }
@@ -148,6 +202,9 @@ impl TextBackground {
             self.slot = Some((painter, idx, egui::Shape::mesh(mesh)));
         } else {
             xf.paint_image(&painter, tex.id(), 0.0, 0.0, 1.0, 1.0);
+            if let Some(look) = settled {
+                painter.galley(xf.norm_to_screen(look.at.0, look.at.1), Arc::clone(&look.galley), look.color);
+            }
         }
     }
 
@@ -1468,8 +1525,10 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
         ed.source.as_ref().and_then(|(block, lines)| block.lines.iter().filter_map(|i| lines.get(*i)).map(|l| l.size as f32).reduce(f32::min));
     let font = editor_font(&ed.look, smallest.map_or(ed.size, |s| (s * scale * 0.5).clamp(1.0, 300.0).min(ed.size)));
     let text_color = color32(ed.look.color);
+    let block = ed.block;
     let mut done = None;
     let mut reveal = false;
+    let mut look = None;
     egui::Area::new(egui::Id::new("edit-text-line")).order(egui::Order::Foreground).fixed_pos(Pos2::new(ed.rect.left(), ed.rect.top())).show(
         ctx,
         |ui| {
@@ -1542,6 +1601,7 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
                         ui.painter().set(cover, egui::Shape::rect_filled(ed.rect.expand(1.0).union(output.response.rect), CornerRadius::ZERO, fill));
                     }
                 }
+                look = Some((Arc::clone(&output.galley), output.galley_pos));
                 if let Some(cursor) = output.cursor_range {
                     let selected = cursor.as_sorted_char_range();
                     let byte = |index| ed.text.char_indices().nth(index).map_or(ed.text.len(), |(at, _)| at);
@@ -1568,6 +1628,9 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
     );
     if reveal {
         view.text_background.reveal();
+    }
+    if let Some((galley, pos)) = look {
+        view.text_background.remember(&xf, page, block, galley, pos, text_color);
     }
     match done {
         Some(apply) => {
