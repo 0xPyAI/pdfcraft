@@ -440,6 +440,7 @@ mod tests {
         assert!(script_fallback(&candidates, 'A').is_some());
         assert!(script_fallback(&candidates, TELUGU_PROBE).is_none());
         assert!(script_fallback(&candidates, DEVANAGARI_PROBE).is_none());
+        assert!(script_fallback(&candidates, HANGUL_PROBE).is_none());
         assert!(script_fallback(&candidates, SINHALA_PROBE).is_none());
         assert!(script_fallback(&candidates, TAMIL_PROBE).is_none());
     }
@@ -451,6 +452,20 @@ mod tests {
             assert!(list.iter().all(|p| p.is_absolute() || cfg!(windows)), "{list:?}");
             assert!(list.iter().all(|p| p.extension().is_some_and(|e| e == "ttf" || e == "ttc")), "{list:?}");
         }
+    }
+
+    #[test]
+    fn hangul_candidates_are_font_files_without_adobe_designs() {
+        let list = hangul_candidates();
+        assert!(!list.is_empty());
+        for path in list {
+            assert!(path.extension().is_some_and(|e| e == "ttf" || e == "ttc"), "{path:?}");
+            let name = path.to_string_lossy().to_lowercase();
+            assert!(!["notosanscjk", "notoserifcjk", "sourcehan", "source-han"].iter().any(|b| name.contains(b)), "{name}");
+        }
+        // Inter has no Hangul.
+        let inter = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+        assert_eq!(face_with(inter, HANGUL_PROBE), None);
     }
 
     #[test]
