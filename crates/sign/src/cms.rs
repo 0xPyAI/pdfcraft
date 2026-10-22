@@ -54,6 +54,60 @@ pub struct SignedData {
     pub quirks: Vec<&'static str>,
 }
 
+/// The X.509 certificates in a SignedData `certificates` field (`[0] IMPLICIT CertificateSet`).
+/// Other certificate formats (attribute certificates) and certificates that don't parse are
+/// skipped.
+fn carried_certificates(set: &Tlv) -> Result<Vec<Certificate>, SignError> {
+    let mut out = Vec::new();
+    for c in set.children()? {
+        if c.tag == tag::SEQUENCE
+            && let Ok(cert) = Certificate::parse(c.raw)
+        {
+            out.push(cert);
+        }
+    }
+    Ok(out)
+}
+
+/// The certificates of a PKCS #7 certificate bundle (`.p7b`, `.p7c`): a SignedData with no
+/// signers ("degenerate", RFC 5652 §5.2), which is how Windows, Acrobat and certificate
+/// authorities hand out a chain or a set of CA certificates. Signers and CRLs, if present, are
+/// ignored; only the certificates are read. DER or BER.
+pub fn certificate_bundle(bytes: &[u8]) -> Result<Vec<Certificate>, SignError> {
+    let (ci, rest) = Tlv::parse_ber(bytes)?;
+    // A trust file is the bundle alone: bytes after it mean a damaged or spliced file.
+    if !rest.is_empty() {
+        return Err(bad("data after the bundle"));
+    }
+    let ci = ci.expect(tag::SEQUENCE, "ContentInfo")?.children()?;
+    let [ct, content] = ci.as_slice() else { return Err(bad("ContentInfo")) };
+    if ct.oid()? != SIGNED_DATA {
+        return Err(bad("not SignedData"));
+    }
+    let sd = content.expect(tag::ctx(0), "content")?.inner()?.children()?;
+    // version, digestAlgorithms, encapContentInfo, the optional [0] certificates and [1] CRLs,
+    // then signerInfos (RFC 5652 §5.1).
+    let [version, digests, encap, middle @ .., signers] = sd.as_slice() else { return Err(bad("SignedData")) };
+    let shape = [(version, tag::INTEGER), (digests, tag::SET), (encap, tag::SEQUENCE), (signers, tag::SET)];
+    // At most one [0] certificates and one [1] CRLs, in that order.
+    const CERTS: u8 = tag::ctx(0);
+    const CRLS: u8 = tag::ctx(1);
+    let middle_ok = matches!(middle.iter().map(|t| t.tag).collect::<Vec<_>>().as_slice(), [] | [CERTS] | [CRLS] | [CERTS, CRLS]);
+    // encapContentInfo starts with its eContentType OID.
+    let encap_ok = encap.children()?.first().is_some_and(|t| t.tag == tag::OID);
+    if shape.iter().any(|(t, want)| t.tag != *want) || !middle_ok || !encap_ok {
+        return Err(bad("SignedData"));
+    }
+    let mut certificates = Vec::new();
+    for t in middle.iter().filter(|t| t.tag == tag::ctx(0)) {
+        certificates.extend(carried_certificates(t)?);
+    }
+    if certificates.is_empty() {
+        return Err(bad("the bundle holds no certificate"));
+    }
+    Ok(certificates)
+}
+
 fn bad(what: &str) -> SignError {
     SignError::Malformed(format!("CMS: {what}"))
 }
@@ -95,16 +149,7 @@ impl SignedData {
         let mut signer_infos = None;
         for t in it {
             match t.tag {
-                t2 if t2 == tag::ctx(0) => {
-                    for c in t.children()? {
-                        // Other certificate formats (attribute certificates) are skipped.
-                        if c.tag == tag::SEQUENCE
-                            && let Ok(cert) = Certificate::parse(c.raw)
-                        {
-                            certificates.push(cert);
-                        }
-                    }
-                }
+                t2 if t2 == tag::ctx(0) => certificates.extend(carried_certificates(&t)?),
                 tag::SET => signer_infos = Some(t),
                 _ => {}
             }

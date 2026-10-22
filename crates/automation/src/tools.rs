@@ -756,7 +756,7 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc", "id", "out"],
             )),
-        t("sign_trust", "Trust certificates", "Add certificates (.cer/.crt/.pem/.der, or the certificates in a .p12 with `password`) to the trusted certificates used to validate signatures, or clear the list (clear: true). Every open document is revalidated. Returns the trusted list.").with(schema(
+        t("sign_trust", "Trust certificates", "Add certificates (.cer/.crt/.pem/.der, a .p7b/.p7c bundle, or the certificates in a .p12 with `password`) to the trusted certificates used to validate signatures, or clear the list (clear: true). Every open document is revalidated. Returns the trusted list.").with(schema(
             json!({ "paths": { "type": "array", "items": { "type": "string" } }, "password": { "type": "string" }, "clear": { "type": "boolean" } }),
             &[],
         )),
