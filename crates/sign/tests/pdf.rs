@@ -1983,6 +1983,23 @@ fn visible_appearance_draws_central_european_characters_with_embedded_font() {
     assert_eq!(s.reason.as_deref(), Some("Podpisano s potrdilom"));
 }
 
+/// A label Helvetica can't draw is refused even when a detail already needs the embedded font: the
+/// labels never choose the font, so a Japanese label beside a Latin Extended name is never written
+/// as the wrong glyphs.
+#[test]
+fn appearance_label_outside_helvetica_is_refused_beside_an_embedded_font_name() {
+    use pdfcraft_sign::{Appearance, AppearanceLabels};
+    let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
+    let name = Name::build("Luka Petravić", "Oddelek", "Podjetje d.o.o.", "luka@example.com", "SI");
+    let cert = Certificate::self_signed(&name, &id.key, Time::from_unix(1_700_000_000), 5, &[1]).unwrap();
+    let luka_id = DigitalId { key: id.key, certificate: cert, chain: Vec::new(), friendly_name: None };
+    let japanese = AppearanceLabels { signed_by: "署名者".into(), ..AppearanceLabels::default() };
+    let o = SignOptions { rect: Some([150.0, 20.0, 280.0, 70.0]), appearance: Appearance::default(), appearance_labels: japanese, ..opts() };
+    let err = pdfcraft_sign::sign(&open(&fixture()), &luka_id, &o).unwrap_err();
+    assert!(matches!(err, SignError::Unsupported(_)), "{err:?}");
+    assert!(err.to_string().contains("the signed_by label"), "{err}");
+}
+
 /// Every sentence this crate says about a signature is listed in `WORDINGS`, and every sentence on
 /// that list is one it still says: the details are written as `Detail::plain`/`Detail::of`, the
 /// sentences the modules that read a signature word for themselves are pushed as notes and quirks,
