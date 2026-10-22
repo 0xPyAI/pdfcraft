@@ -40,7 +40,7 @@ use crate::object::name::{Name, skip_name_like};
 use crate::object::{Array, Null, Number, Object, Stream};
 use crate::reader::Reader;
 use crate::reader::{Readable, ReaderContext, ReaderExt, Skippable};
-use crate::trivia::{Comment, is_white_space_character};
+use crate::trivia::{Comment, is_regular_character, is_white_space_character};
 use crate::util::find_needle;
 use core::array;
 use core::fmt::{Debug, Formatter};
@@ -246,11 +246,12 @@ impl<'a> UntypedIter<'a> {
                         self.reader.read_bytes(pos)?;
 
                         if self.reader.peek_bytes(2) == Some(b"EI") {
-                            // If the following character is not a whitespace character, then we are in a ASCII-85 stream.
+                            // If the following character is a regular character, then the token
+                            // is not `EI` (white space and delimiters both end it).
                             if self
                                 .reader
                                 .peek_bytes(3)
-                                .is_some_and(|b| !is_white_space_character(b[2]))
+                                .is_some_and(|b| is_regular_character(b[2]))
                             {
                                 self.reader.read_bytes(3)?;
 
@@ -894,6 +895,45 @@ mod tests {
                 b"ET".to_vec()
             ]
         );
+    }
+
+    #[test]
+    fn inline_image_ei_may_be_followed_by_a_delimiter() {
+        let mut image = b"BI /W 16 /H 4 /BPC 8 /CS /G ID ".to_vec();
+        image.extend([0x80; 64]);
+        image.extend(b"\nEI");
+        let tail = b" Q BT /F1 24 Tf 72 200 Td (AFTER) Tj ET";
+        let ops = |suffix: &[u8]| {
+            let mut data = image.clone();
+            data.extend(suffix);
+            data.extend(tail);
+            operators(&data)
+        };
+        let control = ops(b"");
+        assert_eq!(control.len(), 7);
+        assert_eq!(ops(b"%c\n"), control);
+        assert_eq!(ops(b"[] 0 d"), [&control[..1], &[b"d".to_vec()], &control[1..]].concat());
+    }
+
+    #[test]
+    fn inline_image_ei_followed_by_a_regular_character_is_not_the_end() {
+        let data = b"BI /W 1 /H 1 /BPC 8 /CS /G ID \x80 EIQ \x81 EI Q BT (a) Tj ET";
+        // `EIQ` is one token and stays part of the image data.
+        let expected: Vec<Vec<u8>> =
+            ["BI", "Q", "BT", "Tj", "ET"].iter().map(|s| s.as_bytes().to_vec()).collect();
+        assert_eq!(operators(data), expected);
+    }
+
+    #[test]
+    fn ascii85_inline_image_data_may_contain_ei_before_a_delimiter() {
+        for glue in [&b"EI["[..], b"EI/", b"EI%", b"EI(", b"EI<"] {
+            let mut data = b"BI /W 4 /H 4 /BPC 8 /CS /G /F /A85 ID 9jqo^".to_vec();
+            data.extend(glue);
+            data.extend(b"87cURD]i,\"Ebo80~>EI Q BT /F1 12 Tf (AFTER) Tj ET");
+            let expected: Vec<Vec<u8>> =
+                ["BI", "Q", "BT", "Tf", "Tj", "ET"].iter().map(|s| s.as_bytes().to_vec()).collect();
+            assert_eq!(operators(&data), expected, "{}", String::from_utf8_lossy(glue));
+        }
     }
 
     #[test]
