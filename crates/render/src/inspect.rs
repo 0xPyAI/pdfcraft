@@ -746,7 +746,8 @@ impl<'a> Inspector<'a> {
             if let Some(ef) = names.get(b"EmbeddedFiles").ok().and_then(|o| self.dict(o)) {
                 let mut seen = HashSet::new();
                 for (name, spec) in self.name_tree(ef, &mut seen, 0) {
-                    info.attachments.push(self.attachment(name.clone(), spec, AttachmentSource::Document { key: name }, &mut text_budget));
+                    let fallback = |_: &mut usize| Some(name.clone());
+                    info.attachments.push(self.attachment(spec, AttachmentSource::Document { key: name.clone() }, &mut text_budget, fallback));
                 }
             }
             info.has_javascript |= names.get(b"JavaScript").is_ok();
@@ -1212,8 +1213,8 @@ impl<'a> Inspector<'a> {
                 if subtype == "FileAttachment"
                     && let Ok(fs) = d.get(b"FS")
                 {
-                    let name = self.budgeted_text(d, b"Contents", text_budget).unwrap_or_else(|| "attachment".into());
-                    info.attachments.push(self.attachment(name, fs, AttachmentSource::Annotation { page, index }, text_budget));
+                    let fallback = |budget: &mut usize| self.budgeted_text(d, b"Contents", budget);
+                    info.attachments.push(self.attachment(fs, AttachmentSource::Annotation { page, index }, text_budget, fallback));
                 }
                 if subtype == "Link" {
                     if let Some(link) = self.link(page, index, d, text_budget) {
@@ -1652,7 +1653,14 @@ impl<'a> Inspector<'a> {
         out.sort_by(|a, b| a.name.cmp(&b.name));
     }
 
-    fn attachment(&self, name: String, spec: &Object, source: AttachmentSource, text_budget: &mut usize) -> Attachment {
+    /// The attachment's name is the file specification's, else `fallback`'s, else a generic one.
+    fn attachment(
+        &self,
+        spec: &Object,
+        source: AttachmentSource,
+        text_budget: &mut usize,
+        fallback: impl FnOnce(&mut usize) -> Option<String>,
+    ) -> Attachment {
         let d = self.dict(spec);
         let size =
             d.and_then(|d| d.get(b"EF").ok()).and_then(|o| self.dict(o)).and_then(|ef| ef.get(b"F").ok().or_else(|| ef.get(b"UF").ok())).and_then(
@@ -1669,7 +1677,10 @@ impl<'a> Inspector<'a> {
                     _ => None,
                 },
             );
-        let display = d.and_then(|d| self.budgeted_text(d, b"UF", text_budget).or_else(|| self.budgeted_text(d, b"F", text_budget))).unwrap_or(name);
+        let display = d
+            .and_then(|d| self.budgeted_text(d, b"UF", text_budget).or_else(|| self.budgeted_text(d, b"F", text_budget)))
+            .or_else(|| fallback(text_budget))
+            .unwrap_or_else(|| "attachment".into());
         Attachment { name: display, description: d.and_then(|d| self.budgeted_text(d, b"Desc", text_budget)), size, source }
     }
 }
@@ -2759,6 +2770,31 @@ trailer << /Root 1 0 R >>
         let mut budget = 10;
         assert_eq!(Inspector::new(&doc).budgeted_text(&d, b"Contents", &mut budget), None);
         assert_eq!(budget, 7);
+    }
+
+    /// An annotation attachment's `/Contents` spends the text budget only when it names the
+    /// attachment, so long descriptions of named files leave a later web address listed.
+    #[test]
+    fn a_named_attachment_leaves_its_contents_unspent() {
+        let files = "<< /Subtype /FileAttachment /Rect [0 0 1 1] /Contents 6 0 R /FS << /F (a.txt) >> >> ".repeat(20);
+        // Longer than what 20 MiB of charged `/Contents` would leave of the 16 MiB budget.
+        let uri = format!("https://example.com/{}", "a".repeat(2 << 20));
+        let pdf = format!(
+            "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+             2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+             3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [{files} \
+             << /Subtype /Link /Rect [0 0 1 1] /A << /S /URI /URI ({uri}) >> >>] >> endobj\n\
+             6 0 obj ({}) endobj\n\
+             trailer << /Root 1 0 R >>\n%%EOF",
+            "x".repeat(1 << 20),
+        );
+        let doc = Document::load_mem(pdf.as_bytes()).expect("loads");
+        let page = PageInfo { width: 200.0, height: 200.0, crop: [0.0, 0.0, 200.0, 200.0], rotation: 0, label: String::new() };
+        let mut info = DocInfo { pages: vec![page], ..Default::default() };
+        Inspector::new(&doc).fill(&mut info);
+        assert!(info.attachments.iter().all(|a| a.name == "a.txt"));
+        assert_eq!(info.links.len(), 1);
+        assert!(matches!(&info.links[0].target, LinkTarget::Uri(u) if *u == uri));
     }
 
     /// Links and attachments sharing one long string each keep a copy only within
