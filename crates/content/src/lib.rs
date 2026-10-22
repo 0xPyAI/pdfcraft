@@ -504,9 +504,20 @@ impl Pieces {
     /// for byte. Returns every piece's new bytes (unchanged pieces come back equal).
     pub fn splice(&self, edits: impl IntoIterator<Item = (std::ops::Range<usize>, Vec<u8>)>) -> Vec<Vec<u8>> {
         let mut out: Vec<Vec<u8>> = (0..self.len()).map(|i| Vec::with_capacity(self.range(i).len())).collect();
+        // Only the pieces from the one holding `from` up to `to`: one call per edit must not
+        // visit every piece.
         let copy = |out: &mut Vec<Vec<u8>>, from: usize, to: usize| {
-            for (i, piece) in out.iter_mut().enumerate() {
+            if from >= to {
+                return;
+            }
+            let first = self.piece_of(from);
+            for (i, piece) in out.iter_mut().enumerate().skip(first) {
+                #[cfg(test)]
+                tests::PIECE_VISITS.with(|c| c.set(c.get() + 1));
                 let r = self.range(i);
+                if r.start >= to {
+                    break;
+                }
                 let (a, b) = (from.max(r.start), to.min(r.end));
                 if a < b {
                     piece.extend_from_slice(self.data.get(a..b).unwrap_or_default());

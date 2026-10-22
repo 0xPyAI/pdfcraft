@@ -5,6 +5,30 @@ thread_local! {
     pub(crate) static RESCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+thread_local! {
+    /// Pieces [`Pieces::splice`] looked at while copying, on this thread.
+    pub(crate) static PIECE_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[test]
+fn splicing_visits_each_piece_a_few_times() {
+    let n = 5_000;
+    let pieces: Vec<String> = (0..n).map(|i| format!("({i}) Tj")).collect();
+    let joined = Pieces::join(&pieces);
+    let parsed = joined.parse();
+    let edits: Vec<_> = parsed.ops.iter().map(|op| (op.span.clone(), b"(x) Tj".to_vec())).collect();
+    assert_eq!(edits.len(), n);
+    PIECE_VISITS.with(|c| c.set(0));
+    let out = joined.splice(edits);
+    let visits = PIECE_VISITS.with(|c| c.get());
+    assert!(visits <= 4 * n, "{visits} piece visits for {n} pieces");
+    assert!(out.iter().all(|p| p == b"(x) Tj"));
+    // A replacement spanning two pieces stays whole in the first and leaves the rest of the second.
+    let two = Pieces::join(&["q (a)", "Tj Q"]);
+    let tj = two.parse().ops.into_iter().find(|o| o.is("Tj")).map(|o| o.span).unwrap_or_default();
+    assert_eq!(two.splice([(tj, b"(b) Tj".to_vec())]), [b"q (b) Tj".to_vec(), b" Q".to_vec()]);
+}
+
 #[test]
 fn a_long_unreadable_number_is_read_once() {
     for junk in ["+", "5"] {
