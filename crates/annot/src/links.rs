@@ -420,6 +420,16 @@ pub fn find_urls(chars: &[char]) -> Vec<(std::ops::Range<usize>, String)> {
 /// line rectangle). Returns how many links were added.
 pub fn add_many(doc: &mut Document, links: &[(usize, Vec<[f64; 4]>, String)], style: &LinkStyle) -> Result<usize, AnnotError> {
     let pages = page_refs(doc)?;
+    // Check the whole batch first, so a bad entry fails it before any link object is created.
+    for (page, rects, uri) in links {
+        pages.get(*page).ok_or(AnnotError::NoSuchPage(*page))?;
+        if uri.trim().is_empty() {
+            return Err(AnnotError::Invalid("type the web address first".into()));
+        }
+        for r in rects {
+            checked_rect(*r)?;
+        }
+    }
     // Each page's `/Annots` is extended once, with its new links in the order given.
     let mut added: Vec<(ObjRef, Vec<Object>)> = Vec::new();
     let mut slot: std::collections::HashMap<ObjRef, usize> = std::collections::HashMap::new();

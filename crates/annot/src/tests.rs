@@ -1541,3 +1541,21 @@ fn many_links_extend_a_page_annotation_list_once() {
     assert_eq!(annots(&doc, page_refs(&doc).unwrap()[0]).len(), before + n);
     assert!(copied <= 4 * n, "{copied} annotation entries copied for {n} links");
 }
+
+/// A batch with one bad entry adds nothing: no link objects are left behind unattached.
+#[test]
+fn a_link_batch_with_a_bad_entry_creates_no_objects() {
+    let mut doc = fixture();
+    let page = page_refs(&doc).unwrap()[0];
+    let before = (annots(&doc, page).len(), doc.scan_objects().count());
+    let good = [10.0, 10.0, 50.0, 20.0];
+    let style = links::LinkStyle::default();
+    for bad in [
+        vec![(0, vec![good], "https://example.com".to_string()), (0, vec![good, [f64::NAN, 0.0, 10.0, 10.0]], "https://example.com".into())],
+        vec![(0, vec![good], "https://example.com".to_string()), (0, vec![good], "  ".into())],
+        vec![(0, vec![good], "https://example.com".to_string()), (99, vec![good], "https://example.com".into())],
+    ] {
+        assert!(links::add_many(&mut doc, &bad, &style).is_err());
+        assert_eq!((annots(&doc, page).len(), doc.scan_objects().count()), before);
+    }
+}
