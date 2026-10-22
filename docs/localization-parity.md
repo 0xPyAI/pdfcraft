@@ -78,8 +78,9 @@ help/docs polish (catalog and script work are already done), not missing UI stri
 | Finnish | `fi` | 2,674 entries | partial; AI-assisted, native proofreading pending | yes |
 | Albanian | `sq` | 2,344 entries | partial; not yet reviewed by a native speaker | no |
 | Catalan | `ca` | 2,592 entries | partial: no translated help, engine error details in English; native-speaker review by the contributor | no |
+| Romanian | `ro` | 2,673 entries (every bundled key) | partial; AI-assisted, not yet reviewed line by line by a native speaker | no |
 
-**15 other languages** ship (26 catalogs plus English = **27** interface languages in Preferences).
+**15 other languages** ship (27 catalogs plus English = **28** interface languages in Preferences).
 The entry counts without percentages were measured on 2026-10-12–14; they are not percentages of the older 2,143-key snapshot above. Their presence does not imply a detailed linguistic or runtime review.
 Acrobat languages PdfCraft lacks: Danish, Dutch, Norwegian, Swedish, Hebrew. Vietnamese is shipped here but not by Acrobat.
 
@@ -95,5 +96,6 @@ Acrobat languages PdfCraft lacks: Danish, Dutch, Norwegian, Swedish, Hebrew. Vie
 | 2026-10-14 | minor | Added Finnish (2,674 entries, AI-assisted) |
 | 2026-10-12 | minor | Added Albanian (`sq`): catalog, date names, Preferences entry |
 | 2026-10-14 | minor | Added Catalan (`ca`, 2,592 entries, measured 2026-10-14); retained existing language assessments |
+| 2026-10-15 | minor | Romanian (`ro`) catalog: 2,673 entries (every bundled key); three plural forms (`plural_ro`); not one of the twelve key languages, so the mean is unchanged |
 | 2026-10-12 | minor | Added current counts for Kazakh, Polish, Slovenian, Greek, Turkish and Lithuanian; retained existing language assessments and the original percentage snapshot |
 | 2026-10-10 | major | Created. Catalog counts measured from `crates/ui-egui/src/i18n/*.tsv` against the 2,143-key union; Acrobat's localizations from its bundle's `.lproj` and Sequences folder names |

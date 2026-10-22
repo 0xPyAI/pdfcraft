@@ -152,8 +152,8 @@ Portuguese and Spanish vs the current union). Detail and script notes: [localiza
 | Vietnamese | `vi` | 100% of current union | partial (dialogs / tooltips; no help) |
 
 Also shipped: Traditional Chinese, Russian, Bulgarian, Telugu, Hungarian, Ukrainian, Italian,
-Kazakh, Polish, Slovenian, Greek, Turkish, Lithuanian and Czech: **14 more catalogs**
-(23 interface languages including English).
+Kazakh, Polish, Slovenian, Greek, Turkish, Lithuanian, Romanian and Czech: **15 more catalogs**
+(24 interface languages including English).
 
 ## Upcoming
 
@@ -228,6 +228,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 - **2026-10-12 (gap 6, #1319, #1305, #1324):** Editing an XFA form keeps a radio item's stored text when it contains a space, so a later layout still selects it. Replace Pages on a split selection replaces those pages and leaves the gap; editing the dialog range still replaces the span. Marking a figure decorative rewrites only that figure's content stream, so a header, added text and unknown stream entries stay. Estimates unchanged.
 - **2026-10-15 (M14, gap 24):** `misc.localization` and `misc.installers` move from planned to partial. Localization: 22 catalogs ship, but Chinese shows tofu in releases, Telugu has no release font and Arabic is not mirrored. Installers: macOS and Windows releases are signed, Linux packages are not. The Acrobat menu diff itself remains open. Estimates unchanged.
 - **2026-10-15 (M14, PNG export):** Export ▸ Image as PNG, `pdfcraft-cli render` and the `page_render` automation/MCP tool write an opaque page as RGB at deflate level 3 instead of RGBA at the default level 6: the files stay the same size and are written 3–5× faster (a 300-dpi scan drawn at 220 dpi: 805 → 167 ms; a text page at 220 dpi: 70 → 40 ms; an annual-report page at 150 dpi: 179 → 64 ms). A page with translucent pixels is still written as RGBA. The automation tools use the engine's encoder instead of a copy of it. Estimates unchanged.
+- **2026-10-15 (G14, Romanian localization):** Added Romanian (`ro`, Română) as an interface and date language with a 2,673-entry catalog covering every bundled key, and a CLDR plural rule (`plural_ro`: one / few / other, "20 de pagini"). Locale tags `ro` / `ro-RO` / `ro_RO.UTF-8` / `ro-MD` resolve, so Auto picks it on Romanian Windows. Coverage and plural tests added. Status `partial` like the other catalogs (no translated help).
 - **2026-10-13 (G14, Vietnamese localization):** Added Vietnamese (`vi`, Tiếng Việt) as an interface and date language with a 2,591-entry catalog (`plural_none`) covering 100% of the current localizable key union (plus `theme`/`Appearance`). Locale tags `vi` / `vi-VN` / `vi_VN.UTF-8` resolve; calendar months use numeric `Tháng 1`…`12` / `tháng 1`…`12`. Native-speaker community review recorded. The twelve-language localization mean moves from ≈59% to ≈68%; weighted readiness ≈49% → ≈50%. Status stays `partial`: engine/OS details, document contents, filenames, CLI/MCP and external help stay outside the catalog by design.
 
 - **2026-10-13 (M3, typed zoom):** The right rail's zoom percentage is an editable field: type 150, 150% or 62.5 % and press Enter, Escape discards, and nonsense keeps the current zoom. The control channel's zoom option shares its parser, which now refuses zero, negative and non-finite values.

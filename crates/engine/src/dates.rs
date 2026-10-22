@@ -59,7 +59,7 @@ const AR_DAYS: [&str; 7] = ["الأحد", "الاثنين", "الثلاثاء", 
 
 /// The languages month and weekday names can be written in (Preferences ▸ Date format ▸ Language):
 /// the interface languages, in the same order and with the same names.
-pub static DATE_LANGUAGES: [DateLanguage; 27] = [
+pub static DATE_LANGUAGES: [DateLanguage; 28] = [
     DateLanguage {
         code: "en",
         name: "English",
@@ -478,6 +478,29 @@ pub static DATE_LANGUAGES: [DateLanguage; 27] = [
         days: ["diumenge", "dilluns", "dimarts", "dimecres", "dijous", "divendres", "dissabte"],
         days_short: ["dg.", "dl.", "dt.", "dx.", "dj.", "dv.", "ds."],
     },
+    // Romanian: month and weekday names are lowercase, also standing alone (`noiembrie 2023`).
+    DateLanguage {
+        code: "ro",
+        name: "Română",
+        months: [
+            "ianuarie",
+            "februarie",
+            "martie",
+            "aprilie",
+            "mai",
+            "iunie",
+            "iulie",
+            "august",
+            "septembrie",
+            "octombrie",
+            "noiembrie",
+            "decembrie",
+        ],
+        months_with_day: None,
+        months_short: ["ian.", "feb.", "mar.", "apr.", "mai", "iun.", "iul.", "aug.", "sept.", "oct.", "nov.", "dec."],
+        days: ["duminică", "luni", "marți", "miercuri", "joi", "vineri", "sâmbătă"],
+        days_short: ["dum.", "lun.", "mar.", "mie.", "joi", "vin.", "sâm."],
+    },
 ];
 
 /// The date language for `code` (any case), or `None` when there's none.
@@ -834,6 +857,23 @@ mod tests {
         assert_eq!(s.today_text_for_pdf(None, None).as_deref(), Ok("martedì 14 novembre"), "Italian names and accents can be written into a PDF");
         s.set_date_language(None).unwrap();
         assert_eq!(s.date_language(), None);
+    }
+
+    #[test]
+    fn romanian_month_and_weekday_names() {
+        let mut s = Session::new().with_clock(|| 1_700_000_000);
+        s.set_date_language(Some("ro")).unwrap();
+        assert_eq!(s.date_language(), Some("ro"));
+        s.set_date_format("d mmmm yyyy").unwrap();
+        assert_eq!(s.today_text(None, None).as_deref(), Ok("14 noiembrie 2023"));
+        s.set_date_format("mmmm yyyy").unwrap();
+        assert_eq!(s.today_text(None, None).as_deref(), Ok("noiembrie 2023"));
+        s.set_date_format("ddd, d mmm").unwrap();
+        assert_eq!(s.today_text(None, None).as_deref(), Ok("mar., 14 nov."));
+        // `14 noiembrie 2023` is WinAnsi; the weekday `marți` (ț, comma below) is not, so Fill & Sign refuses that format.
+        assert_eq!(s.today_text_for_pdf(Some("d mmmm yyyy"), Some("ro")).as_deref(), Ok("14 noiembrie 2023"));
+        let e = s.today_text_for_pdf(Some("dddd d mmmm yyyy"), Some("ro")).unwrap_err();
+        assert!(e.contains("can't be written into the PDF yet"), "{e}");
     }
 
     #[test]
