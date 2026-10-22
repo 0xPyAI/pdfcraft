@@ -2052,6 +2052,10 @@ fn word_num(n: f64, cents: bool) -> String {
     }
     let cents_total = (n * 100.0).round() as u64;
     let whole = if cents { cents_total / 100 } else { n.trunc() as u64 };
+    if whole >= 1_000_000_000_000 {
+        // Rounding to cents carried past the supported range.
+        return String::new();
+    }
     let mut parts = Vec::new();
     let groups = [(1_000_000_000u64, "Billion"), (1_000_000, "Million"), (1_000, "Thousand")];
     let mut rest = whole;
@@ -2645,6 +2649,7 @@ mod tests {
         assert_eq!(parse_date("2/3/01", "M/D/YY"), Some((2001, 2, 3)));
         assert_eq!(format_date(2001, 2, 3, "MMMM D, YYYY"), "February 3, 2001");
         assert_eq!(word_num(1234.5, true), "One Thousand Two Hundred Thirty-Four Dollars And 50 Cents");
+        assert_eq!(word_num(999_999_999_999.999, true), "");
         assert_eq!(num_text(3.0), "3");
         assert_eq!(num_text(2.5), "2.5");
         assert_eq!(num_text(0.1 + 0.2), "0.3");
