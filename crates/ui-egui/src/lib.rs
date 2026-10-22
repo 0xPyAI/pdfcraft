@@ -1426,6 +1426,10 @@ impl PdfCraftApp {
         {
             view.open_organize();
         }
+        // The document shows, not the expanded All tools view over it (whichever workspace opens).
+        if activate {
+            self.all_tools_full = false;
+        }
         if activate && let Some(mode) = self.mode_override {
             // Explicit mode options do not reset independent --tool / --left choices.
             self.mode = mode;
@@ -2286,6 +2290,10 @@ impl PdfCraftApp {
     /// again and applies a paragraph still open in the editor.
     fn enter_mode(&mut self, mode: Mode) {
         self.mode = mode;
+        // Another workspace puts the expanded All tools view away.
+        if mode != Mode::AllTools {
+            self.all_tools_full = false;
+        }
         if mode == Mode::Edit {
             self.quick_tool = QuickTool::EditText;
         } else if matches!(self.quick_tool, QuickTool::EditText | QuickTool::AddText) {
@@ -2296,6 +2304,15 @@ impl PdfCraftApp {
         if mode == Mode::Read {
             self.quick_tool = QuickTool::Select;
         }
+    }
+
+    /// Fill the workspace with the expanded All tools view, entering All tools the way the mode
+    /// bar does: leaving Read restores its right panel and leaving Edit puts the editing tool down.
+    pub(crate) fn expand_all_tools(&mut self) {
+        if self.mode != Mode::AllTools {
+            self.switch_mode(Mode::AllTools, true);
+        }
+        self.all_tools_full = true;
     }
 
     /// Back to the Select tool from an editing tool. A paragraph still open in the editor is
@@ -2316,10 +2333,6 @@ impl PdfCraftApp {
     /// Read mode hides the quick toolbar, so entering it also puts the current tool down.
     pub(crate) fn switch_mode(&mut self, mode: Mode, select_tools: bool) {
         let was_read = self.mode == Mode::Read;
-        // Another workspace puts the expanded All tools view away.
-        if mode != Mode::AllTools {
-            self.all_tools_full = false;
-        }
         if select_tools {
             self.select_mode(mode);
         } else {
@@ -2730,10 +2743,7 @@ impl PdfCraftApp {
                     _ => Some(Dialog::About),
                 }
             }
-            ("tools", _) if value == "full" => {
-                self.mode = Mode::AllTools;
-                self.all_tools_full = true;
-            }
+            ("tools", _) if value == "full" => self.expand_all_tools(),
             ("tools", _) => {
                 self.all_tools_full = false;
                 self.all_tools_expanded = value != "collapsed";

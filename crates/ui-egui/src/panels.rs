@@ -66,8 +66,7 @@ fn all_tools(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
     // Labels distinct from the Combine grid's Expand and Collapse, which can show beside them.
     let (expand, close) = panel_header(ui, t, "All tools", Some(("maximize-2", tl!("Expand all tools"))));
     if expand {
-        app.all_tools_full = true;
-        app.mode = crate::Mode::AllTools;
+        app.expand_all_tools();
     }
     if close {
         app.left_open = false;

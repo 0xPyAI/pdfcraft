@@ -191,6 +191,51 @@ fn another_workspace_from_the_mode_option_puts_the_expanded_all_tools_away() {
 }
 
 #[test]
+fn opening_a_document_puts_the_expanded_all_tools_away() {
+    use pdfcraft_ui_egui::Mode;
+    // All tools as the default workspace: no workspace change, but the document must show.
+    let mut app = PdfCraftApp::new();
+    app.set_option("tools", "full").unwrap();
+    app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens");
+    assert!(!app.all_tools_full, "the document shows, not the catalogue over it");
+    // Read as the default workspace: coming back to All tools later shows the sidebar.
+    let mut app = PdfCraftApp::new();
+    app.set_option("default-mode", "read").unwrap();
+    app.set_option("tools", "full").unwrap();
+    app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens");
+    assert_eq!(app.mode, Mode::Read);
+    assert!(!app.all_tools_full);
+}
+
+#[test]
+fn expanding_all_tools_from_read_mode_restores_the_right_panel() {
+    use pdfcraft_ui_egui::{Mode, RightPanel};
+    let mut h = harness(|app| app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens"));
+    h.state_mut().right = Some(RightPanel::Bookmarks);
+    h.state_mut().execute("view.read_mode");
+    h.run_steps(3);
+    assert_eq!((h.state().mode, h.state().right), (Mode::Read, None), "Read mode hides the panel");
+    h.state_mut().set_option("tools", "full").unwrap();
+    h.run_steps(3);
+    assert!(h.state().all_tools_full);
+    assert_eq!((h.state().mode, h.state().right), (Mode::AllTools, Some(RightPanel::Bookmarks)));
+}
+
+#[test]
+fn expanding_all_tools_from_edit_puts_edit_text_down() {
+    use pdfcraft_ui_egui::{LeftPanel, Mode, QuickTool};
+    let mut h = harness(|app| app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens"));
+    h.get_by_label("Edit").click();
+    h.run_steps(3);
+    assert_eq!(h.state().quick_tool, QuickTool::EditText);
+    h.state_mut().set_option("tools", "full").unwrap();
+    h.run_steps(3);
+    assert!(h.state().all_tools_full);
+    assert_eq!((h.state().mode, h.state().quick_tool), (Mode::AllTools, QuickTool::Select));
+    assert_eq!(h.state().left, LeftPanel::AllTools, "collapsing goes back to the All tools list");
+}
+
+#[test]
 fn opening_a_pdf_shows_comments_and_bookmarks() {
     let mut h = harness(|app| app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens"));
     // Documents with comments open on the Comments panel, like Acrobat.
