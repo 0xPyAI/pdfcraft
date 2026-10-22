@@ -65,16 +65,19 @@ fn a_file_option_refuses_a_value_that_is_another_option() {
 /// is as far as these lines get here.
 #[test]
 fn a_file_whose_name_starts_with_dashes_is_still_reachable() {
-    for args in [
-        vec!["extract", "missing.pdf", "--pages", "1", "--out", "./--dash.pdf"],
-        vec!["edit", "missing.pdf", "--out", "./--dash.pdf"],
-        vec!["info", "./--dash.pdf"],
+    // The error is about the file the command could not open, so the test asks which file it
+    // names -- not how the OS words "not found", which differs on Windows (#3849 review).
+    for (names, args) in [
+        ("missing.pdf", vec!["extract", "missing.pdf", "--pages", "1", "--out", "./--dash.pdf"]),
+        ("missing.pdf", vec!["edit", "missing.pdf", "--out", "./--dash.pdf"]),
+        ("./--dash.pdf", vec!["info", "./--dash.pdf"]),
     ] {
         let out = Command::new(BIN).args(&args).output().expect("run cli");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success(), "{args:?}: no such file either way");
-        assert!(stderr.contains("No such file"), "{args:?}: {stderr}");
-        assert!(!stderr.contains("needs a value"), "{args:?}: {stderr}");
+        assert!(stderr.contains(names), "{args:?}: the error is about {names}: {stderr}");
+        // Not a usage error: the `./--dash.pdf` reached the command as a file name.
+        assert!(!stderr.contains("needs a value") && !stderr.contains("unknown option"), "{args:?}: {stderr}");
     }
 }
 
@@ -86,8 +89,10 @@ fn a_flag_that_takes_no_value_does_not_swallow_the_file() {
         let out = Command::new(BIN).args(&args).output().expect("run cli");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success(), "{args:?}");
-        assert!(stderr.contains("missing.pdf") && stderr.contains("No such file"), "{args:?}: {stderr}");
+        // Which file the error is about, not how the OS says it is missing (#3849 review).
+        assert!(stderr.contains("missing.pdf"), "{args:?}: the error is about the file: {stderr}");
         assert!(!stderr.contains("missing file"), "the file was found, and then not found: {stderr}");
+        assert!(!stderr.contains("needs a value"), "{args:?}: {stderr}");
     }
 }
 
