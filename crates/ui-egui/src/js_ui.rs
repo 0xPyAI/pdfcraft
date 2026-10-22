@@ -271,7 +271,7 @@ pub(crate) fn preferences_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tok
             if ui.selectable_value(&mut app.language, crate::i18n::AUTO.to_string(), tl!("Auto")).clicked() {
                 ui.close();
             }
-            for language in crate::i18n::Lang::all() {
+            for language in crate::i18n::Lang::for_picker() {
                 if ui.selectable_value(&mut app.language, language.code().to_string(), language.name()).clicked() {
                     ui.close();
                 }
