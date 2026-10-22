@@ -4549,6 +4549,110 @@ fn image_pixels_follow_the_frame_while_a_corner_is_dragged() {
     }
 }
 
+/// Red pixels in `r`: the test picture.
+fn red(pixels: &image::RgbaImage, r: egui::Rect) -> usize {
+    let (x0, y0, x1, y1) = (r.left().max(0.0) as u32, r.top().max(0.0) as u32, r.right() as u32, r.bottom() as u32);
+    (y0..y1.min(pixels.height()))
+        .flat_map(|y| (x0..x1.min(pixels.width())).map(move |x| (x, y)))
+        .filter(|(x, y)| matches!(pixels.get_pixel(*x, *y).0, [r, g, b, _] if r > 150 && g < 90 && b < 90))
+        .count()
+}
+
+/// A resized picture is applied when the corner is let go, but the page raster still has it at
+/// its old size until the page is rendered again. Until then it stays drawn at its new size and
+/// blanked at its old one; the old one used to show again for those frames.
+#[test]
+fn a_resized_image_keeps_its_new_size_until_the_page_is_redrawn() {
+    use pdfcraft_cos::{Dict, Document, Object, Stream, write_incremental};
+    let mut doc = Document::open(std::sync::Arc::new(fixture(1))).unwrap();
+    let mut image = Dict::new();
+    image.set(b"Type".to_vec(), Object::name("XObject"));
+    image.set(b"Subtype".to_vec(), Object::name("Image"));
+    image.set(b"Width".to_vec(), Object::Int(1));
+    image.set(b"Height".to_vec(), Object::Int(1));
+    image.set(b"BitsPerComponent".to_vec(), Object::Int(8));
+    image.set(b"ColorSpace".to_vec(), Object::name("DeviceRGB"));
+    let image = doc.add(Object::Stream(Stream::flate(image, &[200, 30, 30])));
+    let page = pdfcraft_model::pages(&doc).remove(0);
+    let contents = doc.add(Object::Stream(Stream::flate(Dict::new(), b"q 80 0 0 80 60 40 cm /Im0 Do Q")));
+    let mut resources = doc.resolve(page.dict.get(b"Resources").unwrap()).as_dict().unwrap().clone();
+    let mut xo = Dict::new();
+    xo.set(b"Im0".to_vec(), Object::Ref(image));
+    resources.set(b"XObject".to_vec(), Object::Dict(xo));
+    doc.update_dict(page.obj, |d| {
+        d.set(b"Resources".to_vec(), Object::Dict(resources));
+        d.set(b"Contents".to_vec(), Object::Ref(contents));
+    })
+    .unwrap();
+    let bytes = write_incremental(&doc, &Default::default()).unwrap();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 1100.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("picture.pdf", None, bytes).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.state_mut().views[0].set_zoom(1.2);
+    h.run_steps(4);
+    support::wait_until(&mut h, "the page raster", |app| !app.render_pending());
+    let page = h.state().views[0].page_screen_rect(0).unwrap();
+    let at = |x: f32, y: f32| egui::pos2(page.left() + x / 200.0 * page.width(), page.top() + (300.0 - y) / 300.0 * page.height());
+    click_at(&mut h, at(100.0, 80.0));
+    assert!(h.state().views[0].image_selection.is_some(), "the picture is selected");
+    support::wait_until(&mut h, "the page raster", |app| !app.render_pending());
+    // From 60..140 × 40..120 to half its size, keeping its lower left corner.
+    let (grip, to) = (at(140.0, 120.0), at(100.0, 80.0));
+    let kept = egui::Rect::from_two_pos(at(62.0, 42.0), at(98.0, 78.0));
+    let gone = egui::Rect::from_two_pos(at(104.0, 84.0), at(138.0, 118.0));
+    h.hover_at(grip);
+    h.run_steps(1);
+    h.drag_at(grip);
+    h.run_steps(1);
+    for k in 1..=4 {
+        h.hover_at(grip + (to - grip) * (k as f32 / 4.0));
+        h.run_steps(1);
+    }
+    // While dragged, no outline stays where the picture was.
+    let old = egui::Rect::from_two_pos(at(60.0, 40.0), at(140.0, 120.0));
+    let trailing = h.output().shapes.iter().any(|shape| {
+        matches!(&shape.shape, egui::Shape::Rect(r) if r.stroke.width == 0.75 && (r.rect.min - old.min).length() < 2.0 && (r.rect.max - old.max).length() < 2.0)
+    });
+    assert!(!trailing, "the dragged picture's outline trails behind it");
+    h.state_mut().views[0].hold_rasters = true;
+    h.drop_at(to);
+    for frame in 0..4 {
+        h.step();
+        let pixels = h.render().unwrap();
+        assert!(red(&pixels, kept) > 100, "frame {frame} after the release: the picture is not at its new size");
+        assert_eq!(red(&pixels, gone), 0, "frame {frame} after the release: the picture shows at its old size");
+    }
+    // Resized again before the page is drawn: the raster still has the first size, so that is
+    // what stays blanked while the corner moves.
+    let (grip, to) = (to, at(80.0, 60.0));
+    let again = egui::Rect::from_two_pos(at(62.0, 42.0), at(78.0, 58.0));
+    h.hover_at(grip);
+    h.run_steps(1);
+    h.drag_at(grip);
+    h.run_steps(1);
+    for k in 1..=4 {
+        h.hover_at(grip + (to - grip) * (k as f32 / 4.0));
+        h.run_steps(1);
+    }
+    let pixels = h.render().unwrap();
+    assert!(red(&pixels, again) > 20, "the second drag draws the picture at its new size");
+    assert_eq!(red(&pixels, gone), 0, "the second drag shows the picture at its first size");
+    h.drop_at(to);
+    h.run_steps(2);
+    let pixels = h.render().unwrap();
+    assert_eq!(red(&pixels, gone), 0, "after the second release");
+    h.state_mut().views[0].hold_rasters = false;
+    support::wait_until(&mut h, "the page drawn with the resized picture", |app| !app.render_pending());
+    h.run_steps(2);
+    let pixels = h.render().unwrap();
+    assert!(red(&pixels, again) > 20 && red(&pixels, gone) == 0, "the page raster has the picture at its new size");
+}
+
 /// Exercise actual pointer gestures on each cropped placement, without capturing private pixels.
 #[test]
 #[ignore = "requires an explicitly supplied local PDF with cropped artwork"]

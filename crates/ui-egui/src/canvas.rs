@@ -1049,6 +1049,18 @@ impl DocView {
         self.pages.get(&page).map(|p| p.tex.id())
     }
 
+    /// Whether `page` is still drawn, somewhere, as it was before its last change: its whole-page
+    /// raster (a tiled page's backdrop too) or any of its tiles waits for a replacement.
+    /// Whether `page`'s whole-page raster (a tiled page's backdrop too) is still the one from
+    /// before its last change, whatever its tiles are.
+    pub(crate) fn page_raster_out_of_date(&self, page: usize) -> bool {
+        self.pages.get(&page).is_some_and(|p| p.tag == STALE_TAG)
+    }
+
+    pub(crate) fn page_out_of_date(&self, page: usize) -> bool {
+        self.pages.get(&page).is_some_and(|p| p.tag == STALE_TAG) || self.stale_tiles.iter().any(|k| k.0 == page)
+    }
+
     /// The print preview's picture of `page`: the sheet raster when it has arrived, otherwise the
     /// thumbnail.
     pub(crate) fn page_preview(&self, page: usize) -> Option<egui::TextureId> {
@@ -6499,5 +6511,121 @@ trailer << /Root 1 0 R >>
         assert_eq!(v.find.as_ref().unwrap().current, Some(0));
         assert_eq!(v.find.as_ref().unwrap().matches, vec![(1, 5..9)]);
         assert!(v.goto.is_none());
+    }
+
+    /// A page whose picture moved can get its whole-page raster back before its last stale tile.
+    /// From then on the raster has the picture where it went: it is drawn from there, not from
+    /// where it was (which the raster now shows empty), and another drag starts from there too.
+    #[test]
+    fn a_moved_picture_is_drawn_from_the_fresh_raster_while_a_tile_is_still_stale() {
+        let content = b"q 60 0 0 60 40 260 cm /Im0 Do Q";
+        let objs: Vec<Vec<u8>> = vec![
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /XObject << /Im0 5 0 R >> >> >>".to_vec(),
+            [format!("<< /Length {} >>\nstream\n", content.len()).as_bytes(), content.as_slice(), b"\nendstream"].concat(),
+            [
+                b"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Length 3 >>\nstream\n".as_slice(),
+                &[200, 30, 30],
+                b"\nendstream",
+            ]
+            .concat(),
+        ];
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, o) in objs.iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+            bytes.extend_from_slice(o);
+            bytes.extend_from_slice(b"\nendobj\n");
+        }
+        let xref = bytes.len();
+        bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+        for o in offsets {
+            bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1400.0, 1100.0)).build_eframe(move |_cc| {
+            let mut app = PdfCraftApp::new();
+            app.set_option("language", "en").unwrap();
+            app.open_bytes("picture.pdf", None, bytes.clone()).unwrap();
+            app.set_option("zoom", "100").unwrap();
+            app.quick_tool = QuickTool::EditText;
+            app
+        });
+        let settle = |h: &mut egui_kittest::Harness<'static, PdfCraftApp>| {
+            for _ in 0..400 {
+                h.step();
+                if !h.state().render_pending() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        };
+        h.run_steps(4);
+        settle(&mut h);
+        let page = h.state().views[0].page_screen_rect(0).unwrap();
+        let at = |x: f32, y: f32| egui::pos2(page.left() + x / 300.0 * page.width(), page.top() + (400.0 - y) / 400.0 * page.height());
+        let red = |pixels: &image::RgbaImage, r: Rect| {
+            let (w, hh) = (pixels.width(), pixels.height());
+            (r.top().max(0.0) as u32..(r.bottom() as u32).min(hh))
+                .flat_map(|y| (r.left().max(0.0) as u32..(r.right() as u32).min(w)).map(move |x| (x, y)))
+                .filter(|(x, y)| matches!(pixels.get_pixel(*x, *y).0, [r, g, b, _] if r > 150 && g < 90 && b < 90))
+                .count()
+        };
+        let (old, new) = (Rect::from_two_pos(at(42.0, 262.0), at(98.0, 318.0)), Rect::from_two_pos(at(182.0, 82.0), at(238.0, 138.0)));
+        // Select the picture and drag it, without overlap, from (40, 260) to (180, 80).
+        let drag = |h: &mut egui_kittest::Harness<'static, PdfCraftApp>, from: Pos2, to: Pos2, release: bool| {
+            h.hover_at(from);
+            h.run_steps(1);
+            h.drag_at(from);
+            h.run_steps(1);
+            for k in 1..=4 {
+                h.hover_at(from + (to - from) * (k as f32 / 4.0));
+                h.run_steps(1);
+            }
+            if release {
+                h.drop_at(to);
+                h.step();
+            }
+        };
+        let (grab, put) = (at(70.0, 290.0), at(210.0, 110.0));
+        h.hover_at(grab);
+        h.run_steps(1);
+        h.drag_at(grab);
+        h.run_steps(1);
+        h.drop_at(grab);
+        h.run_steps(3);
+        assert!(h.state().views[0].image_selection.is_some(), "the picture is selected");
+        h.state_mut().views[0].hold_rasters = true;
+        drag(&mut h, grab, put, true);
+        // One tile stays stale, as a tile result arriving after the whole-page raster would; then
+        // the whole-page raster is let through.
+        let tile = h.ctx.load_texture("stale-tile", egui::ColorImage::new([1, 1], vec![Color32::TRANSPARENT]), TextureOptions::LINEAR);
+        h.state_mut().views[0].tiles.insert((0, 1, 0, 0), tile);
+        h.state_mut().views[0].stale_tiles.insert((0, 1, 0, 0));
+        h.state_mut().views[0].hold_rasters = false;
+        for _ in 0..400 {
+            h.step();
+            if !h.state().views[0].page_raster_out_of_date(0) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(!h.state().views[0].page_raster_out_of_date(0), "the whole-page raster is fresh");
+        assert!(h.state().views[0].page_out_of_date(0), "a tile is still stale");
+        h.run_steps(2);
+        let pixels = h.render().unwrap();
+        assert!(red(&pixels, new) > 100, "the picture shows where it went");
+        assert_eq!(red(&pixels, old), 0, "and not where it was");
+        // Another drag in that interval takes its pixels from where the raster has them.
+        let further = at(210.0, 200.0);
+        drag(&mut h, put, further, false);
+        let pixels = h.render().unwrap();
+        let moving = Rect::from_two_pos(at(182.0, 172.0), at(238.0, 228.0));
+        assert!(red(&pixels, moving) > 100, "the dragged picture is drawn from the fresh raster");
+        assert_eq!(red(&pixels, old), 0, "nothing shows where it first was");
+        h.state_mut().views[0].stale_tiles.clear();
+        h.state_mut().views[0].tiles.clear();
     }
 }
