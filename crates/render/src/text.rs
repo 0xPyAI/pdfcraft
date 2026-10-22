@@ -1420,13 +1420,15 @@ pub fn layout(glyphs: Vec<TextGlyph>) -> PageText {
 fn arrange(glyphs: &[TextGlyph]) -> (Vec<usize>, Vec<u32>, Vec<bool>) {
     // Drop "fake bold" duplicates: the same character redrawn at (almost) the same place. A redraw
     // also overlaps most of its own width: a narrow letter in condensed text (80 Tz and below) sits
-    // closer than a fifth of its height to its double, as the second "l" of "Alle" (#1467).
+    // closer than a fifth of its height to its double, as the second "l" of "Alle" (#1467), and
+    // OCR layers squeeze words to 20 Tz and below (#2457). Only a zero-width mark, which has no
+    // width to overlap, is matched by its height alone.
     let mut keep = vec![true; glyphs.len()];
     for i in 1..glyphs.len() {
         let g = &glyphs[i];
         let h = (g.rect[3] - g.rect[1]).max(0.1);
         let w = g.rect[2] - g.rect[0];
-        let dx = if w > 0.05 * h { (h * 0.2).min(w * 0.5) } else { h * 0.2 };
+        let dx = if w > 0.0 { (h * 0.2).min(w * 0.5) } else { h * 0.2 };
         for j in (i.saturating_sub(4)..i).rev() {
             let p = &glyphs[j];
             if keep[j] && p.text == g.text && (p.rect[0] - g.rect[0]).abs() < dx && (p.rect[1] - g.rect[1]).abs() < h * 0.2 {
@@ -2172,6 +2174,49 @@ mod tests {
             // Each letter redrawn a fifth of a point to the right is still one letter.
             let bold: Vec<TextGlyph> = v.iter().flat_map(|c| [c.clone(), g(&c.text, c.rect[0] + 0.2, 10.0, c.rect[2] + 0.2)]).collect();
             assert_eq!(layout(bold).plain_text(), "Alle", "fake bold at {scale} horizontal scaling");
+        }
+    }
+
+    /// #2457: OCR text layers squeeze each word into its box down to 20 Tz and below, where a
+    /// narrow letter is less than a twentieth of its height wide. Doubled letters, and letters
+    /// repeated two or three places on, are still letters there, not redraws.
+    #[test]
+    fn ocr_condensed_double_letters_are_kept() {
+        // Helvetica advances, in thousandths of an em.
+        let adv = |c: char| match c {
+            'M' => 833.0,
+            'K' | 'B' => 667.0,
+            'W' => 944.0,
+            'I' | 't' | 'f' => 278.0,
+            'i' | 'l' => 222.0,
+            'm' => 833.0,
+            'r' => 333.0,
+            's' => 500.0,
+            _ => 556.0,
+        };
+        for scale in [0.2, 0.1, 0.05] {
+            for word in ["Hallo", "Mitte", "Wille", "Kommission", "Illustration", "still", "Brunnen", "Kaffee"] {
+                let mut v = Vec::new();
+                let mut x = 10.0;
+                for c in word.chars() {
+                    let w = adv(c) / 100.0 * scale;
+                    v.push(g(&c.to_string(), x, 10.0, x + w));
+                    x += w;
+                }
+                assert_eq!(layout(v.clone()).plain_text(), word, "at {scale} horizontal scaling");
+                // Each letter drawn twice at the same place is still one letter.
+                let bold: Vec<TextGlyph> = v.iter().flat_map(|c| [c.clone(), c.clone()]).collect();
+                assert_eq!(layout(bold).plain_text(), word, "fake bold at {scale} horizontal scaling");
+                // And redrawn a quarter of its own width to the right (the match reaches half of it).
+                let shifted: Vec<TextGlyph> = v
+                    .iter()
+                    .flat_map(|c| {
+                        let d = (c.rect[2] - c.rect[0]) * 0.25;
+                        [c.clone(), g(&c.text, c.rect[0] + d, 10.0, c.rect[2] + d)]
+                    })
+                    .collect();
+                assert_eq!(layout(shifted).plain_text(), word, "shifted fake bold at {scale} horizontal scaling");
+            }
         }
     }
 
