@@ -1295,7 +1295,7 @@ impl Renderer {
                             };
                             self.ctx.set_paint_transform(paint_transform);
                             self.ctx.set_paint(PaintType::Image(image));
-                            return clip_path;
+                            return PaintSetup::Clip(clip_path);
                         }
                         // PdfCraft patch: the cell pixmap is `step × scale` pixels, which only the
                         // u16 cast below bounded (a fuzzed /XStep far beyond /BBox gave 65535² cells).
