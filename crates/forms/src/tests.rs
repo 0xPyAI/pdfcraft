@@ -2981,3 +2981,20 @@ fn page_walk_skips_repeated_and_cyclic_kids_without_queueing_them() {
     assert_eq!(walk.next(), None);
     assert_eq!(page_refs(&doc), [page]);
 }
+
+/// A Calculate script naming thousands of fields is merged with the field's other reads in one
+/// pass, not by searching the names so far for each one.
+#[test]
+fn a_script_reading_many_fields_merges_its_reads_in_one_pass() {
+    use crate::calc_order::NAMES_COMPARED;
+    let mut doc = one_page();
+    add_field(&mut doc, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: false }, Some("total")).unwrap();
+    let n = 2_000;
+    let script: String = (0..n).map(|i| format!("getField(\"f{i}\").value + ")).collect::<String>() + "0";
+    set_field_script(&mut doc, "total", "calculate", Some(&format!("event.value = {script};"))).unwrap();
+    NAMES_COMPARED.with(|c| c.set(0));
+    let order = calculation_order(&doc, &fields(&doc));
+    assert_eq!(order.fields[0].reads.len(), n);
+    let compared = NAMES_COMPARED.with(std::cell::Cell::get);
+    assert!(compared <= 4 * n, "{compared} names compared for {n} reads");
+}
