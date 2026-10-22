@@ -109,7 +109,8 @@ struct Walker<'a> {
     pieces: &'a Pieces,
     out: Vec<FilledRect>,
     ops_seen: usize,
-    /// Decoded bytes left for the page, its forms included: spending it fails the audit.
+    /// Decoded bytes and form entries left for the page, its forms included: spending either
+    /// fails the audit.
     budget: DecodeBudget,
 }
 
@@ -273,6 +274,9 @@ impl<'a> Walker<'a> {
             })
             .unwrap_or(Matrix::IDENTITY);
         let sub_resources = dict.get(b"Resources").map(|o| self.doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
+        if !self.budget.enter_form() {
+            return Err(AuditError::TooManyForms);
+        }
         // A form stream that cannot be decoded fails the audit: it might hide a cover.
         let data = self.budget.decode_strict(stream)?;
         let ops = parse(&data).ops;
@@ -306,8 +310,8 @@ fn ext_alpha(doc: &Document, resources: &Dict, name: &[u8]) -> f64 {
 /// Every opaque filled rectangle drawn by a page's content (and its form XObjects), with paint
 /// positions. A page's content streams are walked once, joined, with one graphics state, so
 /// state set in an earlier stream is still in force in the later ones. Any content stream that
-/// cannot be decoded, or content and forms that decode past one page's [`DecodeBudget`] in all,
-/// is an audit failure, never an empty result.
+/// cannot be decoded, or content and forms that decode or enter past one page's [`DecodeBudget`]
+/// in all, is an audit failure, never an empty result.
 pub fn filled_rects(doc: &Document, page: &Dict) -> Result<Vec<FilledRect>, AuditError> {
     let resources = page.get(b"Resources").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
     let contents: Vec<Object> = match page.get(b"Contents") {

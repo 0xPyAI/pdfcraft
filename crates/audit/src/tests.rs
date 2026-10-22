@@ -611,3 +611,17 @@ fn repeated_stream_references_share_one_decode_budget() {
     let page: Dict = [(b"Contents".to_vec(), Object::Ref(draws)), (b"Resources".to_vec(), Object::Dict(resources))].into_iter().collect();
     assert!(crate::cover::filled_rects(&doc, &page).is_err(), "repeated form draws");
 }
+
+#[test]
+fn form_entries_past_the_page_allowance_fail_the_audit() {
+    use pdfcraft_cos::{Dict, Document, Object, Stream};
+    // An empty form decodes to no bytes, so only the count of entries bounds drawing it again.
+    let mut doc = Document::new_empty();
+    let form_dict: Dict = [(b"Subtype".to_vec(), Object::Name(b"Form".to_vec()))].into_iter().collect();
+    let form = doc.add(Stream::from_raw(form_dict, Vec::new()));
+    let draws = doc.add(Stream::from_raw(Dict::new(), "/X Do ".repeat(pdfcraft_cos::MAX_PAGE_FORMS + 1).into_bytes()));
+    let xobjects: Dict = [(b"X".to_vec(), Object::Ref(form))].into_iter().collect();
+    let resources: Dict = [(b"XObject".to_vec(), Object::Dict(xobjects))].into_iter().collect();
+    let page: Dict = [(b"Contents".to_vec(), Object::Ref(draws)), (b"Resources".to_vec(), Object::Dict(resources))].into_iter().collect();
+    assert!(matches!(crate::cover::filled_rects(&doc, &page), Err(crate::AuditError::TooManyForms)));
+}
