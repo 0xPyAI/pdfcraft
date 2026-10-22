@@ -1278,3 +1278,31 @@ fn marking_decorative_refuses_content_past_the_decode_budget() {
     assert!(mark_decorative(&mut doc, ObjRef::new(7, 0)).is_err());
     assert_eq!(figures(&doc).len(), 2, "the figure stays");
 }
+
+/// Text past the page's decode budget is unread, so a page that shows images and no text so far
+/// can't be called image-only, nor its content all tagged.
+#[test]
+fn content_past_the_decode_budget_needs_a_manual_check() {
+    use pdfcraft_cos::{Dict, Object, ObjRef, Stream};
+    let mut doc = pdf(
+        &[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /XObject << /Im 5 0 R >> /Font << /F1 6 0 R >> >> >>".into(),
+            stream("/Artifact BMC q 200 0 0 200 0 0 cm /Im Do Q EMC"),
+            "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n\u{0}\nendstream"
+                .into(),
+            FONT.into(),
+        ],
+        "",
+    );
+    let filler = doc.add(Stream::flate(Dict::new(), &vec![b' '; 1 << 20]));
+    let text = doc.add(Stream::from_raw(Dict::new(), b"BT /F1 12 Tf 10 10 Td (Hello) Tj ET".to_vec()));
+    let mut contents = vec![Object::Ref(ObjRef::new(4, 0))];
+    contents.extend(std::iter::repeat_n(Object::Ref(filler), 256));
+    contents.push(Object::Ref(text));
+    doc.update_dict(ObjRef::new(3, 0), |p| p.set(b"Contents".to_vec(), Object::Array(contents))).unwrap();
+    let report = check(&doc, &Options::default());
+    assert_eq!(status(&report, Rule::ImageOnly), Status::Manual);
+    assert_eq!(status(&report, Rule::TaggedContent), Status::Manual);
+}

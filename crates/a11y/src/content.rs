@@ -20,6 +20,8 @@ pub(crate) struct Scan {
     pub untagged: BTreeMap<usize, usize>,
     /// Page → fonts used.
     pub fonts: BTreeMap<usize, BTreeSet<ObjRef>>,
+    /// Pages read only in part: content or forms past the page's decode budget are missing.
+    pub incomplete: BTreeSet<usize>,
 }
 
 const MAX_FORM_DEPTH: usize = 12;
@@ -32,6 +34,9 @@ impl Scan {
             let res = page.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
             let mut budget = DecodeBudget::page();
             let data = crate::alt::page_content_within(doc, &page.dict, &mut budget);
+            if budget.remaining() == 0 {
+                s.incomplete.insert(p);
+            }
             let mut w = Walk { doc, scan: &mut s, page: p, forms: HashSet::new(), budget };
             w.content(&data, &res, false, 0);
         }
@@ -100,7 +105,20 @@ impl Walk<'_> {
                             self.scan.has_images = true;
                             untagged += usize::from(!inside);
                         }
-                        Some(b"Form") if depth < MAX_FORM_DEPTH && !self.forms.contains(&r) && self.budget.enter_form() => {
+                        Some(b"Form") if depth < MAX_FORM_DEPTH && !self.forms.contains(&r) => {
+                            if !self.budget.enter_form() {
+                                self.scan.incomplete.insert(self.page);
+                                continue;
+                            }
+                            let data = match self.budget.decode(x) {
+                                Ok(data) => data,
+                                Err(_) => {
+                                    if self.budget.exhausted() {
+                                        self.scan.incomplete.insert(self.page);
+                                    }
+                                    continue;
+                                }
+                            };
                             self.forms.insert(r);
                             let inner = x
                                 .dict
@@ -108,7 +126,6 @@ impl Walk<'_> {
                                 .map(|o| self.doc.resolve(o))
                                 .and_then(|o| o.as_dict().cloned())
                                 .unwrap_or_else(|| res.clone());
-                            let data = self.budget.decode(x).unwrap_or_default();
                             self.content(&data, &inner, inside, depth + 1);
                             self.forms.remove(&r);
                         }
