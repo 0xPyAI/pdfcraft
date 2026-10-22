@@ -53,18 +53,34 @@ impl DecodeBudget {
     /// `stream` decoded like [`Stream::decoded`], charged to the allowance. Fails, without
     /// decoding, once the allowance is spent.
     pub fn decode(&mut self, stream: &Stream) -> Result<Vec<u8>, CosError> {
-        self.charge(stream, Stream::decoded_within_typed)
+        self.charge(stream, usize::MAX, Stream::decoded_within_typed)
+    }
+
+    /// Like [`DecodeBudget::decode`], for a stream with a tighter bound of its own: decoding
+    /// past `max` bytes is an error that charges `max`, the work it took to find out.
+    pub fn decode_within(&mut self, stream: &Stream, max: usize) -> Result<Vec<u8>, CosError> {
+        self.charge(stream, max, Stream::decoded_within_typed)
     }
 
     /// `stream` decoded like [`Stream::decoded_strict`] (any corruption is an error), charged to
     /// the allowance.
     pub fn decode_strict(&mut self, stream: &Stream) -> Result<Vec<u8>, CosError> {
-        self.charge(stream, Stream::decoded_strict_within_typed)
+        self.charge(stream, usize::MAX, Stream::decoded_strict_within_typed)
     }
 
-    fn charge(&mut self, stream: &Stream, decode: fn(&Stream, usize) -> Result<Vec<u8>, FilterError>) -> Result<Vec<u8>, CosError> {
+    fn charge(&mut self, stream: &Stream, max: usize, decode: fn(&Stream, usize) -> Result<Vec<u8>, FilterError>) -> Result<Vec<u8>, CosError> {
         if self.bytes == 0 && !stream.raw.is_empty() {
             return Err(CosError::Filter(FilterError::LimitExceeded(self.limit).to_string()));
+        }
+        if max < self.bytes {
+            let result = decode(stream, max);
+            let spent = match &result {
+                Ok(data) => data.len(),
+                Err(FilterError::LimitExceeded(_)) => max,
+                Err(_) => 0,
+            };
+            self.bytes = self.bytes.saturating_sub(spent);
+            return result.map_err(|e| CosError::Filter(e.to_string()));
         }
         match decode(stream, self.bytes) {
             Ok(data) => {
@@ -141,6 +157,12 @@ mod tests {
         let Object::Stream(stream) = &*doc.get(bomb) else { panic!("not a stream") };
         assert!(budget.decode_strict(stream).is_err());
         assert_eq!(budget.remaining(), 0);
+
+        let mut budget = DecodeBudget::new(10 << 20, 1);
+        assert!(budget.decode_within(stream, 1000).is_err());
+        assert_eq!(budget.remaining(), (10 << 20) - 1000);
+        assert_eq!(budget.decode_within(stream, 2 << 20).map(|d| d.len()).ok(), Some(1 << 20));
+        assert_eq!(budget.remaining(), (9 << 20) - 1000);
 
         assert!(budget.enter_form());
         assert!(!budget.enter_form());
