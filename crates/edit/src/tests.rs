@@ -5372,3 +5372,109 @@ fn a_text_session_commits_what_a_rewrite_writes_whatever_it_laid_out_before() {
     assert_eq!(pdfcraft_cos::write_full(&by_session, &SaveOptions::default()).unwrap(), before);
     assert!(session.is_current(&doc) && !session.is_current(&by_session));
 }
+
+/// A one-page document whose resources have `/GS0` (30 % opacity) and `/L1`, a layer that is OFF.
+fn row_state_page(content: &str) -> Document {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R] /D << /OFF [5 0 R] /Order [5 0 R] >> >> >>".into(),
+        "<< /Type /Pages /Kids [6 0 R] /Count 1 >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        "<< /Type /ExtGState /ca 0.3 /CA 0.3 >>".into(),
+        "<< /Type /OCG /Name (Hidden layer) >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 7 0 R /Resources << /Font << /F1 3 0 R >> /ExtGState << /GS0 4 0 R /GS1 << /Type /ExtGState /ca 0.3 /CA 0.3 /BM /Normal >> /GS2 << /Type /ExtGState /ca 1 /CA 1 >> >> /Properties << /L1 5 0 R >> >> >>".into(),
+        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offs = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offs.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let x = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offs {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n", objs.len() + 1).as_bytes());
+    Document::open(Arc::new(out)).unwrap()
+}
+
+/// Each shown string on page 0 with the state it is drawn in: inside a `/OC` marked-content
+/// sequence, after `/GS0 gs`, and its horizontal scale (percent).
+fn shown_states(doc: &Document) -> Vec<(String, bool, bool, f64)> {
+    let joined = streams(doc, 0).join("\n");
+    let (mut oc, mut marks) = (0usize, Vec::new());
+    let (mut gs, mut tz, mut stack) = (false, 100.0, Vec::new());
+    let mut out = Vec::new();
+    for op in pdfcraft_content::parse(joined.as_bytes()).ops {
+        match op.op.as_slice() {
+            b"BDC" | b"BMC" => {
+                let layer = op.name(0) == Some(b"OC".as_slice());
+                oc += usize::from(layer);
+                marks.push(layer);
+            }
+            b"EMC" => oc -= usize::from(marks.pop().unwrap()),
+            b"q" => stack.push((gs, tz)),
+            b"Q" => (gs, tz) = stack.pop().unwrap(),
+            b"gs" => gs |= op.name(0) == Some(b"GS0".as_slice()),
+            b"Tz" => tz = op.num(0).unwrap(),
+            b"Tj" | b"'" => {
+                let Some(Object::String(s)) = op.operands.last() else { continue };
+                if !s.bytes.is_empty() {
+                    out.push((String::from_utf8_lossy(&s.bytes).into_owned(), oc > 0, gs, tz));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// #3115: a row drawn in a hidden layer, at 30 % opacity or at 80 % horizontal scale keeps that
+/// state when another row of the same paragraph is edited; the edited row doesn't take it on.
+#[test]
+fn editing_a_row_keeps_the_layer_opacity_and_scale_of_the_rows_around_it() {
+    let row1 = "BT /F1 12 Tf 72 700 Td (Hello world, this is the first line) Tj ET\n";
+    let row2 = "BT /F1 12 Tf 72 686 Td (and the second) Tj ET";
+    let pages = [
+        (format!("{row1}/OC /L1 BDC {row2} EMC"), (true, false, 100.0)),
+        (format!("{row1}q /GS0 gs {row2} Q"), (false, true, 100.0)),
+        ("BT /F1 12 Tf 72 700 Td (Hello world, this is the first line) Tj 80 Tz 0 -14 Td (and the second) Tj ET".to_string(), (false, false, 80.0)),
+        (format!("{row1}{row2}"), (false, false, 100.0)),
+    ];
+    for (n, (content, (oc, gs, tz))) in pages.iter().enumerate() {
+        let mut doc = row_state_page(content);
+        let blocks = text::text_blocks(&doc, 0).unwrap();
+        let block = blocks.iter().position(|b| b.text.starts_with("Hello")).unwrap();
+        let text = blocks[block].text.replacen("Hello", "Jello", 1);
+        text::replace_block(&mut doc, 0, block, &text).unwrap();
+        let shown = shown_states(&reopen(&doc));
+        let find = |needle: &str| shown.iter().filter(|s| s.0.contains(needle)).cloned().collect::<Vec<_>>();
+        let first = find("Jello");
+        assert_eq!(first.len(), 1, "page {}: {shown:?}", n + 1);
+        assert_eq!((first[0].1, first[0].2, first[0].3), (false, false, 100.0), "page {}: the edited row keeps its own state: {shown:?}", n + 1);
+        let second = find("and the second");
+        assert_eq!(second.len(), 1, "page {}: {shown:?}", n + 1);
+        assert_eq!((second[0].1, second[0].2, second[0].3), (*oc, *gs, *tz), "page {}: the other row keeps its state: {shown:?}", n + 1);
+    }
+    // The control: rows in the same state are still one paragraph.
+    let blocks = text::text_blocks(&row_state_page(&pages[3].0), 0).unwrap();
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].text, "Hello world, this is the first line and the second");
+}
+
+/// What keeps rows apart is the graphics state they are drawn in, not the `gs` operators
+/// before them: a repeated `gs` without q/Q, or another name with the same settings, is still one
+/// paragraph, and a `gs` that changes the opacity or puts it back is not.
+#[test]
+fn rows_under_repeated_or_equal_gs_states_stay_one_paragraph() {
+    let row1 = "BT /F1 12 Tf 72 700 Td (Hello world, this is the first line) Tj ET\n";
+    let row2 = "BT /F1 12 Tf 72 686 Td (and the second) Tj ET";
+    let paragraphs = |content: String| text::text_blocks(&row_state_page(&content), 0).unwrap().len();
+    assert_eq!(paragraphs(format!("/GS0 gs {row1}/GS0 gs {row2}")), 1, "the same name twice");
+    assert_eq!(paragraphs(format!("/GS0 gs {row1}/GS0 gs /GS0 gs {row2}")), 1, "the same name three times");
+    assert_eq!(paragraphs(format!("/GS0 gs {row1}/GS1 gs {row2}")), 1, "two names, the same settings");
+    assert_eq!(paragraphs(format!("/GS2 gs {row1}{row2}")), 1, "settings that are the defaults");
+    assert_eq!(paragraphs(format!("{row1}/GS0 gs {row2}")), 2, "another opacity");
+    assert_eq!(paragraphs(format!("/GS0 gs {row1}/GS2 gs {row2}")), 2, "the opacity put back");
+}
