@@ -76,6 +76,8 @@ pub struct PrintDraft {
     pub as_image: bool,
     pub dpi: f64,
     pub paper: usize,
+    /// The paper chosen before Label put label stock in, so leaving Label gives it back (#3564).
+    pub paper_before_label: Option<usize>,
     /// The sheet shown in the preview (0-based).
     pub sheet: usize,
     pub current_page: usize,
@@ -129,6 +131,7 @@ impl Default for PrintDraft {
             as_image: false,
             dpi: 300.0,
             paper: 0,
+            paper_before_label: None,
             sheet: 0,
             current_page: 0,
             driver_options: None,
@@ -143,6 +146,26 @@ impl Default for PrintDraft {
 }
 
 impl PrintDraft {
+    /// Choose Page Sizing & Handling. Label loads label stock and remembers the paper it
+    /// replaced; leaving Label gives that paper back, unless another one was picked meanwhile.
+    pub fn set_handling(&mut self, handling: Handling) {
+        let leaving_label = self.handling == Handling::Label && handling != Handling::Label;
+        self.handling = handling;
+        self.sheet = 0;
+        if handling == Handling::Label {
+            // A label goes on label stock.
+            if self.paper != print::LABEL_PAPER {
+                self.paper_before_label = Some(self.paper);
+                self.paper = print::LABEL_PAPER;
+            }
+        } else if leaving_label
+            && let Some(paper) = self.paper_before_label.take()
+            && self.paper == print::LABEL_PAPER
+        {
+            self.paper = paper;
+        }
+    }
+
     /// The engine settings for this draft (page count and labels from the document).
     pub fn settings(&self, count: usize, labels: &[String]) -> Result<print::Settings, String> {
         if self.handling == Handling::Multiple && self.order == PageOrder::CutStack && self.duplex != spool::Duplex::Off {
@@ -913,6 +936,7 @@ pub(crate) fn body(
                 });
                 // Label stock gets the label layout (cut, turned upright, fitted).
                 if d.paper != before && d.paper == print::LABEL_PAPER {
+                    d.paper_before_label = Some(before);
                     d.handling = Handling::Label;
                     d.sheet = 0;
                 }
@@ -942,6 +966,8 @@ pub(crate) fn body(
                         && let Some(paper) = matched
                     {
                         d.paper = paper;
+                        // A paper picked outright: nothing for leaving Label to give back.
+                        d.paper_before_label = None;
                         d.handling = Handling::Size;
                         d.size = SizeMode::Actual;
                         d.orientation = Orientation::Auto;
@@ -990,12 +1016,7 @@ pub(crate) fn body(
                     (Handling::Label, tl!("Label")),
                 ] {
                     if widgets::mode_tab(ui, label, d.handling == h).clicked() {
-                        d.handling = h;
-                        d.sheet = 0;
-                        // A label goes on label stock.
-                        if h == Handling::Label {
-                            d.paper = print::LABEL_PAPER;
-                        }
+                        d.set_handling(h);
                     }
                 }
             });

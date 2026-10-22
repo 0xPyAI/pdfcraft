@@ -426,3 +426,115 @@ fn an_empty_printer_list_says_none_were_found() {
     h.get_by_label_contains("No printers were found");
     assert!(!h.get_by_role_and_label(Role::Button, "Save as PDF").accesskit_node().is_disabled());
 }
+
+/// `PAPERS` index of the named sheet.
+fn paper(name: &str) -> usize {
+    pdfcraft_engine::print::PAPERS.iter().position(|p| p.0 == name).unwrap()
+}
+
+/// Label loads label stock; leaving it gives the paper the person had back (#3564).
+#[test]
+fn leaving_label_gives_back_the_paper_it_replaced() {
+    use pdfcraft_engine::print::LABEL_PAPER;
+    use pdfcraft_ui_egui::PrintHandling;
+    let a4 = paper("A4");
+    let mut h = harness();
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    for (mode, tab) in
+        [(PrintHandling::Size, "Size"), (PrintHandling::Poster, "Poster"), (PrintHandling::Multiple, "Multiple"), (PrintHandling::Booklet, "Booklet")]
+    {
+        h.state_mut().print_draft.paper = a4;
+        h.state_mut().print_draft.handling = PrintHandling::Size;
+        h.run_steps(2);
+        h.get_by_role_and_label(Role::Button, "Label").click();
+        h.run_steps(2);
+        assert_eq!(h.state().print_draft.handling, PrintHandling::Label);
+        assert_eq!(h.state().print_draft.paper, LABEL_PAPER, "Label puts label stock in");
+        h.get_by_role_and_label(Role::Button, tab).click();
+        h.run_steps(2);
+        assert_eq!(h.state().print_draft.handling, mode);
+        assert_eq!(h.state().print_draft.paper, a4, "{tab} gives A4 back after Label");
+        h.get_by_value("A4");
+    }
+}
+
+/// A paper picked while in Label is the person's choice, and leaving Label keeps it.
+#[test]
+fn a_paper_picked_while_in_label_is_kept_when_leaving_it() {
+    use pdfcraft_engine::print::LABEL_PAPER;
+    use pdfcraft_ui_egui::{PrintDraft, PrintHandling};
+    let (a4, letter) = (paper("A4"), paper("US Letter"));
+    let mut d = PrintDraft { paper: a4, ..Default::default() };
+    d.set_handling(PrintHandling::Label);
+    assert_eq!(d.paper, LABEL_PAPER);
+    d.paper = letter;
+    d.set_handling(PrintHandling::Size);
+    assert_eq!(d.paper, letter);
+    // A second round trip from the kept paper gives that paper back.
+    d.set_handling(PrintHandling::Label);
+    d.set_handling(PrintHandling::Poster);
+    assert_eq!(d.paper, letter);
+    // Clicking Label again while in Label doesn't forget the paper it replaced.
+    d.set_handling(PrintHandling::Label);
+    d.set_handling(PrintHandling::Label);
+    d.set_handling(PrintHandling::Multiple);
+    assert_eq!(d.paper, letter);
+}
+
+/// Picking the label stock from the Paper menu switches to Label (the existing behaviour); leaving
+/// Label afterwards gives back the paper picked before it.
+#[test]
+fn label_stock_picked_from_the_paper_menu_is_undone_by_leaving_label() {
+    use pdfcraft_engine::print::{LABEL_PAPER, PAPERS};
+    use pdfcraft_ui_egui::PrintHandling;
+    let a4 = paper("A4");
+    let mut h = harness();
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    h.state_mut().print_draft.paper = a4;
+    h.run_steps(2);
+    h.get_by_value("A4").click();
+    h.run_steps(2);
+    // The label stock is last in a menu that scrolls: bring it into view (it settles over a few
+    // frames) before clicking it.
+    h.get_by_label(PAPERS[LABEL_PAPER].0).scroll_to_me();
+    h.run_steps(4);
+    h.get_by_label(PAPERS[LABEL_PAPER].0).click();
+    h.run_steps(2);
+    assert_eq!(h.state().print_draft.paper, LABEL_PAPER);
+    assert_eq!(h.state().print_draft.handling, PrintHandling::Label);
+    h.get_by_role_and_label(Role::Button, "Size").click();
+    h.run_steps(2);
+    assert_eq!(h.state().print_draft.handling, PrintHandling::Size);
+    assert_eq!(h.state().print_draft.paper, a4);
+}
+
+/// The same through the Paper menu: US Letter picked while in Label stays when Size is chosen,
+/// rather than the A4 Label replaced coming back.
+#[test]
+fn a_paper_picked_from_the_menu_while_in_label_is_kept() {
+    use pdfcraft_engine::print::{LABEL_PAPER, PAPERS};
+    use pdfcraft_ui_egui::PrintHandling;
+    let (a4, letter) = (paper("A4"), paper("US Letter"));
+    let mut h = harness();
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    h.state_mut().print_draft.paper = a4;
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::Button, "Label").click();
+    h.run_steps(2);
+    assert_eq!(h.state().print_draft.paper, LABEL_PAPER);
+    h.get_by_value(PAPERS[LABEL_PAPER].0).click();
+    h.run_steps(2);
+    h.get_by_label("US Letter").scroll_to_me();
+    h.run_steps(4);
+    h.get_by_label("US Letter").click();
+    h.run_steps(2);
+    assert_eq!(h.state().print_draft.paper, letter);
+    h.get_by_role_and_label(Role::Button, "Size").click();
+    h.run_steps(2);
+    assert_eq!(h.state().print_draft.handling, PrintHandling::Size);
+    assert_eq!(h.state().print_draft.paper, letter, "the paper picked in Label is kept");
+    h.get_by_value("US Letter");
+}
