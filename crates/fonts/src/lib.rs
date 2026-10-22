@@ -51,6 +51,18 @@ pub fn cjk_width(s: &str, size: f64) -> f64 {
         .sum()
 }
 
+/// Approximate advance of `s` in Inter Regular at `size` points.
+pub fn inter_width(s: &str, size: f64) -> f64 {
+    use skrifa::MetadataProvider as _;
+    let Ok(font) = skrifa::FontRef::new(INTER_REGULAR) else { return helvetica_width(s, size) };
+    let loc = skrifa::instance::LocationRef::default();
+    let upem = font.metrics(skrifa::instance::Size::unscaled(), loc).units_per_em.max(1) as f64;
+    let scale = size / upem;
+    let charmap = font.charmap();
+    let advances = font.glyph_metrics(skrifa::instance::Size::unscaled(), loc);
+    s.chars().map(|c| charmap.map(c).and_then(|gid| advances.advance_width(gid)).unwrap_or(0.0) as f64 * scale).sum()
+}
+
 /// East Asian wide and full-width characters (Unicode UAX #11 W and F, by block).
 fn is_wide(c: char) -> bool {
     matches!(c,
@@ -311,6 +323,14 @@ mod tests {
         // Another value under the key is not a character: no mark.
         d.set(UNDRAWN_MARK.to_vec(), pdfcraft_cos::Object::Bool(true));
         assert_eq!(undrawn_mark(&d), None);
+    }
+
+    #[test]
+    fn inter_width_measures_latin_extended_and_ascii() {
+        assert!(inter_width("Luka Petravić", 12.0) > 0.0);
+        assert_eq!(inter_width("", 12.0), 0.0);
+        let w = inter_width("čžšć", 10.0);
+        assert!(w > 10.0 && w < 100.0);
     }
 
     #[test]
