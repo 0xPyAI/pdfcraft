@@ -169,6 +169,40 @@ fn space_audit_tab_measures_the_file_and_stays_in_the_card() {
 }
 
 #[test]
+fn space_audit_tab_measures_again_after_an_edit() {
+    use pdfcraft_engine::optimize::SpaceCategory;
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("doc.pdf", None, fixture()).unwrap();
+        app.set_option("dialog", "space-audit").unwrap();
+        app
+    });
+    h.run_steps(4);
+    let bookmarks =
+        |h: &Harness<'_, PdfCraftApp>| h.state().space_audit.iter().filter(|r| r.category == SpaceCategory::Bookmarks).map(|r| r.bytes).sum::<u64>();
+    let before = h.state().space_audit.clone();
+    assert_eq!(bookmarks(&h), 0, "the fixture has no outline: {before:?}");
+    // Further frames with the file unchanged keep the same measurement.
+    h.run_steps(2);
+    assert_eq!(h.state().space_audit, before);
+    // An edit while the tab is open is measured on the next frame.
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddBookmark {
+        parent: vec![],
+        index: 0,
+        title: "Chapter".into(),
+        page: 0,
+        left: None,
+        top: None,
+    });
+    h.run_steps(2);
+    assert!(bookmarks(&h) > 0, "the new outline is counted: {:?}", h.state().space_audit);
+    // The table shows the new row (the rail's Bookmarks button has the same label).
+    let card = card(&h, "dialog");
+    assert!(h.query_all_by_label("Bookmarks").any(|n| card.contains_rect(n.rect())), "a Bookmarks row in {card:?}");
+}
+
+#[test]
 fn dialog_buttons_follow_the_content_after_a_taller_tab() {
     use pdfcraft_ui_egui::{Dialog, PropsTab};
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
