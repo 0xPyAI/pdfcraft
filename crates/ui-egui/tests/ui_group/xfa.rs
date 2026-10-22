@@ -58,8 +58,8 @@ fn a_dynamic_xfa_form_is_laid_out_and_filled() {
     let doc = s.session.get(s.views[0].id).unwrap();
     assert_eq!(doc.info.pages.len(), 2);
     assert!(doc.form.iter().any(|f| f.name == "familyName"));
-    // The notice offers to highlight the fields, like any form.
-    h.get_by_label("Highlight fields");
+    // The notice offers the highlight toggle, like any form; highlights are on by default.
+    h.get_by_label("Hide field highlights");
 }
 
 #[test]
@@ -87,8 +87,8 @@ fn a_static_xfa_form_is_filled_from_its_data_and_says_so() {
     assert_eq!(doc.form.iter().find(|f| f.name == "form1[0].page1[0].name[0]").unwrap().value, vec!["Ada".to_string()]);
     assert_eq!(doc.form.iter().find(|f| f.name == "form1[0].page1[0].agree[0]").unwrap().value, vec!["1".to_string()]);
     assert!(!doc.dirty);
-    // The fields can still be highlighted from the notice.
-    h.get_by_label("Highlight fields");
+    // The highlight toggle (on by default, so it reads "Hide") is still in the notice.
+    h.get_by_label("Hide field highlights");
 }
 
 #[test]
@@ -211,4 +211,23 @@ fn scripts_turned_off_by_a_click_bring_a_closed_notice_bar_back() {
     click_field(&mut h, "addRow");
     assert!(h.state().views[0].notice_dismissed);
     assert!(!says_scripts_are_off(&h.state().toast), "{:?}", h.state().toast);
+}
+
+#[test]
+fn a_secured_dynamic_xfa_form_shows_its_layout_and_its_security() {
+    // Changing and assembling withheld, filling allowed.
+    let mut doc = pdfcraft_cos::Document::open(std::sync::Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::template(2)))).unwrap();
+    doc.set_encryption(&pdfcraft_cos::NewEncryption {
+        algorithm: pdfcraft_cos::Algorithm::Aes256,
+        user_password: "",
+        owner_password: "owner",
+        permissions: -1036,
+        encrypt_metadata: true,
+        seed: [4; 32],
+    })
+    .unwrap();
+    let h = open(pdfcraft_cos::write_full(&doc, &Default::default()).unwrap());
+    h.get_by_label_contains("laid out from its template: 2 pages, 11 fields. This document is secured.");
+    h.get_by_label("Hide field highlights");
+    h.get_by_label("Security settings");
 }
