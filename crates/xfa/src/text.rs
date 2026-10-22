@@ -280,6 +280,14 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
     Block { spans, height: total }
 }
 
+/// The width `rich` takes with no line wrapped (its longest paragraph, with the paragraph's
+/// margins and first-line indent): how wide a box without an explicit width grows.
+pub fn natural_width(rich: &RichText, para: &Para, base: &Face, embed: &dyn Fn(&str) -> String) -> f64 {
+    let indent = para.text_indent.max(0.0);
+    let widest = rich.paragraphs.iter().map(|p| words(&p.runs, base, embed).iter().map(|w| w.width).sum::<f64>()).fold(0.0, f64::max);
+    (para.margin_left + indent + widest + para.margin_right).max(0.0)
+}
+
 /// Height `rich` needs at `width` (for boxes without an explicit height).
 pub fn measure_height(rich: &RichText, width: f64, para: &Para, base: &Face, embed: &dyn Fn(&str) -> String) -> f64 {
     let p = Para { v_align: crate::model::VAlign::Top, ..para.clone() };

@@ -1367,6 +1367,112 @@ fn repeating_subforms_inside_positioned_content_get_their_instances() {
     assert!(((after.rect.y - rows[2].rect.y) - step).abs() < 0.01, "after: {:?}, last row: {:?}", after.rect, rows[2].rect);
 }
 
+/// A positioned subform holding `body`, laid out; its page's items.
+fn positioned(body: &str) -> Vec<Item> {
+    let xdp = format!(
+        r##"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <subform name="box" w="7.5in" h="3in">{body}</subform>
+</subform>
+</template></xdp:xdp>"##
+    );
+    layout_xml(&xdp).unwrap().pages.into_iter().next().unwrap().items
+}
+
+/// A text draw without a width is as wide as its text, so right-aligned text starts at its x; a
+/// minimum width wider than the text still wins, and text longer than the room left still wraps.
+#[test]
+fn a_label_without_a_width_is_as_wide_as_its_text() {
+    const TEXT: &str = "PERSONNEL ONLY: from date (YYYYMMDD):";
+    let natural = pdfcraft_fonts::helvetica_width(TEXT, 8.0);
+    // Right-aligned, with a minimum narrower than the text: the box is as wide as the text and
+    // starts where it is placed, so the text does too (not at the far right of the subform).
+    let items = positioned(&format!(
+        r#"<draw name="a" x="1in" y="0" minW="50pt"><value><text>{TEXT}</text></value><font typeface="Arial" size="8pt"/><para hAlign="right"/></draw>"#
+    ));
+    let span = items.iter().find_map(|i| if let Item::Text(s) = i { Some(s) } else { None }).expect("the text");
+    assert!((span.x - (36.0 + 72.0)).abs() < 0.05, "starts at its x: {}", span.x);
+    // With a minimum wider than the text, the box is that wide and the text ends at its right.
+    let items = positioned(&format!(
+        r#"<draw name="a" x="1in" y="0" minW="{}pt"><value><text>{TEXT}</text></value><font typeface="Arial" size="8pt"/><para hAlign="right"/></draw>"#,
+        natural + 40.0
+    ));
+    let span = items.iter().find_map(|i| if let Item::Text(s) = i { Some(s) } else { None }).expect("the text");
+    assert!((span.x + span.face.width(&span.text) - (36.0 + 72.0 + natural + 40.0)).abs() < 0.05, "ends at its right: {}", span.x);
+    // Text longer than the room left still wraps at the container's width.
+    let long = "word ".repeat(200);
+    let items = positioned(&format!(r#"<draw name="a" x="0" y="0"><value><text>{long}</text></value><font typeface="Arial" size="8pt"/></draw>"#));
+    let lines: std::collections::BTreeSet<i64> =
+        items.iter().filter_map(|i| if let Item::Text(s) = i { Some((s.baseline * 100.0).round() as i64) } else { None }).collect();
+    assert!(lines.len() > 1, "wraps: {} line(s)", lines.len());
+    // And within the room it has: no line's drawn text runs past the subform's right edge.
+    let right = items
+        .iter()
+        .filter_map(|i| if let Item::Text(s) = i { Some(s.x + s.face.width(s.text.trim_end())) } else { None })
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert!(right <= 36.0 + 7.5 * 72.0 + 0.05, "the text stays within the available width: {right}");
+}
+
+/// A draw without a width and without text (a bordered spacer or rule) keeps the width it has
+/// room for: with no text to size it to, it doesn't shrink to its margins.
+#[test]
+fn an_empty_draw_without_a_width_keeps_the_width_it_has_room_for() {
+    let items = positioned(r#"<draw name="rule" x="0" y="0" h="12pt"><value><text></text></value><border><edge thickness="1pt"/></border></draw>"#);
+    let widest =
+        items.iter().filter_map(|i| if let Item::Line { from, to, .. } = i { Some((to.0 - from.0).abs()) } else { None }).fold(0.0_f64, f64::max);
+    assert!((widest - 540.0).abs() < 0.5, "the border spans the 7.5in box: {widest}");
+}
+
+/// A button without a width is as wide as its caption, not the subform it sits in, unless its
+/// minimum width is wider.
+#[test]
+fn a_button_without_a_width_is_as_wide_as_its_caption() {
+    // No width, a minimum narrower than its caption: as wide as the caption, not the subform.
+    let caption = "Open the instructions for this form";
+    let items = positioned(&format!(
+        r#"<field name="help" x="1in" y="0" minW="40pt" minH="12pt"><ui><button/></ui><caption><value><text>{caption}</text></value><font typeface="Arial" size="8pt"/></caption></field>"#
+    ));
+    let button = items.iter().find_map(|i| if let Item::Widget(w) = i { Some(w) } else { None }).expect("the button");
+    let natural = pdfcraft_fonts::helvetica_width(caption, 8.0);
+    assert!(button.rect.w >= natural && button.rect.w < natural + 10.0, "{} for a caption of {natural}", button.rect.w);
+    // A minimum wider than the caption wins.
+    let items = positioned(
+        r#"<field name="help" x="1in" y="0" minW="200pt" minH="12pt"><ui><button/></ui><caption><value><text>Help</text></value><font typeface="Arial" size="8pt"/></caption></field>"#,
+    );
+    let button = items.iter().find_map(|i| if let Item::Widget(w) = i { Some(w) } else { None }).expect("the button");
+    assert!((button.rect.w - 200.0).abs() < 0.05, "{}", button.rect.w);
+}
+
+/// A button without a height is as tall as one line of its caption in the caption's own font,
+/// with none of a text field's padding, and never shorter than its minimum height.
+#[test]
+fn a_button_without_a_height_is_as_tall_as_its_caption() {
+    // A 10pt field font, an 8pt caption: the button is as tall as its caption's line (no
+    // text-field padding), and never below its minimum height.
+    let button = |min_h: &str| {
+        let items = positioned(&format!(
+            r#"<field name="help" x="1in" y="0" w="100pt" minH="{min_h}"><ui><button/></ui><font typeface="Times New Roman" size="10pt"/><caption><value><text>Help</text></value><font typeface="Arial" size="8pt"/></caption></field>"#
+        ));
+        items.iter().find_map(|i| if let Item::Widget(w) = i { Some(w.rect.h) } else { None }).expect("the button")
+    };
+    assert!((button("2pt") - text::line_height(8.0)).abs() < 0.05, "{}", button("2pt"));
+    assert!((button("10.5pt") - 10.5).abs() < 0.05, "{}", button("10.5pt"));
+}
+
+/// A button's widget is its whole field, at the field's position and size: the field's margins
+/// pad the caption, not the box.
+#[test]
+fn a_buttons_box_is_the_whole_field_whatever_its_margins() {
+    // The button's box is its field's border: its margins pad the caption, not the box.
+    let items = positioned(
+        r#"<field name="help" x="1in" y="10pt" w="100pt" h="20pt"><ui><button/></ui><margin topInset="5pt" leftInset="3pt"/><border><edge/></border><caption><value><text>Help</text></value><font typeface="Arial" size="8pt"/></caption></field>"#,
+    );
+    let button = items.iter().find_map(|i| if let Item::Widget(w) = i { Some(w.rect) } else { None }).expect("the button");
+    assert!((button.w - 100.0).abs() < 0.05 && (button.h - 20.0).abs() < 0.05, "{button:?}");
+    assert!((button.x - (36.0 + 72.0)).abs() < 0.05, "{button:?}");
+}
+
 /// A page area without an `<occur>` repeats for as long as the body needs pages. Before, it was
 /// treated like a subform (at most once), so once the first body page was out the layout fell
 /// back to the last page area, here one limited to a single use, and drew its content over every
