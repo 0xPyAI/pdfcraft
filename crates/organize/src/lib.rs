@@ -72,36 +72,74 @@ fn pages_root(doc: &Document) -> Result<ObjRef, OrganizeError> {
 
 /// All leaf pages in order, with their effective inherited attributes.
 fn walk(doc: &Document) -> Result<Vec<(ObjRef, Dict)>, OrganizeError> {
-    let root = pages_root(doc)?;
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    // (node, inherited attributes from ancestors)
-    let mut stack: Vec<(ObjRef, Dict)> = vec![(root, Dict::new())];
-    while let Some((node, inherited)) = stack.pop() {
-        if !seen.insert(node) || seen.len() > 1_000_000 {
-            continue; // cycles in broken trees
-        }
-        let obj = doc.get(node);
-        let Some(d) = obj.as_dict() else { continue };
-        let mut attrs = inherited.clone();
-        for k in INHERITABLE {
-            if let Some(v) = d.get(k) {
-                attrs.set(k.to_vec(), v.clone());
+    Ok(PageWalk::new(doc, pages_root(doc)?).collect())
+}
+
+/// For each of `INHERITABLE`, the nearest node that sets it, shared rather than copied.
+type Owners = [Option<std::sync::Arc<Object>>; 4];
+
+/// Depth-first walk over the leaf pages under `top`. It keeps one cursor per open `/Kids` array,
+/// never one entry per child, and carries inherited attributes as the nodes that set them, so a
+/// child listed many times or shared between nodes is skipped by the seen check before anything
+/// is queued or copied (`pdfcraft_model::pages` walks the same way). Cycles in broken trees end
+/// at the seen check and at most a million nodes are visited.
+struct PageWalk<'a> {
+    doc: &'a Document,
+    seen: std::collections::HashSet<ObjRef>,
+    pending: Vec<(std::sync::Arc<Object>, usize, Owners)>,
+}
+
+impl<'a> PageWalk<'a> {
+    fn new(doc: &'a Document, top: ObjRef) -> Self {
+        let top = std::sync::Arc::new(Object::Array(vec![Object::Ref(top)]));
+        Self { doc, seen: Default::default(), pending: vec![(top, 0, Default::default())] }
+    }
+}
+
+impl Iterator for PageWalk<'_> {
+    type Item = (ObjRef, Dict);
+
+    fn next(&mut self) -> Option<(ObjRef, Dict)> {
+        while let Some((kids, next, inherited)) = self.pending.last_mut() {
+            let Some(kid) = kids.as_array().and_then(|a| a.get(*next)) else {
+                self.pending.pop();
+                continue;
+            };
+            let node = kid.as_ref();
+            *next += 1;
+            let Some(node) = node else { continue };
+            if self.seen.len() >= 1_000_000 {
+                self.pending.clear();
+                return None;
             }
-        }
-        let is_pages = d.name(b"Type") == Some(b"Pages") || (d.contains(b"Kids") && d.name(b"Type") != Some(b"Page"));
-        if is_pages {
-            let kids = d.get(b"Kids").map(|k| doc.resolve(k)).and_then(|k| k.as_array().cloned()).unwrap_or_default();
-            for k in kids.iter().rev() {
-                if let Some(r) = k.as_ref() {
-                    stack.push((r, attrs.clone()));
+            if !self.seen.insert(node) {
+                continue;
+            }
+            let obj = self.doc.get(node);
+            let Some(d) = obj.as_dict() else { continue };
+            let mut owners = inherited.clone();
+            for (k, owner) in INHERITABLE.iter().zip(&mut owners) {
+                if d.contains(k) {
+                    *owner = Some(obj.clone());
                 }
             }
-        } else {
-            out.push((node, attrs));
+            let is_pages = d.name(b"Type") == Some(b"Pages") || (d.contains(b"Kids") && d.name(b"Type") != Some(b"Page"));
+            if is_pages {
+                if let Some(kids) = d.get(b"Kids") {
+                    self.pending.push((self.doc.resolve(kids), 0, owners));
+                }
+            } else {
+                let mut attrs = Dict::new();
+                for (k, owner) in INHERITABLE.iter().zip(&owners) {
+                    if let Some(v) = owner.as_ref().and_then(|o| o.as_dict()).and_then(|o| o.get(k)) {
+                        attrs.set(k.to_vec(), v.clone());
+                    }
+                }
+                return Some((node, attrs));
+            }
         }
+        None
     }
-    Ok(out)
 }
 
 /// Leaf pages in document order.
