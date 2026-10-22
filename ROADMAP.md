@@ -175,6 +175,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-19 (M11, #2178):** Optimize checks image and soft-mask dimensions and byte counts before decoding; hostile-dimension regressions pass. Estimates unchanged.
+
 - **2026-10-20 (M11, #3507):** Image merging keeps trailing comments, split operands and graphics state across content streams. Synthetic tool tests check saved text, rendered regions and exact image rows.
 
 - **2026-10-17 (M8, gap 6, #2662):** A filled cover over a long line counts when it hides half of any one word, not only 40% of the line's words or box, so a black box over one number in a long line — or an unapplied redaction mark over it — no longer audits clean while the number is still extractable; a sliver under half of every word it touches and under 40% of the line is still not flagged
