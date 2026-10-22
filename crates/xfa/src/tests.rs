@@ -2711,3 +2711,34 @@ fn repeated_script_events_hold_a_bounded_amount_of_script() {
     assert!(held <= crate::script::MAX_EVENT_SCRIPT_BYTES, "{held} bytes of script held by {} events", live.events.len());
     assert!(live.truncated, "{held} bytes, {} events", live.events.len());
 }
+
+/// Rows added one at a time (each op asking for one more instance) queue each instance node
+/// once, and removals in between don't let the queue grow without bound.
+#[test]
+fn added_instances_are_queued_once_each() {
+    use crate::data::{DataOp, ENSURED, write_data_ops};
+    let mut doc = Document::open(Arc::new(shell(&scripted_template()))).unwrap();
+    render_into(&mut doc).unwrap();
+    let table = som_to_path("form[0].page1[0].table[0]");
+    let ops: Vec<DataOp> = (1..=1000).map(|count| DataOp::Instances { parent: table.clone(), name: "row".into(), count }).collect();
+    ENSURED.with(|n| n.set(0));
+    let r = write_data_ops(&mut doc, &ops, None).unwrap();
+    assert!(r.written, "{r:?}");
+    assert_eq!(crate::data_of(&doc).unwrap().count(&table, "row"), 1000);
+    let queued = ENSURED.with(|n| n.get());
+    assert!(queued <= 2_000, "{queued} instance nodes queued for 1000 rows");
+    // Removals split the ops into separate passes; together they stay within the budget.
+    let ops: Vec<DataOp> = (0..300)
+        .flat_map(|_| {
+            [
+                DataOp::Instances { parent: table.clone(), name: "row".into(), count: 1000 },
+                DataOp::Remove(som_to_path("form[0].page1[0].table[0].row[999]")),
+            ]
+        })
+        .collect();
+    ENSURED.with(|n| n.set(0));
+    let r = write_data_ops(&mut doc, &ops, None).unwrap();
+    let queued = ENSURED.with(|n| n.get());
+    assert!(queued <= 200_000, "{queued} instance nodes queued");
+    assert!(r.warnings.iter().any(|w| w.contains("instances")), "{r:?}");
+}

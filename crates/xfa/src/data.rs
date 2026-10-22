@@ -1516,6 +1516,16 @@ fn element_markup(src: &str, n: roxmltree::Node) -> Option<String> {
     Some(format!("{}{decls}{}", text.get(..name_end)?, text.get(name_end..)?))
 }
 
+/// Most instance nodes one [`write_data_ops`] queues over all its passes (a removal starts a new
+/// pass, which asks for the instances again).
+const MAX_ENSURED: usize = 200_000;
+
+// Instance nodes write_data_ops has queued on this thread, for tests that bound its work.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static ENSURED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Apply `ops` to the datasets packet, in order, as one rewrite of it: everything one script
 /// event changed becomes a single new datasets stream. When the packet is already the stream
 /// `reuse` (written earlier for the same event), that stream is replaced in place instead of
@@ -1525,6 +1535,9 @@ pub fn write_data_ops(doc: &mut Document, ops: &[DataOp], reuse: Option<ObjRef>)
     let mut steps: Vec<Vec<Want>> = Vec::new();
     let mut removes: Vec<Option<DataPath>> = Vec::new();
     let mut run: Vec<Want> = Vec::new();
+    // Instances queued in this run, by parent and name: asking for more only queues the rest.
+    let mut queued: HashMap<(&DataPath, &str), usize> = HashMap::new();
+    let (mut ensured, mut capped) = (0usize, false);
     let flush = |run: &mut Vec<Want>, steps: &mut Vec<Vec<Want>>, removes: &mut Vec<Option<DataPath>>| {
         if !run.is_empty() {
             let mut seen = std::collections::HashSet::new();
@@ -1541,7 +1554,17 @@ pub fn write_data_ops(doc: &mut Document, ops: &[DataOp], reuse: Option<ObjRef>)
                 run.push(Want { som: path_som(path), path: path.clone(), text: text.clone(), ensure: false });
             }
             DataOp::Instances { parent, name, count } => {
-                for k in 0..(*count).min(MAX_INDEX) {
+                let done = queued.entry((parent, name.as_str())).or_insert(0);
+                while *done < (*count).min(MAX_INDEX) {
+                    if ensured >= MAX_ENSURED {
+                        capped = true;
+                        break;
+                    }
+                    ensured += 1;
+                    #[cfg(test)]
+                    ENSURED.with(|n| n.set(n.get() + 1));
+                    let k = *done;
+                    *done += 1;
                     let mut path = parent.clone();
                     path.push((name.clone(), k));
                     run.push(Want { som: format!("{name}[{k}]"), path, text: String::new(), ensure: true });
@@ -1549,6 +1572,7 @@ pub fn write_data_ops(doc: &mut Document, ops: &[DataOp], reuse: Option<ObjRef>)
             }
             DataOp::Remove(path) if !path.is_empty() => {
                 flush(&mut run, &mut steps, &mut removes);
+                queued.clear();
                 steps.push(Vec::new());
                 removes.push(Some(path.clone()));
             }
@@ -1564,7 +1588,11 @@ pub fn write_data_ops(doc: &mut Document, ops: &[DataOp], reuse: Option<ObjRef>)
             None => Op::Values(w),
         })
         .collect();
-    rewrite(doc, &plan, reuse)
+    let mut written = rewrite(doc, &plan, reuse)?;
+    if capped {
+        written.warnings.push(format!("XFA data instances not written past {MAX_ENSURED}: the rows were added and removed too often"));
+    }
+    Ok(written)
 }
 
 /// Put `bytes` in the document as a datasets stream: in place of `old` when that is the stream
