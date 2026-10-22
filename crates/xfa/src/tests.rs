@@ -434,6 +434,16 @@ fn a_packet_stream_listed_many_times_is_read_once() {
 }
 
 #[test]
+fn empty_repeating_subforms_drawn_in_a_positioned_root_spend_the_layout_budget() {
+    // The same four levels inside a positioned root are drawn, not flowed.
+    let level = "<subform layout=\"tb\"><occur initial=\"50\" max=\"-1\"/>";
+    let nest =
+        |n: usize| format!("<template><subform><subform layout=\"tb\">{}{}</subform></subform></template>", level.repeat(n), "</subform>".repeat(n));
+    assert!(matches!(layout_xml(&nest(4)), Err(XfaError::TooLarge(_))));
+    assert!(layout_xml(&nest(3)).is_ok());
+}
+
+#[test]
 fn the_packets_can_be_one_stream_or_named_parts() {
     // Named parts, with the template split from the rest.
     let doc = Document::open(Arc::new(shell(&template(0)))).unwrap();
