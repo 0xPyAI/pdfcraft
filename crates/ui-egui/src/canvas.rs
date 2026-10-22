@@ -2372,6 +2372,8 @@ fn page_scroll<R>(
     ui.scope_builder(egui::UiBuilder::new().id(id), |ui| scroll.show_viewport(ui, draw)).inner
 }
 
+/// Draws the document tab at `index`: its notice bars, then its pages (or the Organize grid) in a
+/// scroll area with this frame's zoom, scrolling, tool input, overlays and render requests.
 pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     // Keyboard scrolling applies to this frame's page view only, never later.
@@ -3482,12 +3484,14 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             }
 
             // Form-field highlight (Acrobat's "Highlight existing fields"); required fields get a
-            // red border. Radio buttons are round, and so is theirs (as in Acrobat).
+            // red border. Radio buttons are round, and so is theirs (as in Acrobat). Only what can
+            // be filled is marked: a read-only widget (its field's, or a radio button's own) is
+            // left as it is drawn.
             if view.highlight_fields {
                 for f in form.iter() {
                     let required = f.has(pdfcraft_engine::field_flags::REQUIRED);
                     let round = f.kind == pdfcraft_engine::FormFieldKind::Radio;
-                    for w in f.widgets.iter().filter(|w| w.page == Some(i) && !w.hidden) {
+                    for w in f.widgets.iter().filter(|w| w.page == Some(i) && !w.hidden && !w.read_only) {
                         let r = w.rect;
                         let sr = xf.user_rect(info, i, [r[0] as f32, r[1] as f32, r[2] as f32, r[3] as f32]);
                         let tint = Color32::from_rgba_unmultiplied(0x6E, 0x8E, 0xF5, 48);

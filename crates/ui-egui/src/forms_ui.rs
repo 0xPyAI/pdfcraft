@@ -165,7 +165,8 @@ pub(crate) fn page_input(
     // Empty signature fields are signed by clicking them (Use a certificate); push buttons run
     // their action.
     let pressable = f.kind == FormFieldKind::PushButton && !f.read_only() && f.button.is_some();
-    let usable = allowed && (fillable(f) || pressable || f.kind == FormFieldKind::Signature);
+    // A radio button of a group can be read-only on its own.
+    let usable = allowed && !w.read_only && (fillable(f) || pressable || f.kind == FormFieldKind::Signature);
     ui.ctx().set_cursor_icon(match (usable, f.kind) {
         (false, _) => egui::CursorIcon::NotAllowed,
         (true, FormFieldKind::Text) => egui::CursorIcon::Text,
@@ -187,7 +188,7 @@ pub(crate) fn page_input(
         return FieldPointer::Owned;
     }
     match f.kind {
-        _ if f.read_only() => view.forms.notice = Some(FormNotice::ReadOnly(f.name.clone())),
+        _ if f.read_only() || w.read_only => view.forms.notice = Some(FormNotice::ReadOnly(f.name.clone())),
         FormFieldKind::PushButton => match &f.button {
             Some(a) => view.forms.button = Some((f.name.clone(), a.clone())),
             None => view.forms.notice = Some(FormNotice::NoAction(f.name.clone())),

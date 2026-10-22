@@ -103,6 +103,9 @@ pub struct Widget {
     pub locked: bool,
     /// The widget's Hidden or NoView flag (`/F` bit 2 or 6): it isn't shown and takes no input.
     pub hidden: bool,
+    /// Read-only: the field is, or the widget's own `/Ff` says so (a radio button of a group can
+    /// be locked on its own, as an XFA exclusion group's layout writes it).
+    pub read_only: bool,
     /// `/MK /R` as 0, 90, 180 or 270 degrees counterclockwise. Anything else is stored as 0.
     pub rotation: i64,
     /// Push buttons: the normal label (`/MK /CA`), separate from the field's name.
@@ -720,6 +723,8 @@ pub fn set_tab_order(doc: &mut Document, pages: &[usize], order: TabOrder) -> Re
     Ok(())
 }
 
+/// Read the field at `r` and the fields under it into `out`, with what they inherit from
+/// `parent`: kids with a name are fields of their own, kids without are this field's widgets.
 fn walk(
     doc: &Document,
     r: ObjRef,
@@ -790,6 +795,7 @@ fn walk(
             let wd = wo.as_dict()?;
             let rect = nums(doc, wd.get(b"Rect")).filter(|r| r.len() == 4).unwrap_or_else(|| vec![0.0; 4]);
             let annot_flags = wd.get(b"F").and_then(|f| doc.resolve(f).as_int()).unwrap_or(0);
+            let own_ff = if w == r { 0 } else { field_flags(doc, wd).unwrap_or(0) };
             let on_state = wd
                 .get(b"AP")
                 .map(|ap| doc.resolve(ap))
@@ -805,6 +811,7 @@ fn walk(
                 tab: usize::MAX,
                 locked: annot_flags & 128 != 0,
                 hidden: annot_flags & (2 | 32) != 0,
+                read_only: (ff | own_ff) & flags::READ_ONLY != 0,
                 rotation: appearance::mk_rotation(doc, wd),
                 caption: (kind == FieldKind::PushButton)
                     .then(|| {
