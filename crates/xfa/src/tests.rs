@@ -2758,3 +2758,16 @@ fn an_inherited_namespace_does_not_multiply_an_import() {
         Err(e) => assert!(matches!(e, XfaError::TooLarge(_)), "{e:?}"),
     }
 }
+
+/// A long data name with a high index is not copied into every sibling created before it.
+#[test]
+fn long_names_repeated_by_an_index_are_capped() {
+    let doc = Document::open(Arc::new(static_shell("<form1/>"))).unwrap();
+    let fields = vec![FieldDatum {
+        obj: pdfcraft_cos::ObjRef::new(1000, 0),
+        name: format!("form1[0].{}[9999]", "n".repeat(2_000)),
+        data: FieldData::Text("v".into()),
+    }];
+    let data = build_data(&doc, &fields);
+    assert!(data.len() < 2_000_000, "{} bytes of data built", data.len());
+}

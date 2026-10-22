@@ -519,6 +519,21 @@ fn escape(s: &str) -> (String, bool) {
 const MAX_NEW_NODES: usize = 20_000;
 /// Highest same-name sibling index a write follows.
 const MAX_INDEX: usize = 10_000;
+/// Most bytes of names the nodes one write creates hold together: every sibling an index
+/// skips over gets its own copy of the name.
+const MAX_NEW_NAME_BYTES: usize = 4 << 20;
+
+/// What one write may still create: nodes and bytes of their names.
+struct NewNodes {
+    nodes: usize,
+    name_bytes: usize,
+}
+
+impl NewNodes {
+    fn new() -> NewNodes {
+        NewNodes { nodes: MAX_NEW_NODES, name_bytes: MAX_NEW_NAME_BYTES }
+    }
+}
 
 /// A data tree being built for writing.
 #[derive(Default)]
@@ -533,8 +548,8 @@ struct Build {
 impl Build {
     /// The node at `path` below this one, created as needed. `None` when the path is deeper
     /// than [`MAX_DEPTH`], an index is above [`MAX_INDEX`], or creating it would spend more
-    /// than `budget` new nodes.
-    fn at(&mut self, path: &[(String, usize)], budget: &mut usize) -> Option<&mut Build> {
+    /// new nodes or name bytes than `budget` holds.
+    fn at(&mut self, path: &[(String, usize)], budget: &mut NewNodes) -> Option<&mut Build> {
         if path.len() > MAX_DEPTH {
             return None;
         }
@@ -547,15 +562,15 @@ impl Build {
             let have = node.by_name.get(&name).map_or(0, Vec::len);
             if *idx >= have {
                 let need = idx - have + 1;
-                if need > *budget {
+                let bytes = need.saturating_mul(name.len());
+                if need > budget.nodes || bytes > budget.name_bytes {
                     return None;
                 }
-                *budget -= need;
-                for _ in 0..need {
-                    let pos = node.children.len();
-                    node.by_name.entry(name.clone()).or_default().push(pos);
-                    node.children.push(Build { name: name.clone(), ..Default::default() });
-                }
+                budget.nodes -= need;
+                budget.name_bytes -= bytes;
+                let start = node.children.len();
+                node.children.extend((0..need).map(|_| Build { name: name.clone(), ..Default::default() }));
+                node.by_name.entry(name.clone()).or_default().extend(start..start + need);
             }
             let pos = *node.by_name.get(&name)?.get(*idx)?;
             node = node.children.get_mut(pos)?;
@@ -675,7 +690,7 @@ const CONTROL: &str = "Characters XML can't hold were left out of the XFA data o
 /// Fresh data for `wants`: the children of an `xfa:data` element.
 fn build_children(wants: &[Want], warnings: &mut Vec<String>) -> String {
     let mut root = Build::default();
-    let mut budget = MAX_NEW_NODES;
+    let mut budget = NewNodes::new();
     for w in wants {
         match root.at(&w.path, &mut budget) {
             Some(node) => node.text = w.text.clone(),
@@ -1095,7 +1110,7 @@ fn merge_values(src: &str, data: roxmltree::Node, wants: &[Want], edits: &mut Ve
     let tree = data.document();
     // Nodes to add, per existing element they go into.
     let mut added: Vec<(roxmltree::NodeId, Build)> = Vec::new();
-    let mut budget = MAX_NEW_NODES;
+    let mut budget = NewNodes::new();
     for w in wants {
         let (escaped, dropped) = escape(&w.text);
         let mut node = data;
