@@ -723,6 +723,21 @@ mod xfa_model {
         assert!(!o.effects.iter().any(|e| matches!(e, XfaEffect::SetPresence { som, .. } | XfaEffect::SetAccess { som, .. } if som.contains("qty"))));
     }
 
+    /// Past the effect cap, a value written to a field with no effect yet is left out of reads as
+    /// well as the effects; a field written again before the cap still takes its new value.
+    #[test]
+    fn a_value_past_the_effect_cap_is_left_out_of_reads_and_effects_alike() {
+        let o = go(
+            "price.rawValue = 1; for (var i = 0; i < 20000; i++) xfa.host.beep(); qty.rawValue = 9; price.rawValue = 3; qty.rawValue + ':' + price.rawValue",
+            "form1[0].page1[0]",
+            "click",
+        );
+        assert_eq!(o.error, None, "{o:?}");
+        assert_eq!(o.effects.len(), MAX_EFFECTS);
+        assert_eq!(o.result.as_deref(), Some("4:3"));
+        assert!(!o.effects.iter().any(|e| matches!(e, XfaEffect::SetValue { som, .. } if som.contains("qty"))));
+    }
+
     #[test]
     fn urls_and_reset_lists_are_clipped_and_deduplicated() {
         let o = go(

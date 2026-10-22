@@ -459,9 +459,9 @@ impl XHost {
             self.clipped_values += 1;
         }
         // The snapshot's copy and the effect's are charged together, before either is kept:
-        // past the byte budget the write is left out of both.
+        // past the byte budget or the effect cap the write is left out of both.
         let effect = XfaEffect::SetValue { som, value: text.clone() };
-        if !self.room(text.len().saturating_add(payload(&effect))) {
+        if !self.reserve(&effect, text.len().saturating_add(payload(&effect))) {
             return true;
         }
         if let Some(n) = self.nodes.get_mut(i) {
