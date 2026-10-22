@@ -59,7 +59,6 @@ fn compare_two_versions() {
     assert_eq!(h.state().session.get(h.state().active_ids().unwrap().1).unwrap().name, "Compare Report.pdf");
 }
 
-/// Writes a screenshot of the Compare panel when PDFCRAFT_SHOT is set (for review).
 /// Two versions compared side by side (old `v1.pdf` left, new `v2.pdf` right).
 fn side_by_side() -> Harness<'static, PdfCraftApp> {
     let s = Session::new();
@@ -98,6 +97,7 @@ fn closing_either_half_of_a_side_by_side_comparison_keeps_the_app_running() {
     }
 }
 
+/// Writes a screenshot of the Compare panel when PDFCRAFT_SHOT is set (for review).
 #[test]
 fn compare_panel_screenshot() {
     let Ok(out) = std::env::var("PDFCRAFT_SHOT") else { return };
