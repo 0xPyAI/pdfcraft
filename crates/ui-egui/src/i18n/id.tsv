@@ -2679,3 +2679,51 @@ key	Space	Space
 	The password must have at least 8 characters.	Kata sandi harus memiliki minimal 8 karakter.
 theme	Appearance	Tampilan
 	Zoom — type a percentage and press Enter	Zoom — ketik persentase dan tekan Enter
+# Untranslated: English text until a translator fills these in.
+	Calculation order	Calculation order
+	Alignment	Alignment
+	Always use my default zoom and page layout	Always use my default zoom and page layout
+	Back to Prepare a form	Back to Prepare a form
+	Bulleted list	Bulleted list
+	Drag a field to move it, or select it and press {up} or {down}.	Drag a field to move it, or select it and press {up} or {down}.
+	Earlier in calculation order	Earlier in calculation order
+	Edit {field}'s formula	Edit {field}'s formula
+	Every field calculates after the fields it reads.	Every field calculates after the fields it reads.
+	Every field outside a loop calculates after the fields it reads.	Every field outside a loop calculates after the fields it reads.
+	Fix order	Fix order
+	Larger thumbnails	Larger thumbnails
+	Later in calculation order	Later in calculation order
+	Layer options	Layer options
+	Less	Less
+	Links on page	Links on page
+	Loop	Loop
+	Missing from the calculation order saved in the PDF: other PDF viewers may not calculate it.	Missing from the calculation order saved in the PDF: other PDF viewers may not calculate it.
+	Move only what must move, so every field calculates after the fields it reads.	Move only what must move, so every field calculates after the fields it reads.
+	Moves only what must move	Moves only what must move
+	No field reads it	No field reads it
+	No order can fix a loop. Change one of the formulas.	No order can fix a loop. Change one of the formulas.
+	Not in order	Not in order
+	Numbered list	Numbered list
+	Order · top calculates first	Order · top calculates first
+	Other options	Other options
+	Paragraph spacing	Paragraph spacing
+	Printer default	Printer default
+	Reading the printer's settings…	Reading the printer's settings…
+	Reads {names}, which read it back. No order can fix a loop: change one of the formulas.	Reads {names}, which read it back. No order can fix a loop: change one of the formulas.
+	Reads {name}, which calculates later, so it shows an old value.	Reads {name}, which calculates later, so it shows an old value.
+	Reset to Initial Visibility	Reset to Initial Visibility
+	Script	Script
+	Show on the page which fields each field reads	Show on the page which fields each field reads
+	Shrink the page content to make room for the header and footer	Shrink the page content to make room for the header and footer
+	Smaller thumbnails	Smaller thumbnails
+	Subscript	Subscript
+	Superscript	Superscript
+	The document's security settings don't allow printing	The document's security settings don't allow printing
+	The order saved in the PDF needs tidying	The order saved in the PDF needs tidying
+	Thumbnail size	Thumbnail size
+	Too early	Too early
+	{fields} read each other	{fields} read each other
+	{field} reads its own value	{field} reads its own value
+	{field} reads no other field	{field} reads no other field
+	{field} reads {fields}	{field} reads {fields}
+	{names} and {last}	{names} and {last}

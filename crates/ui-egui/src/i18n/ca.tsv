@@ -2732,3 +2732,19 @@ theme	Appearance	Aspecte
 	Paragraph spacing	Paragraph spacing
 	Less	Less
 	Other options	Other options
+	Always use my default zoom and page layout	Always use my default zoom and page layout
+	Larger thumbnails	Larger thumbnails
+	Layer options	Layer options
+	Printer default	Printer default
+	Reading the printer's settings…	Reading the printer's settings…
+	Reset to Initial Visibility	Reset to Initial Visibility
+	Shrink the page content to make room for the header and footer	Shrink the page content to make room for the header and footer
+	Smaller thumbnails	Smaller thumbnails
+	The document's security settings don't allow printing	The document's security settings don't allow printing
+	Thumbnail size	Thumbnail size
+	Reshape comment	Reshape comment
+	The signature's signed attributes have no content type, which CMS requires; it was read anyway.	The signature's signed attributes have no content type, which CMS requires; it was read anyway.
+	This signature uses an RSA key shorter than 2048 bits, which is no longer considered strong enough for signatures. It still validates, but it should not be relied on.	This signature uses an RSA key shorter than 2048 bits, which is no longer considered strong enough for signatures. It still validates, but it should not be relied on.
+	The signature's signed attributes have no message digest, so the signature does not cover the document.	The signature's signed attributes have no message digest, so the signature does not cover the document.
+	The signature's signed attributes name a content type other than data, so it is not a signature of the document.	The signature's signed attributes name a content type other than data, so it is not a signature of the document.
+	Remove {standard} identification	Remove {standard} identification

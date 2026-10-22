@@ -2795,3 +2795,8 @@ certificate	Self-signed	Samopodepsaný
 certificate	SHA-1 digest	Otisk SHA-1
 certificate	SHA-256 digest	Otisk SHA-256
 certificate	Version	Verze
+	The signature's signed attributes have no content type, which CMS requires; it was read anyway.	Podepsané atributy podpisu neobsahují typ obsahu, který CMS vyžaduje; přesto byl podpis načten.
+	This signature uses an RSA key shorter than 2048 bits, which is no longer considered strong enough for signatures. It still validates, but it should not be relied on.	Tento podpis používá klíč RSA kratší než 2048 bitů, který už se pro podpisy nepovažuje za dostatečně silný. Ověření stále projde, ale nelze se na něj spoléhat.
+	The signature's signed attributes have no message digest, so the signature does not cover the document.	Podepsané atributy podpisu neobsahují otisk zprávy, takže se podpis na dokument nevztahuje.
+	The signature's signed attributes name a content type other than data, so it is not a signature of the document.	Podepsané atributy podpisu uvádějí jiný typ obsahu než data, takže nejde o podpis dokumentu.
+	Remove {standard} identification	Odebrat identifikaci {standard}
