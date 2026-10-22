@@ -59,7 +59,7 @@ const AR_DAYS: [&str; 7] = ["الأحد", "الاثنين", "الثلاثاء", 
 
 /// The languages month and weekday names can be written in (Preferences ▸ Date format ▸ Language):
 /// the interface languages, in the same order and with the same names.
-pub static DATE_LANGUAGES: [DateLanguage; 26] = [
+pub static DATE_LANGUAGES: [DateLanguage; 27] = [
     DateLanguage {
         code: "en",
         name: "English",
@@ -455,6 +455,29 @@ pub static DATE_LANGUAGES: [DateLanguage; 26] = [
         days: ["วันอาทิตย์", "วันจันทร์", "วันอังคาร", "วันพุธ", "วันพฤหัสบดี", "วันศุกร์", "วันเสาร์"],
         days_short: ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."],
     },
+    DateLanguage {
+        code: "ca",
+        name: "Català",
+        months: ["gener", "febrer", "març", "abril", "maig", "juny", "juliol", "agost", "setembre", "octubre", "novembre", "desembre"],
+        // After a day the month carries its own preposition, elided before a vowel: `7 d'abril`.
+        months_with_day: Some([
+            "de gener",
+            "de febrer",
+            "de març",
+            "d'abril",
+            "de maig",
+            "de juny",
+            "de juliol",
+            "d'agost",
+            "de setembre",
+            "d'octubre",
+            "de novembre",
+            "de desembre",
+        ]),
+        months_short: ["gen.", "febr.", "març", "abr.", "maig", "juny", "jul.", "ag.", "set.", "oct.", "nov.", "des."],
+        days: ["diumenge", "dilluns", "dimarts", "dimecres", "dijous", "divendres", "dissabte"],
+        days_short: ["dg.", "dl.", "dt.", "dx.", "dj.", "dv.", "ds."],
+    },
 ];
 
 /// The date language for `code` (any case), or `None` when there's none.
@@ -777,6 +800,17 @@ mod tests {
         assert_eq!(in_lang("mmmm yyyy", "ru"), "март 2026");
         // A weekday (dddd) is not a day number.
         assert_eq!(in_lang("dddd, mmmm", "cs"), "sobota, březen");
+    }
+
+    #[test]
+    fn catalan_months_elide_the_preposition_after_a_day() {
+        assert_eq!(in_lang("dddd d mmmm \\de yyyy", "ca"), "dissabte 7 de març de 2026");
+        assert_eq!(in_lang("mmmm yyyy", "ca"), "març 2026");
+        let ca = date_language("ca").unwrap();
+        assert_eq!(format_day("d mmmm \\de yyyy", (2026, 4, 23), ca), "23 d'abril de 2026");
+        assert_eq!(format_day("d mmmm", (2026, 8, 1), ca), "1 d'agost");
+        assert_eq!(format_day("d mmmm", (2026, 10, 8), ca), "8 d'octubre");
+        assert_eq!(format_day("mmmm", (2026, 10, 8), ca), "octubre", "no preposition without a day");
     }
 
     #[test]
