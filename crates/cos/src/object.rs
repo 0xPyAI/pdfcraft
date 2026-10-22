@@ -214,11 +214,21 @@ impl Stream {
     /// Like [`Stream::decoded`], for a stream whose decoded size has a tighter bound than
     /// [`MAX_DECODED`]: decoding past `max` bytes is an error.
     pub fn decoded_within(&self, max: usize) -> Result<Vec<u8>, CosError> {
+        self.decoded_within_typed(max).map_err(|e| CosError::Filter(e.to_string()))
+    }
+
+    /// [`Stream::decoded_within`] with the filter error kept typed, so a caller can tell a
+    /// spent limit from corrupt data.
+    pub(crate) fn decoded_within_typed(&self, max: usize) -> Result<Vec<u8>, pdfcraft_filters::FilterError> {
+        let max = max.min(MAX_DECODED);
         let chain = self.filters();
         if chain.is_empty() {
-            return self.raw_within(max);
+            if self.raw.len() > max {
+                return Err(pdfcraft_filters::FilterError::LimitExceeded(max));
+            }
+            return Ok(self.raw.to_vec());
         }
-        pdfcraft_filters::decode_tolerant(&chain, &self.raw, max.min(MAX_DECODED)).map(|(v, _)| v).map_err(|e| CosError::Filter(e.to_string()))
+        pdfcraft_filters::decode_tolerant(&chain, &self.raw, max).map(|(v, _)| v)
     }
 
     /// Decoded data, bounded by [`MAX_DECODED`]; any corruption is an error.
