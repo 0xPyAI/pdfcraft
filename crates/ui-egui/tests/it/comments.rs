@@ -1085,8 +1085,9 @@ fn the_panel_filters_and_sorts() {
     assert_eq!(h.query_all_by_label("Oval").count(), ovals + 1, "a group header was added");
 }
 
-// Contributor-original PDF. Two roots deliberately share /NM. Their replies are on
-// another page, with dates opposite to source order. An unnamed root has no thread.
+// Contributor-original PDF. Two roots deliberately share /NM; the replies (on another page,
+// with dates opposite to source order) point at the first by reference. An unnamed root has
+// no thread.
 const REVIEW_FIXTURE: &[u8] = b"%PDF-1.7
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj
@@ -1107,7 +1108,7 @@ trailer << /Root 1 0 R >>
 %%EOF";
 
 #[test]
-fn the_panel_preserves_global_threads_source_order_and_unfiltered_page_counts() {
+fn the_panel_preserves_threads_source_order_and_unfiltered_page_counts() {
     let mut h = harness_with_bytes(REVIEW_FIXTURE.to_vec(), |app| {
         app.set_option("panel", "comments").unwrap();
         app.views[0].comments.search = Some("needle".into());
@@ -1129,14 +1130,16 @@ fn the_panel_preserves_global_threads_source_order_and_unfiltered_page_counts() 
 
     h.state_mut().views[0].comments.hidden_authors.clear();
     h.run_steps(2);
-    h.get_by_label("Duplicate root");
-    assert_eq!(h.query_all_by_label("Needle first reply").count(), 2, "duplicate names share the same global thread");
+    // The replies point at the first root: sharing its /NM doesn't give the other its thread
+    // (or a search match on that thread).
+    assert_eq!(h.query_all_by_label("Duplicate root").count(), 0);
+    assert_eq!(h.query_all_by_label("Needle first reply").count(), 1);
     h.state_mut().views[0].comments.search = Some("status-only token".into());
     h.state_mut().views[0].comments.hidden_statuses.push("Rejected".into());
     h.state_mut().views[0].comments.hidden_checks.push("Checked".into());
     h.run_steps(2);
     h.get_by_label("First root");
-    h.get_by_label("Duplicate root");
+    assert_eq!(h.query_all_by_label("Duplicate root").count(), 0);
 
     h.state_mut().views[0].comments.hidden_statuses.push("Accepted".into());
     h.run_steps(2);
@@ -1151,6 +1154,31 @@ fn the_panel_preserves_global_threads_source_order_and_unfiltered_page_counts() 
     h.run_steps(2);
     h.get_by_label("Unnamed root");
     assert_eq!(h.query_all_by_label("Needle first reply").count(), 0, "an unnamed root has no replies");
+}
+
+// Contributor-original PDF, shaped like PyMuPDF output: every page's first comment is named
+// `fitz-A0`, so only the `/IRT` reference tells which comment a reply belongs to.
+const PER_PAGE_NAMES: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [5 0 R] >> endobj
+4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [6 0 R 7 0 R 8 0 R] >> endobj
+5 0 obj << /Type /Annot /Subtype /Text /Rect [20 140 40 160] /NM (fitz-A0) /T (Alpha) /Contents (Cover note) >> endobj
+6 0 obj << /Type /Annot /Subtype /Text /Rect [20 140 40 160] /NM (fitz-A0) /T (Beta) /Contents (Second page note) >> endobj
+7 0 obj << /Type /Annot /Subtype /Text /Rect [20 140 40 160] /NM (fitz-A1) /IRT 6 0 R /T (Gamma) /Contents (Reply on page two) >> endobj
+8 0 obj << /Type /Annot /Subtype /Text /Rect [20 140 40 160] /NM (fitz-A2) /IRT 6 0 R /T (Beta) /Contents (Answer on page two) >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
+#[test]
+fn replies_follow_irt_references_when_names_repeat_on_every_page() {
+    let h = harness_with_bytes(PER_PAGE_NAMES.to_vec(), |app| app.set_option("panel", "comments").unwrap());
+    let reply = h.get_by_label("Reply on page two");
+    assert!(reply.rect().top() > h.get_by_label("Second page note").rect().top(), "the reply sits under page 2's comment");
+    assert!(h.get_by_label("Page 2").rect().top() < reply.rect().top(), "not under page 1's comment, which shares the /NM");
+    h.get_by_label("Answer on page two");
+    // The header counts the two comments, not their replies (Acrobat says 2, not 4).
+    assert_eq!(h.query_all_by_label("4").count(), 0);
 }
 
 #[test]

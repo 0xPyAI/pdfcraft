@@ -3419,6 +3419,37 @@ fn comments_lock_take_checkmarks_hide_and_summarize() {
     assert_eq!(comment_summary("x", &[], SummarySort::Page), "Summary of Comments on x\n\nThis document has no comments.\n");
 }
 
+/// Replies thread by their `/IRT` reference, not `/NM`: PyMuPDF names the first comment on every
+/// page `fitz-A0`, which used to file every reply under page 1's comment. Both readers (inspect on
+/// open, and the comment list the engine refreshes after an edit) must agree.
+#[test]
+fn replies_thread_by_reference_when_names_repeat_across_pages() {
+    let pdf = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [5 0 R] >> endobj
+4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [6 0 R 7 0 R] >> endobj
+5 0 obj << /Type /Annot /Subtype /Text /Rect [20 140 40 160] /NM (fitz-A0) /T (Alpha) /Contents (COVER) >> endobj
+6 0 obj << /Type /Annot /Subtype /Text /Rect [20 140 40 160] /NM (fitz-A0) /T (Beta) /Contents (SECOND) >> endobj
+7 0 obj << /Type /Annot /Subtype /Text /Rect [20 100 40 120] /NM (fitz-A1) /IRT 6 0 R /T (Gamma) /Contents (ANSWER) >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("fitz.pdf", None, Arc::new(pdf.to_vec()), None).expect("opens");
+    let check = |s: &Session, replies: usize| {
+        let all = &s.get(id).unwrap().info.annotations;
+        let answer = all.iter().find(|a| a.contents.as_deref() == Some("ANSWER")).unwrap();
+        assert_eq!(answer.parent, Some((1, 0)), "{answer:?}");
+        let text = comment_summary("fitz.pdf", all, SummarySort::Page);
+        let (cover, second) = text.split_once("SECOND").unwrap();
+        assert!(!cover.contains("ANSWER"), "page 1's comment has no replies: {text}");
+        assert_eq!(second.matches("    Author:").count(), replies, "{text}");
+    };
+    check(&s, 1);
+    s.apply(id, Edit::ReplyToAnnotation { page: 1, index: 0, text: "LATER".into(), author: "Delta".into() }).unwrap();
+    check(&s, 2);
+}
+
 /// #820: the generated summary includes replies to replies, indented one level deeper.
 #[test]
 fn comment_summary_includes_replies_to_replies() {

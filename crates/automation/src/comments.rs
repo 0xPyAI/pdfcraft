@@ -200,26 +200,24 @@ impl Automation {
         };
         let roots: Vec<Value> = all
             .iter()
-            .filter(|c| c.in_reply_to.is_none() && only.is_none_or(|p| c.page == p))
+            .filter(|c| !c.is_reply() && only.is_none_or(|p| c.page == p))
             .map(|c| {
                 let mut v = view(c);
                 // Every reply under this comment, at any depth, in document order. A reply to a
                 // reply keeps its `/IRT` on the direct parent, so following one level would drop it.
-                let descends_from = |r: &Annotation, root: &str| -> bool {
-                    let mut parent = r.in_reply_to.as_deref();
+                // Parents are found by reference: `/NM` need not be unique.
+                let descends_from = |r: &Annotation, root: &Annotation| -> bool {
+                    let mut parent = r.parent;
                     for _ in 0..64 {
-                        let Some(nm) = parent else { return false };
-                        if nm == root {
+                        let Some(at) = parent else { return false };
+                        if at == (root.page, root.index) {
                             return true;
                         }
-                        parent = all.iter().find(|x| x.name.as_deref() == Some(nm)).and_then(|x| x.in_reply_to.as_deref());
+                        parent = all.iter().find(|x| (x.page, x.index) == at).and_then(|x| x.parent);
                     }
                     false
                 };
-                let thread: Vec<&Annotation> = match c.name.as_deref() {
-                    Some(nm) => all.iter().filter(|r| r.in_reply_to.is_some() && descends_from(r, nm)).collect(),
-                    None => Vec::new(),
-                };
+                let thread: Vec<&Annotation> = all.iter().filter(|r| r.is_reply() && descends_from(r, c)).collect();
                 let status = thread.iter().rev().filter(|r| !r.is_mark()).find_map(|r| r.state.clone());
                 v["status"] = json!(status);
                 v["marked"] = json!(thread.iter().rev().find(|r| r.is_mark()).is_some_and(|r| r.state.as_deref() == Some("Marked")));
