@@ -65,7 +65,7 @@ pub struct AuditFinding {
     /// `rect[0] <= rect[2]` and `rect[1] <= rect[3]`.
     pub rect: [f64; 4],
     /// The extractable text the cover hides, lines joined with single spaces and trimmed.
-    /// Possibly empty when nothing decodable remains under the cover.
+    /// Empty when the document's permissions withhold copying (see [`audit_redactions`]).
     pub covered_text: String,
 }
 
@@ -101,6 +101,10 @@ const COVER_CONTRAST: f64 = 3.0;
 /// Audit every page for faux redactions and unapplied redaction marks. Fails closed: any
 /// content that cannot be decoded, or that needs more work or report than the audit's bounds, is
 /// returned as an error, never as an empty finding list.
+///
+/// When the document's permissions withhold copying (ISO 32000-2 Table 22, bit 5), findings are
+/// still reported but their `covered_text` is empty: the audit hands out no text that copying
+/// would refuse.
 pub fn audit_redactions(doc: &Document) -> Result<Vec<AuditFinding>, AuditError> {
     audit(doc, Limits::DEFAULT)
 }
@@ -152,6 +156,7 @@ impl Budget {
 }
 
 fn audit(doc: &Document, limits: Limits) -> Result<Vec<AuditFinding>, AuditError> {
+    let copying = doc.permissions().is_none_or(|p| p.copy());
     let mut budget = Budget { limits, comparisons: 0, covered_text: 0 };
     let mut out = Vec::new();
     for (n, page) in pdfcraft_model::pages(doc).iter().enumerate() {
@@ -161,7 +166,8 @@ fn audit(doc: &Document, limits: Limits) -> Result<Vec<AuditFinding>, AuditError
         for r in cover::filled_rects(doc, &page.dict)? {
             let covered = budget.hidden_text(&lines, |line| is_cover(&r, line))?;
             if !covered.trim().is_empty() {
-                out.push(AuditFinding { page: n, kind: FindingKind::CoveredText, rect: r.rect, covered_text: covered });
+                let covered_text = if copying { covered } else { String::new() };
+                out.push(AuditFinding { page: n, kind: FindingKind::CoveredText, rect: r.rect, covered_text });
             }
         }
         // 2. Annotation covers over extractable text.
@@ -175,7 +181,8 @@ fn audit(doc: &Document, limits: Limits) -> Result<Vec<AuditFinding>, AuditError
                     AnnotationCover::Redact(rect) => (FindingKind::UnappliedMark, rect),
                     AnnotationCover::Square { rect, .. } => (FindingKind::CoveredText, rect),
                 };
-                out.push(AuditFinding { page: n, kind, rect, covered_text: covered });
+                let covered_text = if copying { covered } else { String::new() };
+                out.push(AuditFinding { page: n, kind, rect, covered_text });
             }
         }
     }

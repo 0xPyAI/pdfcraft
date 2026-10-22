@@ -675,3 +675,29 @@ fn cover_and_line_comparisons_are_bounded() {
     let limits = crate::Limits { comparisons: 400, covered_text: usize::MAX };
     assert!(crate::audit(&doc, limits).expect("within the budget").is_empty());
 }
+
+/// Covered text is document text: a document whose permissions withhold copying reports where
+/// its covers are but not what they hide, unless it was opened with the owner password.
+#[test]
+fn copy_restricted_documents_withhold_covered_text() {
+    let content = b"BT /F1 24 Tf 100 700 Td (SECRET DATA 123) Tj ET\n0 g\n100 688 220 32 re f\n";
+    let mut doc = open(one_page(content, ""));
+    doc.set_encryption(&pdfcraft_cos::NewEncryption {
+        algorithm: pdfcraft_cos::Algorithm::Aes256,
+        user_password: "",
+        owner_password: "owner",
+        permissions: -1 ^ 0b1_0000,
+        encrypt_metadata: true,
+        seed: [7; 32],
+    })
+    .expect("encrypt");
+    let bytes = Arc::new(pdfcraft_cos::write_full(&doc, &Default::default()).expect("save"));
+    let user = Document::open_with_password(bytes.clone(), None).expect("open");
+    let findings = audit_redactions(&user).expect("audit must run");
+    assert_eq!(findings.len(), 1, "the cover is still reported: {findings:?}");
+    assert_eq!(findings[0].covered_text, "");
+    let owner = Document::open_with_password(bytes, Some("owner")).expect("open");
+    let findings = audit_redactions(&owner).expect("audit must run");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].covered_text, "SECRET DATA 123");
+}
