@@ -165,12 +165,19 @@ impl ImageState {
                 }
             }
             b"l" => {
-                if let Some([x, y]) = op.nums::<2>() {
+                // A segment before any m (or re) has no subpath to extend: BezPath's line_to and
+                // friends panic on an empty path by contract, so the segment is skipped, as the
+                // renderer, MuPDF and pdftotext do (#3581).
+                if let Some([x, y]) = op.nums::<2>()
+                    && self.path.elements().last().is_some()
+                {
                     self.path.line_to(self.point(x, y));
                 }
             }
             b"c" => {
-                if let Some([x1, y1, x2, y2, x3, y3]) = op.nums::<6>() {
+                if let Some([x1, y1, x2, y2, x3, y3]) = op.nums::<6>()
+                    && self.path.elements().last().is_some()
+                {
                     self.path.curve_to(self.point(x1, y1), self.point(x2, y2), self.point(x3, y3));
                 }
             }
@@ -182,12 +189,19 @@ impl ImageState {
                 }
             }
             b"y" => {
-                if let Some([x1, y1, x2, y2]) = op.nums::<4>() {
+                if let Some([x1, y1, x2, y2]) = op.nums::<4>()
+                    && self.path.elements().last().is_some()
+                {
                     let end = self.point(x2, y2);
                     self.path.curve_to(self.point(x1, y1), end, end);
                 }
             }
-            b"h" => self.path.close_path(),
+            b"h" => {
+                // ClosePath with no subpath panics by the same contract (#3581).
+                if self.path.elements().last().is_some() {
+                    self.path.close_path();
+                }
+            }
             b"re" => {
                 if let Some([x, y, w, h]) = op.nums::<4>() {
                     self.path.move_to(self.point(x, y));

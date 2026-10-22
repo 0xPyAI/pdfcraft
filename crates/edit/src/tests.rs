@@ -119,6 +119,99 @@ fn header_and_footer_are_drawn_in_display_space_and_wrap_the_original_content() 
 }
 
 #[test]
+fn header_and_footer_are_drawn_in_the_chosen_standard_face() {
+    // #3754: Times or Courier instead of Helvetica. The content names the face, the page's fonts
+    // gain it, and right-aligned text is placed by that face's widths (not Helvetica's).
+    let text = "Wide words";
+    for (font, resource, base) in [(added::Family::Times, "PCTimes", "Times-Roman"), (added::Family::Courier, "PCCour", "Courier")] {
+        let mut doc = fixture();
+        let hf = HeaderFooter {
+            text: [String::new(), String::new(), text.into(), String::new(), String::new(), String::new()],
+            font,
+            ..HeaderFooter::default()
+        };
+        add_header_footer(&mut doc, &[0], &hf, false, &cx()).unwrap();
+        let doc = reopen(&doc);
+        let mark = streams(&doc, 0).last().cloned().unwrap();
+        assert!(mark.contains(&format!("/{resource} 8 Tf")), "{base}: {mark}");
+        let x = 600.0 - 72.0 - font.width(text, 8.0, false, false);
+        assert!((x - (600.0 - 72.0 - pdfcraft_fonts::helvetica_width(text, 8.0))).abs() > 1.0, "{base}: the faces differ in width");
+        assert!(mark.contains(&format!("1 0 0 1 {} ", n(x))), "{base}: right-aligned by its own widths: {mark}");
+        let page = &pdfcraft_model::pages(&doc)[0];
+        let res = doc.resolve(page.dict.get(b"Resources").unwrap());
+        let fonts = doc.resolve(res.as_dict().unwrap().get(b"Font").unwrap()).as_dict().cloned().unwrap();
+        let face = doc.resolve(fonts.get(resource.as_bytes()).unwrap()).as_dict().cloned().unwrap();
+        assert_eq!(face.name(b"BaseFont"), Some(base.as_bytes()), "{base}");
+    }
+    // The default is still Helvetica, and only Helvetica is added.
+    let mut doc = fixture();
+    let hf =
+        HeaderFooter { text: [text.into(), String::new(), String::new(), String::new(), String::new(), String::new()], ..HeaderFooter::default() };
+    add_header_footer(&mut doc, &[0], &hf, false, &cx()).unwrap();
+    let mark = streams(&reopen(&doc), 0).last().cloned().unwrap();
+    assert!(mark.contains("/PCHelv 8 Tf") && !mark.contains("/PCTimes") && !mark.contains("/PCCour"), "{mark}");
+}
+
+#[test]
+fn a_header_never_takes_over_a_font_name_the_page_already_draws_with() {
+    // From review of #3756: a page that already draws a different font as /PCTimes keeps it; the
+    // header's Times goes under a free name, and an update reuses that name, not a third one.
+    let mut doc = fixture();
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    let mut fonts = Dict::new();
+    let mut theirs = Dict::new();
+    theirs.set(b"Type".to_vec(), Object::name("Font"));
+    theirs.set(b"Subtype".to_vec(), Object::name("Type1"));
+    theirs.set(b"BaseFont".to_vec(), Object::name("Helvetica-Bold"));
+    fonts.set(b"PCTimes".to_vec(), Object::Dict(theirs));
+    let mut res = Dict::new();
+    res.set(b"Font".to_vec(), Object::Dict(fonts));
+    doc.update_dict(page, |d| d.set(b"Resources".to_vec(), Object::Dict(res))).unwrap();
+    let hf = HeaderFooter {
+        text: ["Serif".into(), String::new(), String::new(), String::new(), String::new(), String::new()],
+        font: added::Family::Times,
+        ..HeaderFooter::default()
+    };
+    let base_of = |doc: &Document, name: &[u8]| {
+        let fonts = page_fonts(doc, &pdfcraft_model::pages(doc)[0]);
+        fonts.get(name).map(|f| doc.resolve(f)).and_then(|f| f.as_dict().and_then(|d| d.name(b"BaseFont")).map(<[u8]>::to_vec))
+    };
+    add_header_footer(&mut doc, &[0], &hf, false, &cx()).unwrap();
+    let doc = reopen(&doc);
+    assert_eq!(base_of(&doc, b"PCTimes").as_deref(), Some(&b"Helvetica-Bold"[..]), "the page's own font is untouched");
+    assert_eq!(base_of(&doc, b"PCTimes_1").as_deref(), Some(&b"Times-Roman"[..]));
+    let mark = streams(&doc, 0).last().cloned().unwrap();
+    assert!(mark.contains("/PCTimes_1 8 Tf"), "{mark}");
+    // Updating the header finds its own name again.
+    let mut doc = doc;
+    add_header_footer(&mut doc, &[0], &hf, true, &cx()).unwrap();
+    let doc = reopen(&doc);
+    assert!(streams(&doc, 0).last().unwrap().contains("/PCTimes_1 8 Tf"));
+    assert_eq!(base_of(&doc, b"PCTimes_2"), None, "no new name on update");
+    assert_eq!(base_of(&doc, b"PCTimes").as_deref(), Some(&b"Helvetica-Bold"[..]));
+    // The same face with more to it (here a /ToUnicode map) is the page's own too: kept whole.
+    let mut doc = fixture();
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    let map = doc.add(Object::Stream(pdfcraft_cos::Stream::flate(Dict::new(), b"/CIDInit /ProcSet findresource begin")));
+    let mut theirs = Dict::new();
+    for (k, v) in [("Type", "Font"), ("Subtype", "Type1"), ("BaseFont", "Times-Roman"), ("Encoding", "WinAnsiEncoding")] {
+        theirs.set(k.as_bytes().to_vec(), Object::name(v));
+    }
+    theirs.set(b"ToUnicode".to_vec(), Object::Ref(map));
+    let mut fonts = Dict::new();
+    fonts.set(b"PCTimes".to_vec(), Object::Dict(theirs));
+    let mut res = Dict::new();
+    res.set(b"Font".to_vec(), Object::Dict(fonts));
+    doc.update_dict(page, |d| d.set(b"Resources".to_vec(), Object::Dict(res))).unwrap();
+    add_header_footer(&mut doc, &[0], &hf, false, &cx()).unwrap();
+    let doc = reopen(&doc);
+    let fonts = page_fonts(&doc, &pdfcraft_model::pages(&doc)[0]);
+    let kept = doc.resolve(fonts.get(b"PCTimes").unwrap()).as_dict().cloned().unwrap();
+    assert!(kept.contains(b"ToUnicode"), "the page's map is kept");
+    assert!(streams(&doc, 0).last().unwrap().contains("/PCTimes_1 8 Tf"));
+}
+
+#[test]
 fn header_start_number_that_would_wrap_is_refused_without_drawing() {
     // u32::MAX is a valid start_number on its own, but there is no room for a second page
     // number after it. The old code wrapped the second page to zero; now the whole run is
@@ -187,6 +280,45 @@ fn watermarks_rotate_fade_and_can_go_behind() {
     assert!(s[0].contains("/PCGS30 gs") && s[0].contains("0.707 0.707 -0.707 0.707 300 400 cm"), "{}", s[0]);
     assert!(s[0].contains("(CONFIDENTIAL) Tj") && s[0].contains("(Do not copy) Tj"));
     assert_eq!(s.len(), 2, "no wrapper needed for content behind");
+}
+
+#[test]
+fn a_second_background_is_drawn_over_the_first() {
+    // #3591: the new background went in front of the old one in /Contents, so the old colour
+    // was painted over it and stayed.
+    let mut doc = fixture();
+    add_background(&mut doc, &[0], &Background { color: [0.0, 0.0, 1.0], opacity: 1.0, ..Background::default() }, false).unwrap();
+    add_background(&mut doc, &[0], &Background { color: [0.0, 1.0, 0.0], opacity: 1.0, ..Background::default() }, false).unwrap();
+    let s = streams(&doc, 0);
+    assert_eq!(s.len(), 3, "{s:?}");
+    assert!(s[0].contains("0 0 1 rg") && s[1].contains("0 1 0 rg"), "the newer background is painted last: {s:?}");
+    assert!(s[2].contains("(Hi) Tj"), "both stay behind the content: {s:?}");
+}
+
+#[test]
+fn backgrounds_stay_below_watermarks_behind_the_content() {
+    // Behind the content, backgrounds come first, in the order added, and then watermarks, so a
+    // watermark added after a background shows and a later background doesn't cover it.
+    let mut doc = fixture();
+    add_background(&mut doc, &[0], &Background { color: [0.0, 0.0, 1.0], opacity: 1.0, ..Background::default() }, false).unwrap();
+    add_watermark(&mut doc, &[0], &Watermark { text: "DRAFT".into(), behind: true, ..Watermark::default() }, false).unwrap();
+    add_background(&mut doc, &[0], &Background { color: [0.0, 1.0, 0.0], opacity: 1.0, ..Background::default() }, false).unwrap();
+    let s = streams(&doc, 0);
+    assert_eq!(s.len(), 4, "{s:?}");
+    assert!(s[0].contains("0 0 1 rg") && s[1].contains("0 1 0 rg"), "backgrounds first, oldest first: {s:?}");
+    assert!(s[2].contains("/PCMark /Watermark") && s[3].contains("(Hi) Tj"), "then the watermark, then the content: {s:?}");
+}
+
+#[test]
+fn a_watermark_behind_goes_under_one_on_top_of_a_page_without_content() {
+    // With no content of its own, the page's watermark on top is its first stream, which looks
+    // like a behind-mark; a watermark added behind later must still be painted under it.
+    let mut doc = fixture();
+    add_watermark(&mut doc, &[2], &Watermark { text: "TOP".into(), ..Watermark::default() }, false).unwrap();
+    add_watermark(&mut doc, &[2], &Watermark { text: "BEHIND".into(), behind: true, ..Watermark::default() }, false).unwrap();
+    let s = streams(&doc, 2);
+    assert_eq!(s.len(), 2, "{s:?}");
+    assert!(s[0].contains("(BEHIND) Tj") && s[1].contains("(TOP) Tj"), "the watermark behind is painted first: {s:?}");
 }
 
 #[test]
@@ -2111,6 +2243,25 @@ fn image_page_with(content: &str) -> Document {
     Document::open(Arc::new(out)).unwrap()
 }
 
+/// A path segment operator before any `m` (or `re`) has no subpath to extend: the image scan used
+/// to call `BezPath`'s `line_to`/`curve_to`/`close_path` on an empty path, which panics by contract,
+/// taking `object_list`, `page_images` and the Office export's image walk down with it (#3581).
+/// The segment is now skipped, as the renderer, MuPDF and pdftotext do, and the page's images are
+/// still listed.
+#[test]
+fn image_scan_skips_a_path_segment_before_any_m() {
+    for bad in ["1 1 l S", "1 1 2 2 3 3 c S", "1 1 2 2 4 4 y S", "1 1 2 2 3 3 v S", "h S"] {
+        let content = format!("q {bad} Q 100 100 200 100 cm /Im0 Do");
+        let doc = image_page_with(&content);
+        assert_eq!(images::page_images(&doc, 0).unwrap().len(), 1, "{bad}: the image is still listed");
+    }
+    // A path started with m (or re) still extends and closes as before.
+    let doc = image_page_with("q 0 0 m 1 1 l h S Q 100 100 200 100 cm /Im0 Do");
+    assert_eq!(images::page_images(&doc, 0).unwrap().len(), 1);
+    let doc = image_page_with("q 10 10 20 20 re W n Q 100 100 200 100 cm /Im0 Do");
+    assert_eq!(images::page_images(&doc, 0).unwrap().len(), 1);
+}
+
 /// The box of the first `re` on the page in user space, after the `cm`s before it.
 fn first_rect_in_user_space(doc: &Document) -> [f64; 4] {
     let mut ctm = pdfcraft_content::Matrix::IDENTITY;
@@ -2361,6 +2512,43 @@ fn paragraphs_take_new_formatting() {
     let lines = text::text_lines(&doc, 0).unwrap();
     for l in &lines {
         assert!((l.rect[2] - right).abs() < 1.0, "{:?} ends at {} not {right}", l.text, l.rect[2]);
+    }
+}
+
+#[test]
+fn a_one_row_title_keeps_its_centre_when_it_grows_and_when_it_wraps() {
+    // A centred one-row title (its centre is at x ≈ 306 on the 600 pt page) above a body
+    // left-aligned at x = 72. Growing it must not drag it to the right.
+    let src = "BT /F1 18 Tf 1 0 0 1 252.477 700 Tm (Centered title) Tj ET\n\
+               BT /F1 12 Tf 1 0 0 1 72 640 Tm (Body text below the heading starts here and runs) Tj ET\n\
+               BT /F1 12 Tf 1 0 0 1 72 625.6 Tm (on for a second row of ordinary words.) Tj ET";
+    let mut doc = text_page(src);
+    let before = text::text_blocks(&doc, 0).unwrap()[0].clone();
+    let centre = (before.rect[0] + before.rect[2]) / 2.0;
+    text::rewrite_block(&mut doc, 0, 0, Some("Centered title with a few more words"), &text::BlockStyle::default()).unwrap();
+    let doc = reopen(&doc);
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(blocks[0].text, "Centered title with a few more words");
+    let r = lines[blocks[0].lines[0]].rect;
+    assert!(((r[0] + r[2]) / 2.0 - centre).abs() < 1.0, "the grown title stays centred on {centre}, its centre is {}", (r[0] + r[2]) / 2.0);
+    // Long enough to have to wrap: every row stays centred on the same centre too.
+    let mut doc = text_page(src);
+    text::rewrite_block(
+        &mut doc,
+        0,
+        0,
+        Some("Centered title with many more words added so that the single row has to become much longer"),
+        &text::BlockStyle::default(),
+    )
+    .unwrap();
+    let doc = reopen(&doc);
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert!(blocks[0].lines.len() > 1, "the long title wraps into rows: {:?}", blocks[0].text);
+    for i in &blocks[0].lines {
+        let r = lines[*i].rect;
+        assert!(((r[0] + r[2]) / 2.0 - centre).abs() < 2.0, "row {:?} stays centred on {centre}", lines[*i].text);
     }
 }
 
@@ -5345,6 +5533,23 @@ fn flattening_comments_keeps_annotations_that_are_not_comments() {
     assert_eq!(left(&reopen(&doc)), without_widget, "flattening fields touches no annotation that isn't a widget");
 }
 
+/// A footnote marker (`Ts` text rise, a smaller `Tf` size) does not split the paragraph around it
+/// into separate editable zones (#3252): on `main` this read as three blocks — the text up to the
+/// marker, the marker alone, and the text after it — because the row-joining baseline tolerance
+/// was scaled by the smaller of the two runs' sizes, far tighter than a typical superscript's rise.
+#[test]
+fn a_superscript_footnote_marker_stays_in_its_paragraphs_row() {
+    let doc = text_page(
+        "BT /F1 12 Tf 72 700 Td (and A.) Tj 0 -14 Td (Edward Siecienski) Tj 4 Ts /F1 7.2 Tf (3) Tj 0 Ts /F1 12 Tf (. More words continue the paragraph right after the marker.) Tj ET",
+    );
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 4, "the marker is its own line, raised and smaller: {lines:?}");
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 1, "one paragraph, not split at the marker: {blocks:?}");
+    assert_eq!(blocks[0].rows.len(), 2, "two visual rows, the second carrying the marker");
+    assert_eq!(blocks[0].text, "and A. Edward Siecienski3. More words continue the paragraph right after the marker.", "{:?}", blocks[0]);
+}
+
 /// A page whose text is a clipping mask (`mode` Tr) with a fill painted through it.
 fn clipping_text_page(mode: i64) -> Document {
     text_page(&format!("q\nBT {mode} Tr /F1 48 Tf 40 60 Td (MASK) Tj ET\n1 0 0 rg 0 0 300 150 re f\nQ\n"))
@@ -5702,4 +5907,41 @@ fn vertical_text_drawn_one_glyph_per_tj_is_one_line() {
         assert!((r[1] - 660.0).abs() < 0.5 && (r[3] - 720.0).abs() < 0.5, "{r:?}");
     }
     assert_eq!(text::text_blocks(&doc, 0).unwrap().len(), 2);
+}
+
+/// Two genuinely stacked rows of ordinary body text must not join into one row just because the
+/// first is narrow enough to put the second's start within the #3252 tolerance band: here the
+/// second row starts 1.4pt to the left of where the first ends (so the two overlap a little,
+/// as compressed text or a tight column can) and 5pt below its baseline — inside the widened 50%
+/// tolerance but outside the original 20% one. They stay two rows (and two paragraphs).
+#[test]
+fn stacked_rows_that_merely_overlap_do_not_join_into_one_row() {
+    let doc = text_page("BT /F1 12 Tf 72 700 Td (A compressed line of body text here) Tj 190 -5 Td (Second stacked line of body text) Tj ET");
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 2);
+    let gap = lines[1].rect[0] - lines[0].rect[2];
+    assert!((-2.4..0.0).contains(&gap), "the rows overlap a little, within the old tolerance band: {gap}");
+    let baseline_shift = lines[0].rect[3] - lines[1].rect[3];
+    assert!((2.4..6.0).contains(&baseline_shift), "between the old and new vertical tolerance: {baseline_shift}");
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 2, "two separate rows stay two paragraphs, not one: {blocks:?}");
+}
+
+/// Two equal-size rows with no horizontal overlap must not join into one row either (#3252):
+/// the wider tolerance is for a run distinctly smaller or larger than its neighbour (a
+/// super/subscript), not for two ordinary body-text rows that happen to sit close enough
+/// vertically — here a 5pt baseline shift, inside the widened 50% tolerance but outside the
+/// original 20% one, with the second row starting just past where the first ends.
+#[test]
+fn equal_size_rows_need_the_tighter_tolerance_even_without_overlap() {
+    let doc = text_page("BT /F1 12 Tf 72 700 Td (Short line one) Tj 75 -5 Td (Second line two here) Tj ET");
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].size, lines[1].size, "same size: no super/subscript here");
+    let gap = lines[1].rect[0] - lines[0].rect[2];
+    assert!(gap >= 0.0, "no horizontal overlap: {gap}");
+    let baseline_shift = lines[0].rect[3] - lines[1].rect[3];
+    assert!((2.4..6.0).contains(&baseline_shift), "between the old and new vertical tolerance: {baseline_shift}");
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 2, "two separate rows stay two paragraphs, not one: {blocks:?}");
 }

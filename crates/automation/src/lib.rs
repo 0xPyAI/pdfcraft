@@ -1290,6 +1290,14 @@ impl Automation {
                 if let Some(s) = a.opt_num("font_size")? {
                     hf.font_size = s;
                 }
+                hf.font = match a.opt_str("font")? {
+                    None | Some("Helvetica") => pdfcraft_engine::FontFamily::Helvetica,
+                    Some("Times") => pdfcraft_engine::FontFamily::Times,
+                    Some("Courier") => pdfcraft_engine::FontFamily::Courier,
+                    Some(other) => {
+                        return Err(ToolError::InvalidArgs(format!("font must be \"Helvetica\", \"Times\" or \"Courier\", not {other:?}")));
+                    }
+                };
                 hf.color = color("color", hf.color)?;
                 if let Some(m) = a.get("margins").and_then(Value::as_array) {
                     let m: Vec<f64> = m.iter().filter_map(Value::as_f64).collect();

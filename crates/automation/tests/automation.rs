@@ -2239,6 +2239,20 @@ fn headers_watermarks_and_backgrounds_through_tools() {
     assert!(matches!(a.call("doc_remove_marks", &json!({ "doc": doc, "kind": "watermark" })), Err(ToolError::Failed(_))));
     assert!(matches!(a.call("doc_header_footer", &json!({ "doc": doc })), Err(ToolError::Failed(_))), "no text");
     ok(&mut a, "doc_save", json!({ "doc": doc, "path": "marked.pdf" }));
+    // A standard face other than Helvetica (#3754), kept through save and reopen; one it doesn't
+    // offer is refused with the faces it does.
+    let mono = ok(&mut a, "doc_open", json!({ "path": "b.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_header_footer", json!({ "doc": mono, "header_left": "MONO", "font": "Courier" }));
+    assert!(page_text(&mut a, mono)[0].contains("MONO"));
+    ok(&mut a, "doc_save", json!({ "doc": mono, "path": "courier.pdf" }));
+    let saved = pdfcraft_cos::Document::open(std::sync::Arc::new(std::fs::read(dir.join("courier.pdf")).unwrap())).unwrap();
+    let page = &pdfcraft_model::pages(&saved)[0];
+    let res = saved.resolve(page.dict.get(b"Resources").unwrap());
+    let fonts = saved.resolve(res.as_dict().unwrap().get(b"Font").unwrap()).as_dict().cloned().unwrap();
+    let face = saved.resolve(fonts.get(b"PCCour").expect("Courier is added")).as_dict().cloned().unwrap();
+    assert_eq!(face.name(b"BaseFont"), Some(&b"Courier"[..]));
+    let refused = a.call("doc_header_footer", &json!({ "doc": mono, "header_left": "X", "font": "Arial" }));
+    assert!(matches!(refused, Err(ToolError::InvalidArgs(e)) if e.contains("Courier")));
 }
 
 #[test]
@@ -3727,6 +3741,103 @@ fn content_index_out_of_range_is_an_error_not_a_panic() {
         }
     }
     assert_eq!(ok(&mut a, "content_list", json!({ "doc": doc }))["count"], 1);
+}
+
+fn added_rotation_image(dir: &Path) {
+    let mut png = Vec::new();
+    let mut enc = png::Encoder::new(&mut png, 2, 1);
+    enc.set_color(png::ColorType::Rgb);
+    enc.write_header().unwrap().write_image_data(&[255, 0, 0, 0, 0, 255]).unwrap();
+    std::fs::write(dir.join("rotation.png"), png).unwrap();
+}
+
+#[test]
+fn large_added_image_rotations_keep_orientation_and_undo() {
+    let dir = workdir("large-added-rotation");
+    added_rotation_image(&dir);
+    let mut a = auto(&dir);
+    let image = |a: &Automation, doc| {
+        let d = a.session().get(pdfcraft_engine::DocId(doc)).unwrap();
+        let pdfcraft_engine::AddedContent::Image(image) = &d.added()[0].content else { panic!("added image") };
+        image.clone()
+    };
+    let largest = i64::MAX / 90 * 90;
+    let smallest = i64::MIN / 90 * 90;
+    for initial in [1, 0, 2, 3] {
+        let doc = ok(&mut a, "doc_create", json!({ "from": "blank", "width": 200, "height": 300 }))["doc"].as_u64().unwrap();
+        ok(&mut a, "page_add_image", json!({ "doc": doc, "page": 1, "path": "rotation.png", "rect": [20, 20, 120, 70] }));
+        ok(
+            &mut a,
+            "content_update",
+            json!({ "doc": doc, "page": 1, "index": 1, "rotate": initial * 90,
+            "flip_h": true, "flip_v": true, "crop": [0.1, 0.05, 0.2, 0.1] }),
+        );
+        let before = image(&a, doc);
+        for degrees in [largest, largest - 90, largest - 180, smallest, smallest + 90, smallest + 180, -450, -90, 0, 90, 450] {
+            ok(&mut a, "content_update", json!({ "doc": doc, "page": 1, "index": 1, "rotate": degrees }));
+            let expected = pdfcraft_engine::AddedImage { rotation: (initial + (degrees / 90).rem_euclid(4)).rem_euclid(4) as u8, ..before.clone() };
+            assert_eq!(image(&a, doc), expected, "initial quarter turn {initial}, degrees {degrees}");
+            ok(&mut a, "edit_undo", json!({ "doc": doc }));
+            assert_eq!(image(&a, doc), before, "Undo restores the image and its properties");
+            ok(&mut a, "edit_redo", json!({ "doc": doc }));
+            assert_eq!(image(&a, doc), expected, "Redo restores the normalized orientation");
+            ok(&mut a, "edit_undo", json!({ "doc": doc }));
+        }
+        ok(&mut a, "doc_save", json!({ "doc": doc, "path": format!("initial-{initial}.pdf") }));
+        let state = |a: &Automation| {
+            let d = a.session().get(pdfcraft_engine::DocId(doc)).unwrap();
+            (d.bytes.clone(), d.dirty, d.edit_generation(), d.can_undo().map(str::to_owned), d.can_redo().map(str::to_owned))
+        };
+        let saved = state(&a);
+        assert!(!saved.1 && saved.4.is_some(), "a clean document with a redo step");
+        for degrees in [i64::MIN, i64::MAX, -1, 1, 45] {
+            assert!(matches!(
+                a.call("content_update", &json!({ "doc": doc, "page": 1, "index": 1, "rotate": degrees })),
+                Err(ToolError::InvalidArgs(_))
+            ));
+            assert_eq!(state(&a), saved, "invalid degrees {degrees} leave bytes and history alone");
+        }
+    }
+}
+
+#[cfg(feature = "mcp")]
+#[test]
+fn large_added_image_rotations_round_trip_through_mcp() {
+    let dir = workdir("large-added-rotation-mcp");
+    added_rotation_image(&dir);
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "blank", "width": 200, "height": 300 }))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_add_image", json!({ "doc": doc, "page": 1, "path": "rotation.png", "rect": [20, 20, 120, 70] }));
+    ok(
+        &mut a,
+        "content_update",
+        json!({ "doc": doc, "page": 1, "index": 1, "rotate": 90,
+        "flip_h": true, "flip_v": true, "crop": [0.1, 0.05, 0.2, 0.1] }),
+    );
+    let mut server = McpServer::new(a);
+    let render = json!({ "name": "page_render", "arguments": { "doc": doc, "page": 1, "dpi": 72 } });
+    let before = rpc(&mut server, 1, "tools/call", render.clone());
+    let update = rpc(
+        &mut server,
+        2,
+        "tools/call",
+        json!({ "name": "content_update", "arguments": {
+        "doc": doc, "page": 1, "index": 1, "rotate": i64::MAX / 360 * 360
+    } }),
+    );
+    assert_eq!(update["result"]["isError"], false, "{update}");
+    let after = rpc(&mut server, 3, "tools/call", render.clone());
+    assert_eq!(after["result"]["content"], before["result"]["content"], "full turns retain the rendered orientation");
+    let saved = rpc(&mut server, 4, "tools/call", json!({ "name": "doc_save", "arguments": { "doc": doc, "path": "rotated.pdf" } }));
+    assert_eq!(saved["result"]["isError"], false, "{saved}");
+    let mut reopened = auto(&dir);
+    let doc = ok(&mut reopened, "doc_open", json!({ "path": "rotated.pdf" }))["doc"].as_u64().unwrap();
+    let d = reopened.session().get(pdfcraft_engine::DocId(doc)).unwrap();
+    let pdfcraft_engine::AddedContent::Image(image) = &d.added()[0].content else { panic!("saved image") };
+    assert_eq!(image.rotation, 1);
+    let png = reopened.call("page_render", &json!({ "doc": doc, "page": 1, "dpi": 72 })).unwrap();
+    let Content::Png { data, .. } = &png[0] else { panic!("rendered PNG") };
+    assert_eq!(after["result"]["content"][0]["data"], base64::Engine::encode(&base64::engine::general_purpose::STANDARD, data));
 }
 
 /// Text styling on an added image is refused (#1331), as image transforms are on text, and the

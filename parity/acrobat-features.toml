@@ -1962,8 +1962,8 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text", "edit.text"]
 tools = ["text_edit", "content_update"]
-evidence = ["crates/edit/src/tests.rs::justify_underline_and_spacing", "crates/edit/src/tests.rs::paragraphs_take_new_formatting", "crates/ui-egui/tests/editing.rs::the_format_panel_restyles_the_paragraph_being_edited"]
-notes = "left, centre, right and justify (word spacing per line, last line left) for existing paragraphs and added text"
+evidence = ["crates/edit/src/tests.rs::justify_underline_and_spacing", "crates/edit/src/tests.rs::paragraphs_take_new_formatting", "crates/edit/src/tests.rs::a_one_row_title_keeps_its_centre_when_it_grows_and_when_it_wraps", "crates/ui-egui/tests/editing.rs::the_format_panel_restyles_the_paragraph_being_edited"]
+notes = "left, centre, right and justify (word spacing per line, last line left) for existing paragraphs and added text. A centred paragraph is found either from its ragged rows or, for a one row title, from its centre sitting on the page's own centre away from the edge the rest of the text uses, so growing or wrapping it keeps that centre (#2581)"
 
 [[feature]]
 id = "edit.line-paragraph-spacing"
@@ -2117,9 +2117,9 @@ tier = "P0"
 milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text"]
-tools = ["image_edit"]
-evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
-notes = "existing raster images and grouped Form artwork: rotate either way about the centre, flip horizontally or vertically (a q/cm/Q wrapper); Forms stay intact as groups; added images too"
+tools = ["image_edit", "content_update"]
+evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete", "crates/ui-egui/tests/editing.rs::editing_existing_images_on_the_page", "crates/automation/tests/automation.rs::editing_page_images_through_tools", "crates/automation/tests/automation.rs::large_added_image_rotations_keep_orientation_and_undo", "crates/automation/tests/automation.rs::large_added_image_rotations_round_trip_through_mcp"]
+notes = "Existing raster images and grouped Form artwork: rotate either way about the centre, flip horizontally or vertically (a q/cm/Q wrapper); Forms stay intact as groups; added images too. Added-image content_update rotation accepts positive or negative integer multiples of 90 degrees; reducing the angle before addition prevents overflow at signed 64-bit limits and preserves the current orientation through full turns, Undo/Redo and save/reopen. Added-image rotations remain limited to 90-degree steps."
 
 [[feature]]
 id = "edit.image-move-resize"
@@ -2401,7 +2401,7 @@ status = "shipped"
 commands = ["edit.header_footer"]
 tools = ["doc_header_footer"]
 evidence = ["crates/ui-egui/tests/ui_group/marks.rs::header_and_footer_dialog_inserts_tokens_and_applies_to_a_subset", "crates/edit/src/tests.rs::header_and_footer_are_drawn_in_display_space_and_wrap_the_original_content", "crates/engine/src/tests.rs::headers_footers_watermarks_and_backgrounds_show_update_and_remove"]
-notes = "Helvetica only (no font choice yet); drawn in display space on rotated pages; artifact-tagged"
+notes = "Standard faces only: Helvetica, Times or Courier (#3754; no bold, italic or embedded fonts yet); drawn in display space on rotated pages; artifact-tagged"
 
 [[feature]]
 id = "edit.header-footer-update-remove"

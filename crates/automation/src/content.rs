@@ -171,7 +171,8 @@ impl Automation {
                     if deg.rem_euclid(90) != 0 {
                         return Err(bad("rotate must be a multiple of 90"));
                     }
-                    i.rotation = ((i64::from(i.rotation) * 90 + deg).rem_euclid(360) / 90) as u8;
+                    // Reduce untrusted degrees before adding the current quarter turns.
+                    i.rotation = (i64::from(i.rotation) + deg.rem_euclid(360) / 90).rem_euclid(4) as u8;
                 }
                 if a.opt_bool("flip_h")? == Some(true) {
                     i.flip_h = !i.flip_h;
