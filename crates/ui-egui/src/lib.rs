@@ -903,6 +903,23 @@ fn rgb_triple(v: &serde_json::Value) -> Option<[f64; 3]> {
     Some(out)
 }
 
+/// What [`PdfCraftApp::open_path`] did: opened the file in a new tab, focused the tab already
+/// showing it, handed it to the background open worker, or failed. Failures tell the user
+/// through a toast; this is the programmatic contract for callers that must know (the control
+/// channel, tools that wait for a file) (#1620).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpenOutcome {
+    /// The file opened in a new tab (or raised its password prompt).
+    Opened,
+    /// A tab already showed the file; it was focused and no tab was added.
+    Focused,
+    /// The file was accepted for opening in the background; its tab appears when the open
+    /// completes (`ui.state.pending_opens` lists the files on the way).
+    Pending,
+    /// The file could not be read or opened; the user was told.
+    Failed,
+}
+
 impl PdfCraftApp {
     pub fn new() -> Self {
         Self {
@@ -1762,6 +1779,8 @@ impl PdfCraftApp {
             #[cfg(not(target_arch = "wasm32"))]
             self.open_path(path);
         }
+        #[cfg(target_arch = "wasm32")]
+        let _ = path;
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1846,24 +1865,27 @@ impl PdfCraftApp {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn open_path(&mut self, path: &str) {
-        self.open_path_then(path, None);
+    pub fn open_path(&mut self, path: &str) -> OpenOutcome {
+        self.open_path_then(path, None)
     }
 
-    /// Keep a chosen tool with its file until preparation and any password entry finish.
+    /// Keep a chosen tool with its file until preparation and any password entry finish. The
+    /// return value is the programmatic open contract (#1620): callers that must know whether
+    /// the file opened, focused its tab, was handed to the background worker, or failed.
     #[cfg(not(target_arch = "wasm32"))]
-    fn open_path_then(&mut self, path: &str, then: Option<&'static str>) {
+    fn open_path_then(&mut self, path: &str, then: Option<&'static str>) -> OpenOutcome {
         // One file, one tab (#2166): a file that is open already comes to the front instead,
         // and the tool it was opened for runs on it. One still being opened is left to that.
         if let Some(i) = self.tab_showing(path) {
+            self.startup_superseded = true;
             self.active = Some(i);
             if let Some(command) = then {
                 self.execute(command);
             }
-            return;
+            return OpenOutcome::Focused;
         }
         if self.pending_opens.iter().any(|p| p.path.as_deref().is_some_and(|p| same_file(p, path))) {
-            return;
+            return OpenOutcome::Pending;
         }
         let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
         // Taken before reading: a build that rewrites the file meanwhile still counts as a change.
@@ -1877,7 +1899,10 @@ impl PdfCraftApp {
                     let before = self.views.len();
                     if let Err(error) = self.open_bytes(&name, Some(path.to_string()), bytes) {
                         self.notify_fmt("Couldn't open {name}: {e}", &[("name", &name), ("e", &error)]);
-                    } else if let Some(prompt) = self.password_prompt.as_mut().filter(|p| p.path.as_deref() == Some(path)) {
+                        return OpenOutcome::Failed;
+                    }
+                    if let Some(prompt) = self.password_prompt.as_mut().filter(|p| p.path.as_deref() == Some(path)) {
+                        // Encrypted: the tool runs once the password is in.
                         prompt.then = then;
                     } else if self.views.len() > before {
                         if let Some(doc) = self.views.last().map(|view| view.id) {
@@ -1886,25 +1911,37 @@ impl PdfCraftApp {
                         if let Some(command) = then {
                             self.execute(command);
                         }
+                    } else {
+                        // Open reported success but added no tab and raised no prompt; the
+                        // control channel answers this as a failure to open.
+                        return OpenOutcome::Failed;
                     }
+                    OpenOutcome::Opened
                 }
-                Err(error) => self.notify_fmt("Couldn't read {name}: {e}", &[("name", &name), ("e", &error.to_string())]),
+                Err(error) => {
+                    self.notify_fmt("Couldn't read {name}: {e}", &[("name", &name), ("e", &error.to_string())]);
+                    OpenOutcome::Failed
+                }
             }
-            return;
-        }
-        self.startup_superseded = true;
-        if let Err(error) = self.schedule_open(OpenRequest {
-            name: name.clone(),
-            path: Some(path.to_string()),
-            stamp,
-            input: open_worker::Input::Path(std::path::PathBuf::from(path)),
-            password: None,
-            activate: true,
-            after_open: None,
-            recovered: None,
-            then,
-        }) {
-            self.notify_fmt("Couldn't open {name}: {e}", &[("name", &name), ("e", &error)]);
+        } else {
+            self.startup_superseded = true;
+            match self.schedule_open(OpenRequest {
+                name: name.clone(),
+                path: Some(path.to_string()),
+                stamp,
+                input: open_worker::Input::Path(std::path::PathBuf::from(path)),
+                password: None,
+                activate: true,
+                after_open: None,
+                recovered: None,
+                then,
+            }) {
+                Ok(_) => OpenOutcome::Pending,
+                Err(error) => {
+                    self.notify_fmt("Couldn't open {name}: {e}", &[("name", &name), ("e", &error)]);
+                    OpenOutcome::Failed
+                }
+            }
         }
     }
 
@@ -3138,7 +3175,9 @@ impl eframe::App for PdfCraftApp {
             match e {
                 #[cfg(not(target_arch = "wasm32"))]
                 OsEvent::Open(paths) => {
-                    paths.iter().for_each(|p| self.open_path(p));
+                    paths.iter().for_each(|p| {
+                        self.open_path(p);
+                    });
                     // Files handed to the running app (Finder, or another launch): bring its
                     // window to the front, also when minimized or full screen on another Space.
                     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));

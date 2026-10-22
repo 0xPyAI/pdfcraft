@@ -835,6 +835,30 @@ fn dropping_a_pdf_on_the_window_opens_it() {
 }
 
 #[test]
+fn dropping_an_open_pdf_again_focuses_its_tab() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-drop-dedup-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("dropped.pdf");
+    std::fs::write(&path, FIXTURE).unwrap();
+    let mut h = Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app
+    });
+    h.run_steps(3);
+    let file: egui::DroppedFileHandle = std::sync::Arc::new(Dropped { path: path.clone(), bytes: FIXTURE.to_vec() });
+    h.input_mut().dropped_files.push(file.clone());
+    // The drop opens through the background worker on a live window; wait for the tab.
+    support::wait_until(&mut h, "dropped document", |app| app.views.len() == 1);
+    assert_eq!(h.state().views.len(), 1, "the dropped PDF opens in a tab");
+    h.input_mut().dropped_files.push(file);
+    h.run_steps(3);
+    assert_eq!(h.state().views.len(), 1, "dropping it again adds no tab");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn a_file_dropped_on_the_page_grid_is_read_from_disk_and_inserted() {
     // The grid's drop reads a file from its path when its turn to be inserted comes, and inserts it
     // at the end when the pointer doesn't say where it went (about a second).

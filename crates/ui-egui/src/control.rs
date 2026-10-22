@@ -36,8 +36,9 @@
 //!   for this session without changing the saved preference. `ui.state.default_mode` reports it.
 //!   `theme=light|dark|system` changes the saved theme preference; `ui.state.theme_preference`
 //!   reports the choice and `ui.state.theme` reports the resolved light/dark colours.
-//! - `ui.open {path}`: accept a file open; native opens report `pending: true` until they
-//!   complete and are listed in `ui.state.pending_opens`.
+//! - `ui.open {path}`: open a file. A file whose tab is already open focuses it
+//!   (`"focused": true`) instead of adding a tab; native opens report `pending: true` until
+//!   they complete and are listed in `ui.state.pending_opens`; only a failed open replies `Err`.
 //! - `ui.screenshot {region?}`: PNG of the window (base64), optionally cropped to a rect.
 
 use std::collections::{HashMap, VecDeque};
@@ -767,14 +768,11 @@ impl Host for crate::PdfCraftApp {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn open(&mut self, path: &str) -> Reply {
-        let before = self.views.len();
-        self.open_path(path);
-        if self.views.len() > before || self.password_prompt.is_some() {
-            Ok(json!({ "opened": path, "password_prompt": self.password_prompt.is_some() }))
-        } else if self.pending_opens.iter().any(|pending| pending.path.as_deref() == Some(path)) {
-            Ok(json!({ "accepted": path, "pending": true }))
-        } else {
-            Err(self.toast.as_ref().map(|t| t.0.clone()).unwrap_or_else(|| format!("couldn't open {path}")))
+        match self.open_path(path) {
+            crate::OpenOutcome::Opened => Ok(json!({ "opened": path, "password_prompt": self.password_prompt.is_some() })),
+            crate::OpenOutcome::Focused => Ok(json!({ "opened": path, "focused": true })),
+            crate::OpenOutcome::Pending => Ok(json!({ "accepted": path, "pending": true })),
+            crate::OpenOutcome::Failed => Err(self.toast.as_ref().map(|t| t.0.clone()).unwrap_or_else(|| format!("couldn't open {path}"))),
         }
     }
 

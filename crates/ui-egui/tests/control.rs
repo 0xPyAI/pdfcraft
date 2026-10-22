@@ -1560,6 +1560,89 @@ fn read_mode_retains_existing_rail_click_to_close_policy() {
     assert_eq!(h.state().mode, pdfcraft_ui_egui::Mode::Read);
 }
 
+#[test]
+fn control_open_of_an_already_open_file_replies_ok_and_focuses_its_tab() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-ui-open-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let a = dir.join("a.pdf").to_string_lossy().into_owned();
+    let b = dir.join("b.pdf").to_string_lossy().into_owned();
+    std::fs::write(&a, fixture(2)).unwrap();
+    std::fs::write(&b, fixture(3)).unwrap();
+    let slot: Arc<Mutex<Option<ControlClient>>> = Arc::default();
+    let s = slot.clone();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        // Inline opens: this test pins the synchronous open contract (focus vs open vs
+        // failure). Live apps schedule the worker instead and reply `pending` (#1620).
+        app.run_inline = true;
+        *s.lock().unwrap() = Some(app.attach_control(&cc.egui_ctx));
+        app
+    });
+    h.run_steps(4);
+    let c = slot.lock().unwrap().take().unwrap();
+
+    let first = ok(&mut h, &c, "ui.open", json!({ "path": a }));
+    assert_eq!(first["opened"], json!(a), "{first}");
+    ok(&mut h, &c, "ui.open", json!({ "path": b }));
+    // The file is already open: the tab focuses, and the reply must be Ok — an agent driving the
+    // app headlessly would otherwise read a focus as a read failure (#1620).
+    let again = ok(&mut h, &c, "ui.open", json!({ "path": a }));
+    assert_eq!(again["focused"], true, "{again}");
+
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    let docs = state["documents"].as_array().cloned().unwrap_or_default();
+    assert_eq!(docs.len(), 2, "opening an open file adds no tab: {state}");
+    let a_tab = docs.iter().find(|d| d["path"] == json!(a)).unwrap();
+    assert_eq!(a_tab["active"], true, "the already-open tab is in front: {state}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The other half of the #1620 contract on a live UI: a fresh open is scheduled on the
+/// background worker and answered `pending` (upstream's reply shape), the tab appears once
+/// the open completes, and opening the file again then focuses that tab.
+#[test]
+fn control_open_replies_pending_while_the_worker_opens_and_focuses_once_it_has() {
+    let dir = std::env::temp_dir().join(format!("pdfcraft-ui-open-pending-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let a = dir.join("pending.pdf").to_string_lossy().into_owned();
+    std::fs::write(&a, fixture(2)).unwrap();
+    let slot: Arc<Mutex<Option<ControlClient>>> = Arc::default();
+    let s = slot.clone();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        *s.lock().unwrap() = Some(app.attach_control(&cc.egui_ctx));
+        app
+    });
+    h.run_steps(4);
+    let c = slot.lock().unwrap().take().unwrap();
+
+    let first = ok(&mut h, &c, "ui.open", json!({ "path": a }));
+    assert_eq!(first["accepted"], json!(a), "{first}");
+    assert_eq!(first["pending"], true, "{first}");
+
+    // The worker completes the open on later frames; the tab shows, and only then does a
+    // repeated open focus it instead of reporting another pending open.
+    let mut documents = 0;
+    for _ in 0..30 {
+        h.run_steps(1);
+        let state = ok(&mut h, &c, "ui.state", json!({}));
+        documents = state["documents"].as_array().map(|d| d.len()).unwrap_or_default();
+        if documents == 1 {
+            break;
+        }
+    }
+    assert_eq!(documents, 1, "the pending open completed into a tab");
+
+    let again = ok(&mut h, &c, "ui.open", json!({ "path": a }));
+    assert_eq!(again["focused"], true, "{again}");
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    let docs = state["documents"].as_array().cloned().unwrap_or_default();
+    assert_eq!(docs.len(), 1, "focusing the completed open adds no tab: {state}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn navigation_frame(h: &mut Harness<'static, PdfCraftApp>, events: Vec<egui::Event>) {
     h.input_mut().events.extend(events);
     h.step();

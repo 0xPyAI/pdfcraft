@@ -8,7 +8,7 @@ use egui::{Key, Modifiers};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use pdfcraft_render::{PageRenderer, RenderRequest, RequestKind};
-use pdfcraft_ui_egui::{CloseRequest, Dialog, PdfCraftApp};
+use pdfcraft_ui_egui::{CloseRequest, Dialog, OpenOutcome, PdfCraftApp};
 
 /// An `n`-page document with a proper xref table; page `i` shows "Page i+1".
 fn fixture(n: usize) -> Vec<u8> {
@@ -834,7 +834,11 @@ fn the_last_session_reopens_its_files_pages_and_active_tab() {
     let dir = TempPdfs::new("reopen");
     let files = [dir.file("a.pdf", 1), dir.file("b.pdf", 5), dir.file("c.pdf", 2)];
     let opened = files.clone();
-    let mut h = session_harness(move |app| opened.iter().for_each(|f| app.open_path(f)));
+    let mut h = session_harness(move |app| {
+        opened.iter().for_each(|f| {
+            app.open_path(f);
+        })
+    });
     h.state_mut().views[1].go_to_page(3);
     h.state_mut().active = Some(1);
     h.run_steps(4);
@@ -856,7 +860,11 @@ fn quitting_with_unsaved_changes_still_remembers_every_file() {
     let dir = TempPdfs::new("quit");
     let files = [dir.file("a.pdf", 1), dir.file("b.pdf", 1)];
     let opened = files.clone();
-    let mut h = session_harness(move |app| opened.iter().for_each(|f| app.open_path(f)));
+    let mut h = session_harness(move |app| {
+        opened.iter().for_each(|f| {
+            app.open_path(f);
+        })
+    });
     for tab in 0..2 {
         h.state_mut().active = Some(tab);
         h.state_mut().views[tab].select_pages(&[0]);
@@ -900,6 +908,95 @@ fn the_last_session_is_off_by_default_and_skips_missing_and_duplicate_files() {
     later.restore(&settings);
     later.reopen_last_files(&[a]);
     assert!(later.views.is_empty(), "neither opens from the session");
+}
+
+#[test]
+fn opening_the_same_path_again_focuses_its_tab() {
+    let pdfs = TempPdfs::new("dedup-open");
+    let a = pdfs.file("a.pdf", 1);
+    let b = pdfs.file("b.pdf", 1);
+    // Inline opens: this pins the synchronous open contract (open vs focus). A live app
+    // schedules the background worker instead and answers `Pending` until it completes.
+    let mut h = session_harness(|app| app.run_inline = true);
+    assert_eq!(h.state_mut().open_path(&a), OpenOutcome::Opened);
+    assert_eq!(h.state_mut().open_path(&b), OpenOutcome::Opened);
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 2, "two different files open two tabs");
+    assert_eq!(h.state_mut().open_path(&a), OpenOutcome::Focused, "opening an open file focuses, it doesn't reopen");
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 2, "opening an open file again adds no tab");
+    assert_eq!(h.state().active, Some(0), "the existing tab comes to the front");
+    assert_eq!(open_paths(h.state()), vec![a, b], "the tab order is untouched");
+}
+
+#[test]
+fn opening_a_missing_file_fails_and_tells_the_user() {
+    let mut app = PdfCraftApp::new();
+    app.set_option("language", "en").unwrap();
+    let missing = std::env::temp_dir().join(format!("pdfcraft-no-such-file-{}.pdf", std::process::id()));
+    assert_eq!(app.open_path(&missing.to_string_lossy()), OpenOutcome::Failed);
+    assert!(app.views.is_empty());
+    assert!(app.toast.is_some(), "the failure is still reported to the user");
+}
+
+#[test]
+fn opening_the_same_file_with_a_dot_component_focuses_its_tab() {
+    let pdfs = TempPdfs::new("dedup-dot");
+    let a = pdfs.file("a.pdf", 1);
+    let dotted = format!("{}/./a.pdf", pdfs.0.display());
+    let mut h = session_harness(|app| app.run_inline = true);
+    h.state_mut().open_path(&a);
+    h.state_mut().open_path(&dotted);
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 1, "another spelling of the same file matches");
+    assert_eq!(h.state().active, Some(0));
+}
+
+#[test]
+fn opening_a_file_whose_copy_vanished_from_disk_focuses_its_tab() {
+    let pdfs = TempPdfs::new("dedup-vanished");
+    let a = pdfs.file("a.pdf", 1);
+    let mut h = session_harness(|_| {});
+    h.state_mut().open_path(&a);
+    // A live window opens through the background worker; the tab has to exist before the file
+    // is deleted, or the worker itself fails to read what this test is about to remove.
+    support::wait_until(&mut h, "the vanished file's tab", |app| app.views.len() == 1);
+    std::fs::remove_file(&a).unwrap();
+    h.state_mut().open_path(&a);
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 1, "no second tab");
+    assert_eq!(h.state().active, Some(0), "the open tab is focused");
+    assert!(h.state().toast.is_none(), "no read error: the file is never read again");
+}
+
+#[test]
+fn opening_an_encrypted_document_twice_keeps_one_prompt_and_one_tab() {
+    let pdfs = TempPdfs::new("dedup-encrypted");
+    let secret = pdfs.0.join("secret.pdf");
+    std::fs::write(&secret, protected("pw", "owner", -1)).unwrap();
+    let s = secret.to_string_lossy().into_owned();
+    let mut h = session_harness(|app| app.run_inline = true);
+    h.state_mut().open_path(&s);
+    h.state_mut().open_path(&s);
+    h.run_steps(2);
+    assert!(h.state().views.is_empty(), "still locked");
+    let field = h.get_by_role(Role::PasswordInput);
+    field.focus();
+    field.type_text("pw");
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(4);
+    assert_eq!(h.state().views.len(), 1, "unlocking opens one tab, not two");
+}
+
+#[test]
+fn opening_documents_without_a_path_still_open_twice() {
+    let bytes = fixture(1);
+    let mut h = session_harness(|_| {});
+    h.state_mut().open_bytes("copy.pdf", None, bytes.clone()).unwrap();
+    h.state_mut().open_bytes("copy.pdf", None, bytes).unwrap();
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 2, "bytes have no path to compare (attachments, conversions)");
 }
 
 #[test]
