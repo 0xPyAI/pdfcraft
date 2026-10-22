@@ -174,6 +174,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-20 (M3, #3535):** Escape with a menu open closes the menu and keeps the text selection; the next Escape clears it, as before. One keypress used to do both. A synthetic UI regression checks it. Estimates unchanged.
 - **2026-10-16 (M3, close prompt keyboard):** The "Save changes?" prompt opens with Save chosen (Enter saves, as before) and the arrow keys and Tab / Shift+Tab move the choice to Cancel or Don't save, shown with a focus ring; Enter or Space press the chosen button and Escape still cancels. Before, Enter always saved whatever was Tab-focused. Estimates unchanged.
 - **2026-10-21 (M3, #3808):** Page thumbnails in the Inspector can be resized independently from the document and Organize, with a slider, buttons and `thumbnail-zoom` control option. Selection, page following and reload are covered by regressions. Estimates unchanged.
 - **2026-10-20 (M6, calculation order page):** Prepare a form ▸ Calculation order, a page of its own, lists the calculated fields in the order they calculate with their formulas and values, moved with Up/Down arrows (as Acrobat's Set Field Calculation Order), Alt+↑/↓ or by dragging. A card says what is wrong with the order and holds Fix order; a loop has a card of its own that opens one of its formulas. On the page, each calculated field shows its step, and arrows show what the field in focus reads and what reads it. Estimates unchanged.
