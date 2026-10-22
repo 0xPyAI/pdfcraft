@@ -1754,9 +1754,12 @@ impl Document {
         let mut revisions = Vec::new();
         let mut oddities = Vec::new();
         let mut visited = HashSet::new();
-        // Hybrid streams already read: a newer section has merged every entry of one, so reading
-        // it again for each older section that names it adds nothing and repeats the decode.
-        let (mut hybrids, mut noted) = (HashSet::new(), HashSet::new());
+        // Hybrid streams already read, by offset: their entries, or `None` when unreadable. A newer
+        // section has merged every entry of one into `entries`, so an older section that names it
+        // again only has its own table compared with them, without decoding the stream again.
+        // At most MAX_XREF_OBJECTS entries are kept in all; a stream past that is read again.
+        let mut hybrids: HashMap<i64, Option<BTreeMap<u32, XrefEntry>>> = HashMap::new();
+        let (mut hybrid_rows, mut noted) = (0usize, HashSet::new());
         let mut next = Some(first);
         while let Some(off) = next.take() {
             if !visited.insert(off) || visited.len() > 10_000 {
@@ -1788,15 +1791,23 @@ impl Document {
             // Hybrid files (§7.5.8.4): the /XRefStm entries supplement the table and replace the
             // free entries it gives objects only a cross-reference stream can locate.
             let hybrid = sect_trailer.int(b"XRefStm").filter(|x| *x >= 0);
-            let repeated = hybrid.is_some_and(|x| !hybrids.insert(x));
-            if let Some(x) = hybrid.filter(|x| repeated && noted.insert(*x)) {
-                log.push(format!("hybrid /XRefStm at {x} named again by the section at {off}; read once"));
-            }
-            if let Some(x) = hybrid.filter(|_| !repeated) {
+            if let Some((x, read)) = hybrid.and_then(|x| hybrids.get(&x).map(|read| (x, read))) {
+                if noted.insert(x) {
+                    log.push(format!("hybrid /XRefStm at {x} named again by the section at {off}; read once"));
+                }
+                if let Some(stm) = read {
+                    for (num, old) in &sect {
+                        // The table places the object somewhere other than the stream does.
+                        if !matches!(old, XrefEntry::Free { .. }) && stm.get(num).is_some_and(|e| e != old) {
+                            odd.push(*num);
+                        }
+                    }
+                }
+            } else if let Some(x) = hybrid {
                 let mut stm = BTreeMap::new();
-                match self.read_section(x as usize, &mut stm, &mut odd, log) {
+                let read = match self.read_section(x as usize, &mut stm, &mut odd, log) {
                     Ok(_) => {
-                        for (num, e) in stm {
+                        for (&num, &e) in &stm {
                             match sect.get(&num) {
                                 None | Some(XrefEntry::Free { .. }) => {
                                     sect.insert(num, e);
@@ -1806,8 +1817,17 @@ impl Document {
                                 Some(_) => {}
                             }
                         }
+                        Some(stm)
                     }
-                    Err(e) => log.push(format!("hybrid /XRefStm at {x} unreadable: {e}")),
+                    Err(e) => {
+                        log.push(format!("hybrid /XRefStm at {x} unreadable: {e}"));
+                        None
+                    }
+                };
+                let rows = read.as_ref().map_or(0, BTreeMap::len);
+                if let Some(total) = hybrid_rows.checked_add(rows).filter(|total| *total <= MAX_XREF_OBJECTS) {
+                    hybrid_rows = total;
+                    hybrids.insert(x, read);
                 }
             }
             oddities.extend(odd.into_iter().map(|num| (off, num)));
@@ -3237,6 +3257,31 @@ endobj
         assert!(matches!(entries.get(&3), Some(XrefEntry::InStream { stream: 4, .. })), "{:?}", entries.get(&3));
         assert_eq!(text_of(&doc, 3, b"Hidden").as_deref(), Some("yes"));
         assert_compact_matches_materialized(&doc);
+    }
+
+    /// An older section that names an /XRefStm a newer section already read still has its own
+    /// table compared with that stream, so an entry it sets aside is recorded for it.
+    #[test]
+    fn a_repeated_hybrid_stream_records_each_sections_conflicts() {
+        let mut out = object_stream_file("3 0 ", "<< /Hidden (yes) >>", 0);
+        let stream = find(&out, b"5 0 obj", 0, out.len()).unwrap();
+        let catalog = find(&out, b"1 0 obj", 0, out.len()).unwrap();
+        let base = rfind(&out, b"\nxref\n", 0).unwrap() + 1;
+        // This section's table places object 3 at the catalog; the stream puts it in object stream 4.
+        let older = out.len();
+        out.extend_from_slice(
+            format!(
+                "xref\n3 1\n{catalog:010} 00000 n \ntrailer << /Size 6 /Root 1 0 R /XRefStm {stream} /Prev {base} >>\nstartxref\n{older}\n%%EOF\n"
+            )
+            .as_bytes(),
+        );
+        let newer = out.len();
+        out.extend_from_slice(
+            format!("xref\ntrailer << /Size 6 /Root 1 0 R /XRefStm {stream} /Prev {older} >>\nstartxref\n{newer}\n%%EOF\n").as_bytes(),
+        );
+        let doc = Document::open(Arc::new(out)).unwrap();
+        assert_eq!(doc.xref_oddities(), [(older as u64, 3)]);
+        assert_eq!(text_of(&doc, 3, b"Hidden").as_deref(), Some("yes"));
     }
 
     fn text_of(doc: &Document, num: u32, key: &[u8]) -> Option<String> {
