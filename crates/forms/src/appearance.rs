@@ -449,6 +449,40 @@ pub fn field_appearance_as(doc: &Document, f: &Field, w: &Widget, values: &[Stri
 /// hold it: the form's font is a simple (WinAnsi) font, Helvetica stands in for one PdfCraft can't
 /// write with (an embedded subset, `Identity-H`), or a UCS-2 CMap meets a character beyond U+FFFF.
 pub fn field_appearance_drawn(doc: &Document, f: &Field, w: &Widget, values: &[String], format: bool) -> (Stream, Option<char>) {
+    let (stream, unencodable, _) = field_appearance_fit(doc, f, w, values, format);
+    (stream, unencodable)
+}
+
+/// A text value that its box cuts off at the field's font size (#4018).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Overflow {
+    /// One line `width` points wide, with `room` for it, at `size` points.
+    Wide { width: f64, room: f64, size: f64 },
+    /// `lines` wrapped lines, of which the box shows `room`, at `size` points.
+    Tall { lines: usize, room: usize, size: f64 },
+}
+
+impl std::fmt::Display for Overflow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Wide { width, room, size } => {
+                write!(f, "the value does not fit: {} pt wide at {} pt, room for {} pt", fmt(*width), fmt(*size), fmt(*room))
+            }
+            Self::Tall { lines, room, size } => write!(f, "the value does not fit: {lines} lines at {} pt, room for {room}", fmt(*size)),
+        }
+    }
+}
+
+/// Whether the text field's value, drawn in widget `w`, is cut off by its box.
+pub fn value_overflow(doc: &Document, f: &Field, w: &Widget) -> Option<Overflow> {
+    if f.kind != FieldKind::Text {
+        return None;
+    }
+    field_appearance_fit(doc, f, w, &f.value, true).2
+}
+
+/// [`field_appearance_drawn`], and whether the text drawn is cut off by the box.
+fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String], format: bool) -> (Stream, Option<char>, Option<Overflow>) {
     // The Format event: what is shown, not what is stored.
     let formatted: Vec<String>;
     let values = if format
@@ -513,6 +547,7 @@ pub fn field_appearance_drawn(doc: &Document, f: &Field, w: &Widget, values: &[S
         }
     };
     let mut size = da.size;
+    let mut overflow = None;
     match f.kind {
         FieldKind::List => {
             // Every option, one per line from the top (from `/TI`); selected ones highlighted.
@@ -539,12 +574,21 @@ pub fn field_appearance_drawn(doc: &Document, f: &Field, w: &Widget, values: &[S
                     size = auto_text_size(&text, inner_w, height - 2.0 * pad, true, width_of);
                 }
                 let mut y = height - pad - size * 0.85;
-                for line in wrap_with(&text, size, inner_w, width_of) {
+                let lines = wrap_with(&text, size, inner_w, width_of);
+                // The lines whose descent stays inside the border; the rest are cut off.
+                let mut room = 0;
+                for line in &lines {
                     if y < -size {
                         break;
                     }
-                    show(&mut body, x_for(&line, size), y, &line);
+                    if y - 0.207 * size >= bw - 0.01 {
+                        room += 1;
+                    }
+                    show(&mut body, x_for(line, size), y, line);
                     y -= size * 1.15;
+                }
+                if room < lines.len() {
+                    overflow = Some(Overflow::Tall { lines: lines.len(), room, size });
                 }
             } else {
                 if size == 0.0 {
@@ -565,6 +609,10 @@ pub fn field_appearance_drawn(doc: &Document, f: &Field, w: &Widget, values: &[S
                         show(&mut body, cell * i as f64 + (cell - width_of(&s, size)) / 2.0, y, &s);
                     }
                 } else {
+                    let tw = width_of(&text.replace(['\n', '\r'], " "), size);
+                    if tw > inner_w + 0.01 {
+                        overflow = Some(Overflow::Wide { width: tw, room: inner_w, size });
+                    }
                     show(&mut body, x_for(&text, size), y, &text);
                 }
             }
@@ -595,7 +643,7 @@ pub fn field_appearance_drawn(doc: &Document, f: &Field, w: &Widget, values: &[S
     d.set(b"Subtype".to_vec(), Object::name("Form"));
     set_form_box(&mut d, place);
     d.set(b"Resources".to_vec(), Object::Dict(res));
-    (Stream::flate(d, &content), unencodable)
+    (Stream::flate(d, &content), unencodable, overflow)
 }
 
 /// On/Off appearances for a check box or radio button that has none (a check mark or a dot,

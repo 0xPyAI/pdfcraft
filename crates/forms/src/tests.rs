@@ -2981,3 +2981,40 @@ fn page_walk_skips_repeated_and_cyclic_kids_without_queueing_them() {
     assert_eq!(walk.next(), None);
     assert_eq!(page_refs(&doc), [page]);
 }
+
+/// #4018: a value that doesn't fit its box at the field's font size is reported (it is drawn cut
+/// at the box). An auto-sized field shrinks to fit, and a short or empty value fits.
+#[test]
+fn a_value_wider_or_taller_than_its_box_is_reported() {
+    let long = "Doe, Jane (represented by John Doe)";
+    let field = |name: &str, rect: &str, extra: &str, value: &str| {
+        format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /V ({value}) /Rect [{rect}] /P 3 0 R {extra} >>")
+    };
+    let doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R] >>".into(),
+        "<< /Fields [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R] /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        field("single", "50 700 190 718", "", long),
+        field("multi", "50 650 190 668", "/Ff 4096", long),
+        field("auto", "50 600 190 618", "/DA (/Helv 0 Tf 0 g)", long),
+        field("wide", "50 550 350 568", "", long),
+        field("short", "50 500 190 518", "/Ff 4096", "Ada"),
+    ]);
+    let overflow = |name: &str| {
+        let f = fields(&doc).into_iter().find(|f| f.name == name).unwrap();
+        appearance::value_overflow(&doc, &f, &f.widgets[0])
+    };
+    match overflow("single") {
+        Some(appearance::Overflow::Wide { width, room, size }) => {
+            assert_eq!(size, 12.0);
+            assert!((width - 201.4).abs() < 1.0 && room < 140.0, "{width} in {room}");
+        }
+        other => panic!("single: {other:?}"),
+    }
+    assert_eq!(overflow("multi"), Some(appearance::Overflow::Tall { lines: 2, room: 1, size: 12.0 }));
+    assert_eq!(overflow("auto"), None, "auto size shrinks to fit");
+    assert_eq!(overflow("wide"), None);
+    assert_eq!(overflow("short"), None);
+}

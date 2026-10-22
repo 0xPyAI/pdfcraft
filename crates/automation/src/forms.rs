@@ -288,6 +288,23 @@ impl Automation {
         let edit = if edits.len() == 1 { edits.remove(0) } else { Edit::Batch { label: "Fill in form".into(), edits } };
         let mut out = self.apply(a, edit)?;
         out["filled"] = json!(values.len());
+        // A value the box cuts off at a fixed font size is saved whole but shows only in part:
+        // said, not silent (#4018).
+        let doc = self.doc(a)?;
+        let cut: Vec<Value> = values
+            .keys()
+            .filter_map(|name| doc.field_overflow(name).map(|(page, o)| (name, page, o)))
+            .map(|(name, page, o)| {
+                let page = page.map(|p| format!(" (page {})", p.saturating_add(1))).unwrap_or_default();
+                json!(format!("form field {name:?}{page}: {o}, so the box shows only part of it (the whole value is saved)"))
+            })
+            .collect();
+        if !cut.is_empty() {
+            match out.get_mut("warnings").and_then(Value::as_array_mut) {
+                Some(w) => w.extend(cut),
+                None => out["warnings"] = Value::Array(cut),
+            }
+        }
         Ok(out)
     }
 

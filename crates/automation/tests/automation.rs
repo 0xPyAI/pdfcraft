@@ -2293,6 +2293,51 @@ fn forms_through_tools() {
     assert_ne!(v, "Filled by an agent");
 }
 
+/// A PDF of the given objects (numbered from 1).
+fn pdf_of(objs: &[&str]) -> Vec<u8> {
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+/// #4018: `form_fill` warns about a value its box cuts off at the field's fixed font size (the
+/// value is saved whole), and not about one that fits.
+#[test]
+fn form_fill_warns_when_a_value_does_not_fit() {
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 400 300] >>",
+        "<< /Type /Page /Parent 2 0 R /Annots [5 0 R 6 0 R] >>",
+        "<< /Fields [5 0 R 6 0 R] /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 7 0 R >> >> >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (narrow) /Rect [10 250 150 268] /P 3 0 R >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (wide) /Rect [10 200 310 218] /P 3 0 R >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    ];
+    let dir = workdir("form-overflow");
+    std::fs::write(dir.join("form.pdf"), pdf_of(&objs)).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "form.pdf" }))["doc"].as_u64().unwrap();
+    let long = "Doe, Jane (represented by John Doe)";
+    let r = ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "narrow": long, "wide": long } }));
+    let warnings: Vec<&str> = r["warnings"].as_array().map(|w| w.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    assert_eq!(warnings.len(), 1, "{r}");
+    assert!(warnings[0].starts_with("form field \"narrow\" (page 1): the value does not fit"), "{}", warnings[0]);
+    let after = ok(&mut a, "form_fields", json!({ "doc": doc }));
+    assert_eq!(after["fields"][0]["value"], long, "saved whole");
+    let r = ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "narrow": "Ada" } }));
+    assert!(r.get("warnings").is_none(), "{r}");
+}
+
 /// A form whose fields are only page widgets (the `/Fields` list is empty) still lists, fills and
 /// resets through the tools, and the leniency shows up as a repair note.
 #[test]
@@ -2308,19 +2353,7 @@ fn orphan_form_fields_through_tools() {
             "<< /Type /Annot /Subtype /Widget /FT /Tx /T (beta) /Rect [10 150 90 170] /P 3 0 R >>",  // 6
             "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",                                // 7
         ];
-        let mut out = b"%PDF-1.7\n".to_vec();
-        let mut offsets = Vec::new();
-        for (i, o) in objs.iter().enumerate() {
-            offsets.push(out.len());
-            out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
-        }
-        let xref = out.len();
-        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
-        for o in offsets {
-            out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
-        }
-        out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
-        out
+        pdf_of(&objs)
     }
     let dir = workdir("orphan-forms");
     std::fs::write(dir.join("orphan.pdf"), orphan_form()).unwrap();
