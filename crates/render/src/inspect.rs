@@ -856,17 +856,13 @@ impl<'a> Inspector<'a> {
         (!s.is_empty()).then_some(s)
     }
 
-    /// [`Self::text`], converted and spent from `budget` as [`spend`] does. Text that trims to
-    /// nothing spends its raw length too.
+    /// [`Self::text`], converted and spent from `budget` as [`spend`] does, so text that trims
+    /// short or to nothing still spends its raw length.
     fn budgeted_text(&self, d: &Dictionary, key: &[u8], budget: &mut usize) -> Option<String> {
         let o = self.resolve(d.get(key).ok()?);
         let (Object::String(bytes, _) | Object::Name(bytes)) = o else { return None };
         let text = spend(bytes, budget, |_| trimmed_text(o).unwrap_or_default())?;
-        if text.is_empty() {
-            *budget = budget.saturating_sub(bytes.len());
-            return None;
-        }
-        Some(text)
+        (!text.is_empty()).then_some(text)
     }
 
     fn name(&self, d: &Dictionary, key: &[u8]) -> Option<String> {
@@ -1714,9 +1710,10 @@ fn trimmed_text(o: &Object) -> Option<String> {
     Some(s.trim_matches('\0').trim().to_string())
 }
 
-/// `convert(bytes)` when the result fits in `budget`, which it then spends. Bytes longer than the
-/// budget are not converted. A conversion that comes out too long spends the raw length, so a
-/// string many entries share is converted only until the budget runs out.
+/// `convert(bytes)` when the result fits in `budget`, which it then spends by the longer of the raw
+/// and converted lengths. Bytes longer than the budget are not converted. A conversion that comes
+/// out too long spends the raw length, so a string many entries share is converted only until the
+/// budget runs out.
 fn spend(bytes: &[u8], budget: &mut usize, convert: impl FnOnce(&[u8]) -> String) -> Option<String> {
     if bytes.len() > *budget {
         return None;
@@ -1726,7 +1723,8 @@ fn spend(bytes: &[u8], budget: &mut usize, convert: impl FnOnce(&[u8]) -> String
         *budget = budget.saturating_sub(bytes.len());
         return None;
     }
-    *budget = budget.saturating_sub(text.len());
+    // The conversion's work follows the raw length, even when the text it keeps is shorter.
+    *budget = budget.saturating_sub(text.len().max(bytes.len()));
     Some(text)
 }
 
@@ -2760,8 +2758,8 @@ trailer << /Root 1 0 R >>
         }
     }
 
-    /// A conversion rejected as too long, or trimmed to nothing, still spends the budget, so a string
-    /// many entries share is converted only a few times.
+    /// A conversion rejected as too long, or trimmed short or to nothing, still spends the raw
+    /// length, so a string many entries share is converted only a few times.
     #[test]
     fn rejected_text_conversions_spend_the_budget() {
         let mut budget = 10;
@@ -2784,6 +2782,11 @@ trailer << /Root 1 0 R >>
         let mut budget = 10;
         assert_eq!(Inspector::new(&doc).budgeted_text(&d, b"Contents", &mut budget), None);
         assert_eq!(budget, 7);
+        // Text that trims short spends its raw length.
+        let d = Dictionary::from_iter([("Contents", Object::string_literal("      x"))]);
+        let mut budget = 10;
+        assert_eq!(Inspector::new(&doc).budgeted_text(&d, b"Contents", &mut budget).as_deref(), Some("x"));
+        assert_eq!(budget, 3);
     }
 
     /// An annotation attachment's `/Contents` spends the text budget only when it names the
