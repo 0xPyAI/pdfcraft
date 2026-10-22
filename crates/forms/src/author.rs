@@ -918,12 +918,14 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
         if n.is_empty() || n.contains('.') {
             return invalid("field names can't be empty or contain a period");
         }
-        if all.iter().any(|x| x.name == n) {
-            return invalid(format!("a field named {n:?} already exists"));
-        }
-        // Rename the terminal part (the field's own /T).
+        // Rename the terminal part (the field's own /T). The parents' part stays, so the name that
+        // must be free is the full one: `MASTER.a` renamed to `b` takes `MASTER.b` (ISO 32000-2
+        // §12.7.4.2). The field itself is no clash when it keeps its own name.
         let prefix = f.name.rsplit_once('.').map(|(p, _)| format!("{p}.")).unwrap_or_default();
         new_name = format!("{prefix}{n}");
+        if all.iter().any(|x| x.obj != f.obj && x.name == new_name) {
+            return invalid(format!("a field named {new_name:?} already exists"));
+        }
         doc.update_dict(f.obj, |d| d.set(b"T".to_vec(), PdfString::text(n)))?;
         // Calculations read the field by its new name, unless another field keeps the old one.
         if all.iter().filter(|x| x.name == f.name).count() == 1 {

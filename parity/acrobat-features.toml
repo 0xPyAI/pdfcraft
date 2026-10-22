@@ -5040,7 +5040,7 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.prepare"]
 tools = ["form_set_props"]
-evidence = ["crates/forms/src/tests.rs::locked_fields_only_take_unlocking", "crates/ui-egui/tests/prepare.rs::preview_fills_the_form_and_locked_fields_keep_their_properties"]
+evidence = ["crates/forms/src/tests.rs::locked_fields_only_take_unlocking", "crates/ui-egui/tests/prepare.rs::preview_fills_the_form_and_locked_fields_keep_their_properties", "crates/forms/src/tests.rs::renaming_a_kid_is_checked_against_the_full_name_it_takes", "crates/forms/src/tests.rs::renaming_a_top_level_field_is_still_checked_against_top_level_names"]
 notes = "rename in Field Properties ▸ General; Locked sets the widgets' annotation Locked flag (/F bit 8) and greys out the properties until unlocked; values can still be filled in"
 
 [[feature]]
