@@ -1162,7 +1162,8 @@ pub(crate) fn page_input(
         return true;
     }
     let boxes: Vec<Rect> = lines.iter().map(|l| xf.user_rect(info, page, l.rect.map(|v| v as f32)).expand(2.0)).collect();
-    let painter = ui.painter();
+    // Outlines stay on their page, like its text (#3061).
+    let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(xf.rect.expand(1.0)));
     let active = view.line_editor.as_ref().filter(|e| e.page == page).map(|e| e.block);
     for (i, b) in boxes.iter().enumerate() {
         if active != Some(i) {
@@ -1504,6 +1505,10 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
         .as_ref()
         .and_then(|ed| view.text_background.draft_rect_for(ed.page, ed.block))
         .map(|r| xf.user_rect(info, page, r.map(|v| v as f32)));
+    // The editor draws on its page only, as the page itself does: a paragraph running past the
+    // page's edge (a converter relying on the page clip) must not cover the next page or the
+    // tool bars (#3061).
+    let page_clip = xf.rect.intersect(view.viewport_rect());
     let ed = view.line_editor.as_mut()?;
     if hold {
         ed.focus = true;
@@ -1537,6 +1542,7 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
         .fade_in(false)
         .fixed_pos(Pos2::new(ed.rect.left(), ed.rect.top()))
         .show(ctx, |ui| {
+            ui.set_clip_rect(ui.clip_rect().intersect(page_clip));
             // The editor opens at the source size. Once text changes, show the real draft
             // extent: single rows grow toward the page edge, paragraphs rewrap at their
             // source width, and the visible frame grows/shrinks vertically with their rows.
