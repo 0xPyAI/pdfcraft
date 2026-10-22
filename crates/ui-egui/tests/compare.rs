@@ -59,6 +59,69 @@ fn compare_two_versions() {
     assert_eq!(h.state().session.get(h.state().active_ids().unwrap().1).unwrap().name, "Compare Report.pdf");
 }
 
+/// Two versions whose differences are of both kinds: a replaced word (text) and a rectangle
+/// drawn far below the text (visual only, no text change explains it).
+fn text_and_visual_versions() -> (Vec<u8>, Vec<u8>) {
+    let mut s = Session::new();
+    let v1 = s.create_from_text("t", "Delivery within five days. Returns accepted.").unwrap().to_vec();
+    let text = s.create_from_text("t", "Delivery within three days. Returns accepted.").unwrap();
+    let id = s.open("v2.pdf", None, text, None).unwrap();
+    let square = pdfcraft_engine::Shape::Rectangle { rect: [100.0, 80.0, 300.0, 200.0] };
+    let style = pdfcraft_engine::Style::default_for(&square);
+    let new = pdfcraft_engine::NewAnnotation { page: 0, shape: square, style, contents: String::new(), author: "Ada".into() };
+    s.apply(id, pdfcraft_engine::Edit::AddAnnotation(new)).unwrap();
+    (v1, s.save_bytes(id).unwrap().to_vec())
+}
+
+/// The Compare panel's Show: Text / Visual filter, on both halves: Text takes the text changes
+/// out of the list and the shading, Visual takes the visual differences (counted, never listed)
+/// out of the shading, and each brings them back.
+#[test]
+fn compare_filters_hide_text_or_visual_changes() {
+    let (v1, v2) = text_and_visual_versions();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("v1.pdf", None, v1.clone()).unwrap();
+        app.open_bytes("v2.pdf", None, v2.clone()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    h.state_mut().compare_old = h.state().views.first().map(|v| v.id);
+    h.state_mut().run_compare();
+    h.run_steps(3);
+    let new_i = h.state().active_ids().unwrap().0;
+    let old_i = h.state().views.iter().position(|v| v.id == h.state().compare.as_ref().unwrap().old).unwrap();
+    // Visual differences are shaded orange (compare_ui::VISUAL), text changes in their kind's colour.
+    let visual = egui::Color32::from_rgb(0xF0, 0x8C, 0x1A);
+    let kinds = |h: &Harness<'_, PdfCraftApp>, i: usize| {
+        let marks = &h.state().views[i].compare_marks;
+        (marks.iter().filter(|m| m.2 != visual).count(), marks.iter().filter(|m| m.2 == visual).count())
+    };
+    let (text_new, visual_new) = kinds(&h, new_i);
+    let (text_old, visual_old) = kinds(&h, old_i);
+    assert!(text_new > 0 && visual_new > 0, "the fixture has both kinds on the new file: {text_new} text, {visual_new} visual");
+    assert!(text_old > 0 && visual_old > 0, "and on the old file: {text_old} text, {visual_old} visual");
+    h.get_by_label("\"five\" → \"three\"");
+
+    h.get_by_label("Text").click();
+    h.run_steps(2);
+    assert!(h.query_by_label("\"five\" → \"three\"").is_none(), "text changes leave the list");
+    assert_eq!(kinds(&h, new_i), (0, visual_new), "and the new file's shading");
+    assert_eq!(kinds(&h, old_i), (0, visual_old), "and the old file's");
+
+    h.get_by_label("Visual").click();
+    h.run_steps(2);
+    assert_eq!(kinds(&h, new_i), (0, 0));
+    assert_eq!(kinds(&h, old_i), (0, 0));
+
+    h.get_by_label("Text").click();
+    h.run_steps(2);
+    h.get_by_label("\"five\" → \"three\"");
+    assert_eq!(kinds(&h, new_i), (text_new, 0), "text back, visual still hidden");
+    assert_eq!(kinds(&h, old_i), (text_old, 0));
+}
+
 /// Writes a screenshot of the Compare panel when PDFCRAFT_SHOT is set (for review).
 #[test]
 fn compare_panel_screenshot() {

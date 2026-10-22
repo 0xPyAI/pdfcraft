@@ -9189,11 +9189,11 @@ title = "Filter changes by type (text, images, formatting)"
 area = "N"
 tier = "P2"
 milestone = "M12"
-status = "planned"
-commands = []
+status = "partial"
+commands = ["doc.compare"]
 tools = []
-evidence = []
-notes = ""
+evidence = ["crates/ui-egui/tests/compare.rs::compare_filters_hide_text_or_visual_changes"]
+notes = "The Compare panel's Show: Text / Visual checkboxes (both on after Compare files) hide that kind of change on both halves of a side-by-side view and bring it back: Text takes the text changes out of the list and the shading, Visual takes the visual differences out of the shading (the list holds only text changes; visual differences are counted, not listed); hiding the text does not uncover the visual differences a text change explains. The counts, Mark as comments and Report… still cover every change. Still missing against Acrobat's Filter menu: telling images, annotations, formatting and background/header-footer changes apart (the comparison finds text changes and pixel differences only, so those all fall under Visual), and Acrobat's defaults with annotations, formatting and background off. Headless: doc_compare returns every change with its kind, so an agent filters the result itself."
 
 [[feature]]
 id = "misc.compare-page-ranges"
