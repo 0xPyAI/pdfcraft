@@ -59,7 +59,7 @@ const AR_DAYS: [&str; 7] = ["الأحد", "الاثنين", "الثلاثاء", 
 
 /// The languages month and weekday names can be written in (Preferences ▸ Date format ▸ Language):
 /// the interface languages, in the same order and with the same names.
-pub static DATE_LANGUAGES: [DateLanguage; 28] = [
+pub static DATE_LANGUAGES: [DateLanguage; 29] = [
     DateLanguage {
         code: "en",
         name: "English",
@@ -500,6 +500,15 @@ pub static DATE_LANGUAGES: [DateLanguage; 28] = [
         months_short: ["ian.", "feb.", "mar.", "apr.", "mai", "iun.", "iul.", "aug.", "sept.", "oct.", "nov.", "dec."],
         days: ["duminică", "luni", "marți", "miercuri", "joi", "vineri", "sâmbătă"],
         days_short: ["dum.", "lun.", "mar.", "mie.", "joi", "vin.", "sâm."],
+    },
+    DateLanguage {
+        code: "lo",
+        name: "ພາສາລາວ",
+        months: ["ມັງກອນ", "ກຸມພາ", "ມີນາ", "ເມສາ", "ພຶດສະພາ", "ມິຖຸນາ", "ກໍລະກົດ", "ສິງຫາ", "ກັນຍາ", "ຕຸລາ", "ພະຈິກ", "ທັນວາ"],
+        months_with_day: None,
+        months_short: ["ມ.ກ.", "ກ.ພ.", "ມ.ນ.", "ມ.ສ.", "ພ.ພ.", "ມິ.ຖ.", "ກ.ລ.", "ສ.ຫ.", "ກ.ຍ.", "ຕ.ລ.", "ພ.ຈ.", "ທ.ວ."],
+        days: ["ວັນອາທິດ", "ວັນຈັນ", "ວັນອັງຄານ", "ວັນພຸດ", "ວັນພະຫັດ", "ວັນສຸກ", "ວັນເສົາ"],
+        days_short: ["ອາທິດ", "ຈັນ", "ອັງຄານ", "ພຸດ", "ພະຫັດ", "ສຸກ", "ເສົາ"],
     },
 ];
 
