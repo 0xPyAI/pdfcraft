@@ -423,3 +423,16 @@ fn listing_skips_repeated_refs_and_caps_what_it_keeps() {
     assert!(listing.measurements.iter().map(retained).sum::<usize>() <= MAX_LISTED_BYTES);
     assert!(!listing.measurements.is_empty());
 }
+#[test]
+fn a_stream_over_the_byte_budget_uses_it_up_once() {
+    // 50 references to one Flate stream that inflates past the 16 MiB budget decode once.
+    let big = pdfcraft_cos::Stream::flate(Dict::new(), &vec![b' '; 17 << 20]);
+    let hex: String = big.raw.iter().map(|b| format!("{b:02x}")).collect();
+    let bomb = String::from_utf8(pdfcraft_testkit::stream_obj("/Filter [/ASCIIHexDecode /FlateDecode]", hex)).unwrap();
+    let contents = format!("[4 0 R{}]", " 5 0 R".repeat(50));
+    let d = fixture_with(&contents, "0 0 m 10 0 l S", "", &[bomb.as_str()]);
+    let g = snap::geometry(&d, 0).unwrap();
+    assert_eq!(g.unreadable, 1);
+    assert!(g.truncated);
+    assert_eq!(g.segments.len(), 1, "the parts before it still snap");
+}
