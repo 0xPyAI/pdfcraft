@@ -59,7 +59,7 @@ const AR_DAYS: [&str; 7] = ["الأحد", "الاثنين", "الثلاثاء", 
 
 /// The languages month and weekday names can be written in (Preferences ▸ Date format ▸ Language):
 /// the interface languages, in the same order and with the same names.
-pub static DATE_LANGUAGES: [DateLanguage; 25] = [
+pub static DATE_LANGUAGES: [DateLanguage; 26] = [
     DateLanguage {
         code: "en",
         name: "English",
@@ -445,6 +445,15 @@ pub static DATE_LANGUAGES: [DateLanguage; 25] = [
         months_short: ["jan", "shk", "mar", "pri", "maj", "qer", "korr", "gush", "sht", "tet", "nën", "dhj"],
         days: ["e diel", "e hënë", "e martë", "e mërkurë", "e enjte", "e premte", "e shtunë"],
         days_short: ["die", "hën", "mar", "mër", "enj", "pre", "sht"],
+    },
+    DateLanguage {
+        code: "th",
+        name: "ไทย",
+        months: ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"],
+        months_with_day: None,
+        months_short: ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."],
+        days: ["วันอาทิตย์", "วันจันทร์", "วันอังคาร", "วันพุธ", "วันพฤหัสบดี", "วันศุกร์", "วันเสาร์"],
+        days_short: ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."],
     },
 ];
 
