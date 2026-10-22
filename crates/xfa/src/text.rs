@@ -181,19 +181,28 @@ fn ink_width(w: &Word) -> f64 {
 /// holds: a value embedded over and over is expanded only so far.
 pub(crate) const MAX_EMBEDDED: usize = 1 << 20;
 
+/// The longest prefix of `s` at most `max` bytes long that ends on a character boundary.
+pub fn prefix(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let end = s.char_indices().map(|(i, _)| i).take_while(|i| *i <= max).last().unwrap_or(0);
+    s.get(..end).unwrap_or_default()
+}
+
 /// Break the runs of a paragraph into words (spaces stay attached to the word before them).
-/// Embedded values take from `embed_left` bytes and are cut when it runs out.
-fn words(runs: &[Run], base: &Face, embed: &dyn Fn(&str) -> String, embed_left: &mut usize) -> Vec<Word> {
+/// Embedded values take from `embed_left` bytes and are cut when it runs out; `embed` is asked
+/// for at most that many bytes of each.
+fn words(runs: &[Run], base: &Face, embed: &dyn Fn(&str, usize) -> String, embed_left: &mut usize) -> Vec<Word> {
     let mut out = Vec::new();
     for run in runs {
         let face = base.with_run(run);
         let text: String = match &run.embed {
             Some(_) if *embed_left == 0 => String::new(),
             Some(id) => {
-                let mut v = embed(id);
+                let mut v = embed(id, *embed_left);
                 if v.len() > *embed_left {
-                    let end = v.char_indices().map(|(i, _)| i).take_while(|i| *i <= *embed_left).last().unwrap_or(0);
-                    v.truncate(end);
+                    v = prefix(&v, *embed_left).to_string();
                 }
                 *embed_left = embed_left.saturating_sub(v.len());
                 v
@@ -228,7 +237,7 @@ fn words(runs: &[Run], base: &Face, embed: &dyn Fn(&str) -> String, embed_left: 
 
 /// Lay `rich` out inside `rect` with `para` and `base` face. `embed` resolves embedded fields to
 /// their text. Returns the spans (absolute coordinates) and the height the text takes.
-pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn Fn(&str) -> String) -> Block {
+pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn Fn(&str, usize) -> String) -> Block {
     struct Line {
         words: Vec<Word>,
         width: f64,
@@ -349,7 +358,7 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
 
 /// The width `rich` takes with no line wrapped (its longest paragraph, with the paragraph's
 /// margins and first-line indent): how wide a box without an explicit width grows.
-pub fn natural_width(rich: &RichText, para: &Para, base: &Face, embed: &dyn Fn(&str) -> String) -> f64 {
+pub fn natural_width(rich: &RichText, para: &Para, base: &Face, embed: &dyn Fn(&str, usize) -> String) -> f64 {
     let indent = para.text_indent.max(0.0);
     let mut embed_left = MAX_EMBEDDED;
     let widest =
@@ -358,7 +367,7 @@ pub fn natural_width(rich: &RichText, para: &Para, base: &Face, embed: &dyn Fn(&
 }
 
 /// Height `rich` needs at `width` (for boxes without an explicit height).
-pub fn measure_height(rich: &RichText, width: f64, para: &Para, base: &Face, embed: &dyn Fn(&str) -> String) -> f64 {
+pub fn measure_height(rich: &RichText, width: f64, para: &Para, base: &Face, embed: &dyn Fn(&str, usize) -> String) -> f64 {
     let p = Para { v_align: crate::model::VAlign::Top, ..para.clone() };
     layout(rich, Rect::new(0.0, 0.0, width.max(1.0), 0.0), &p, base, embed).height
 }

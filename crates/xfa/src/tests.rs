@@ -2638,7 +2638,7 @@ fn a_space_at_the_end_of_a_line_does_not_count_when_fitting_it() {
     assert_eq!(baselines.len(), 1, "{spans:?}");
     // Nor do they add a blank line: the text measures as tall as without them.
     let face = text::Face::of(&Font { typeface: "Arial".into(), size: 10.0, ..Font::default() });
-    let height = |t: &str| text::measure_height(&text::plain(t), w, &Para::default(), &face, &|_| String::new());
+    let height = |t: &str| text::measure_height(&text::plain(t), w, &Para::default(), &face, &|_, _| String::new());
     assert_eq!(height("a. DATE   "), height("a. DATE"));
     // Text that is wider than the box still wraps.
     let spans = draw_spans(&one_draw("a. DATES ", w, "left"));
@@ -2664,7 +2664,7 @@ fn a_long_word_breaks_in_linear_work() {
     let face = text::Face::of(&Font { typeface: "Arial".into(), size: 1.0, ..Font::default() });
     let word = "i".repeat(20_000);
     text::MEASURED.with(|m| m.set(0));
-    let b = text::layout(&text::plain(&word), Rect::new(0.0, 0.0, 1000.0, 0.0), &Para::default(), &face, &|_| String::new());
+    let b = text::layout(&text::plain(&word), Rect::new(0.0, 0.0, 1000.0, 0.0), &Para::default(), &face, &|_, _| String::new());
     let measured = text::MEASURED.with(|m| m.get());
     assert!(b.spans.len() > 2, "{} lines", b.spans.len());
     assert_eq!(b.spans.iter().map(|s| s.text.len()).sum::<usize>(), 20_000);
@@ -2678,11 +2678,33 @@ fn embedded_field_values_expand_to_a_bounded_amount_of_text() {
     let value = "word ".repeat(3_300);
     let run = Run { embed: Some("f".into()), ..Run::default() };
     let rich = RichText { paragraphs: vec![Paragraph { runs: vec![run; 100], h_align: None }] };
-    let b = text::layout(&rich, Rect::new(0.0, 0.0, 500.0, 0.0), &Para::default(), &face, &|_| value.clone());
+    let b = text::layout(&rich, Rect::new(0.0, 0.0, 500.0, 0.0), &Para::default(), &face, &|_, _| value.clone());
     let kept: usize = b.spans.iter().map(|s| s.text.len()).sum();
     assert!(kept > 0);
     assert!(kept <= text::MAX_EMBEDDED, "{kept} bytes of embedded text laid out");
-    assert!(text::natural_width(&rich, &Para::default(), &face, &|_| value.clone()) <= face.width(&value) * 70.0);
+    assert!(text::natural_width(&rich, &Para::default(), &face, &|_, _| value.clone()) <= face.width(&value) * 70.0);
+}
+
+/// Once the embedded-text budget is nearly spent, a long value embedded again is copied out only
+/// as far as the budget reaches, not whole each time.
+#[test]
+fn embedded_values_are_copied_out_only_as_far_as_the_budget() {
+    let first: String = "xxxxxxx ".repeat(text::MAX_EMBEDDED / 8 + 1).chars().take(text::MAX_EMBEDDED - 1).collect();
+    let second = "\u{e9}".repeat(100_000);
+    let span = |id: &str| format!(r##"<span xfa:embed="#{id}" xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"/>"##);
+    let spans = format!("{}{}", span("a"), span("b").repeat(200));
+    let tpl = format!(
+        r#"<template><subform layout="tb">
+<field id="a" presence="hidden" w="1in" h="0.2in"><ui><textEdit/></ui><value><text>{first}</text></value></field>
+<field id="b" presence="hidden" w="1in" h="0.2in"><ui><textEdit/></ui><value><text>{second}</text></value></field>
+<draw w="7in" h="9in"><value><exData contentType="text/html"><body xmlns="http://www.w3.org/1999/xhtml"><p>{spans}</p></body></exData></value></draw>
+</subform></template>"#
+    );
+    crate::layout::EMBED_COPIED.with(|c| c.set(0));
+    layout_xml(&tpl).unwrap();
+    let copied = crate::layout::EMBED_COPIED.with(|c| c.get());
+    // The draw is measured at most seven times before it is laid out once.
+    assert!(copied <= 8 * text::MAX_EMBEDDED as u64 + 8 * 4 * 201, "{copied} bytes of embedded values copied");
 }
 
 /// Repeated subforms each carry their own copy of a long script: the live form holds a bounded
