@@ -386,6 +386,9 @@ pub struct Annotation {
     /// A Fill & Sign mark: typed text, a check, cross, dot or line, or a typed, drawn or picture
     /// signature or initials (the rules of `pdfcraft_annot::is_fill_sign`).
     pub fill_sign: bool,
+    /// The points that shape a line (its two ends, `/L`) or connected lines, a polygon or a
+    /// cloud (their corners, `/Vertices`), in user space; empty for other comments.
+    pub points: Vec<[f32; 2]>,
 }
 
 impl Annotation {
@@ -1149,6 +1152,16 @@ impl<'a> Inspector<'a> {
                 };
                 let in_reply_to = d.get(b"IRT").ok().and_then(|o| self.dict(o)).and_then(|p| self.text(p, b"NM"));
                 let fill_sign = self.is_fill_sign(d, &subtype);
+                // Keep in step with `pdfcraft_annot::summaries`.
+                let key: &[u8] = if subtype == "Line" { b"L" } else { b"Vertices" };
+                let points = match d.get(key).map(|o| self.resolve(o)) {
+                    Ok(Object::Array(v)) if matches!(subtype.as_str(), "Line" | "PolyLine" | "Polygon") => {
+                        let v: Vec<f32> = v.iter().map(|o| o.as_float().unwrap_or(0.0)).collect();
+                        let pts: Vec<[f32; 2]> = v.as_chunks::<2>().0.to_vec();
+                        if subtype == "Line" && pts.len() != 2 { Vec::new() } else { pts }
+                    }
+                    _ => Vec::new(),
+                };
                 info.annotations.push(Annotation {
                     page,
                     subtype,
@@ -1167,6 +1180,7 @@ impl<'a> Inspector<'a> {
                     locked: d.get(b"F").ok().and_then(|f| self.resolve(f).as_i64().ok()).unwrap_or(0) & 128 != 0,
                     intent: self.name(d, b"IT"),
                     fill_sign,
+                    points,
                 });
             }
         }

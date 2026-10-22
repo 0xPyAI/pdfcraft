@@ -385,6 +385,9 @@ pub enum Gesture {
     Move { page: usize, index: usize, from: Pos2 },
     /// Resizing a comment by one of its handles: (dx, dy) ∈ {-1, 0, 1}² says which sides move.
     Resize { page: usize, index: usize, handle: (i8, i8), from: Pos2, aspect_ratio: Option<f32> },
+    /// Dragging point `point` of a line, connected lines, a polygon or a cloud (its `points`
+    /// before the drag, in user space) to where the pointer is.
+    Reshape { page: usize, index: usize, point: usize, points: Vec<[f64; 2]> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -713,6 +716,42 @@ fn resizable(a: &Annotation) -> bool {
     matches!(a.subtype.as_str(), "Square" | "Circle" | "FreeText" | "Stamp" | "Ink") && a.intent.as_deref() != Some("FreeTextCallout")
 }
 
+/// Lines, connected lines, polygons and clouds: their ends and corners have handles of their own
+/// (measurements keep the points they measured, and a locked comment its shape).
+fn reshapable(a: &Annotation) -> bool {
+    matches!(a.subtype.as_str(), "Line" | "PolyLine" | "Polygon")
+        && !a.points.is_empty()
+        && !a.locked
+        && !a.intent.as_deref().is_some_and(|i| i.ends_with("Dimension"))
+}
+
+/// Whether `tool` picks up a line's end and corner handles: the Select and Fill & Sign tools.
+/// The drawing tools draw from where they are pressed, so a new line starts at the end of the
+/// one just drawn rather than dragging it.
+fn grabs_points(tool: QuickTool) -> bool {
+    !matches!(tool, QuickTool::Comment(t) if t.draws() || t.clicks_points())
+}
+
+/// The point of `a` (an end or a corner) whose handle is at `p` on screen.
+fn point_handle(cx: &PageCx<'_>, a: &Annotation, p: Pos2) -> Option<usize> {
+    a.points.iter().position(|q| cx.to_screen([f64::from(q[0]), f64::from(q[1])]).distance(p) <= 7.0)
+}
+
+/// `points` with point `i` moved to `to`; with Shift, held to the nearest 45° from the point
+/// before it (a line's other end; the first corner turns about the second).
+pub(crate) fn reshaped(points: &[[f64; 2]], i: usize, to: [f64; 2], shift: bool) -> Vec<[f64; 2]> {
+    let mut out = points.to_vec();
+    let anchor = if i == 0 { points.get(1) } else { points.get(i - 1) };
+    let to = match anchor {
+        Some(a) if shift => pdfcraft_engine::measure::snap::constrain(*a, to),
+        _ => to,
+    };
+    if let Some(p) = out.get_mut(i) {
+        *p = to;
+    }
+    out
+}
+
 const HANDLES: [(i8, i8); 8] = [(-1, -1), (0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0)];
 
 fn handle_pos(r: Rect, (hx, hy): (i8, i8)) -> Pos2 {
@@ -1025,7 +1064,7 @@ pub(crate) fn draw_grabs(ui: &egui::Ui, cx: &PageCx<'_>, view: &DocView) -> bool
         return false;
     }
     let cv = &view.comments;
-    if matches!(cv.gesture, Some(Gesture::Resize { page, .. }) if page == cx.page) {
+    if matches!(cv.gesture, Some(Gesture::Resize { page, .. } | Gesture::Reshape { page, .. }) if page == cx.page) {
         return true;
     }
     // A polygon being clicked out keeps its clicks, even near an old shape's handle.
@@ -1041,7 +1080,8 @@ fn grabs(ui: &egui::Ui, cx: &PageCx<'_>, view: &DocView, pick: impl Fn(&Annotati
     if cx.hidden {
         return false;
     }
-    if matches!(view.comments.gesture, Some(Gesture::Move { page, .. } | Gesture::Resize { page, .. }) if page == cx.page) {
+    if matches!(view.comments.gesture, Some(Gesture::Move { page, .. } | Gesture::Resize { page, .. } | Gesture::Reshape { page, .. }) if page == cx.page)
+    {
         return true;
     }
     let Some(p) = press_point(ui, cx) else { return false };
@@ -1057,12 +1097,10 @@ fn press_point(ui: &egui::Ui, cx: &PageCx<'_>) -> Option<Pos2> {
 
 /// Whether `p` is on a resize handle of the selected comment, when it is a resizable `pick`.
 fn on_handle(cx: &PageCx<'_>, view: &DocView, p: Pos2, pick: impl Fn(&Annotation) -> bool) -> bool {
-    view.comments
-        .selected
-        .filter(|(page, _)| *page == cx.page)
-        .and_then(|(_, i)| cx.get(i))
-        .filter(|a| pick(a) && cx.allowed && resizable(a))
-        .is_some_and(|a| HANDLES.into_iter().any(|h| handle_pos(cx.screen_rect(a), h).distance(p) <= 7.0))
+    view.comments.selected.filter(|(page, _)| *page == cx.page).and_then(|(_, i)| cx.get(i)).filter(|a| pick(a) && cx.allowed).is_some_and(|a| {
+        (resizable(a) && HANDLES.into_iter().any(|h| handle_pos(cx.screen_rect(a), h).distance(p) <= 7.0))
+            || (grabs_points(cx.tool) && reshapable(a) && point_handle(cx, a, p).is_some())
+    })
 }
 
 fn clamp_to(r: Rect, p: Pos2) -> Pos2 {
@@ -1087,9 +1125,14 @@ fn select_input(
         let r = cx.screen_rect(a);
         HANDLES.into_iter().find(|h| handle_pos(r, *h).distance(p) <= 7.0)
     };
+    // Ends and corners of a selected line, connected lines, polygon or cloud.
+    let point_at =
+        |p: Pos2| -> Option<usize> { selected.filter(|a| cx.allowed && grabs_points(cx.tool) && reshapable(a)).and_then(|a| point_handle(cx, a, p)) };
     let mut consumed = false;
     if let Some(p) = pointer {
-        if let Some(h) = handle_at(p) {
+        if point_at(p).is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        } else if let Some(h) = handle_at(p) {
             ui.ctx().set_cursor_icon(match h {
                 (0, _) => egui::CursorIcon::ResizeVertical,
                 (_, 0) => egui::CursorIcon::ResizeHorizontal,
@@ -1105,7 +1148,11 @@ fn select_input(
         && pressed_here
         && let Some(o) = origin
     {
-        if let (Some(h), Some(a)) = (handle_at(o), selected) {
+        if let (Some(point), Some(a)) = (point_at(o), selected) {
+            let points = a.points.iter().map(|q| [f64::from(q[0]), f64::from(q[1])]).collect();
+            cv.gesture = Some(Gesture::Reshape { page: cx.page, index: a.index, point, points });
+            consumed = true;
+        } else if let (Some(h), Some(a)) = (handle_at(o), selected) {
             // On screen, the image is also turned by the view's rotation.
             let turned = !cx.xf.rot.is_multiple_of(180);
             let aspect_ratio = view.signature_drag.aspect_ratio(cx.page, a.index).map(|ratio| if turned { ratio.recip() } else { ratio });
@@ -1127,7 +1174,7 @@ fn select_input(
             consumed = true;
         }
     }
-    if matches!(cv.gesture, Some(Gesture::Move { page, .. } | Gesture::Resize { page, .. }) if page == cx.page) {
+    if matches!(cv.gesture, Some(Gesture::Move { page, .. } | Gesture::Resize { page, .. } | Gesture::Reshape { page, .. }) if page == cx.page) {
         consumed = true;
     }
     if resp.drag_stopped()
@@ -1152,6 +1199,14 @@ fn select_input(
                     if r.width() >= 4.0 && r.height() >= 4.0 {
                         view.pending_edit = Some(Edit::ResizeAnnotation { page, index, rect });
                     }
+                }
+            }
+            Some(Gesture::Reshape { page, index, point, points }) if page == cx.page => {
+                cv.gesture = None;
+                let shift = ui.input(|i| i.modifiers.shift);
+                let moved = points.get(point).is_some_and(|q| cx.to_screen(*q).distance(p) >= 2.0);
+                if moved {
+                    view.pending_edit = Some(Edit::ReshapeAnnotation { page, index, points: reshaped(&points, point, cx.to_user(p), shift) });
                 }
             }
             _ => {}
@@ -1264,6 +1319,9 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, cx: &PageCx<'_>
             return paint_gesture(painter, cx, view);
         }
         let shift = ui.input(|i| i.modifiers.shift);
+        if cx.allowed && grabs_points(cx.tool) && reshapable(a) {
+            return paint_points(painter, cx, view, a, pointer, shift);
+        }
         let r = cx.adjusted_rect(a, cv.gesture.as_ref(), pointer, shift, view.pending_edit.as_ref()).expand(2.0);
         painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.0, SELECT_BLUE), egui::StrokeKind::Middle);
         if cx.allowed && resizable(a) {
@@ -1272,6 +1330,56 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, cx: &PageCx<'_>
                 painter.circle(c, 4.5, Color32::WHITE, Stroke::new(1.0, SELECT_BLUE));
             }
         }
+    }
+    paint_gesture(painter, cx, view);
+}
+
+/// A selected line, connected lines, polygon or cloud: a handle on each end or corner and, while
+/// one is dragged (or its edit is on its way), the new shape over the old.
+/// The points a selected line, polygon or cloud is drawn with while it changes: an end or corner
+/// being dragged, the whole comment being moved by its body, or the edit just released (until the
+/// page is drawn again). `None` while it isn't changing.
+fn changing_points(
+    gesture: Option<&Gesture>,
+    pending: Option<&Edit>,
+    (page, index): (usize, usize),
+    points: &[[f64; 2]],
+    to_user: impl Fn(Pos2) -> [f64; 2],
+    pointer: Option<Pos2>,
+    shift: bool,
+) -> Option<Vec<[f64; 2]>> {
+    let shifted = |dx: f64, dy: f64| points.iter().map(|q| [q[0] + dx, q[1] + dy]).collect();
+    match (gesture, pending) {
+        (Some(Gesture::Reshape { page: p, index: i, point, points: from }), _) if (*p, *i) == (page, index) => {
+            pointer.map(|at| reshaped(from, *point, to_user(at), shift))
+        }
+        (Some(Gesture::Move { page: p, index: i, from }), _) if (*p, *i) == (page, index) => pointer.map(|at| {
+            let (a, b) = (to_user(*from), to_user(at));
+            shifted(b[0] - a[0], b[1] - a[1])
+        }),
+        (_, Some(Edit::ReshapeAnnotation { page: p, index: i, points: to })) if (*p, *i) == (page, index) => Some(to.clone()),
+        (_, Some(Edit::MoveAnnotation { page: p, index: i, dx, dy })) if (*p, *i) == (page, index) => Some(shifted(*dx, *dy)),
+        _ => None,
+    }
+}
+
+fn paint_points(painter: &egui::Painter, cx: &PageCx<'_>, view: &DocView, a: &Annotation, pointer: Option<Pos2>, shift: bool) {
+    let cv = &view.comments;
+    let points: Vec<[f64; 2]> = a.points.iter().map(|q| [f64::from(q[0]), f64::from(q[1])]).collect();
+    let changing = changing_points(cv.gesture.as_ref(), view.pending_edit.as_ref(), (cx.page, a.index), &points, |p| cx.to_user(p), pointer, shift);
+    let changed = changing.is_some();
+    let points = changing.unwrap_or(points);
+    let screen: Vec<Pos2> = points.iter().map(|q| cx.to_screen(*q)).collect();
+    if changed {
+        let stroke = Stroke::new(1.5, SELECT_BLUE);
+        painter.add(if a.subtype == "Polygon" {
+            egui::Shape::closed_line(screen.clone(), stroke)
+        } else {
+            egui::Shape::line(screen.clone(), stroke)
+        });
+    }
+    for c in screen {
+        painter.circle(c, 4.5, Color32::WHITE, Stroke::new(1.0, SELECT_BLUE));
     }
     paint_gesture(painter, cx, view);
 }
@@ -1984,6 +2092,24 @@ pub fn status_badge(state: &str) -> Option<(&'static str, &'static str, Color32)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A selected line is drawn where it is going: moved by its body (both ends follow the
+    /// pointer), with an end dragged (that end alone), and as released until the page is drawn.
+    #[test]
+    fn a_moved_or_reshaped_line_is_drawn_at_its_new_points() {
+        let line = [[10.0, 10.0], [50.0, 10.0]];
+        let to_user = |p: Pos2| [f64::from(p.x), f64::from(p.y)];
+        let moving = Gesture::Move { page: 0, index: 3, from: pos2(20.0, 10.0) };
+        let at = Some(pos2(25.0, 30.0));
+        assert_eq!(changing_points(Some(&moving), None, (0, 3), &line, to_user, at, false), Some(vec![[15.0, 30.0], [55.0, 30.0]]));
+        assert_eq!(changing_points(Some(&moving), None, (0, 4), &line, to_user, at, false), None, "another comment's move");
+        let released = Edit::MoveAnnotation { page: 0, index: 3, dx: 5.0, dy: 20.0 };
+        assert_eq!(changing_points(None, Some(&released), (0, 3), &line, to_user, None, false), Some(vec![[15.0, 30.0], [55.0, 30.0]]));
+        let dragging = Gesture::Reshape { page: 0, index: 3, point: 1, points: line.to_vec() };
+        let to = Some(pos2(60.0, 10.0));
+        assert_eq!(changing_points(Some(&dragging), None, (0, 3), &line, to_user, to, false), Some(vec![[10.0, 10.0], [60.0, 10.0]]));
+        assert_eq!(changing_points(None, None, (0, 3), &line, to_user, to, false), None, "not changing");
+    }
     use pdfcraft_render::TextGlyph;
 
     /// One glyph per character, `w` points wide, on a line of `em`-point text whose baseline is at `y`, drawn

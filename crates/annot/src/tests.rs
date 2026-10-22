@@ -1405,3 +1405,50 @@ fn free_text_properties_show_legacy_or_absent_border_width() {
     .unwrap();
     assert_eq!(props(&doc, 0, index).unwrap().width, Some(4.0));
 }
+
+/// A line's ends and the corners of connected lines and polygons can be moved after drawing:
+/// the points change, `/Rect` follows them (with room for an arrowhead), and the appearance is
+/// drawn anew. A line needs two ends far enough apart; a locked comment keeps its shape.
+#[test]
+fn lines_and_polygons_are_reshaped_by_their_points() {
+    let mut doc = fixture();
+    let l = add_annotation(
+        &mut doc,
+        &new(0, Shape::Line { from: [100.0, 100.0], to: [200.0, 100.0], start: LineEnding::None, end: LineEnding::OpenArrow }),
+        &meta("l"),
+    )
+    .unwrap();
+    let before = ap_content(&doc, &list(&doc, 0)[l]);
+    set_points(&mut doc, 0, l, &[[100.0, 100.0], [100.0, 300.0]], &meta("")).unwrap();
+    let doc2 = reopen(&doc);
+    let d = &list(&doc2, 0)[l];
+    let ends: Vec<f64> = d.get(b"L").unwrap().as_array().unwrap().iter().map(|o| o.as_f64().unwrap()).collect();
+    assert_eq!(ends, [100.0, 100.0, 100.0, 300.0]);
+    let r = rect(d);
+    assert!(r[0] < 100.0 && r[2] > 100.0 && r[1] < 100.0 && r[3] > 300.0, "the rectangle holds the line and its arrowhead: {r:?}");
+    assert!(r[2] - r[0] < 40.0, "and no more: {r:?}");
+    assert_ne!(ap_content(&doc2, d), before, "drawn anew");
+    assert_eq!(summaries(&doc2).into_iter().find(|s| s.index == l).unwrap().points, vec![[100.0, 100.0], [100.0, 300.0]]);
+    // Two ends exactly, far enough apart.
+    assert!(matches!(set_points(&mut doc, 0, l, &[[1.0, 1.0]], &meta("")), Err(AnnotError::Invalid(_))));
+    assert!(matches!(set_points(&mut doc, 0, l, &[[1.0, 1.0], [1.2, 1.0]], &meta("")), Err(AnnotError::Invalid(_))));
+    assert!(matches!(set_points(&mut doc, 0, l, &[[f64::NAN, 1.0], [10.0, 1.0]], &meta("")), Err(AnnotError::Invalid(_))));
+    // A polygon's corner.
+    let g = add_annotation(
+        &mut doc,
+        &new(0, Shape::Polygon { vertices: vec![[300.0, 300.0], [400.0, 300.0], [350.0, 380.0]], cloud: false }),
+        &meta("g"),
+    )
+    .unwrap();
+    set_points(&mut doc, 0, g, &[[300.0, 300.0], [450.0, 300.0], [350.0, 380.0], [300.0, 360.0]], &meta("")).unwrap();
+    let d = &list(&doc, 0)[g];
+    let v: Vec<f64> = d.get(b"Vertices").unwrap().as_array().unwrap().iter().map(|o| o.as_f64().unwrap()).collect();
+    assert_eq!(v.len(), 8);
+    assert!(rect(d)[2] > 450.0);
+    // Locked: refused, and nothing changes.
+    set_locked(&mut doc, 0, l, true).unwrap();
+    assert!(set_points(&mut doc, 0, l, &[[0.0, 0.0], [50.0, 50.0]], &meta("")).is_err());
+    // Other comments have no points to move.
+    let s = add_annotation(&mut doc, &new(0, Shape::Rectangle { rect: [10.0, 10.0, 50.0, 50.0] }), &meta("s")).unwrap();
+    assert!(matches!(set_points(&mut doc, 0, s, &[[0.0, 0.0], [50.0, 50.0]], &meta("")), Err(AnnotError::Invalid(_))));
+}

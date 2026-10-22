@@ -2445,3 +2445,5 @@ animation effects	Off	关
 	Paragraph spacing	段落间距
 	Less	收起
 	Other options	其他选项
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	更改注释形状

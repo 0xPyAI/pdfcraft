@@ -2480,3 +2480,5 @@ animation effects	Off	Ki
 	Paragraph spacing	Bekezdéstávolság
 	Less	Kevesebb
 	Other options	Egyéb beállítások
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Megjegyzés alakjának módosítása

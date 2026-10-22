@@ -2693,3 +2693,5 @@ certificate	SHA-256 digest	Impronta SHA-256
 	Paragraph spacing	Spaziatura paragrafi
 	Less	Meno
 	Other options	Altre opzioni
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Modifica la forma del commento

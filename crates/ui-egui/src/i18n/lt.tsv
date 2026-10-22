@@ -2731,3 +2731,5 @@ theme	Appearance	Išvaizda
 	Paragraph spacing	Tarpas tarp pastraipų
 	Less	Mažiau
 	Other options	Kitos parinktys
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Keisti komentaro formą

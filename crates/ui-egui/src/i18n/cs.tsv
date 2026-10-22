@@ -2555,3 +2555,5 @@ animation effects	Off	Vypnuto
 	Paragraph spacing	Mezera mezi odstavci
 	Less	Méně
 	Other options	Další možnosti
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Změnit tvar komentáře

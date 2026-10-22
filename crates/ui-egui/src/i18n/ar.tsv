@@ -2757,3 +2757,5 @@ certificate	Version	الإصدار
 	Paragraph spacing	تباعد الفقرات
 	Less	أقل
 	Other options	خيارات أخرى
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	إعادة تشكيل التعليق

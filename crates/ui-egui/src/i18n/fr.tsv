@@ -2481,3 +2481,5 @@ animation effects	Off	Désactivés
 	Paragraph spacing	Espacement des paragraphes
 	Less	Moins
 	Other options	Autres options
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Modifier la forme du commentaire

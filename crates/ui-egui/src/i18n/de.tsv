@@ -2482,3 +2482,5 @@ animation effects	Off	Aus
 	Paragraph spacing	Absatzabstand
 	Less	Weniger
 	Other options	Weitere Optionen
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Kommentar umformen

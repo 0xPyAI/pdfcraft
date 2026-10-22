@@ -2503,3 +2503,5 @@ animation effects	Off	Вимкнено
 	Paragraph spacing	Інтервал між абзацами
 	Less	Менше
 	Other options	Інші параметри
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Змінити форму коментаря

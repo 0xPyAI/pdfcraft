@@ -645,6 +645,58 @@ fn comments_are_selected_moved_and_deleted_with_the_select_tool() {
     assert_eq!(comments(&h).len(), 1);
 }
 
+/// A line's ends have handles: dragging one with the Select tool changes the line's length and
+/// angle (Shift holds it to 45°), as one undo step. The line tool keeps drawing from an end: a
+/// new line starts there rather than dragging the one just drawn.
+#[test]
+fn line_ends_are_dragged_to_change_length_and_angle() {
+    let mut h = harness(|app| app.set_option("quick", "line").unwrap());
+    drag_pt(&mut h, (40.0, 100.0), (140.0, 100.0));
+    let line = comments(&h).into_iter().find(|a| a.subtype == "Line").expect("a line");
+    assert_eq!(line.points.len(), 2);
+    let ends = |h: &Harness<'static, PdfCraftApp>| comments(h).into_iter().find(|a| a.index == line.index).unwrap().points;
+    // With the line tool, a drag from the end just drawn draws another line.
+    let first = ends(&h);
+    drag_pt(&mut h, (first[1][0], first[1][1]), (140.0, 40.0));
+    assert_eq!(comments(&h).iter().filter(|a| a.subtype == "Line").count(), 2, "a second line");
+    assert_eq!(ends(&h), first, "the first one stays");
+    h.state_mut().set_option("quick", "select").unwrap();
+    click_pt(&mut h, (90.0, 100.0));
+    assert_eq!(h.state().views[0].comments.selected, Some((0, line.index)));
+    // Drag the right end up and further right: longer, and turned.
+    let [_, end] = [line.points[0], line.points[1]];
+    drag_pt(&mut h, (end[0], end[1]), (200.0, 160.0));
+    let p = ends(&h);
+    assert!((p[0][0] - 40.0).abs() < 1.0 && (p[0][1] - 100.0).abs() < 1.0, "the other end stays: {p:?}");
+    assert!((p[1][0] - 200.0).abs() < 1.0 && (p[1][1] - 160.0).abs() < 1.0, "the dragged end follows: {p:?}");
+    let id = h.state().views[0].id;
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Reshape comment"));
+    // Shift: held to the nearest 45° from the other end (39° here).
+    let a = at(&h, 200.0, 160.0);
+    let b = at(&h, 150.0, 190.0);
+    h.hover_at(a);
+    h.run_steps(1);
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::SHIFT));
+    h.drag_at(a);
+    h.run_steps(1);
+    for k in 1..=4 {
+        h.hover_at(a + (b - a) * (k as f32 / 4.0));
+        h.run_steps(1);
+    }
+    h.drop_at(b);
+    h.run_steps(3);
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    h.run_steps(1);
+    let p = ends(&h);
+    let (dx, dy) = (p[1][0] - p[0][0], p[1][1] - p[0][1]);
+    assert!(dx > 50.0 && (dx - dy).abs() < 0.5, "45°: {p:?}");
+    // Undo puts the line back as it was before the drag.
+    h.state_mut().undo();
+    h.run_steps(2);
+    let p = ends(&h);
+    assert!((p[1][0] - 200.0).abs() < 1.0 && (p[1][1] - 160.0).abs() < 1.0, "{p:?}");
+}
+
 #[test]
 fn a_shape_just_drawn_resizes_from_its_handles_without_the_select_tool() {
     // #2338: the new shape showed its handles, but only the Select tool answered them.

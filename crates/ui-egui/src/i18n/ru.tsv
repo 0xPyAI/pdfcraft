@@ -2394,3 +2394,5 @@ animation effects	Off	Выкл
 	Paragraph spacing	Интервал между абзацами
 	Less	Меньше
 	Other options	Другие параметры
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Изменить форму комментария

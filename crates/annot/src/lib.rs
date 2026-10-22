@@ -1788,6 +1788,48 @@ pub fn set_rect(doc: &mut Document, page: usize, index: usize, rect: [f64; 4], m
     apply_text_box(doc, r, rect, meta, false)
 }
 
+/// At most this many points reshape a comment (a drawn polygon has a handful).
+const MAX_POINTS: usize = 100_000;
+
+/// Reshape a line, connected lines, a polygon or a cloud: its points in user space (a line's two
+/// ends, the others' corners), as dragging the comment's handles sets them. `/Rect` follows the
+/// points with room for the line's width and endings, as when the comment was drawn, and the
+/// appearance is redrawn. A measurement keeps the points it measured.
+pub fn set_points(doc: &mut Document, page: usize, index: usize, points: &[[f64; 2]], meta: &Meta) -> Result<(), AnnotError> {
+    let (_, r) = annot_ref(doc, page, index)?;
+    unlocked(doc, r)?;
+    let d = annot_dict(doc, r);
+    if d.contains(b"Measure") {
+        return Err(AnnotError::Invalid("a measurement's points are where it measured".into()));
+    }
+    if points.len() > MAX_POINTS {
+        return Err(AnnotError::Invalid(format!("at most {MAX_POINTS} points")));
+    }
+    let style = Style { width: border_width_of(&d), ..Style::default() };
+    let ends = line_endings_of(&d).unwrap_or_default();
+    let (start, end) = (ends.first().copied().unwrap_or(LineEnding::None), ends.get(1).copied().unwrap_or(LineEnding::None));
+    let subtype = String::from_utf8_lossy(d.name(b"Subtype").unwrap_or_default()).into_owned();
+    let (shape, key): (Shape, &[u8]) = match (subtype.as_str(), points) {
+        ("Line", [from, to]) => (Shape::Line { from: *from, to: *to, start, end }, b"L"),
+        ("Line", _) => return Err(AnnotError::Invalid("a line has two ends".into())),
+        ("PolyLine", _) => (Shape::PolyLine { vertices: points.to_vec(), start, end }, b"Vertices"),
+        ("Polygon", _) => {
+            let cloud = d.get(b"BE").and_then(|b| b.as_dict()).is_some_and(|b| b.name(b"S") == Some(b"C"));
+            (Shape::Polygon { vertices: points.to_vec(), cloud }, b"Vertices")
+        }
+        (other, _) => return Err(AnnotError::Invalid(format!("{other} comments have no points to move"))),
+    };
+    // Checks the points too: finite, and far enough apart to draw.
+    let rect = rect_for(&shape, &style)?;
+    let before = d;
+    doc.update_dict(r, |d| {
+        d.set(key.to_vec(), num_array(&points.concat()));
+        d.set(b"Rect".to_vec(), num_array(&rect));
+        touch(d, meta);
+    })?;
+    redraw_or_restore(doc, r, before)
+}
+
 /// Scale a drawing's strokes into `rect`. The margin between the strokes and the old `/Rect` (half
 /// the line width and a little more) stays the same on each side, so the line isn't clipped.
 fn resize_ink(doc: &mut Document, r: ObjRef, rect: [f64; 4], meta: &Meta) -> Result<(), AnnotError> {
@@ -2096,6 +2138,9 @@ pub struct Summary {
     pub intent: Option<String>,
     /// A Fill & Sign mark ([`is_fill_sign`]).
     pub fill_sign: bool,
+    /// A line's two ends (`/L`), or the corners of connected lines, a polygon or a cloud
+    /// (`/Vertices`), in user space; empty for other comments.
+    pub points: Vec<[f32; 2]>,
 }
 
 fn text_value(doc: &Document, d: &Dict, key: &[u8]) -> Option<String> {
@@ -2150,6 +2195,12 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
                 }
             }
             let quads = nums(b"QuadPoints").as_chunks::<8>().0.to_vec();
+            // Keep in step with `pdfcraft_render::inspect`.
+            let points = match subtype.as_str() {
+                "Line" => Some(nums(b"L")).filter(|l| l.len() == 4).map(|l| l.as_chunks::<2>().0.to_vec()).unwrap_or_default(),
+                "PolyLine" | "Polygon" => nums(b"Vertices").as_chunks::<2>().0.to_vec(),
+                _ => Vec::new(),
+            };
             let in_reply_to = d.get(b"IRT").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).and_then(|p| text_value(doc, &p, b"NM"));
             out.push(Summary {
                 page,
@@ -2169,6 +2220,7 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
                 locked: annotation_flags(doc, d) & FLAG_LOCKED != 0,
                 intent: d.get(b"IT").and_then(|o| doc.resolve(o).as_name().map(|n| String::from_utf8_lossy(n).into_owned())),
                 fill_sign: is_fill_sign(doc, d),
+                points,
             });
         }
     }
