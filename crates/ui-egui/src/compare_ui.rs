@@ -163,6 +163,17 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, state: &Option<CompareState>,
 }
 
 impl PdfCraftApp {
+    /// Set gaps for the active document and both visible comparison panes, leaving other tabs alone.
+    pub(crate) fn set_active_page_gaps(&mut self, show: bool) {
+        let Some((index, id)) = self.active_ids() else { return };
+        let partner = side_by_side(self, index).and_then(|(old, _)| self.views.get(old).map(|v| v.id));
+        for view in &mut self.views {
+            if view.id == id || partner == Some(view.id) {
+                view.set_page_gaps(show);
+            }
+        }
+    }
+
     /// Compare the chosen older document with the active one and show the differences.
     pub fn run_compare(&mut self) {
         let Some((i, new)) = self.active_ids() else { return };
@@ -318,17 +329,24 @@ pub(crate) fn compare_area(app: &mut PdfCraftApp, old: usize, new: usize, ui: &m
     let leader = app.compare.as_ref().map_or(1, |c| c.leader);
     let (lead, follow) = if leader == 0 { (old, new) } else { (new, old) };
     // The follower takes the leader's zoom and layout before either is drawn.
-    let (zoom, fit, layout, continuous, rotation) = {
+    let (zoom, fit, layout, continuous, page_gaps, rotation) = {
         let v = &app.views[lead];
-        (v.zoom, v.fit, v.layout, v.continuous, v.rotation)
+        (v.zoom, v.fit, v.layout, v.continuous, v.show_page_gaps, v.rotation)
     };
     {
         let v = &mut app.views[follow];
-        if v.zoom != zoom || v.fit != fit || v.layout != layout || v.continuous != continuous || v.rotation != rotation {
+        if v.zoom != zoom
+            || v.fit != fit
+            || v.layout != layout
+            || v.continuous != continuous
+            || v.show_page_gaps != page_gaps
+            || v.rotation != rotation
+        {
             v.zoom = zoom;
             v.fit = fit;
             v.layout = layout;
             v.continuous = continuous;
+            v.show_page_gaps = page_gaps;
             v.rotation = rotation;
         }
     }

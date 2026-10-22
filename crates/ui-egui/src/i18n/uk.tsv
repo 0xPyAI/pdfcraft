@@ -136,6 +136,8 @@
 	Next view	Наступний вигляд
 	Page display	Відображення сторінок
 	Continuous scrolling	Безперервне прокручування
+	Show gaps between pages	Показувати проміжки між сторінками
+	Hide gaps to join page edges. Margins inside the PDF remain unchanged.	Приховайте проміжки, щоб з’єднати краї сторінок. Поля всередині PDF залишаться без змін.
 	Two-page view	Дві сторінки
 	Single page	Одна сторінка
 	Show cover page in two-page view	Показувати обкладинку в режимі двох сторінок
