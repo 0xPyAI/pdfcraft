@@ -38,6 +38,24 @@ const MAX_XFA_CONFIG_BYTES: usize = 16 << 20;
 const MAX_REMOTE_FILE_SPEC_BYTES: usize = 4096;
 const MAX_REMOTE_DESTINATION_NAME_BYTES: usize = 1024;
 
+/// Text and geometry `DocInfo::annotations` keeps, as counted by [`retained`]. Past it the rest
+/// are not listed: real comments stay far below, many small ones sharing one long string do not.
+const MAX_ANNOTATION_BYTES: usize = 64 << 20;
+
+/// The bytes a listed annotation keeps.
+fn retained(a: &Annotation) -> usize {
+    let text = [&a.author, &a.contents, &a.modified, &a.name, &a.in_reply_to, &a.state, &a.intent];
+    text.into_iter()
+        .map(|t| t.as_ref().map_or(0, String::len))
+        .chain([
+            a.subtype.len(),
+            std::mem::size_of_val(a.quads.as_slice()),
+            std::mem::size_of_val(a.points.as_slice()),
+            std::mem::size_of::<Annotation>(),
+        ])
+        .fold(0, usize::saturating_add)
+}
+
 /// At most this many layers are read from all of `/RBGroups` together.
 const MAX_LAYER_GROUP_ENTRIES: usize = 4096;
 
@@ -1142,10 +1160,26 @@ impl<'a> Inspector<'a> {
     // ── annotations ─────────────────────────────────────────────────────────────────────────
 
     fn annotations(&self, info: &mut DocInfo) {
-        for (&id, &page) in &self.page_index {
+        let mut pages: Vec<(ObjectId, usize)> = self.page_index.iter().map(|(&id, &page)| (id, page)).collect();
+        pages.sort_unstable_by_key(|&(_, page)| page);
+        // An annotation, or a whole `/Annots` array, that several entries or pages list is on the
+        // first of them (§12.5.2 allows one page per annotation).
+        let mut seen = HashSet::new();
+        let mut kept = 0usize;
+        for (id, page) in pages {
             let Ok(page_dict) = self.doc.get_dictionary(id) else { continue };
+            if let Ok(Object::Reference(r)) = page_dict.get(b"Annots")
+                && !seen.insert(*r)
+            {
+                continue;
+            }
             let Ok(Object::Array(annots)) = page_dict.get(b"Annots").map(|o| self.resolve(o)) else { continue };
             for (index, a) in annots.iter().enumerate() {
+                if let Object::Reference(r) = a
+                    && !seen.insert(*r)
+                {
+                    continue;
+                }
                 let Some(d) = self.dict(a) else { continue };
                 let Some(subtype) = self.name(d, b"Subtype") else { continue };
                 if subtype == "FileAttachment"
@@ -1209,7 +1243,7 @@ impl<'a> Inspector<'a> {
                     }
                     _ => Vec::new(),
                 };
-                info.annotations.push(Annotation {
+                let annotation = Annotation {
                     page,
                     subtype,
                     author: self.text(d, b"T"),
@@ -1228,7 +1262,15 @@ impl<'a> Inspector<'a> {
                     intent: self.name(d, b"IT"),
                     fill_sign,
                     points,
-                });
+                };
+                kept = kept.saturating_add(retained(&annotation));
+                if kept > MAX_ANNOTATION_BYTES {
+                    break;
+                }
+                info.annotations.push(annotation);
+            }
+            if kept > MAX_ANNOTATION_BYTES {
+                break;
             }
         }
         info.annotations.sort_by(|a, b| a.page.cmp(&b.page).then(b.rect[3].total_cmp(&a.rect[3])));
@@ -2581,6 +2623,33 @@ trailer << /Root 1 0 R >>
         fn encrypted(&self) -> bool {
             false
         }
+    }
+
+    /// One comment referenced many times, or a page-shared `/Annots` array, is listed once, and many
+    /// small comments sharing one large `/Contents` string stop at the retained-bytes budget.
+    #[test]
+    fn repeated_annotations_are_listed_once_within_a_byte_budget() {
+        let small = "<< /Subtype /Text /Rect [0 0 1 1] /Contents 7 0 R >> ".repeat(1200);
+        let pdf = format!(
+            "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+             2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj\n\
+             3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots 5 0 R >> endobj\n\
+             4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots 5 0 R >> endobj\n\
+             5 0 obj [{} {small}] endobj\n\
+             6 0 obj << /Type /Annot /Subtype /Text /Rect [0 0 1 1] /Contents (note) >> endobj\n\
+             7 0 obj ({}) endobj\ntrailer << /Root 1 0 R >>\n%%EOF",
+            "6 0 R ".repeat(1000),
+            "x".repeat(64 << 10),
+        );
+        let doc = Document::load_mem(pdf.as_bytes()).expect("loads");
+        let page = PageInfo { width: 200.0, height: 200.0, crop: [0.0, 0.0, 200.0, 200.0], rotation: 0, label: String::new() };
+        let mut info = DocInfo { pages: vec![page.clone(), page], ..Default::default() };
+        Inspector::new(&doc).fill(&mut info);
+        let notes = &info.annotations;
+        assert_eq!(notes.iter().filter(|a| a.contents.as_deref() == Some("note")).count(), 1);
+        assert!(notes.iter().all(|a| a.page == 0), "the shared array is the first page's");
+        assert!(notes.len() > 1);
+        assert!(notes.iter().map(retained).sum::<usize>() <= MAX_ANNOTATION_BYTES);
     }
 
     /// Widgets without `/P` are placed on the page that lists them with one pass over the pages'
