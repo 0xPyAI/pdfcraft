@@ -2884,6 +2884,10 @@ pub(crate) fn copy_refused() -> &'static str {
     tl!("The document's security settings don't allow copying text and images")
 }
 
+pub(crate) fn print_refused() -> &'static str {
+    tl!("The document's security settings don't allow printing")
+}
+
 impl PdfCraftApp {
     /// Whether text and images may be copied out of document `id`; says why not when they may
     /// not. Reading aloud and accessibility tools don't ask (assistive technology may read

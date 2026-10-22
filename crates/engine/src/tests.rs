@@ -1210,6 +1210,24 @@ fn copy_restricted_documents_refuse_extraction_unless_opened_by_the_owner() {
     assert!(s.get(plain).unwrap().check_copying().is_ok() && extracting.iter().all(|c| enabled(&s, plain, c)));
 }
 
+/// Table 22, bit 3 (#2669): a document that forbids printing disables Print up front instead
+/// of refusing once the dialog is confirmed. Low-resolution printing (bit 3 on, bit 12 off) is
+/// still printing, and the owner password lifts the restriction.
+#[test]
+fn print_restricted_documents_disable_print_unless_opened_by_the_owner() {
+    let enabled = |s: &Session, id, c| commands::is_enabled(commands::command(c).unwrap(), s, Some(id));
+    let bytes = protected("", "owner", -1 ^ 0b100);
+    let mut s = Session::new();
+    let id = s.open("r.pdf", None, bytes.clone(), None).unwrap();
+    assert!(!s.get(id).unwrap().allows_printing());
+    assert!(!enabled(&s, id, "print.dialog"));
+    assert!(enabled(&s, id, "export.text"), "only printing is withheld");
+    let oid = s.open("r.pdf", None, bytes, Some("owner")).unwrap();
+    assert!(enabled(&s, oid, "print.dialog"), "the owner may print");
+    let low = s.open("low.pdf", None, protected("", "owner", -1 ^ (1 << 11)), None).unwrap();
+    assert!(enabled(&s, low, "print.dialog"), "low-resolution printing is printing");
+}
+
 #[test]
 fn the_permissions_password_unlocks_an_open_document() {
     // Only a permissions password (#995, #1077): opens without asking. Changes are allowed,
