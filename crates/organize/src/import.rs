@@ -826,8 +826,11 @@ fn register_fields(dst: &mut Document, fields: &[ObjRef]) -> Result<(), Organize
         _ => (None, Dict::new()),
     };
     let mut list = form.get(b"Fields").map(|f| dst.resolve(f)).and_then(|f| f.as_array().cloned()).unwrap_or_default();
+    let mut listed: HashSet<ObjRef> = list.iter().filter_map(Object::as_ref).collect();
     for f in fields {
-        if !list.contains(&Object::Ref(*f)) {
+        #[cfg(test)]
+        crate::work(1);
+        if listed.insert(*f) {
             list.push(Object::Ref(*f));
         }
     }

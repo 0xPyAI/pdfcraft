@@ -3132,3 +3132,31 @@ fn page_walk_skips_repeated_and_cyclic_kids_without_copying_attributes() {
     assert!(walk.next().is_none());
     assert_eq!(labels(&doc), ["Page 1", "Page 2", "Page 3"]);
 }
+
+/// A one-page document whose page carries `annots` (object bodies 5…), with `extra` bodies after them.
+fn page_with_annots(annots: &[String], extra: &[String], catalog_extra: &str) -> Document {
+    let n = annots.len();
+    let refs: String = (0..n).map(|i| format!("{} 0 R ", i + 5)).collect();
+    let mut b: Vec<String> = vec![
+        format!("<< /Type /Catalog /Pages 2 0 R {catalog_extra} >>"),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".into(),
+        format!("<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Annots [{refs}] >>"),
+        body("P1"),
+    ];
+    b.extend(annots.iter().cloned());
+    b.extend(extra.iter().cloned());
+    open(build(&b, "/Root 1 0 R"))
+}
+
+#[test]
+fn registering_many_imported_fields_is_linear() {
+    let n = 2_000;
+    let widgets: Vec<String> = (0..n).map(|i| format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T (f{i}) /Rect [0 0 10 10] >>")).collect();
+    let src = page_with_annots(&widgets, &[], "");
+    take_work();
+    let out = extract_pages(&src, &[0]).unwrap();
+    let work = take_work();
+    assert!(work <= 4 * n, "{work} steps registering {n} fields");
+    let form = out.resolve(catalog(&out).get(b"AcroForm").unwrap()).as_dict().cloned().unwrap();
+    assert_eq!(form.get(b"Fields").and_then(|f| f.as_array()).map(Vec::len), Some(n));
+}
