@@ -1390,6 +1390,10 @@
 	Draw freehand	Gambar bebas
 	Drawing	Gambar
 	Drawing scale	Skala gambar
+	Scale	Skala
+	Common scales	Skala umum
+	Enter a scale such as 1:50.	Masukkan skala seperti 1:50.
+	Applying a scale switches units to m / mm.	Menerapkan skala mengubah satuan menjadi m / mm.
 	Drop-down list	Daftar drop-down
 	Duplicate pages	Duplikat halaman
 	Edit a PDF	Edit PDF

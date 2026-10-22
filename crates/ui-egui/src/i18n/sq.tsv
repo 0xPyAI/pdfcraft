@@ -645,6 +645,10 @@
 	Draw your {what} below.	Vizato {what} më poshtë.
 	Drawing	Vizatim
 	Drawing scale	Shkalla e vizatimit
+	Scale	Shkalla
+	Common scales	Shkalla të zakonshme
+	Enter a scale such as 1:50.	Shkruani një shkallë si 1:50.
+	Applying a scale switches units to m / mm.	Zbatimi i një shkalle i kalon njësitë në m / mm.
 	Drop PDFs or folders here, or choose them.	Hidh PDF ose dosje këtu, ose zgjidh ato.
 	Drop-down list	Listë rënëse
 	Dropdown Properties	Vetitë e listës rënëse

@@ -1961,6 +1961,10 @@
 	Perimeter	Kerület
 	Area	Terület
 	Drawing scale	Rajz méretaránya
+	Scale	Méretarány
+	Common scales	Gyakori méretarányok
+	Enter a scale such as 1:50.	Adjon meg egy méretarányt, például 1:50.
+	Applying a scale switches units to m / mm.	A méretarány alkalmazása m / mm mértékegységre vált.
 	Snapping	Illesztés
 	Export measurements	Mérések exportálása
 	Open a PDF to measure it.	Nyiss meg egy PDF-et a méréshez.

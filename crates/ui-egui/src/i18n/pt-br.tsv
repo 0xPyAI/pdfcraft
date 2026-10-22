@@ -1774,6 +1774,10 @@
 	Perimeter	Perímetro
 	Area	Área
 	Drawing scale	Escala de desenho
+	Scale	Escala
+	Common scales	Escalas comuns
+	Enter a scale such as 1:50.	Digite uma escala como 1:50.
+	Applying a scale switches units to m / mm.	Aplicar uma escala muda as unidades para m / mm.
 	Snapping	Alinhamento inteligente
 	Export measurements	Exportar medições
 	Open a PDF to measure it.	Abra um PDF para medi-lo.

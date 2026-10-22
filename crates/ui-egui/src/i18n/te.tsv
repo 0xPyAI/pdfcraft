@@ -1960,6 +1960,10 @@ action wizard	Start	ప్రారంభించు
 	Perimeter	చుట్టుకొలత
 	Area	వైశాల్యం
 	Drawing scale	డ్రాయింగ్ స్కేల్
+	Scale	స్కేల్
+	Common scales	సాధారణ స్కేల్‌లు
+	Enter a scale such as 1:50.	1:50 వంటి స్కేల్‌ను నమోదు చేయండి.
+	Applying a scale switches units to m / mm.	స్కేల్‌ను వర్తింపజేస్తే యూనిట్లు m / mm‌కు మారతాయి.
 	Snapping	స్నాపింగ్
 	Export measurements	కొలతలను ఎగుమతి చేయి
 	Open a PDF to measure it.	కొలవడానికి ఒక PDFను తెరవండి.

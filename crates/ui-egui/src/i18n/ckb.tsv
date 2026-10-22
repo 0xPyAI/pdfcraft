@@ -2003,6 +2003,10 @@
 	Perimeter	چێوە
 	Area	ڕووبەر
 	Drawing scale	پێوەری وێنەکێشان
+	Scale	پێوەر
+	Common scales	پێوەرە باوەکان
+	Enter a scale such as 1:50.	پێوەرێک بنووسە وەک 1:50.
+	Applying a scale switches units to m / mm.	جێبەجێکردنی پێوەر یەکەکان دەگۆڕێت بۆ م / ملم.
 	Snapping	لکاندن
 	Export measurements	هەناردەکردنی پێوانەکان
 	Open a PDF to measure it.	PDFێک بکەرەوە بۆ پێوانەکردنی.

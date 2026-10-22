@@ -1961,6 +1961,10 @@
 	Perimeter	परिमाप
 	Area	क्षेत्रफल
 	Drawing scale	रेखाचित्र पैमाना
+	Scale	पैमाना
+	Common scales	सामान्य पैमाने
+	Enter a scale such as 1:50.	1:50 जैसा पैमाना दर्ज करें।
+	Applying a scale switches units to m / mm.	पैमाना लागू करने पर इकाइयाँ m / mm में बदल जाती हैं।
 	Snapping	स्नैपिंग
 	Export measurements	मापन निर्यात करें
 	Open a PDF to measure it.	मापने के लिए एक पीडीएफ़ खोलें।

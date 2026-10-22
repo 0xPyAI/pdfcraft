@@ -2014,6 +2014,10 @@
 	Perimeter	ລວງຮອບ
 	Area	ເນື້ອທີ່
 	Drawing scale	ມາດຕາສ່ວນຮູບແຕ້ມ
+	Scale	ມາດຕາສ່ວນ
+	Common scales	ມາດຕາສ່ວນທີ່ໃຊ້ທົ່ວໄປ
+	Enter a scale such as 1:50.	ປ້ອນມາດຕາສ່ວນ ເຊັ່ນ 1:50.
+	Applying a scale switches units to m / mm.	ການນຳໃຊ້ມາດຕາສ່ວນຈະປ່ຽນຫົວໜ່ວຍເປັນ m / mm.
 	Snapping	ການດູດຈັບ
 	Export measurements	ສົ່ງອອກການວັດແທກ
 	Open a PDF to measure it.	ເປີດ PDF ເພື່ອວັດແທກ.

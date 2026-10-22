@@ -1978,6 +1978,10 @@
 	Perimeter	Ympärysmitta
 	Area	Pinta-ala
 	Drawing scale	Piirustuksen mittakaava
+	Scale	Mittakaava
+	Common scales	Yleiset mittakaavat
+	Enter a scale such as 1:50.	Anna mittakaava, esimerkiksi 1:50.
+	Applying a scale switches units to m / mm.	Mittakaavan käyttö vaihtaa yksiköiksi m / mm.
 	Snapping	Tartunta
 	Export measurements	Vie mittaukset
 	Open a PDF to measure it.	Avaa PDF mitataksesi sitä.

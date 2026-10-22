@@ -1971,6 +1971,10 @@
 	Perimeter	Périmètre
 	Area	Aire
 	Drawing scale	Échelle du dessin
+	Scale	Échelle
+	Common scales	Échelles courantes
+	Enter a scale such as 1:50.	Saisissez une échelle comme 1:50.
+	Applying a scale switches units to m / mm.	Appliquer une échelle passe les unités en m / mm.
 	Snapping	Accrochage
 	Export measurements	Exporter les mesures
 	Open a PDF to measure it.	Ouvrez un PDF pour le mesurer.

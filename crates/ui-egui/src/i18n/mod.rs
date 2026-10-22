@@ -1102,6 +1102,18 @@ mod tests {
         }
     }
 
+    /// The drawing-scale labels of the Measure panel are translated in every catalog.
+    #[test]
+    fn drawing_scale_labels_are_translated_in_every_catalog() {
+        for language in LANGUAGES.iter().filter(|language| !language.source.is_empty()) {
+            let lang = Lang::from_code(language.code).expect("registered language");
+            for label in ["Scale", "Common scales", "Enter a scale such as 1:50.", "Applying a scale switches units to m / mm."] {
+                assert!(has(lang, label), "{} lacks {label:?}", language.code);
+                assert_ne!(tr(lang, label), label, "{} falls back to English for {label:?}", language.code);
+            }
+        }
+    }
+
     /// Every catalog says the labels of a visible signature, which are looked up by the sign
     /// crate's own English words (so the `tl!` scan can't see them), and the note shown when they
     /// fall back to English. Each label that runs into its value keeps a separator at its end.

@@ -1934,6 +1934,10 @@
 	Perimeter	Çevre
 	Area	Alan
 	Drawing scale	Çizim ölçeği
+	Scale	Ölçek
+	Common scales	Yaygın ölçekler
+	Enter a scale such as 1:50.	1:50 gibi bir ölçek girin.
+	Applying a scale switches units to m / mm.	Ölçek uygulamak birimleri m / mm olarak değiştirir.
 	Snapping	Yakalama
 	Export measurements	Ölçümleri dışa aktar
 	Open a PDF to measure it.	Ölçmek için bir PDF açın.

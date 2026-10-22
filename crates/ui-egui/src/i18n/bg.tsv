@@ -1902,6 +1902,10 @@
 	Perimeter	Периметър
 	Area	Площ
 	Drawing scale	Мащаб на чертежа
+	Scale	Мащаб
+	Common scales	Често използвани мащаби
+	Enter a scale such as 1:50.	Въведете мащаб, например 1:50.
+	Applying a scale switches units to m / mm.	Прилагането на мащаб превключва единиците на m / mm.
 	Snapping	Прилепване
 	Export measurements	Експортирай измерванията
 	Open a PDF to measure it.	Отворете PDF файл, за да го измервате.

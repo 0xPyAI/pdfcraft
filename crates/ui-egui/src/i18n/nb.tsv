@@ -1401,6 +1401,10 @@
 	Draw freehand	Tegn på frihånd
 	Drawing	Tegning
 	Drawing scale	Tegneskala
+	Scale	Målestokk
+	Common scales	Vanlige målestokker
+	Enter a scale such as 1:50.	Skriv inn en målestokk, for eksempel 1:50.
+	Applying a scale switches units to m / mm.	Når du bruker en målestokk, byttes enhetene til m / mm.
 	Drop-down list	Nedtrekksliste
 	Duplicate pages	Dupliser sider
 	Edit a PDF	Rediger en PDF

@@ -2087,6 +2087,10 @@ key	Space	Mezerník
 	Perimeter	Obvod
 	Area	Plocha
 	Drawing scale	Měřítko výkresu
+	Scale	Měřítko
+	Common scales	Běžná měřítka
+	Enter a scale such as 1:50.	Zadejte měřítko, například 1:50.
+	Applying a scale switches units to m / mm.	Použití měřítka přepne jednotky na m / mm.
 	Snapping	Přichytávání
 	Export measurements	Exportovat měření
 	Open a PDF to measure it.	Otevřete PDF, které chcete měřit.
