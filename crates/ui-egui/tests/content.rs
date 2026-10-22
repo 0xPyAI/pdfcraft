@@ -6,6 +6,17 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use pdfcraft_ui_egui::{PdfCraftApp, QuickTool};
 
+/// Tests that render pixels (`h.render()`) take this first, so only one wgpu device exists at a
+/// time. Lavapipe crashes when another test creates its Vulkan instance meanwhile (segfault in
+/// `vkCreateSampler` during a concurrent `vkCreateInstance`). Declared before the harness, so it
+/// is released after the device is dropped.
+static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn gpu() -> std::sync::MutexGuard<'static, ()> {
+    // A test that panicked while holding it leaves nothing to clean up.
+    GPU.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn harness() -> Harness<'static, PdfCraftApp> {
     harness_with_step_dt(0.25)
 }
@@ -78,6 +89,7 @@ fn texts(h: &Harness<'static, PdfCraftApp>) -> Vec<String> {
 
 #[test]
 fn text_tool_drafts_grow_for_latin_and_arabic() {
+    let _gpu = gpu();
     for text in ["Wide words ".repeat(8), "سلام عليكم ".repeat(8)] {
         let mut h = harness();
         assert!(h.state_mut().execute("edit.text"));
@@ -145,6 +157,7 @@ fn text_tool_single_click_retypes_added_text_without_another_item() {
 
 #[test]
 fn text_tool_deleting_a_draft_hides_the_old_added_glyphs_and_cancel_restores_them() {
+    let _gpu = gpu();
     let mut h = harness();
     assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::AddText {
         page: 0,
@@ -343,6 +356,7 @@ fn a_picture_on_the_clipboard_is_pasted_onto_the_page() {
 /// written to the page as `?` (or lost).
 #[test]
 fn text_the_standard_fonts_cant_draw_stays_in_the_editor() {
+    let _gpu = gpu();
     let mut h = harness();
     assert!(h.state_mut().execute("edit.text"));
     h.run_steps(2);
@@ -601,6 +615,7 @@ fn drag_added_text(h: &mut Harness<'static, PdfCraftApp>) -> ([f64; 4], egui::Re
 /// until the button is released.
 #[test]
 fn dragged_text_follows_the_pointer_before_release() {
+    let _gpu = gpu();
     let mut h = harness();
     let (rect, from, to, end) = drag_added_text(&mut h);
     if let Ok(dir) = std::env::var("PDFCRAFT_SHOTS") {
@@ -619,6 +634,7 @@ fn dragged_text_follows_the_pointer_before_release() {
 /// instead of jumping back to where it was for those frames.
 #[test]
 fn released_text_does_not_jump_back_before_the_page_is_redrawn() {
+    let _gpu = gpu();
     // A page slow enough to render that the frames before its new raster can be looked at: many
     // pale squares, too light to count as ink.
     let mut content = String::from("0.9 g\n");
@@ -805,6 +821,7 @@ fn settle(h: &mut Harness<'static, PdfCraftApp>) {
 /// the whole drag, and to show there again after the release.
 #[test]
 fn a_resized_added_picture_shows_only_at_its_new_size() {
+    let _gpu = gpu();
     let mut h = harness();
     assert!(h.state_mut().execute("edit.edit_text"));
     h.run_steps(2);
