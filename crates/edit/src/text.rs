@@ -1085,7 +1085,11 @@ fn interpret(
                 let Some((name, m)) = ts.font.clone() else { continue };
                 // Pieces: strings, and TJ number adjustments.
                 let pieces: Vec<Object> = match op.op.as_slice() {
-                    b"TJ" => op.operands.first().and_then(Object::as_array).cloned().unwrap_or_default(),
+                    // A surplus array (`[(A)] [(B)] TJ`) is malformed, but the operator still
+                    // takes the one immediately before it, as the renderer and every other
+                    // reader here do (#3569) -- not the first, which a reader counting operands
+                    // from the front of a surplus list would otherwise take.
+                    b"TJ" => op.operands.last().and_then(Object::as_array).cloned().unwrap_or_default(),
                     _ => op.operands.last().cloned().into_iter().collect(),
                 };
                 // Tc is already included in the pen advance; TJ may encode tracking instead.
@@ -1384,13 +1388,18 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
 /// Joining independent text objects is safe only when they use the same text and graphics
 /// transforms and spacing. In particular, a nearby rotated label isn't part of this line.
 fn compatible_word(line: &TextLine, shown: &Shown) -> bool {
-    let same = |a: &[f64], b: &[f64]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6);
+    let within = |a: &[f64], b: &[f64], tolerance: f64| a.iter().zip(b).all(|(a, b)| (a - b).abs() < tolerance);
+    let same = |a: &[f64], b: &[f64]| within(a, b, 1e-6);
     let (a, b) = (&line.origin.state, TextState::of(&shown.state));
+    // Spacing that differs by less than a thousandth of an em, the unit glyph widths are given in,
+    // can't be seen. Some producers still write it (`0.0001 Tc` on one word of a line).
+    let em = shown.state.size.abs() / 1000.0;
     line.scope == shown.scope
         && line.paint == shown.paint
         && same(&line.origin.tm[..4], &shown.tm.0[..4])
         && same(&line.origin.ctm, &shown.state.ctm.0)
-        && same(&[a.char_spacing, a.word_spacing, a.scale, a.rise], &[b.char_spacing, b.word_spacing, b.scale, b.rise])
+        && within(&[a.char_spacing, a.word_spacing], &[b.char_spacing, b.word_spacing], em.max(1e-6))
+        && same(&[a.scale, a.rise], &[b.scale, b.rise])
         && a.fill.len() == b.fill.len()
         && a.fill.iter().zip(&b.fill).all(|(a, b)| a.op == b.op && a.operands == b.operands)
 }

@@ -153,3 +153,9 @@ sync_github_name = true
 real_name = "Eric Kaden"
 display_name = "Eric Kaden"
 sync_github_name = false
+
+[people.MatrixMagician]
+sync_github_name = true
+
+[people.Lcoding15]
+real_name = "Livio Oswald"
