@@ -182,11 +182,11 @@ fn cut_stack_dialog_previews_saves_and_refuses_duplex() {
     h.get_by_label("›").click();
     h.run_steps(2);
     h.get_by_label("Sheet 2 of 3");
-    h.state_mut().print_draft.duplex = Duplex::LongEdge;
+    h.state_mut().print_draft.duplex = Some(Duplex::LongEdge);
     h.run_steps(2);
     h.get_by_label_contains("Cut and stack needs Two-sided: Off");
     assert!(!h.state_mut().print_now());
-    h.state_mut().print_draft.duplex = Duplex::Off;
+    h.state_mut().print_draft.duplex = Some(Duplex::Off);
     h.state_mut().print_draft.printer = None;
     let out = std::env::temp_dir().join(format!("pdfcraft-cut-stack-ui-{}.pdf", std::process::id()));
     h.state_mut().save_override = Some(out.to_string_lossy().into_owned());

@@ -8020,8 +8020,8 @@ milestone = "M10"
 status = "shipped"
 commands = ["print.dialog"]
 tools = ["doc_print"]
-evidence = ["crates/print/src/tests.rs::spooler_arguments_and_printer_list"]
-notes = "long/short edge via the spooler: lp -o sides=…, and the Windows driver's Duplex setting"
+evidence = ["crates/print/src/tests.rs::spooler_arguments_and_printer_list", "crates/ui-egui/src/print_ui.rs::two_sided_follows_the_printer_until_chosen", "crates/automation/src/printing.rs::duplex_printer_leaves_two_sided_to_the_printer"]
+notes = "long/short edge via the spooler: lp -o sides=…, and the Windows driver's Duplex setting. Two-sided starts at Printer default, as in Acrobat: nothing is sent, so the printer's own default (its Properties) applies until Off or an edge is chosen (doc_print: duplex \"printer\"). Missing: the document's /ViewerPreferences /Duplex preset isn't read yet"
 
 [[feature]]
 id = "print.n-up"
