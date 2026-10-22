@@ -1952,7 +1952,7 @@ impl Document {
             return;
         }
         let mut located = BTreeMap::new();
-        for (num, offset, generation) in object_headers(&self.data) {
+        for (num, offset, generation, _) in object_headers(&self.data) {
             located.insert(num, (offset, generation));
         }
         let mut filled = entries.to_map(&self.data);
@@ -1989,9 +1989,17 @@ impl Document {
         let data = self.data.clone();
         let mut entries: BTreeMap<u32, XrefEntry> = BTreeMap::new();
         let mut objstms = Vec::new();
-        for (num, offset, generation) in object_headers(&data) {
+        // Offsets of objects that may be cross-reference streams: their dictionaries are the
+        // trailers of files that have no `trailer` keyword (§7.5.8).
+        let mut xref_streams = Vec::new();
+        for (num, offset, generation, body) in object_headers(&data) {
             entries.insert(num, XrefEntry::InFile { offset, generation });
             objstms.push(num);
+            if find(&data, b"/XRef", body, body.saturating_add(1024)).is_some()
+                && let Ok(at) = usize::try_from(offset)
+            {
+                xref_streams.push(at);
+            }
         }
         if entries.is_empty() {
             return Err(CosError::Syntax { offset: 0, detail: "no objects found".into() });
@@ -2015,20 +2023,44 @@ impl Document {
         let object_count = entries.len();
         self.entries = Arc::new(XrefIndex::Materialized(Arc::new(entries)));
         self.cache.lock().map_err(|_| CosError::Poisoned)?.clear();
-        // Trailer: the last `trailer` dictionary with a usable /Root, else the catalog itself.
-        let mut trailer = None;
+        // Trailer: the last `trailer` dictionary or cross-reference stream dictionary with a
+        // usable /Root (last in the file, whichever kind), else the catalog itself. One whose
+        // /Root is a catalog (as `root_is_catalog` judges it) beats one whose /Root is another
+        // dictionary, such as /Info, wherever it is; an FDF's /Root (no /Type, no /Pages) still
+        // counts when nothing better is there.
+        // A file whose only trailers are cross-reference streams (and whose `startxref` is gone
+        // or points nowhere) keeps its /Info, /ID and /Encrypt this way.
+        let rank = |at: usize, d: &Dict| {
+            let root = self.try_get(d.reference(b"Root")?.num).ok()?;
+            let Object::Dict(c) = &*root else { return None };
+            Some((c.name(b"Type") == Some(b"Catalog") || c.contains(b"Pages"), at))
+        };
+        let mut trailer: Option<((bool, usize), Dict)> = None;
         let mut from = 0;
         while let Some(p) = find(&data, b"trailer", from, data.len()) {
             from = p + 7;
             let mut lx = Lexer::new(&data, from);
             if let Ok(Object::Dict(d)) = lx.object()
-                && d.reference(b"Root").is_some_and(|r| matches!(self.try_get(r.num).as_deref(), Ok(Object::Dict(_))))
+                && let Some(r) = rank(p, &d)
+                && trailer.as_ref().is_none_or(|(best, _)| r > *best)
             {
-                trailer = Some(d);
+                trailer = Some((r, d));
+            }
+        }
+        for at in xref_streams {
+            if trailer.as_ref().is_some_and(|((catalog, p), _)| *catalog && *p > at) {
+                continue;
+            }
+            if let Ok((_, Object::Stream(s))) = parse_indirect_shared(&data, at, &|_| None)
+                && s.dict.name(b"Type") == Some(b"XRef")
+                && let Some(r) = rank(at, &s.dict)
+                && trailer.as_ref().is_none_or(|(best, _)| r > *best)
+            {
+                trailer = Some((r, s.dict));
             }
         }
         let trailer = match trailer {
-            Some(t) => t,
+            Some((_, t)) => t,
             None => {
                 let catalog = self
                     .entries
@@ -2042,7 +2074,9 @@ impl Document {
             }
         };
         let mut trailer = trailer;
-        for k in [&b"Prev"[..], b"XRefStm"] {
+        // What a cross-reference stream's dictionary carries for itself goes, as the chain
+        // readers drop it: a save writes its own.
+        for k in [&b"Prev"[..], b"XRefStm", b"Type", b"W", b"Index", b"Filter", b"DecodeParms", b"Length"] {
             trailer.remove(k);
         }
         self.trailer = trailer;
@@ -2071,8 +2105,9 @@ fn shifted_subsection_end(data: &[u8], at: usize) -> Option<u32> {
     }
 }
 
-/// Every `N G obj` header in `data`, in file order, as (number, offset, generation).
-fn object_headers(data: &[u8]) -> Vec<(u32, u64, u16)> {
+/// Every `N G obj` header in `data`, in file order, as (number, offset, generation, position
+/// after `obj`).
+fn object_headers(data: &[u8]) -> Vec<(u32, u64, u16, usize)> {
     let mut headers = Vec::new();
     let mut i = 0;
     while i < data.len() {
@@ -2087,7 +2122,7 @@ fn object_headers(data: &[u8]) -> Vec<(u32, u64, u16)> {
                 let num = std::str::from_utf8(n).ok().and_then(|s| s.parse::<u32>().ok());
                 let generation = std::str::from_utf8(g).ok().and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
                 if let Some(num) = num {
-                    headers.push((num, i as u64, generation));
+                    headers.push((num, i as u64, generation, lx.pos));
                 }
                 i = lx.pos;
                 continue;
@@ -3319,6 +3354,55 @@ endobj
         assert!(doc.repair_log()[0].contains(&format!("the offset {prev}")), "{:?}", doc.repair_log());
         assert_eq!(doc.get(ObjRef::new(3, 0)).as_dict().and_then(|d| d.name(b"Type")), Some(&b"Page"[..]));
         assert_compact_matches_materialized(&doc);
+    }
+
+    /// A file whose only trailers are cross-reference stream dictionaries, with its `startxref`
+    /// out of reach (here a second file appended after it, cut off before its own
+    /// cross-reference data, as in #2365), is rebuilt from its object headers. The rebuild used
+    /// to look only for the `trailer` keyword, so /Info and /ID were lost, and a full save after
+    /// editing one Info field dropped every other.
+    #[test]
+    fn reconstruction_takes_the_trailer_from_a_cross_reference_stream() {
+        let table = build(
+            &["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [] /Count 0 >>", "<< /Title (Kept) /Creator (Me) >>"],
+            "/Root 1 0 R /Info 3 0 R",
+        );
+        let packed = crate::write_full(&Document::open(Arc::new(table)).unwrap(), &crate::SaveOptions::default()).unwrap();
+        let text = String::from_utf8_lossy(&packed);
+        assert!(text.contains("/XRef") && !text.contains("trailer"), "a cross-reference stream is the only trailer");
+        let mut bytes = packed.clone();
+        let appended = format!("%PDF-1.3\n90 0 obj\n<< /Length 5000 >>\nstream\n{}\nendstream\nendobj\n", "x".repeat(5000));
+        bytes.extend_from_slice(appended.as_bytes());
+        let doc = Document::open(Arc::new(bytes)).unwrap();
+        assert!(doc.revisions().is_empty(), "rebuilt: {:?}", doc.repair_log());
+        let info = doc.trailer().reference(b"Info").expect("the cross-reference stream's /Info");
+        let field = |d: &Document, key: &[u8]| d.get(info).as_dict().unwrap().get(key).unwrap().as_string().unwrap().bytes.clone();
+        assert_eq!(field(&doc, b"Title"), b"Kept");
+        assert!(doc.trailer().get(b"ID").is_some(), "and its /ID");
+        let mut edited = doc.clone();
+        edited.update_dict(info, |d| d.set(b"Subject".to_vec(), Object::String(crate::PdfString::literal("new")))).unwrap();
+        let saved = crate::write_full(&edited, &crate::SaveOptions::default()).unwrap();
+        let back = Document::open(Arc::new(saved)).unwrap();
+        assert!(back.repair_log().is_empty(), "{:?}", back.repair_log());
+        let info = back.trailer().reference(b"Info").expect("the full save keeps /Info");
+        let field = |key: &[u8]| back.get(info).as_dict().unwrap().get(key).unwrap().as_string().unwrap().bytes.clone();
+        assert_eq!((field(b"Title"), field(b"Creator"), field(b"Subject")), (b"Kept".to_vec(), b"Me".to_vec(), b"new".to_vec()));
+    }
+
+    /// A rebuild prefers a trailer whose /Root is the catalog (as `root_is_catalog` judges it): a
+    /// later cross-reference stream whose /Root points at the Info dictionary does not replace an
+    /// earlier good trailer, or a full save would write the Info dictionary as /Root.
+    #[test]
+    fn reconstruction_skips_a_trailer_whose_root_is_not_the_catalog() {
+        let mut bytes =
+            build(&["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [] /Count 0 >>", "<< /Title (Kept) >>"], "/Root 1 0 R /Info 3 0 R");
+        bytes.extend_from_slice(b"4 0 obj\n<< /Type /XRef /Size 5 /W [1 1 1] /Root 3 0 R /Length 3 >>\nstream\nabc\nendstream\nendobj\n");
+        let appended = format!("%PDF-1.3\n90 0 obj\n<< /Length 5000 >>\nstream\n{}\nendstream\nendobj\n", "x".repeat(5000));
+        bytes.extend_from_slice(appended.as_bytes());
+        let doc = Document::open(Arc::new(bytes)).unwrap();
+        assert!(doc.repair_log().iter().any(|l| l.contains("rebuilt")), "{:?}", doc.repair_log());
+        assert_eq!(doc.trailer().reference(b"Root").map(|r| r.num), Some(1), "the catalog, not the Info dictionary");
+        assert_eq!(doc.trailer().reference(b"Info").map(|r| r.num), Some(3));
     }
 
     #[test]
