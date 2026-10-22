@@ -735,6 +735,15 @@ mod formcalc {
     }
 
     #[test]
+    fn format_nine_pads_the_integer_part() {
+        assert_eq!(calc(r#"Format("99999", 42)"#), "00042");
+        assert_eq!(calc(r#"Format("9999", 5)"#), "0005");
+        assert_eq!(calc(r#"Format("999.99", 4.5)"#), "004.50");
+        assert_eq!(calc(r#"Format("zzz9", 42)"#), "42");
+        assert_eq!(calc(r#"Format("99", 12345)"#), "12345");
+    }
+
+    #[test]
     fn date2num_rejects_days_past_the_end_of_the_month() {
         assert_eq!(calc(r#"Date2Num("2023-02-30")"#), "0");
         assert_eq!(calc(r#"Date2Num("31/04/2024", "DD/MM/YYYY")"#), "0");

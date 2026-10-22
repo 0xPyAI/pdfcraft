@@ -2305,8 +2305,11 @@ impl Interp<'_> {
                 }
                 let num = self.to_num(&v);
                 let decimals = pic.split_once('.').map_or(0, |(_, f)| f.chars().filter(|c| matches!(c, '9' | 'z' | 'Z')).count()).min(20);
+                // `9` in the integer part forces a digit; `z` does not.
+                let min_int = pic.split('.').next().map_or(0, |i| i.chars().filter(|c| *c == '9').count()).min(20);
+                let width = min_int + if decimals > 0 { decimals + 1 } else { 0 };
                 let grouped = pic.contains(',');
-                let mut text = fixed(num.abs(), decimals);
+                let mut text = format!("{:0>width$}", fixed(num.abs(), decimals));
                 if grouped {
                     let (int, frac) = text.split_once('.').map_or((text.as_str(), ""), |(a, b)| (a, b));
                     let mut g = String::new();
