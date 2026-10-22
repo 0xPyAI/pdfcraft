@@ -191,7 +191,8 @@ impl Automation {
             if !c.points.is_empty() {
                 let round = |v: f32| (v * 100.0).round() / 100.0;
                 let page = doc.info.pages.get(c.page);
-                v["points"] = json!(c.points.iter().map(|q| page.map_or([q[0], q[1]], |p| p.user_to_view(q[0], q[1])).map(round)).collect::<Vec<_>>());
+                v["points"] =
+                    json!(c.points.iter().map(|q| page.map_or([q[0], q[1]], |p| p.user_to_view(q[0], q[1])).map(round)).collect::<Vec<_>>());
             }
             v
         };
