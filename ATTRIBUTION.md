@@ -285,6 +285,7 @@ Every asset PdfCraft includes, bundles or uses to build its published material, 
 | `assets/icons/subscript.svg` | Lucide icon "subscript" | Lucide Contributors (portions Cole Bemis, Feather) | ISC | https://github.com/lucide-icons/lucide (npm lucide-static 1.49.0, icons/subscript.svg) | UI icon, embedded via crates/ui-egui/src/icon_data.rs |
 | `assets/icons/pilcrow.svg` | Lucide icon "pilcrow" | Lucide Contributors (portions Cole Bemis, Feather) | ISC | https://github.com/lucide-icons/lucide (npm lucide-static 1.49.0, icons/pilcrow.svg) | UI icon, embedded via crates/ui-egui/src/icon_data.rs |
 | `assets/icons/move-horizontal.svg` | Lucide icon "move-horizontal" | Lucide Contributors (portions Cole Bemis, Feather) | ISC | https://github.com/lucide-icons/lucide (npm lucide-static 1.49.0, icons/move-horizontal.svg) | UI icon, embedded via crates/ui-egui/src/icon_data.rs |
+| `crates/ui-egui/src/i18n/sq.tsv` | Albanian interface translation catalog | PdfCraft contributors | MIT OR Apache-2.0 | Contributor-original: clean-room translations of PdfCraft's English UI labels, no proprietary localisation resources | Albanian UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs |
 
 ## Compiled in through dependencies (6)
 

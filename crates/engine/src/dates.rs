@@ -59,7 +59,7 @@ const AR_DAYS: [&str; 7] = ["الأحد", "الاثنين", "الثلاثاء", 
 
 /// The languages month and weekday names can be written in (Preferences ▸ Date format ▸ Language):
 /// the interface languages, in the same order and with the same names.
-pub static DATE_LANGUAGES: [DateLanguage; 24] = [
+pub static DATE_LANGUAGES: [DateLanguage; 25] = [
     DateLanguage {
         code: "en",
         name: "English",
@@ -437,6 +437,15 @@ pub static DATE_LANGUAGES: [DateLanguage; 24] = [
         days: ["sunnuntai", "maanantai", "tiistai", "keskiviikko", "torstai", "perjantai", "lauantai"],
         days_short: ["su", "ma", "ti", "ke", "to", "pe", "la"],
     },
+    DateLanguage {
+        code: "sq",
+        name: "Shqip",
+        months: ["janar", "shkurt", "mars", "prill", "maj", "qershor", "korrik", "gusht", "shtator", "tetor", "nëntor", "dhjetor"],
+        months_with_day: None,
+        months_short: ["jan", "shk", "mar", "pri", "maj", "qer", "korr", "gush", "sht", "tet", "nën", "dhj"],
+        days: ["e diel", "e hënë", "e martë", "e mërkurë", "e enjte", "e premte", "e shtunë"],
+        days_short: ["die", "hën", "mar", "mër", "enj", "pre", "sht"],
+    },
 ];
 
 /// The date language for `code` (any case), or `None` when there's none.
@@ -742,6 +751,8 @@ mod tests {
         assert_eq!(in_lang("yyyy\\年mmmmd\\日 dddd", "ja"), "2026年3月7日 土曜日");
         assert_eq!(in_lang("yyyy\\年mmmmd\\日 dddd", "zh-hans"), "2026年三月7日 星期六");
         assert_eq!(in_lang("ddd", "zh-hant"), "週六");
+        assert_eq!(in_lang("dddd, d mmmm yyyy", "sq"), "e shtunë, 7 mars 2026");
+        assert_eq!(in_lang("ddd d mmm", "sq"), "sht 7 mar");
         assert_eq!(date_language("PT-BR").map(|l| l.code), Some("pt-br"));
         assert!(date_language("xx").is_none());
         for l in &DATE_LANGUAGES {
