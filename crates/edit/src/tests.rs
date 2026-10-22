@@ -6403,6 +6403,38 @@ fn flattening_prunes_a_field_tree_with_repeated_kids_once_per_node() {
     assert_eq!(left, 2, "the chain to the hidden widget and the self-listing node stay");
 }
 
+/// A field reached first at the end of a long chain has its kids cut off by the depth limit, so
+/// they survive there. A shorter path to the same field still looks at its kids: an off-page widget
+/// under it is taken out when every field is flattened.
+#[test]
+fn a_field_reached_again_by_a_shorter_path_is_pruned_there() {
+    let chain = 64;
+    let page = stream("", " ");
+    // 7…: the chain; then the shared field, its off-page widget, and the short path to it.
+    let shared = 7 + chain;
+    let fields = format!("<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R 7 0 R {} 0 R] >> >>", shared + 2);
+    let mut objs: Vec<String> = vec![
+        fields,
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 4 0 R /Annots [5 0 R] >>".into(),
+        page,
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (shown) /Rect [10 10 150 40] /F 4 /AP << /N 6 0 R >> >>".into(),
+        "<< /Type /XObject /Subtype /Form /BBox [0 0 140 30] /Length 0 >>\nstream\n\nendstream".into(),
+    ];
+    for i in 0..chain {
+        objs.push(format!("<< /T (c{i}) /Kids [{} 0 R] >>", 8 + i));
+    }
+    objs.push(format!("<< /T (shared) /Kids [{} 0 R] >>", shared + 1));
+    objs.push("<< /Type /Annot /Subtype /Widget /FT /Tx /T (orphan) /Rect [10 50 150 80] /F 4 >>".into());
+    objs.push(format!("<< /T (short) /Kids [{shared} 0 R] >>"));
+    let objs: Vec<&str> = objs.iter().map(String::as_str).collect();
+    let mut doc = build(&objs);
+    assert_eq!(flatten(&mut doc, &[0], false, true).unwrap(), 1);
+    let shared_ref = pdfcraft_cos::ObjRef::new(u32::try_from(shared).unwrap(), 0);
+    let kids = doc.resolve(doc.get(shared_ref).as_dict().unwrap().get(b"Kids").unwrap()).as_array().unwrap().len();
+    assert_eq!(kids, 0, "the off-page widget is pruned along the short path");
+}
+
 /// A ToUnicode destination is repeated for every glyph that shows its code: a page whose text
 /// would run past the extraction budget is refused, not built in memory.
 #[test]

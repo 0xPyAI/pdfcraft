@@ -309,42 +309,59 @@ fn prune_fields(doc: &mut Document, widgets: &HashSet<ObjRef>, on_page: Option<&
     let af_ref = af.as_ref();
     let mut af_dict = doc.resolve(&af).as_dict().cloned().unwrap_or_default();
     let fields = af_dict.get(b"Fields").map(|f| doc.resolve(f)).and_then(|f| f.as_array().cloned()).unwrap_or_default();
-    // Returns whether the node survives. `known` holds each node's answer once it is visited, so
-    // a node listed twice is pruned once, and one still being visited (a cycle) survives.
+    // Returns whether the node survives, and whether that answer depends on the depth cutoff.
+    // `known` holds each node's answer once it is visited, so a node listed twice is pruned once,
+    // and one still being visited (a cycle) survives. An answer the cutoff decided records the depth
+    // it was reached at, and a shallower path visits the node again: at most once per depth.
     fn keep(
         doc: &mut Document,
         r: ObjRef,
         widgets: &HashSet<ObjRef>,
         on_page: Option<&HashSet<ObjRef>>,
-        known: &mut HashMap<ObjRef, bool>,
+        known: &mut HashMap<ObjRef, (bool, Option<usize>)>,
         depth: usize,
-    ) -> bool {
+    ) -> (bool, bool) {
         #[cfg(test)]
         KEEP_CALLS.with(|c| c.set(c.get().saturating_add(1)));
-        if widgets.contains(&r) || depth > 64 {
-            return depth > 64;
+        if widgets.contains(&r) {
+            return (false, false);
         }
-        if let Some(&survives) = known.get(&r) {
-            return survives;
+        if depth > 64 {
+            return (true, true);
         }
-        known.insert(r, true);
-        let Some(d) = doc.get(r).as_dict().cloned() else { return true };
+        match known.get(&r) {
+            Some(&(survives, None)) => return (survives, false),
+            Some(&(survives, Some(at))) if depth >= at => return (survives, true),
+            _ => {}
+        }
+        known.insert(r, (true, None));
+        let Some(d) = doc.get(r).as_dict().cloned() else { return (true, false) };
         let Some(kids) = d.get(b"Kids").map(|k| doc.resolve(k)).and_then(|k| k.as_array().cloned()) else {
             let survives = on_page.is_none_or(|p| p.contains(&r));
-            known.insert(r, survives);
-            return survives;
+            known.insert(r, (survives, None));
+            return (survives, false);
         };
-        let survivors: Vec<Object> =
-            kids.iter().filter(|k| k.as_ref().is_none_or(|kr| keep(doc, kr, widgets, on_page, known, depth + 1))).cloned().collect();
+        let mut cut = false;
+        let survivors: Vec<Object> = kids
+            .iter()
+            .filter(|k| {
+                k.as_ref().is_none_or(|kr| {
+                    let (survives, kid_cut) = keep(doc, kr, widgets, on_page, known, depth + 1);
+                    cut |= kid_cut;
+                    survives
+                })
+            })
+            .cloned()
+            .collect();
         if survivors.len() != kids.len() {
             let _ = doc.update_dict(r, |d| d.set(b"Kids".to_vec(), Object::Array(survivors.clone())));
         }
-        known.insert(r, !survivors.is_empty());
-        !survivors.is_empty()
+        known.insert(r, (!survivors.is_empty(), cut.then_some(depth)));
+        (!survivors.is_empty(), cut)
     }
     let mut known = HashMap::new();
     let survivors: Vec<Object> =
-        fields.iter().filter(|f| f.as_ref().is_none_or(|r| keep(doc, r, widgets, on_page, &mut known, 0))).cloned().collect();
+        fields.iter().filter(|f| f.as_ref().is_none_or(|r| keep(doc, r, widgets, on_page, &mut known, 0).0)).cloned().collect();
     if survivors.len() == fields.len() && widgets.is_empty() {
         return Ok(()); // only looked for fields on no page, and there were none
     }
