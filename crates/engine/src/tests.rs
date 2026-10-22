@@ -6147,3 +6147,110 @@ fn undo_never_makes_an_unsaved_document_clean() {
     s.undo(new).unwrap();
     assert!(!s.get(new).unwrap().dirty, "once saved, undo back to the saved state is clean");
 }
+
+#[test]
+fn undo_and_redo_roll_back_on_a_refresh_panic_or_error() {
+    let (mut s, id) = session_with(1);
+    s.apply(id, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    let (bytes_90, gen_90) = {
+        let d = s.get(id).unwrap();
+        (d.bytes.clone(), d.generation)
+    };
+
+    // 1. A panic during undo's refresh catches the unwind and rolls back cos, undo/redo, info, and working bytes.
+    panic_on_refresh(1);
+    let err = s.undo(id).unwrap_err();
+    assert_eq!(err, EditError::Reopen("injected refresh panic".into()));
+    {
+        let d = s.get(id).unwrap();
+        let ed = d.editor.as_ref().unwrap();
+        assert_eq!(d.info.pages[0].rotation, 90);
+        assert_eq!(d.bytes, bytes_90);
+        assert_eq!(d.generation, gen_90);
+        assert!(d.dirty);
+        assert!(ed.cos.is_modified());
+        assert_eq!(ed.undo.len(), 1);
+        assert!(ed.redo.is_empty());
+    }
+    let _ = shown(&s, id, 0);
+
+    // 2. If the rollback refresh also panics, `show_released` restores the renderer so the page still draws.
+    panic_on_refresh(2);
+    assert_eq!(s.undo(id), Err(EditError::Reopen("injected refresh panic".into())));
+    assert_eq!(s.get(id).unwrap().editor.as_ref().unwrap().undo.len(), 1);
+    let _ = shown(&s, id, 0);
+
+    // Undo now succeeds cleanly.
+    assert_eq!(s.undo(id).unwrap().as_str(), "Rotate page");
+    let (bytes_0, gen_0) = {
+        let d = s.get(id).unwrap();
+        assert_eq!(d.info.pages[0].rotation, 0);
+        assert!(!d.dirty);
+        (d.bytes.clone(), d.generation)
+    };
+
+    // 3. A panic during redo's refresh catches the unwind and rolls back to the undone state.
+    panic_on_refresh(1);
+    let err = s.redo(id).unwrap_err();
+    assert_eq!(err, EditError::Reopen("injected refresh panic".into()));
+    {
+        let d = s.get(id).unwrap();
+        let ed = d.editor.as_ref().unwrap();
+        assert_eq!(d.info.pages[0].rotation, 0);
+        assert_eq!(d.bytes, bytes_0);
+        assert_eq!(d.generation, gen_0);
+        assert!(!d.dirty);
+        assert!(!ed.cos.is_modified());
+        assert!(ed.undo.is_empty());
+        assert_eq!(ed.redo.len(), 1);
+    }
+    let _ = shown(&s, id, 0);
+
+    // 4. If redo's rollback refresh also panics, `show_released` restores the renderer.
+    panic_on_refresh(2);
+    assert_eq!(s.redo(id), Err(EditError::Reopen("injected refresh panic".into())));
+    assert_eq!(s.get(id).unwrap().editor.as_ref().unwrap().redo.len(), 1);
+    let _ = shown(&s, id, 0);
+
+    // Redo now succeeds cleanly.
+    assert_eq!(s.redo(id).unwrap().as_str(), "Rotate page");
+    assert_eq!(s.get(id).unwrap().info.pages[0].rotation, 90);
+
+    // 5. Metadata scope: a panic after `doc.info.title` was written rolls back `info.title` and keeps `edit_notices`.
+    s.apply(id, Edit::SetInfo { key: "Title".into(), value: "Draft".into() }).unwrap();
+    let notice = TextNotice { field: None, page: 0, ch: '☺', redrawn_elsewhere: false };
+    s.doc_mut(id).unwrap().edit_notices.push(notice.clone());
+    panic_on_refresh(1);
+    assert_eq!(s.undo(id), Err(EditError::Reopen("injected refresh panic".into())));
+    assert_eq!(s.get(id).unwrap().info.title.as_deref(), Some("Draft"));
+    assert_eq!(s.get(id).unwrap().edit_notices, [notice]);
+    assert_eq!(s.undo(id).unwrap().as_str(), "Change Title");
+    assert_eq!(s.get(id).unwrap().info.title, None);
+    assert!(s.get(id).unwrap().edit_notices.is_empty());
+
+    panic_on_refresh(1);
+    assert_eq!(s.redo(id), Err(EditError::Reopen("injected refresh panic".into())));
+    assert_eq!(s.get(id).unwrap().info.title, None);
+    assert_eq!(s.redo(id).unwrap().as_str(), "Change Title");
+    assert_eq!(s.get(id).unwrap().info.title.as_deref(), Some("Draft"));
+
+    // 6. Protection keys: undo/redo rollback restores `editor.keys` and `doc.password` before re-inspecting.
+    let protect = Protection { open_password: Some("u".into()), permissions_password: Some("o".into()), ..Protection::default() };
+    s.apply(id, Edit::Protect(protect)).unwrap();
+    assert!(s.get(id).unwrap().info.encrypted);
+    panic_on_refresh(1);
+    assert_eq!(s.undo(id), Err(EditError::Reopen("injected refresh panic".into())));
+    assert!(s.get(id).unwrap().info.encrypted);
+    assert_eq!(s.get(id).unwrap().password.as_deref(), Some("u"));
+    assert_eq!(s.undo(id).unwrap().as_str(), "Protect with password");
+    assert!(!s.get(id).unwrap().info.encrypted);
+    assert_eq!(s.get(id).unwrap().password, None);
+
+    panic_on_refresh(1);
+    assert_eq!(s.redo(id), Err(EditError::Reopen("injected refresh panic".into())));
+    assert!(!s.get(id).unwrap().info.encrypted);
+    assert_eq!(s.get(id).unwrap().password, None);
+    assert_eq!(s.redo(id).unwrap().as_str(), "Protect with password");
+    assert!(s.get(id).unwrap().info.encrypted);
+    assert_eq!(s.get(id).unwrap().password.as_deref(), Some("u"));
+}

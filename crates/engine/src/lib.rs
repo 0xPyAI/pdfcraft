@@ -171,6 +171,23 @@ use std::sync::{Arc, OnceLock};
 #[cfg(test)]
 thread_local! {
     static SECONDARY_SCAN_COUNTS: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+    static REFRESH_PANICS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn panic_on_refresh(count: usize) {
+    REFRESH_PANICS.with(|n| n.set(count));
+}
+
+#[cfg(test)]
+fn check_refresh_panic() {
+    REFRESH_PANICS.with(|n| {
+        let rem = n.get();
+        if rem > 0 {
+            n.set(rem - 1);
+            panic!("injected refresh panic");
+        }
+    });
 }
 
 #[cfg(test)]
@@ -3853,14 +3870,28 @@ impl Session {
 
     pub fn undo(&mut self, id: DocId) -> Result<Label, EditError> {
         let doc = self.doc_mut(id)?;
-        doc.edit_notices.clear();
         let editor = doc.editor.as_mut().ok_or(EditError::NothingToUndo)?;
         let (label, prev, keys, scope) = editor.undo.pop().ok_or(EditError::NothingToUndo)?;
         let current = std::mem::replace(&mut editor.cos, prev);
         let current_keys = std::mem::replace(&mut editor.keys, keys);
         editor.redo.push((label.clone(), current, current_keys, scope));
         Self::adopt_keys(doc);
-        Self::refresh_scoped(doc, scope).inspect_err(|_| Self::show_released(doc))?;
+        let refreshed = guard(|| Self::refresh_scoped(doc, scope)).unwrap_or_else(|m| Err(EditError::Reopen(m)));
+        if let Err(e) = refreshed {
+            if let Some(ed) = doc.editor.as_mut()
+                && let Some((label, current, current_keys, scope)) = ed.redo.pop()
+            {
+                let prev = std::mem::replace(&mut ed.cos, current);
+                let keys = std::mem::replace(&mut ed.keys, current_keys);
+                ed.undo.push((label, prev, keys, scope));
+            }
+            Self::adopt_keys(doc);
+            if !matches!(guard(|| Self::refresh(doc)), Ok(Ok(()))) {
+                Self::show_released(doc);
+            }
+            return Err(e);
+        }
+        doc.edit_notices.clear();
         Self::sync_dirty(doc);
         doc.generation += 1;
         Ok(label)
@@ -3868,14 +3899,28 @@ impl Session {
 
     pub fn redo(&mut self, id: DocId) -> Result<Label, EditError> {
         let doc = self.doc_mut(id)?;
-        doc.edit_notices.clear();
         let editor = doc.editor.as_mut().ok_or(EditError::NothingToRedo)?;
         let (label, next, keys, scope) = editor.redo.pop().ok_or(EditError::NothingToRedo)?;
         let current = std::mem::replace(&mut editor.cos, next);
         let current_keys = std::mem::replace(&mut editor.keys, keys);
         editor.undo.push((label.clone(), current, current_keys, scope));
         Self::adopt_keys(doc);
-        Self::refresh_scoped(doc, scope).inspect_err(|_| Self::show_released(doc))?;
+        let refreshed = guard(|| Self::refresh_scoped(doc, scope)).unwrap_or_else(|m| Err(EditError::Reopen(m)));
+        if let Err(e) = refreshed {
+            if let Some(ed) = doc.editor.as_mut()
+                && let Some((label, current, current_keys, scope)) = ed.undo.pop()
+            {
+                let next = std::mem::replace(&mut ed.cos, current);
+                let keys = std::mem::replace(&mut ed.keys, current_keys);
+                ed.redo.push((label, next, keys, scope));
+            }
+            Self::adopt_keys(doc);
+            if !matches!(guard(|| Self::refresh(doc)), Ok(Ok(()))) {
+                Self::show_released(doc);
+            }
+            return Err(e);
+        }
+        doc.edit_notices.clear();
         Self::sync_dirty(doc);
         doc.generation += 1;
         Ok(label)
@@ -3937,6 +3982,8 @@ impl Session {
             doc.info.producer = info("Producer");
             doc.info.custom = pdfcraft_organize::custom_info(&editor.cos);
             doc.info.file_size = bytes.len();
+            #[cfg(test)]
+            check_refresh_panic();
             if !doc.signatures.is_empty() {
                 let signatures = signatures_of(&editor.cos, &bytes, &doc.trust, &doc.sig_cache);
                 doc.signatures = Arc::new(signatures);
@@ -4050,6 +4097,8 @@ impl Session {
         doc.renderer = RenderPool::new_inline(Arc::new(Vec::new()), doc.config.clone());
         doc.display = original.clone();
         doc.bytes = original;
+        #[cfg(test)]
+        check_refresh_panic();
     }
 
     /// After a refresh failed: draw the display bytes it left (the original, once released),
