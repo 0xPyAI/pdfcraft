@@ -873,8 +873,7 @@ pub(crate) fn overlay(
                     None
                 }
             });
-            let clicked_away = ctx.input(|i| i.pointer.any_click() && !i.pointer.hover_pos().is_some_and(|p| rect.contains(p)));
-            if esc || clicked_away {
+            if esc || clicked_outside() {
                 close = true;
             } else if tab {
                 next = Some(!shift);

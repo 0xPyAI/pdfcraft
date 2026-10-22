@@ -482,7 +482,6 @@ fn mouse_click_ticks_a_check_box() {
 }
 
 #[test]
-#[ignore = "the check box focus (#2223) counts a tap as a click away: fixed by a later commit"]
 fn touch_tap_ticks_a_check_box() {
     let mut h = open(checkbox_pdf(), "150", false);
     let p = at(&h, 110.0, 210.0);

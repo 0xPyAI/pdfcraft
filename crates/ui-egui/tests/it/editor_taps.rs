@@ -86,10 +86,15 @@ fn mouse_click(h: &mut Harness<'_, PdfCraftApp>, p: egui::Pos2) {
 
 /// Where field `name`'s widget is on screen.
 fn field(h: &Harness<'_, PdfCraftApp>, name: &str) -> egui::Rect {
+    widget(h, name, 0)
+}
+
+/// Where widget `w` of field `name` is on screen.
+fn widget(h: &Harness<'_, PdfCraftApp>, name: &str, w: usize) -> egui::Rect {
     let s = h.state();
     let doc = s.session.get(s.views[0].id).unwrap();
     let f = doc.form.iter().find(|f| f.name == name).unwrap();
-    pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen")
+    pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, w).expect("on screen")
 }
 
 fn value(h: &Harness<'_, PdfCraftApp>, name: &str) -> Vec<String> {
@@ -226,6 +231,72 @@ fn touch_tap_on_a_date_fields_calendar_keeps_it_open() {
     let day = h.get_by_label("15").rect().center();
     touch_tap(&mut h, day);
     assert_eq!(value(&h, "due"), [picked], "and a tap on a day picks it");
+}
+
+/// A 300×400 page with a check box `agree` and a pair of radio buttons `pick`, A and then B to
+/// its right, each 20 pt square. A click focuses them, so the keys reach them (#2223).
+fn toggles_pdf() -> Vec<u8> {
+    pdf(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] >> >>",
+        PAGES,
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 6 0 R 7 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /V /Off /AS /Off /Rect [40 300 60 320] /P 3 0 R /F 4 /AP << /N << /Yes 8 0 R /Off 8 0 R >> >> >>",
+        "<< /FT /Btn /T (pick) /Ff 32768 /V /Off /Kids [6 0 R 7 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /Parent 5 0 R /AS /Off /Rect [40 240 60 260] /P 3 0 R /F 4 /AP << /N << /A 8 0 R /Off 8 0 R >> >> >>",
+        "<< /Type /Annot /Subtype /Widget /Parent 5 0 R /AS /Off /Rect [100 240 120 260] /P 3 0 R /F 4 /AP << /N << /B 8 0 R /Off 8 0 R >> >> >>",
+        "<< /Type /XObject /Subtype /Form /BBox [0 0 20 20] /Length 0 >>\nstream\n\nendstream",
+    ])
+}
+
+#[test]
+fn mouse_click_on_a_focused_check_box_keeps_its_focus() {
+    // Control for the tap below.
+    let mut h = open(toggles_pdf());
+    let p = field(&h, "agree").center();
+    mouse_click(&mut h, p);
+    assert_eq!((value(&h, "agree"), focus(&h).as_deref()), (vec!["Yes".to_string()], Some("agree")), "a click ticks and focuses the box");
+    mouse_click(&mut h, p);
+    assert_eq!(focus(&h).as_deref(), Some("agree"), "a click on the focused box keeps its focus");
+    assert!(value(&h, "agree").is_empty(), "and clears it");
+}
+
+#[test]
+fn touch_tap_on_a_focused_check_box_keeps_its_focus() {
+    let mut h = open(toggles_pdf());
+    let p = field(&h, "agree").center();
+    mouse_click(&mut h, p);
+    assert_eq!(focus(&h).as_deref(), Some("agree"), "a click focuses the box");
+    touch_tap(&mut h, p);
+    assert_eq!(focus(&h).as_deref(), Some("agree"), "a tap on the focused box keeps its focus, as a click does");
+    assert!(value(&h, "agree").is_empty(), "and clears it");
+}
+
+#[test]
+fn mouse_click_on_a_radio_button_keeps_the_group_focused() {
+    // Control for the tap below.
+    let mut h = open(toggles_pdf());
+    let (a, b) = (widget(&h, "pick", 0).center(), widget(&h, "pick", 1).center());
+    mouse_click(&mut h, a);
+    assert_eq!((value(&h, "pick"), focus(&h).as_deref()), (vec!["A".to_string()], Some("pick")), "a click selects A and focuses the group");
+    mouse_click(&mut h, b);
+    assert_eq!((value(&h, "pick"), focus(&h).as_deref()), (vec!["B".to_string()], Some("pick")), "a click on B selects it in the focused group");
+    h.key_press(egui::Key::ArrowLeft);
+    h.run_steps(3);
+    assert_eq!(value(&h, "pick"), ["A"], "so the arrows move within the group");
+}
+
+#[test]
+fn touch_tap_on_a_radio_button_keeps_the_group_focused() {
+    let mut h = open(toggles_pdf());
+    let (a, b) = (widget(&h, "pick", 0).center(), widget(&h, "pick", 1).center());
+    mouse_click(&mut h, a);
+    assert_eq!(focus(&h).as_deref(), Some("pick"), "a click focuses the group");
+    touch_tap(&mut h, b);
+    assert_eq!(focus(&h).as_deref(), Some("pick"), "a tap on B keeps the group focused, as a click does");
+    assert_eq!(value(&h, "pick"), ["B"], "and selects B");
+    h.key_press(egui::Key::ArrowLeft);
+    h.run_steps(3);
+    assert_eq!(value(&h, "pick"), ["A"], "so the arrows move within the group");
 }
 
 // ---------------------------------------------------------------------------------------------
