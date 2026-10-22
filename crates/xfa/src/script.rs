@@ -245,7 +245,7 @@ impl Walker<'_> {
 
     /// The live node of field `f`, child `index` of `parent_som`, with its scripts recorded. In an
     /// exclusion group (`radio` is the group's selected value) its value is its on value when picked,
-    /// else empty; elsewhere it is its data value (as saved) or its template default.
+    /// else empty; elsewhere it is its data value (as saved, as scripts read it) or its template default.
     fn field(&mut self, f: &Field, parent_som: &str, index: usize, radio: Option<&str>) -> FormNode {
         let som = child_som(parent_som, f.common.name.as_deref().or(Some("field")), index);
         let data_value = self.data.and_then(|d| d.value_at(&data_path(self.tpl, &som))).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
@@ -255,7 +255,7 @@ impl Walker<'_> {
                 let on = f.items.first().cloned().unwrap_or_default();
                 if selected == on { on } else { String::new() }
             }
-            (None, Some(v)) => f.saved_value(&v),
+            (None, Some(v)) => f.saved_value(&Walker::as_scripts_read(f, &v)),
             (None, None) => f.value.plain().map(|v| f.saved_value(v.trim())).unwrap_or_default(),
         };
         self.push_events(&som, &f.scripts, f.calculate.as_ref(), f.validate.as_ref(), f.validate_message.as_deref());
@@ -276,12 +276,19 @@ impl Walker<'_> {
         }
     }
 
-    /// What [`Self::field`] gives a field outside an exclusion group: its data value (as saved)
-    /// or its template default.
+    /// A value the data holds as scripts read it: a date the field's data picture writes in
+    /// another form (`20261018`) is the ISO date (`2026-10-18`) another viewer gives scripts as
+    /// `rawValue`. Other values, and dates that don't match the picture, are as they are.
+    fn as_scripts_read(f: &Field, v: &str) -> String {
+        crate::data::data_to_iso(v, crate::data::data_date_letters(f).as_deref())
+    }
+
+    /// What [`Self::field`] gives a field outside an exclusion group: its data value (as saved,
+    /// as scripts read it) or its template default.
     fn plain_field_value(tpl: &Template, data: Option<&DataNode>, f: &Field, som: &str) -> String {
         let data_value = data.and_then(|d| d.value_at(&data_path(tpl, som))).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
         match data_value {
-            Some(v) => f.saved_value(&v),
+            Some(v) => f.saved_value(&Walker::as_scripts_read(f, &v)),
             None => f.value.plain().map(|v| f.saved_value(v.trim())).unwrap_or_default(),
         }
     }
@@ -611,46 +618,6 @@ pub fn template_of(doc: &Document) -> Result<Template, XfaError> {
     crate::parse(&packets.xdp).map(|(t, _)| t)
 }
 
-/// The template field the object at `som` is an instance of, when it is a field outside an
-/// exclusion group (whose buttons take their value from the group).
-fn template_field<'a>(tpl: &'a Template, som: &str) -> Option<&'a Field> {
-    let path = crate::data::som_to_path(som);
-    let (first, rest) = path.split_first()?;
-    if tpl.root.common.name.as_deref() != Some(first.0.as_str()) {
-        return None;
-    }
-    let mut level: &[Node] = &tpl.root.children;
-    let mut found: Option<&Node> = None;
-    for (name, _) in rest {
-        let next = named_in(level, name, 0)?;
-        level = match next {
-            Node::Subform(sf) => &sf.children,
-            Node::Area(a) => &a.children,
-            _ => &[],
-        };
-        found = Some(next);
-    }
-    match found {
-        Some(Node::Field(f)) => Some(f),
-        _ => None,
-    }
-}
-
-/// The child of `nodes` named `name`, looking through unnamed subforms and areas (as data
-/// paths do); exclusion groups are not looked into.
-fn named_in<'a>(nodes: &'a [Node], name: &str, depth: usize) -> Option<&'a Node> {
-    if depth > MAX_DEPTH {
-        return None;
-    }
-    nodes.iter().find(|n| n.common().name.as_deref() == Some(name)).or_else(|| {
-        nodes.iter().find_map(|n| match n {
-            Node::Subform(sf) if sf.common.name.is_none() => named_in(&sf.children, name, depth + 1),
-            Node::Area(a) if a.common.name.is_none() => named_in(&a.children, name, depth + 1),
-            _ => None,
-        })
-    })
-}
-
 /// Give the field at `som` in `live`, and every other field bound to the same data node (a
 /// field inside an area shares its node with one outside, since areas are left out of data
 /// paths), the value [`form_tree`] would give it from `data` now, so a value change needs no
@@ -659,11 +626,13 @@ fn named_in<'a>(nodes: &'a [Node], name: &str, depth: usize) -> Option<&'a Node>
 /// node bound there is not a plain field the tree can refresh alone (a radio button, an
 /// exclusion group, an object the template doesn't have): rebuild the tree.
 pub fn refresh_value(live: &mut FormNode, tpl: &Template, data: Option<&DataNode>, som: &str) -> Option<bool> {
-    template_field(tpl, som)?;
+    crate::data::template_field(tpl, som)?;
     let path = data_path(tpl, som);
     if path.is_empty() {
         return None;
     }
+    /// Down the one branch of `n` that `path` leads to from segment `pos`, giving each field
+    /// bound there its value from `data`; `None` when something there needs a rebuild.
     fn walk(
         n: &mut FormNode,
         tpl: &Template,
@@ -695,7 +664,7 @@ pub fn refresh_value(live: &mut FormNode, tpl: &Template, data: Option<&DataNode
             if c.kind != Some(NodeKind::Field) {
                 return None;
             }
-            let f = template_field(tpl, &c.som)?;
+            let f = crate::data::template_field(tpl, &c.som)?;
             let value = Walker::plain_field_value(tpl, data, f, &c.som);
             if c.value != value {
                 c.value = value;
