@@ -129,6 +129,7 @@ pub(crate) struct XfaRun<'a> {
     pub ran_away: bool,
 }
 
+/// The live form node `n`, with its descendants, as the script engine's snapshot of it.
 fn to_js(n: &FormNode) -> XfaNode {
     XfaNode {
         name: n.name.clone(),
@@ -149,6 +150,7 @@ fn to_js(n: &FormNode) -> XfaNode {
         occur_max: n.occur_max,
         index: n.index,
         children: n.children.iter().map(to_js).collect(),
+        formatted: n.display_picture.as_deref().and_then(|p| pdfcraft_xfa::formatted_value(p, &n.value)),
     }
 }
 

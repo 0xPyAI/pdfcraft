@@ -239,7 +239,7 @@ fn date_pattern_of(doc: &Document, f: &FieldDatum) -> Option<String> {
 }
 
 /// The tokens of a date pattern: `yyyy`, `yy`, `mm`, `m`, `dd`, `d`, or a literal character.
-fn date_tokens(pattern: &str) -> Vec<String> {
+pub(crate) fn date_tokens(pattern: &str) -> Vec<String> {
     let mut out = Vec::new();
     let chars: Vec<char> = pattern.chars().collect();
     let mut i = 0;

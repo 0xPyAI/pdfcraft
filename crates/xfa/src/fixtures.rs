@@ -352,6 +352,47 @@ pub fn many_calculations_template(sections: usize, rows: usize) -> String {
     )
 }
 
+/// Shaped like a leave form's row of dates: `from`, a date field typed and shown as `YYYYMMDD`
+/// (its data keeps ISO dates), `days`, an invisible `minus1` one less than `days`, and `to`,
+/// which a calculation works out as `from` plus `minus1` days. As such forms do, it checks that
+/// `from`'s raw value is a whole ISO date, then does its date arithmetic on `formattedValue`.
+pub fn date_row_template() -> String {
+    r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form1" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <subform name="page" layout="tb">
+  <field name="from" w="1.5in" h="0.3in"><ui><dateTimeEdit/><picture>date{YYYYMMDD}</picture></ui><value><date/></value><format><picture>date{YYYYMMDD}</picture></format></field>
+  <field name="days" w="1in" h="0.3in"><ui><numericEdit/></ui></field>
+  <field name="minus1" w="1in" h="0.3in" presence="invisible" access="readOnly"><ui><numericEdit/></ui><calculate><script contentType="application/x-javascript">this.rawValue = days.rawValue - 1;</script></calculate></field>
+  <field name="to" w="1.5in" h="0.3in" access="readOnly"><ui><textEdit/></ui><calculate><script contentType="application/x-javascript">
+if (form1.page.from.access == "open") {
+  if (form1.page.from.rawValue != null &amp;&amp; form1.page.from.rawValue != "" &amp;&amp; String(form1.page.from.rawValue).length == 10) {
+    form1.page.to.rawValue = AddDays(form1.page.from, form1.page.minus1.rawValue);
+  } else {
+    form1.page.to.rawValue = "";
+  }
+}
+function AddDays(dateObj, daysOffset) {
+  var shown = dateObj.formattedValue;
+  var date = new Date(shown.substr(0, 4), shown.substr(4, 2) - 1, shown.substr(6, 2), 0, 0, 0, 0);
+  date.setMilliseconds(daysOffset * 86400000);
+  var month = date.getMonth() + 1;
+  if (month &lt; 10) { month = "0" + month; }
+  var day = date.getDate();
+  if (day &lt; 10) { day = "0" + day; }
+  return String(date.getFullYear()) + String(month) + String(day);
+}
+</script></calculate></field>
+ </subform>
+</subform>
+</template>
+</xdp:xdp>
+"##
+    .to_string()
+}
+
 /// A PDF shell around `xdp`: one placeholder page, `/NeedsRendering true`, no fields.
 pub fn shell(xdp: &str) -> Vec<u8> {
     let objs: Vec<Vec<u8>> = vec![

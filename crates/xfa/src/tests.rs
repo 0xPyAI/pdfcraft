@@ -310,6 +310,7 @@ fn jpeg_headers_give_the_size() {
 
 const DATA: &str = "<form><head><familyName>Singh</familyName><agree>1</agree><born>2001-02-03</born><answer>N</answer></head><table><row><from0>2019</from0><what0>Studied</what0><where0>Delhi</where0></row><row><from0>2021</from0><what0>Worked</what0><where0>Toronto</where0></row><row><from0>2023</from0><what0>Moved</what0><where0>Ottawa</where0></row></table></form>";
 
+/// The datasets packet parses into a tree whose nodes the fields' data paths find.
 #[test]
 fn datasets_parse_into_a_tree_and_som_paths_find_their_nodes() {
     let d = parse_datasets(&template_with_data(1, DATA)).expect("datasets");
@@ -323,6 +324,8 @@ fn datasets_parse_into_a_tree_and_som_paths_find_their_nodes() {
     assert!(parse_datasets("<xdp:xdp xmlns:xdp=\"x\"/>").is_none());
 }
 
+/// ISO dates convert to and from the date patterns fields show; text that isn't a date is left
+/// alone or refused.
 #[test]
 fn dates_convert_between_iso_and_acrobat_patterns() {
     assert_eq!(iso_to_pattern("2001-02-03", "yyyy-mm-dd"), "2001-02-03");
@@ -336,6 +339,41 @@ fn dates_convert_between_iso_and_acrobat_patterns() {
     assert_eq!(pattern_to_iso("hello", "mm/dd/yyyy"), None);
 }
 
+/// What scripts read as `formattedValue`: a date display picture shows the ISO value in its
+/// pattern (the first of several alternatives); other kinds of picture, and values that aren't
+/// ISO dates, leave the raw value.
+#[test]
+fn formatted_values_follow_date_display_pictures() {
+    assert_eq!(crate::formatted_value("date{YYYYMMDD}", "2026-10-20").as_deref(), Some("20261020"));
+    assert_eq!(crate::formatted_value("date{MM/DD/YYYY}", "2026-10-20").as_deref(), Some("10/20/2026"));
+    assert_eq!(crate::formatted_value("date{YYYYMMDD}|date{DDMMMYY}", "2026-10-20").as_deref(), Some("20261020"));
+    assert_eq!(crate::formatted_value("date{YYYY-MM-DD}", "2026-10-20"), None, "shown as it is");
+    assert_eq!(crate::formatted_value("num{zzz9}", "2026-10-20"), None);
+    assert_eq!(crate::formatted_value("date{YYYYMMDD}", "20261020"), None, "not an ISO date");
+    assert_eq!(crate::formatted_value("date{YYYYMMDD}", ""), None);
+    // Month and weekday names aren't shown yet: the raw value stands rather than `20 mmm 2026`.
+    assert_eq!(crate::formatted_value("date{DD MMM YYYY}", "2026-10-20"), None);
+    assert_eq!(crate::formatted_value("date{EEE MM/DD/YYYY}", "2026-10-20"), None);
+    // Only the ISO date's own shape is formatted.
+    assert_eq!(crate::formatted_value("date{YYYYMMDD}", "2026-1-2"), None);
+    // Parentheses hold the picture's locale and braces its pattern: one without braces has none.
+    assert_eq!(crate::formatted_value("date(en_US){YYYYMMDD}", "2026-10-20").as_deref(), Some("20261020"));
+    assert_eq!(crate::formatted_value("date(YYYYMMDD)", "2026-10-20"), None);
+}
+
+/// A field's `<format><picture>` is its display picture, kept apart from its `<ui>` edit
+/// picture; a field without one has none.
+#[test]
+fn display_pictures_are_parsed_apart_from_edit_pictures() {
+    let (tpl, _) = parse(&crate::fixtures::date_row_template()).unwrap();
+    let Node::Subform(page) = &tpl.root.children[0] else { panic!() };
+    let Node::Field(from) = &page.children[0] else { panic!() };
+    assert_eq!((from.picture.as_deref(), from.display_picture.as_deref()), (Some("date{YYYYMMDD}"), Some("date{YYYYMMDD}")));
+    let Node::Field(days) = &page.children[1] else { panic!() };
+    assert_eq!(days.display_picture, None);
+}
+
+/// The datasets fill the fields they bind to and add the rows the data holds.
 #[test]
 fn data_fills_the_fields_and_adds_rows() {
     let form = layout_xml(&template_with_data(1, DATA)).unwrap();

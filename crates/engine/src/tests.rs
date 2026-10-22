@@ -4355,6 +4355,8 @@ fn xfa_choice_lists_signature_and_picture_fields_open_fill_script_and_save() {
     assert!(taken[0].contains("langs") && !taken[0].contains("country"), "{}", taken[0]);
 }
 
+/// A form's data exports, imports and takes pictures through the session, and what it holds
+/// comes back the same.
 #[test]
 fn xfa_data_exports_imports_and_pictures_round_trip_through_the_session() {
     use pdfcraft_xfa::som_to_path;
@@ -4436,6 +4438,8 @@ fn xfa_data_exports_imports_and_pictures_round_trip_through_the_session() {
     assert_eq!(d2.page_images(0).len(), 2);
 }
 
+/// Importing data into a static form replaces every value, emptying the fields the file
+/// doesn't name, and pictures chosen for it reach its data.
 #[test]
 fn xfa_data_import_on_a_static_form_replaces_every_value_and_pictures_reach_its_data() {
     let original = Arc::new(pdfcraft_xfa::fixtures::static_shell("<form1><page1><name>Ada</name><agree>1</agree></page1></form1>"));
@@ -4456,6 +4460,8 @@ fn xfa_data_import_on_a_static_form_replaces_every_value_and_pictures_reach_its_
     assert!(xml.contains("<name>Bob</name>") && !xml.contains("<agree>1</agree>"), "{xml}");
 }
 
+/// Importing data into a dynamic form adds and removes the rows of its repeating subform to
+/// match, and the calculations over them run again.
 #[test]
 fn xfa_data_import_adds_and_removes_rows_of_a_dynamic_form() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));
@@ -4488,6 +4494,8 @@ fn xfa_data_import_adds_and_removes_rows_of_a_dynamic_form() {
     assert!(String::from_utf8_lossy(&out).contains("<item>only</item>"));
 }
 
+/// Hundreds of calculations, in JavaScript and FormCalc, run on opening in one engine within
+/// the opening's budget, and a change recalculates them within the event's.
 #[test]
 fn hundreds_of_xfa_calculations_run_in_one_engine_within_the_open_budget() {
     let (sections, rows) = (10, 20);
@@ -4518,6 +4526,9 @@ fn hundreds_of_xfa_calculations_run_in_one_engine_within_the_open_budget() {
     eprintln!("recalculated after a change in {:?}", started.elapsed());
 }
 
+/// The scripts of one event share the form as the engine holds it: a failed script's
+/// half-done writes reach nobody, and a script reads the saved value a choice list was given
+/// by its shown text.
 #[test]
 fn xfa_scripts_of_one_event_see_the_form_as_the_engine_holds_it() {
     // In document order: `a` holds 1; `b`'s calculate writes `a` then fails; `c`'s calculate
@@ -4545,6 +4556,23 @@ fn xfa_scripts_of_one_event_see_the_form_as_the_engine_holds_it() {
     assert_eq!(value(&s, "summary"), vec!["Country: CA".to_string()]);
 }
 
+/// A row of dates worked out the way leave forms do it: the calculation checks that the raw value
+/// is a whole ISO date, then adds days to the date as `formattedValue` shows it (`YYYYMMDD`).
+#[test]
+fn xfa_date_arithmetic_reads_the_date_as_its_display_picture_shows_it() {
+    let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::date_row_template()));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("row.pdf", None, bytes, None).expect("opens");
+    let value = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).map(|f| f.value.clone()).unwrap_or_default();
+    s.apply(id, Edit::SetFieldValue { name: "from".into(), value: FieldValue::Text("20261020".into()) }).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "days".into(), value: FieldValue::Text("3".into()) }).unwrap();
+    let out = s.take_js_output(id);
+    assert_eq!(value(&s, "to"), ["20261022"], "{:?}", out.errors);
+}
+
+/// A scripted form end to end: initialize and calculate on open, recalculation after a change,
+/// a failing validation's message, buttons that add and remove rows and show messages, a check
+/// box that shows a subform (undoable), FormCalc, and a save and reopen that keep it all.
 #[test]
 fn xfa_scripts_initialize_calculate_validate_toggle_and_add_rows() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));

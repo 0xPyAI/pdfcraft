@@ -44,6 +44,8 @@ pub struct FormNode {
     pub occur_max: Option<usize>,
     pub index: usize,
     pub children: Vec<FormNode>,
+    /// Fields: the display picture (see [`Field::display_picture`]), for `formattedValue`.
+    pub display_picture: Option<String>,
 }
 
 /// A script the template runs for an event of one node instance.
@@ -186,6 +188,8 @@ impl Walker<'_> {
         true
     }
 
+    /// Note the scripted events of the object at `som`: its event scripts, its calculation and
+    /// its validation (with the message a failing one shows).
     fn push_events(&mut self, som: &str, scripts: &[Script], calculate: Option<&Script>, validate: Option<&Script>, message: Option<&str>) {
         if self.events.len() >= MAX_EVENTS {
             self.truncated = true;
@@ -227,14 +231,18 @@ impl Walker<'_> {
         }
     }
 
+    /// The presence of the object at `som`: a script's override, else the template's `p`.
     fn presence(&self, som: &str, p: Presence) -> String {
         self.ov.presence.get(som).cloned().unwrap_or_else(|| presence_name(p).to_string())
     }
 
+    /// The access of the object at `som`: a script's override, else the template's `a`.
     fn access(&self, som: &str, a: Access) -> String {
         self.ov.access.get(som).cloned().unwrap_or_else(|| access_name(a).to_string())
     }
 
+    /// The live node of field `f`, instance `index` under `parent_som`, valued from the data or
+    /// its template default (`radio`: the value its exclusion group chose), with its events noted.
     fn field(&mut self, f: &Field, parent_som: &str, index: usize, radio: Option<&str>) -> FormNode {
         let som = child_som(parent_som, f.common.name.as_deref().or(Some("field")), index);
         let data_value = self.data.and_then(|d| d.value_at(&data_path(self.tpl, &som))).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
@@ -261,6 +269,7 @@ impl Walker<'_> {
             occur_max: Some(1),
             index,
             children: Vec::new(),
+            display_picture: f.display_picture.clone(),
         }
     }
 
@@ -274,6 +283,8 @@ impl Walker<'_> {
         }
     }
 
+    /// The live nodes of template `nodes` under `parent_som`: as many instances of a subform as
+    /// the data or its occurrence asks for, areas, fields, exclusion groups and draws.
     fn children(&mut self, nodes: &[Node], parent_som: &str, depth: usize) -> Vec<FormNode> {
         let mut out = Vec::new();
         if depth > MAX_DEPTH {
@@ -314,6 +325,7 @@ impl Walker<'_> {
                             occur_max: sf.occur.max,
                             index,
                             children,
+                            display_picture: None,
                         });
                     }
                 }
