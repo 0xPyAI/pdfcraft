@@ -7238,4 +7238,7 @@ trailer << /Root 1 0 R >>
             assert!(render(glyph, 3).as_chunks::<4>().0.iter().all(|p| p[..3] == [255, 255, 255]), "{glyph}: 3 Tr hides the glyph");
         }
     }
+
+    // #1201: /DefaultGray, /DefaultRGB and /DefaultCMYK (vendored hayro-interpret patch 38).
+    mod default_colour_spaces;
 }

@@ -9,12 +9,14 @@ use hayro_syntax::object::Name;
 use hayro_syntax::object::Object;
 use hayro_syntax::object::Stream;
 use hayro_syntax::object::dict::keys::*;
+use hayro_syntax::page::Resources;
 use moxcms::{
     ColorProfile, DataColorSpace, Layout, Transform8BitExecutor, TransformF32Executor,
     TransformOptions,
 };
 use smallvec::{SmallVec, ToSmallVec, smallvec};
 use std::borrow::Cow;
+use std::cell::OnceCell;
 use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
 use std::sync::{Arc, LazyLock, OnceLock};
@@ -349,6 +351,139 @@ impl ColorSpace {
     pub fn to_rgba(&self, c: &[f32], opacity: f32, manual_scale: bool) -> AlphaColor {
         self.to_alpha_color(c, opacity, manual_scale)
             .unwrap_or(AlphaColor::BLACK)
+    }
+
+    /// PdfCraft patch (38): whether this space can be the default colour space of `family`
+    /// (ISO 32000-2 §8.6.5.6): it has as many components as the device space and is not a
+    /// Lab, Indexed or Pattern space. Nor is a device space: a default that names one is
+    /// ignored, so substitution never recurses.
+    fn can_stand_in_for(&self, family: DeviceFamily) -> bool {
+        !matches!(
+            self.0.as_ref(),
+            ColorSpaceType::DeviceGray
+                | ColorSpaceType::DeviceRgb
+                | ColorSpaceType::DeviceCmyk
+                | ColorSpaceType::Lab(_)
+                | ColorSpaceType::Indexed(_)
+                | ColorSpaceType::Pattern(_)
+        ) && self.num_components() == family.num_components()
+    }
+}
+
+/// PdfCraft patch (38): a device colour space (ISO 32000-2 §8.6.4), which the resources'
+/// default colour space for it replaces wherever content selects it (§8.6.5.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeviceFamily {
+    Gray,
+    Rgb,
+    Cmyk,
+}
+
+impl DeviceFamily {
+    /// The device space a colour space operand names: `/DeviceGray`, `/DeviceRGB` or
+    /// `/DeviceCMYK` (or an abbreviation read as one), alone or at the head of an array. `None`
+    /// for any other space, including the ICC-based and calibrated ones drawn as device colour
+    /// here (an sRGB profile, `/CalCMYK`): they are not device spaces.
+    pub(crate) fn of_object(object: &Object<'_>) -> Option<Self> {
+        match object {
+            Object::Name(name) => Self::of_name(name),
+            Object::Array(array) => array
+                .flex_iter()
+                .next::<Name<'_>>()
+                .and_then(|name| Self::of_name(&name)),
+            _ => None,
+        }
+    }
+
+    /// The device space `name` names, as [`DeviceFamily::of_object`].
+    pub(crate) fn of_name(name: &Name<'_>) -> Option<Self> {
+        match name.deref() {
+            DEVICE_GRAY | G => Some(Self::Gray),
+            DEVICE_RGB | RGB => Some(Self::Rgb),
+            DEVICE_CMYK | CMYK => Some(Self::Cmyk),
+            _ => None,
+        }
+    }
+
+    /// The device space itself.
+    fn space(self) -> ColorSpace {
+        match self {
+            Self::Gray => ColorSpace::device_gray(),
+            Self::Rgb => ColorSpace::device_rgb(),
+            Self::Cmyk => ColorSpace::device_cmyk(),
+        }
+    }
+
+    fn num_components(self) -> u8 {
+        match self {
+            Self::Gray => 1,
+            Self::Rgb => 3,
+            Self::Cmyk => 4,
+        }
+    }
+
+    /// The `/ColorSpace` resource that holds the default for this space.
+    fn default_key(self) -> &'static [u8] {
+        match self {
+            Self::Gray => DEFAULT_GRAY,
+            Self::Rgb => DEFAULT_RGB,
+            Self::Cmyk => DEFAULT_CMYK,
+        }
+    }
+}
+
+/// PdfCraft patch (38): the default colour spaces (`/DefaultGray`, `/DefaultRGB` and
+/// `/DefaultCMYK`, ISO 32000-2 §8.6.5.6) of the resources content is drawn with, each read the
+/// first time the content selects its device space. Like any named resource, a default comes
+/// from those resources' `/ColorSpace` or from the resources they inherit: a form XObject
+/// without one of its own draws in its page's.
+pub(crate) struct DefaultColorSpaces<'r, 'a> {
+    resources: &'r Resources<'a>,
+    cache: Cache,
+    gray: OnceCell<Option<(ColorSpace, u128)>>,
+    rgb: OnceCell<Option<(ColorSpace, u128)>>,
+    cmyk: OnceCell<Option<(ColorSpace, u128)>>,
+}
+
+impl<'r, 'a> DefaultColorSpaces<'r, 'a> {
+    pub(crate) fn new(resources: &'r Resources<'a>, cache: &Cache) -> Self {
+        Self {
+            resources,
+            cache: cache.clone(),
+            gray: OnceCell::new(),
+            rgb: OnceCell::new(),
+            cmyk: OnceCell::new(),
+        }
+    }
+
+    /// The default for `family`, with the cache key of the object it was read from. `None`
+    /// when the resources have none, or theirs is not a colour space that can stand in for
+    /// the device space: device colour is then drawn as it is.
+    pub(crate) fn get(&self, family: DeviceFamily) -> Option<(ColorSpace, u128)> {
+        let found = match family {
+            DeviceFamily::Gray => &self.gray,
+            DeviceFamily::Rgb => &self.rgb,
+            DeviceFamily::Cmyk => &self.cmyk,
+        };
+        found
+            .get_or_init(|| {
+                let object = self
+                    .resources
+                    .get_color_space(&Name::new_unescaped(family.default_key()))?;
+                let key = object.cache_key();
+                let space = self
+                    .cache
+                    .get_or_insert_with(key, || ColorSpace::new(object.clone(), &self.cache))?;
+                space.can_stand_in_for(family).then_some((space, key))
+            })
+            .clone()
+    }
+
+    /// The colour space content that selects `family` draws in: its default, else the device
+    /// space itself.
+    pub(crate) fn device(&self, family: DeviceFamily) -> ColorSpace {
+        self.get(family)
+            .map_or_else(|| family.space(), |(space, _)| space)
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::cache::{Cache, DecodedImageCache, DecodedImageKey};
-use crate::color::{ColorComponents, ColorSpace, ToRgb};
+use crate::color::{ColorComponents, ColorSpace, DefaultColorSpaces, DeviceFamily, ToRgb};
 use crate::context::Context;
 use crate::device::Device;
 use crate::function::{Function, interpolate};
@@ -36,6 +36,7 @@ impl<'a> XObject<'a> {
         cache: &Cache,
         decoded_cache: Option<&DecodedImageCache>,
         transfer_function: Option<ActiveTransferFunction>,
+        defaults: &DefaultColorSpaces<'_, '_>,
     ) -> Option<Self> {
         let dict = stream.dict();
         match dict.get::<Name<'_>>(SUBTYPE)?.deref() {
@@ -47,6 +48,7 @@ impl<'a> XObject<'a> {
                 decoded_cache,
                 false,
                 transfer_function,
+                Some(defaults),
             )?)),
             FORM => Some(Self::FormXObject(FormXObject::new(stream)?)),
             _ => None,
@@ -308,9 +310,15 @@ pub(crate) struct ImageXObject<'a> {
     stream: Stream<'a>,
     transfer_function: Option<ActiveTransferFunction>,
     warning_sink: WarningSinkFn,
+    /// PdfCraft patch (38): the cache key of the default colour space drawn in place of the
+    /// image's device space, if one is.
+    default_space: Option<u128>,
 }
 
 impl<'a> ImageXObject<'a> {
+    /// PdfCraft patch (38): an image in a device space is drawn in its default colour space
+    /// from `defaults`. Masks have none to replace, and `resolve_cs` (an inline image's named
+    /// colour space) substitutes its own.
     pub(crate) fn new(
         stream: &Stream<'a>,
         resolve_cs: impl FnOnce(&Name<'_>) -> Option<ColorSpace>,
@@ -319,6 +327,7 @@ impl<'a> ImageXObject<'a> {
         decoded_cache: Option<&DecodedImageCache>,
         mut is_mask: bool,
         transfer_function: Option<ActiveTransferFunction>,
+        defaults: Option<&DefaultColorSpaces<'_, '_>>,
     ) -> Option<Self> {
         let dict = stream.dict();
 
@@ -328,6 +337,7 @@ impl<'a> ImageXObject<'a> {
             .unwrap_or(false);
         is_mask |= is_stencil_mask;
 
+        let mut default_space = None;
         let image_cs = if is_mask {
             // Masks are always single-channel.
             Some(ColorSpace::device_gray())
@@ -336,15 +346,25 @@ impl<'a> ImageXObject<'a> {
                 .get::<Object<'_>>(CS)
                 .or_else(|| dict.get::<Object<'_>>(COLORSPACE));
 
-            cs_obj
-                .clone()
-                .and_then(|c| ColorSpace::new(c, cache))
-                // Inline images can also refer to color spaces by name.
-                .or_else(|| {
-                    cs_obj
-                        .and_then(|c| c.into_name())
-                        .and_then(|n| resolve_cs(&n))
-                })
+            let default = cs_obj
+                .as_ref()
+                .and_then(DeviceFamily::of_object)
+                .zip(defaults)
+                .and_then(|(family, defaults)| defaults.get(family));
+            if let Some((space, key)) = default {
+                default_space = Some(key);
+                Some(space)
+            } else {
+                cs_obj
+                    .clone()
+                    .and_then(|c| ColorSpace::new(c, cache))
+                    // Inline images can also refer to color spaces by name.
+                    .or_else(|| {
+                        cs_obj
+                            .and_then(|c| c.into_name())
+                            .and_then(|n| resolve_cs(&n))
+                    })
+            }
         };
 
         let interpolate = dict
@@ -371,6 +391,7 @@ impl<'a> ImageXObject<'a> {
             stream: stream.clone(),
             is_mask,
             is_stencil_mask,
+            default_space,
         })
     }
 
@@ -434,6 +455,8 @@ impl<'a> ImageXObject<'a> {
             is_mask: self.is_mask,
             is_stencil_mask: self.is_stencil_mask,
             interpolate: self.interpolate,
+            // PdfCraft patch (38): the same image drawn in a default colour space or without one.
+            default_space: self.default_space,
             // PdfCraft patch (32): see `decode_reads_target`.
             target: if self.decode_reads_target() {
                 target_dimension
@@ -905,7 +928,7 @@ fn resolve_alpha(
         .get::<Stream<'_>>(SMASK)
         .or_else(|| dict.get::<Stream<'_>>(MASK))
     {
-        let obj = ImageXObject::new(&s_mask, |_| None, &obj.warning_sink, &obj.cache, obj.decoded_cache.as_ref(), true, None)?;
+        let obj = ImageXObject::new(&s_mask, |_| None, &obj.warning_sink, &obj.cache, obj.decoded_cache.as_ref(), true, None, None)?;
 
         decode_mask(&obj, target_dimension).map(|decoded| decoded.luma)
     } else if let Some(color_key_mask) = dict.get::<SmallVec<[u16; 4]>>(MASK) {
@@ -965,7 +988,7 @@ fn resolve_matte(
     let mut matte_rgb = [0_u8; 3];
     color_space.convert_f32(&matte, &mut matte_rgb, false);
 
-    let mask_obj = ImageXObject::new(&s_mask, |_| None, &obj.warning_sink, &obj.cache, obj.decoded_cache.as_ref(), true, None)?;
+    let mask_obj = ImageXObject::new(&s_mask, |_| None, &obj.warning_sink, &obj.cache, obj.decoded_cache.as_ref(), true, None, None)?;
     let alpha = decode_mask(&mask_obj, target_dimension)?.luma;
 
     Some((alpha, matte_rgb))

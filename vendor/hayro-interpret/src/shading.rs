@@ -4,9 +4,9 @@
 
 use crate::CacheKey;
 use crate::cache::Cache;
-use crate::color::{ColorComponents, ColorSpace};
+use crate::color::{ColorComponents, ColorSpace, DefaultColorSpaces, DeviceFamily};
 use crate::function::{Function, StitchingBounds, Values, interpolate};
-use crate::util::{Float32Ext, PointExt, RectExt};
+use crate::util::{Float32Ext, PointExt, RectExt, hash128};
 use hayro_syntax::bit_reader::BitReader;
 use hayro_syntax::object::Array;
 use hayro_syntax::object::Dict;
@@ -139,12 +139,24 @@ pub struct Shading {
 }
 
 impl Shading {
-    pub(crate) fn new(dict: &Dict<'_>, stream: Option<&Stream<'_>>, cache: &Cache) -> Option<Self> {
-        let cache_key = dict.cache_key();
-
+    /// PdfCraft patch (38): a shading in a device space is drawn in its default colour space
+    /// from `defaults`, the resources it is painted with (ISO 32000-2 §8.6.5.6), and keyed by
+    /// it as an image is.
+    pub(crate) fn new(
+        dict: &Dict<'_>,
+        stream: Option<&Stream<'_>>,
+        cache: &Cache,
+        defaults: &DefaultColorSpaces<'_, '_>,
+    ) -> Option<Self> {
         let shading_num = dict.get::<u8>(SHADING_TYPE)?;
 
-        let color_space = ColorSpace::new(dict.get(COLORSPACE)?, cache)?;
+        let color_space_obj = dict.get::<Object<'_>>(COLORSPACE)?;
+        let default =
+            DeviceFamily::of_object(&color_space_obj).and_then(|family| defaults.get(family));
+        let (color_space, cache_key) = match default {
+            Some((space, key)) => (space, hash128(&(dict.cache_key(), key))),
+            None => (ColorSpace::new(color_space_obj, cache)?, dict.cache_key()),
+        };
 
         let shading_type = match shading_num {
             1 => {
