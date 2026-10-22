@@ -167,11 +167,15 @@ pub enum Request {
 /// A side panel a script can show or hide (`app.execMenuItem("ShowHideFileAttachment")`, …).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Panel {
+    /// The document's bookmarks (outline).
     Bookmarks,
     /// Page thumbnails.
     Pages,
+    /// The files attached to the document.
     Attachments,
+    /// The document's signatures and their validity.
     Signatures,
+    /// The document's layers (optional content).
     Layers,
 }
 
