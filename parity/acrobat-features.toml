@@ -7052,8 +7052,8 @@ milestone = "M10"
 status = "shipped"
 commands = ["export.image"]
 tools = ["doc_export_images"]
-evidence = ["crates/engine/src/tests.rs::pages_export_as_png_jpeg_and_tiff", "crates/automation/tests/automation.rs::exporting_images_and_text_through_tools"]
-notes = "JPEG with quality, TIFF; flattened onto white"
+evidence = ["crates/engine/src/tests.rs::pages_export_as_png_jpeg_and_tiff", "crates/automation/tests/automation.rs::exporting_images_and_text_through_tools", "crates/engine/src/export.rs::rasters_of_the_wrong_length_are_rejected"]
+notes = "JPEG with quality, TIFF; flattened onto white; a raster that is not exactly its width × height in pixels is refused, as for PNG"
 
 [[feature]]
 id = "create.export-jpeg2000"
