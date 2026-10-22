@@ -496,6 +496,12 @@ impl ObjectReader {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Cross-reference sections read on this thread.
+    static SECTION_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Nesting [`owned_bytes`] walks: past the parser's own nesting limit, so every parsed object
 /// is measured in full.
 const OWNED_BYTES_DEPTH: usize = 256;
@@ -1748,6 +1754,9 @@ impl Document {
         let mut revisions = Vec::new();
         let mut oddities = Vec::new();
         let mut visited = HashSet::new();
+        // Hybrid streams already read: a newer section has merged every entry of one, so reading
+        // it again for each older section that names it adds nothing and repeats the decode.
+        let (mut hybrids, mut noted) = (HashSet::new(), HashSet::new());
         let mut next = Some(first);
         while let Some(off) = next.take() {
             if !visited.insert(off) || visited.len() > 10_000 {
@@ -1778,7 +1787,12 @@ impl Document {
             revisions.push(Revision { xref_offset: off, is_stream, header_relative });
             // Hybrid files (§7.5.8.4): the /XRefStm entries supplement the table and replace the
             // free entries it gives objects only a cross-reference stream can locate.
-            if let Some(x) = sect_trailer.int(b"XRefStm").filter(|x| *x >= 0) {
+            let hybrid = sect_trailer.int(b"XRefStm").filter(|x| *x >= 0);
+            let repeated = hybrid.is_some_and(|x| !hybrids.insert(x));
+            if let Some(x) = hybrid.filter(|x| repeated && noted.insert(*x)) {
+                log.push(format!("hybrid /XRefStm at {x} named again by the section at {off}; read once"));
+            }
+            if let Some(x) = hybrid.filter(|_| !repeated) {
                 let mut stm = BTreeMap::new();
                 match self.read_section(x as usize, &mut stm, &mut odd, log) {
                     Ok(_) => {
@@ -1822,6 +1836,8 @@ impl Document {
         odd: &mut Vec<u32>,
         log: &mut Vec<String>,
     ) -> Result<(Dict, bool), CosError> {
+        #[cfg(test)]
+        SECTION_READS.with(|c| c.set(c.get() + 1));
         let data = &self.data;
         let mut lx = Lexer::new(data, off);
         if lx.eat_keyword(b"xref") {
@@ -3197,6 +3213,30 @@ endobj
         }
         out.extend_from_slice(format!("trailer << /Size 6 /Root 1 0 R /XRefStm {} >>\nstartxref\n{table}\n%%EOF\n", offs[5]).as_bytes());
         out
+    }
+
+    /// Many revisions naming one hybrid /XRefStm read it once.
+    #[test]
+    fn a_hybrid_stream_named_by_many_revisions_is_read_once() {
+        let mut out = object_stream_file("3 0 ", "<< /Hidden (yes) >>", 0);
+        let stream = find(&out, b"5 0 obj", 0, out.len()).unwrap();
+        let mut prev = rfind(&out, b"\nxref\n", 0).unwrap() + 1;
+        let revisions = 200;
+        for _ in 0..revisions {
+            let at = out.len();
+            out.extend_from_slice(
+                format!("xref\ntrailer << /Size 6 /Root 1 0 R /XRefStm {stream} /Prev {prev} >>\nstartxref\n{at}\n%%EOF\n").as_bytes(),
+            );
+            prev = at;
+        }
+        let doc = Document::open(Arc::new(out)).unwrap();
+        SECTION_READS.with(|c| c.set(0));
+        let (entries, ..) = doc.read_xref_chain_materialized(&mut Vec::new()).unwrap();
+        let reads = SECTION_READS.with(|c| c.get());
+        assert!(reads <= revisions + 2, "{reads} sections read for {} revisions", revisions + 1);
+        assert!(matches!(entries.get(&3), Some(XrefEntry::InStream { stream: 4, .. })), "{:?}", entries.get(&3));
+        assert_eq!(text_of(&doc, 3, b"Hidden").as_deref(), Some("yes"));
+        assert_compact_matches_materialized(&doc);
     }
 
     fn text_of(doc: &Document, num: u32, key: &[u8]) -> Option<String> {
