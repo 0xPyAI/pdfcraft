@@ -833,6 +833,15 @@ fn indexed_hival_resolves_indirect_values_and_stream_palettes() {
 }
 
 #[test]
+fn indexed_lookup_stream_has_a_size_cap() {
+    // A lookup table needs 256 × 4 bytes at most; a 1 MiB one is refused, not decoded whole.
+    let mut palette = vec![255, 0, 0, 0, 0, 255];
+    palette.resize(1 << 20, 0);
+    let (doc, image) = indexed_export_fixture(Object::Int(1), palette, true, false, 8, vec![0, 1, 0, 1]);
+    assert!(crate::extract::image_file(&doc, image).unwrap_err().contains("lookup table"));
+}
+
+#[test]
 fn indexed_hival_boundary_values_keep_valid_palette_entries() {
     let palette: Vec<u8> = (0..=255u8).flat_map(|i| [i, 255 - i, 17]).collect();
     for high in [0, 255] {
