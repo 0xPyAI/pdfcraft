@@ -1274,9 +1274,21 @@ impl HostHooks for CheckedCodeFromStrings {
     }
 }
 
+/// The prefix of a document script's error ([`doc_error`]).
+const DOC_ERROR_PREFIX: &str = "document script ";
+
 /// How [`Outcome::doc_errors`] names a failing document script: by its 1-based place.
 fn doc_error(index: usize, error: &dyn std::fmt::Display) -> String {
-    format!("document script {}: {error}", index.saturating_add(1))
+    format!("{DOC_ERROR_PREFIX}{}: {error}", index.saturating_add(1))
+}
+
+/// Whether `error` is one of [`Outcome::doc_errors`]: a document script's failure, which repeats
+/// each time the document scripts run again, unlike a field script's own error.
+pub fn is_doc_error(error: &str) -> bool {
+    error
+        .strip_prefix(DOC_ERROR_PREFIX)
+        .and_then(|rest| rest.split_once(": "))
+        .is_some_and(|(n, _)| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// `doc_scripts` are the document scripts to run with their places among all of them;
