@@ -133,6 +133,8 @@
 	Next view	Visualització següent
 	Page display	Visualització de pàgines
 	Continuous scrolling	Desplaçament continu
+	Show gaps between pages	Mostra els espais entre pàgines
+	Hide gaps to join page edges. Margins inside the PDF remain unchanged.	Amaga els espais per unir les vores de les pàgines. Els marges dins del PDF no canvien.
 	Two-page view	Visualització de dues pàgines
 	Single page	Pàgina única
 	Show cover page in two-page view	Mostra la portada en la visualització de dues pàgines
