@@ -900,12 +900,15 @@ impl PdfCraftApp {
     /// Close tab `index` for a close request, then ask about the next dirty document, or quit.
     fn close_and_continue(&mut self, ctx: &egui::Context, index: usize, req: CloseRequest) {
         self.close_tab(index);
-        // Its question is answered: a question about the next document is a new one.
-        self.save_prompt_seen = false;
-        // A newer prompt wins: the user may have started another close while a save was pending.
+        // A newer prompt wins: the user may have started another close while a save was pending,
+        // and seen its question, which keeps counting as seen.
         if (req == CloseRequest::Quit || req == CloseRequest::All) && self.close_request.is_none() {
             match self.first_dirty() {
-                Some(_) => self.close_request = Some(req),
+                Some(_) => {
+                    // A question about the next document is a new one.
+                    self.save_prompt_seen = false;
+                    self.close_request = Some(req);
+                }
                 None if req == CloseRequest::Quit => self.quit(ctx),
                 None => {}
             }
@@ -1651,5 +1654,47 @@ mod content_page_tests {
         assert_eq!(content_page(&moved), Some(3));
         assert_eq!(content_page(&Edit::RotatePages { pages: vec![0], degrees: 90 }), None);
         assert_eq!(content_page(&Edit::SetInfo { key: "Title".into(), value: "x".into() }), None);
+    }
+}
+
+#[cfg(test)]
+mod attention_tests {
+    use super::CloseRequest;
+    use crate::PdfCraftApp;
+
+    /// The attention requests one frame of `attend_save_prompt` sends, with the window `focused`
+    /// or not.
+    fn attend(app: &mut PdfCraftApp, ctx: &egui::Context, focused: bool) -> Vec<egui::UserAttentionType> {
+        let mut out = ctx.run_ui(egui::RawInput { focused, ..Default::default() }, |ui| app.attend_save_prompt(ui.ctx()));
+        // The frame's font texture isn't uploaded anywhere in a unit test.
+        out.textures_delta.clear();
+        out.viewport_output
+            .values()
+            .flat_map(|v| v.commands.iter())
+            .filter_map(|c| if let egui::ViewportCommand::RequestUserAttention(a) = c { Some(*a) } else { None })
+            .collect()
+    }
+
+    /// A save that finishes after a newer "save changes?" question opened in front, and after the
+    /// user went to another app, asks for no attention: the user saw that question.
+    #[test]
+    fn a_save_finishing_behind_a_newer_question_the_user_saw_asks_for_nothing() {
+        let ctx = egui::Context::default();
+        let mut app = PdfCraftApp::new();
+        for name in ["a.pdf", "b.pdf", "c.pdf"] {
+            let bytes = app.session.create_blank(200.0, 300.0, 1).unwrap();
+            app.open_bytes(name, None, bytes.as_ref().clone()).unwrap();
+            app.active = Some(app.views.len() - 1);
+            assert!(app.apply_edit(pdfcraft_engine::Edit::RotatePages { pages: vec![0], degrees: 90 }));
+        }
+        // a.pdf was answered with Save while quitting. While that save is pending, the user closes
+        // c.pdf's tab, and its question opens in front.
+        let c = app.views[2].id;
+        app.close_request = Some(CloseRequest::Tab(c));
+        assert!(attend(&mut app, &ctx, true).is_empty());
+        // a.pdf's save finishes once the user has gone to another app.
+        app.close_and_continue(&ctx, 0, CloseRequest::Quit);
+        assert_eq!(app.close_request, Some(CloseRequest::Tab(c)), "the newer question stands");
+        assert!(attend(&mut app, &ctx, false).is_empty(), "the user has seen it");
     }
 }
