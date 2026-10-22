@@ -590,7 +590,7 @@ fn enumerate(doc: &Document) -> (Vec<Field>, usize) {
         None => Inherited::default(),
     };
     let mut out = Vec::new();
-    let mut seen = Seen { fields: std::collections::HashSet::new(), scripts: script_budget() };
+    let mut seen = Seen { fields: std::collections::HashSet::new(), widgets: std::collections::HashSet::new(), scripts: script_budget() };
     if let Some(af) = &af {
         for f in af.get(b"Fields").map(|o| doc.resolve(o)).and_then(|o| o.as_array().cloned()).unwrap_or_default() {
             if let Some(r) = f.as_ref() {
@@ -623,7 +623,7 @@ fn adopt_page_fields(
         let Some(annots) = annots.as_array() else { continue };
         for e in annots {
             let Some(r) = e.as_ref() else { continue };
-            if seen.fields.contains(&r) {
+            if seen.fields.contains(&r) || seen.widgets.contains(&r) {
                 continue;
             }
             let obj = doc.get(r);
@@ -764,15 +764,17 @@ pub fn set_tab_order(doc: &mut Document, pages: &[usize], order: TabOrder) -> Re
     Ok(())
 }
 
-/// Read the field at `r` and the fields under it into `out`, with what they inherit from
-/// `parent`: kids with a name are fields of their own, kids without are this field's widgets.
-/// What one reading of the form's fields has used: the field dictionaries read, and the script
-/// budget their actions share.
+/// What one reading of the form's fields has used: the field and widget dictionaries read, and
+/// the script budget their actions share.
 struct Seen {
     fields: std::collections::HashSet<ObjRef>,
+    /// A widget belongs to the first field that lists it, however often it is listed.
+    widgets: std::collections::HashSet<ObjRef>,
     scripts: DecodeBudget,
 }
 
+/// Read the field at `r` and the fields under it into `out`, with what they inherit from
+/// `parent`: kids with a name are fields of their own, kids without are this field's widgets.
 fn walk(
     doc: &Document,
     r: ObjRef,
@@ -825,6 +827,7 @@ fn walk(
         return;
     }
     let widget_refs: Vec<ObjRef> = if d.contains(b"Rect") { vec![r] } else { kids };
+    let widget_refs: Vec<ObjRef> = widget_refs.into_iter().filter(|w| seen.widgets.insert(*w)).collect();
     let actions = actions_of(doc, d, &widget_refs, &mut seen.scripts);
     let button = (inh.ft.as_deref() == Some(b"Btn") && inh.ff.unwrap_or(0) & flags::PUSH_BUTTON != 0)
         .then(|| button_action(doc, d, &widget_refs, &mut seen.scripts))

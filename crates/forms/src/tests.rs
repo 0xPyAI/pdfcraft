@@ -3021,3 +3021,22 @@ fn repeated_script_references_share_one_decode_budget() {
     let calculate: usize = all.iter().filter_map(|f| f.actions.scripts.calculate.as_ref()).map(String::len).sum();
     assert!(calculate > 0 && calculate <= limit, "{calculate} bytes of field scripts");
 }
+
+/// A widget listed many times, by one field's `/Kids` or by a `/Kids` array several fields share,
+/// is read once: the first field to list it owns it.
+#[test]
+fn a_widget_listed_repeatedly_is_read_once() {
+    let kids = "7 0 R ".repeat(500);
+    let doc = document(&[
+        "<< /Type /Catalog /Pages 4 0 R /AcroForm << /Fields [2 0 R 3 0 R] >> >>".into(),
+        "<< /FT /Tx /T (a) /Kids 6 0 R >>".into(),
+        "<< /FT /Tx /T (b) /Kids 6 0 R >>".into(),
+        "<< /Type /Pages /Kids [5 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 4 0 R /MediaBox [0 0 100 100] /Annots [7 0 R] >>".into(),
+        format!("[{kids}]"),
+        "<< /Type /Annot /Subtype /Widget /Parent 2 0 R /Rect [0 0 10 10] >>".into(),
+    ]);
+    let all = fields(&doc);
+    let widgets: Vec<usize> = all.iter().map(|f| f.widgets.len()).collect();
+    assert_eq!(widgets, [1, 0], "{:?}", all.iter().map(|f| &f.name).collect::<Vec<_>>());
+}
