@@ -7101,6 +7101,8 @@ fn exporting_office_keeps_dotted_leader_entries_as_paragraphs() {
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "reading order: {html}");
 }
 
+/// A date typed in another of an XFA date field's edit patterns is kept in its first: yymmdd and
+/// yyyymd are rewritten as yyyymmdd, a date none of them reads is refused, and the data holds the date.
 #[test]
 fn a_date_typed_by_another_of_an_xfa_fields_edit_patterns_is_kept_in_its_first() {
     let mut s = Session::new();

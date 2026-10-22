@@ -2658,6 +2658,9 @@ fn trailing_spaces_do_not_shift_centered_or_right_aligned_text() {
     assert!((left_edge("right", "TITLE   ") - (36.0 + w - ink)).abs() < 1e-6);
 }
 
+/// `typed_date` rewrites a date typed by another of a field's edit-picture patterns in the first
+/// one, and leaves alone a date the first pattern reads, text no pattern reads, a field with one
+/// pattern and a field that isn't a date.
 #[test]
 fn a_date_typed_by_another_of_its_edit_pictures_patterns_is_written_in_the_first() {
     let (tpl, _) = crate::parse(&crate::fixtures::date_alternatives_template()).unwrap();
