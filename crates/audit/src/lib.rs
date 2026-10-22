@@ -115,7 +115,7 @@ struct Limits {
     /// Cover-against-line comparisons per page, counting a line once per word box it has (at
     /// least once), since [`covers`] walks them.
     comparisons: usize,
-    /// Bytes of covered text across all findings.
+    /// Bytes of covered text the findings report.
     covered_text: usize,
 }
 
@@ -150,17 +150,23 @@ impl Budget {
         }
         let mut covered = String::new();
         for line in lines.iter().filter(|l| hides(l)) {
-            let text = line.text.trim();
-            self.covered_text = self.covered_text.saturating_add(text.len() + 1);
-            if self.covered_text > self.limits.covered_text {
-                return Err(AuditError::TooMuchOutput);
-            }
             if !covered.is_empty() {
                 covered.push(' ');
             }
-            covered.push_str(text);
+            covered.push_str(line.text.trim());
         }
         Ok(covered)
+    }
+
+    /// The text a finding reports for `covered`: none when copying is withheld. Charges what it
+    /// reports against the output bound.
+    fn report_text(&mut self, covered: String, copying: bool) -> Result<String, AuditError> {
+        let reported = if copying { covered } else { String::new() };
+        self.covered_text = self.covered_text.saturating_add(reported.len());
+        if self.covered_text > self.limits.covered_text {
+            return Err(AuditError::TooMuchOutput);
+        }
+        Ok(reported)
     }
 }
 
@@ -175,7 +181,7 @@ fn audit(doc: &Document, limits: Limits) -> Result<Vec<AuditFinding>, AuditError
         for r in cover::filled_rects(doc, &page.dict)? {
             let covered = budget.hidden_text(&lines, |line| is_cover(&r, line))?;
             if !covered.trim().is_empty() {
-                let covered_text = if copying { covered } else { String::new() };
+                let covered_text = budget.report_text(covered, copying)?;
                 out.push(AuditFinding { page: n, kind: FindingKind::CoveredText, rect: r.rect, covered_text });
             }
         }
@@ -190,7 +196,7 @@ fn audit(doc: &Document, limits: Limits) -> Result<Vec<AuditFinding>, AuditError
                     AnnotationCover::Redact(rect) => (FindingKind::UnappliedMark, rect),
                     AnnotationCover::Square { rect, .. } => (FindingKind::CoveredText, rect),
                 };
-                let covered_text = if copying { covered } else { String::new() };
+                let covered_text = budget.report_text(covered, copying)?;
                 out.push(AuditFinding { page: n, kind, rect, covered_text });
             }
         }

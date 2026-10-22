@@ -697,8 +697,15 @@ fn copy_restricted_documents_withhold_covered_text() {
     let findings = audit_redactions(&user).expect("audit must run");
     assert_eq!(findings.len(), 1, "the cover is still reported: {findings:?}");
     assert_eq!(findings[0].covered_text, "");
+    // The output bound counts the text reported, so withheld text costs nothing.
+    let nothing = crate::Limits { comparisons: usize::MAX, covered_text: 0 };
+    assert_eq!(crate::audit(&user, nothing).expect("withheld text is not output").len(), 1);
     let owner = Document::open_with_password(bytes, Some("owner")).expect("open");
     let findings = audit_redactions(&owner).expect("audit must run");
     assert_eq!(findings.len(), 1, "{findings:?}");
     assert_eq!(findings[0].covered_text, "SECRET DATA 123");
+    let exact = crate::Limits { comparisons: usize::MAX, covered_text: "SECRET DATA 123".len() };
+    assert!(crate::audit(&owner, exact).is_ok());
+    let short = crate::Limits { covered_text: exact.covered_text - 1, ..exact };
+    assert!(matches!(crate::audit(&owner, short), Err(crate::AuditError::TooMuchOutput)));
 }
