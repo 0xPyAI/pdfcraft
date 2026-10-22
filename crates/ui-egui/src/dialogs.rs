@@ -1715,12 +1715,16 @@ fn password_modal(
         ui.add(egui::Label::new(message).wrap());
         ui.add_space(8.0);
         let r = ui.add(widgets::line(input).password(true).hint_text(tl!("Password")).desired_width(f32::INFINITY));
-        // Enter submits. The field keeps focus (we request it every frame), so check the key
-        // while it is focused as well as on the frame focus is lost.
+        // Enter submits. The field keeps focus, so check the key while it is focused as well as
+        // on the frame focus is lost.
         if (r.has_focus() || r.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             answer = Some(PasswordAnswer::Submit);
         }
-        r.request_focus();
+        // Only when it lost focus: each request interrupts the input method, and on Linux typed
+        // keys go through it, so asking on every frame lost everything typed (#2818).
+        if !r.has_focus() {
+            r.request_focus();
+        }
         if let Some(e) = error {
             ui.add_space(4.0);
             // Known error text is translated; anything else passes through.
