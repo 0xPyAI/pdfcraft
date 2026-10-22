@@ -17,6 +17,7 @@ pub struct Params { predictor, colors, bits_per_component, columns, early_change
 pub enum FilterError { Corrupt { filter, detail }, LimitExceeded(usize), Unsupported(String) }
 
 decode(chain, data, max_output) -> Result<Vec<u8>, FilterError>
+decode_counted(chain, data, max_output) -> Result<Vec<u8>, (FilterError, usize /*decoded before the error*/)>
 decode_tolerant(chain, data, max_output) -> Result<(Vec<u8>, bool /*partial*/), FilterError>
 encode(filter, params, data) -> Result<Vec<u8>, FilterError>
 encode_flate(data) -> Vec<u8>   // zlib, level 6
@@ -25,6 +26,7 @@ encode_flate(data) -> Vec<u8>   // zlib, level 6
 - `chain` is applied first to last, as in a `/Filter` array.
 - Image codecs (DCT, JPX, JBIG2, CCITT), `Crypt` and unknown filters anywhere in a chain give `Unsupported`: callers keep such data encoded. So does a chain longer than `MAX_CHAIN` (8) filters, before any stage runs. Decryption belongs to `crypt`.
 - `max_output` bounds every intermediate buffer (including the pre-predictor buffer) and gives `LimitExceeded(max_output)`. This also holds when Flate retries raw deflate after a misleading zlib header, in both strict and tolerant decoding.
+- `decode_counted` is `decode` that also gives, on failure, the bytes the stages decoded before it, so a caller charging a budget (`pdfcraft_cos::DecodeBudget`) pays for a failed decode too.
 - `decode_tolerant` turns `Corrupt` into "what was decoded so far" plus `partial = true`, then runs the rest of the chain on it (predictors are applied to partial output too). `LimitExceeded` and `Unsupported` are still errors.
 
 ## Behaviour
