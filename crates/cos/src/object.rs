@@ -256,6 +256,21 @@ impl Stream {
             .collect()
     }
 
+    /// [`Stream::filters`], or an error when `/Filter` is present but is not a name or an
+    /// array of names (an indirect reference, say): the data is not unfiltered, so it must not
+    /// read as decoded.
+    fn readable_filters(&self) -> Result<Vec<(Filter, Params)>, CosError> {
+        let readable = match self.dict.get(b"Filter") {
+            None | Some(Object::Null | Object::Name(_)) => true,
+            Some(Object::Array(a)) => a.iter().all(|f| f.as_name().is_some()),
+            Some(_) => false,
+        };
+        if !readable {
+            return Err(CosError::Filter("/Filter is not a name or an array of names".into()));
+        }
+        Ok(self.filters())
+    }
+
     /// Decoded data, tolerating truncated or corrupt encodings the way viewers do (the data
     /// decoded before the damage is returned). Streams with image codecs fail with
     /// `CosError::Filter` (keep them encoded). Use `decoded_strict` to detect damage.
@@ -266,7 +281,7 @@ impl Stream {
     /// Like [`Stream::decoded`], for a stream whose decoded size has a tighter bound than
     /// [`MAX_DECODED`]: decoding past `max` bytes is an error.
     pub fn decoded_within(&self, max: usize) -> Result<Vec<u8>, CosError> {
-        let chain = self.filters();
+        let chain = self.readable_filters()?;
         if chain.is_empty() {
             return self.raw_within(max);
         }
@@ -275,7 +290,7 @@ impl Stream {
 
     /// Decoded data, bounded by [`MAX_DECODED`]; any corruption is an error.
     pub fn decoded_strict(&self) -> Result<Vec<u8>, CosError> {
-        let chain = self.filters();
+        let chain = self.readable_filters()?;
         if chain.is_empty() {
             return self.raw_within(MAX_DECODED);
         }
@@ -285,7 +300,7 @@ impl Stream {
     /// Data after the first filter alone, bounded by `max`: the rest of the chain stays encoded.
     /// Any corruption in that first filter is an error.
     pub fn decoded_first_filter_strict(&self, max: usize) -> Result<Vec<u8>, CosError> {
-        let mut chain = self.filters();
+        let mut chain = self.readable_filters()?;
         chain.truncate(1);
         if chain.is_empty() {
             return self.raw_within(max);
@@ -433,6 +448,30 @@ impl From<Stream> for Object {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_filter_that_is_not_a_direct_name_is_not_decoded_as_absent() {
+        let stream = |filter: Object| {
+            let mut d = Dict::new();
+            d.set(b"Filter".to_vec(), filter);
+            Stream::from_raw(d, b"48 69>".to_vec())
+        };
+        let hex = Object::Name(b"ASCIIHexDecode".to_vec());
+        assert_eq!(stream(hex.clone()).decoded_strict().ok(), Some(b"Hi".to_vec()));
+        assert_eq!(stream(Object::Array(vec![hex.clone()])).decoded().ok(), Some(b"Hi".to_vec()));
+        assert_eq!(stream(Object::Null).decoded_strict().ok(), Some(b"48 69>".to_vec()));
+        for filter in [
+            Object::Ref(ObjRef::new(5, 0)),
+            Object::Array(vec![Object::Ref(ObjRef::new(5, 0))]),
+            Object::Int(3),
+            Object::Array(vec![hex, Object::Int(1)]),
+        ] {
+            let s = stream(filter.clone());
+            assert!(s.decoded_strict().is_err(), "{filter:?}");
+            assert!(s.decoded().is_err(), "{filter:?}");
+            assert!(s.decoded_first_filter_strict(1 << 20).is_err(), "{filter:?}");
+        }
+    }
 
     #[test]
     fn parsing_many_distinct_keys_is_not_quadratic() {
