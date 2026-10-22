@@ -173,7 +173,6 @@ impl Automation {
         let only = a.opt_int("page")?.map(|p| (p.max(1) - 1) as usize);
         let all = self.comments(a)?;
         let view = |c: &Annotation| -> Value {
-            let p = &doc.info.pages[c.page.min(doc.info.pages.len().saturating_sub(1))];
             let mut v = json!({
                 "id": c.name,
                 "page": c.page + 1,
@@ -182,14 +181,17 @@ impl Automation {
                 "author": c.author,
                 "contents": c.contents,
                 "modified": c.modified,
-                "rect": rect_to_view(p, c.rect),
+                // Unchanged on a page the viewer could not read (#2660), as `doc_info` reports it.
+                "rect": crate::view_rect(&doc.info, c.page, c.rect),
                 "color": c.color.map(hex),
             });
             // A line's ends, or the corners of connected lines, a polygon or a cloud, as
             // comment_edit's `points` takes them.
+            // Unchanged on a page the viewer could not read, as `rect` is.
             if !c.points.is_empty() {
                 let round = |v: f32| (v * 100.0).round() / 100.0;
-                v["points"] = json!(c.points.iter().map(|q| p.user_to_view(q[0], q[1]).map(round)).collect::<Vec<_>>());
+                let page = doc.info.pages.get(c.page);
+                v["points"] = json!(c.points.iter().map(|q| page.map_or([q[0], q[1]], |p| p.user_to_view(q[0], q[1])).map(round)).collect::<Vec<_>>());
             }
             v
         };
@@ -595,7 +597,10 @@ impl Automation {
     pub(crate) fn comments_hide(&mut self, a: &Args) -> Result<Value> {
         let id = self.doc(a)?.id;
         let hidden = a.opt_bool("hidden")?.unwrap_or(true);
-        self.session.set_hide_comments(id, hidden);
+        if self.session.set_hide_comments(id, hidden) {
+            // The cached renderer drew with the old setting; page_render must read it again.
+            self.renderers.remove(&id);
+        }
         Ok(json!({ "hidden": hidden }))
     }
 

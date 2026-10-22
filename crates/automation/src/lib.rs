@@ -21,6 +21,7 @@ mod content;
 mod conventions;
 pub mod file_access;
 mod forms;
+mod layers;
 mod links;
 #[cfg(feature = "mcp")]
 pub mod mcp;
@@ -835,6 +836,14 @@ impl Automation {
             "print_readiness" => self.print_readiness(&a)?,
             "doc_export_office" => self.doc_export_office(&a)?,
             "pdfa_convert" => self.pdfa_convert(&a)?,
+            "standards_remove_id" => {
+                let standard = match a.str("standard")? {
+                    "pdfa" => pdfcraft_engine::Standard::PdfA,
+                    "pdfx" => pdfcraft_engine::Standard::PdfX,
+                    other => return Err(ToolError::InvalidArgs(format!("standard must be pdfa or pdfx, not {other}"))),
+                };
+                self.apply(&a, Edit::RemoveStandardId { standard })?
+            }
             "action_run" => self.action_run(&a)?,
             "doc_compare_report" => self.doc_compare_report(&a)?,
             "doc_compare_mark" => self.doc_compare_mark(&a)?,
@@ -891,6 +900,7 @@ impl Automation {
             "comment_mark" => self.comment_mark(&a)?,
             "comment_lock" => self.comment_lock(&a)?,
             "comments_hide" => self.comments_hide(&a)?,
+            "layer_set" => self.layer_set(&a)?,
             "view_reading_colors" => self.view_reading_colors(&a)?,
             "comments_summarize" => self.comments_summarize(&a)?,
             "comment_edit" => self.comment_edit(&a)?,
@@ -1918,11 +1928,11 @@ impl Automation {
 
     fn renderer(&mut self, id: DocId) -> Result<&mut PageRenderer> {
         let doc = self.session.get(id).ok_or_else(|| failed("no such document"))?;
-        let colors = self.session.reading_colors(id).unwrap_or_default();
-        let fresh = || {
-            let config = RenderConfig { password: doc.password.as_deref().map(Arc::from), reading_colors: colors, ..Default::default() };
-            (doc.display.clone(), PageRenderer::new(doc.display.clone(), config))
-        };
+        // The document's own view settings: layer visibility, hidden comments, reading colours
+        // (tools that change one drop this cache so the next render reads it again).
+        let config =
+            self.session.render_config(id).unwrap_or_else(|| RenderConfig { password: doc.password.as_deref().map(Arc::from), ..Default::default() });
+        let fresh = || (doc.display.clone(), PageRenderer::new(doc.display.clone(), config.clone()));
         let entry = self.renderers.entry(id).or_insert_with(fresh);
         if !Arc::ptr_eq(&entry.0, &doc.display) {
             *entry = fresh();

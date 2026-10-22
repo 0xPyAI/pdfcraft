@@ -202,8 +202,8 @@ milestone = "M1"
 status = "shipped"
 commands = ["protect.unlock"]
 tools = ["doc_open"]
-evidence = ["crates/engine/src/tests.rs::restricted_documents_refuse_changes_unless_opened_by_the_owner", "crates/engine/src/tests.rs::owner_password_of_older_revisions_opens_the_viewer_too", "crates/crypt/src/tests.rs::owner_authentication_recovers_the_user_password", "crates/engine/src/tests.rs::the_permissions_password_unlocks_an_open_document", "crates/ui-egui/tests/editing.rs::the_security_notice_unlocks_with_the_permissions_password", "crates/ui-egui/tests/editing.rs::remove_security_asks_for_the_permissions_password_first", "crates/ui-egui/tests/pickers.rs::the_permissions_password_can_be_typed_through_an_input_method"]
-notes = "at open (the password prompt takes either password), or after opening a restricted file that needed no password (#995, #1077): Unlock… on the security notice and in Properties ▸ Security, and changing security asks for it first. Not yet: an automation tool to unlock an open document (reopen with doc_open and the password instead)"
+evidence = ["crates/engine/src/tests.rs::restricted_documents_refuse_changes_unless_opened_by_the_owner", "crates/engine/src/tests.rs::owner_password_of_older_revisions_opens_the_viewer_too", "crates/engine/src/tests.rs::render_password_for_recovers_the_user_password_of_older_revisions", "apps/pdfcraft-cli/tests/owner_password.rs::info_accepts_the_owner_password", "apps/pdfcraft-cli/tests/owner_password.rs::text_accepts_the_owner_password", "crates/crypt/src/tests.rs::owner_authentication_recovers_the_user_password", "crates/engine/src/tests.rs::the_permissions_password_unlocks_an_open_document", "crates/ui-egui/tests/editing.rs::the_security_notice_unlocks_with_the_permissions_password", "crates/ui-egui/tests/editing.rs::remove_security_asks_for_the_permissions_password_first", "crates/ui-egui/tests/pickers.rs::the_permissions_password_can_be_typed_through_an_input_method"]
+notes = "at open (the password prompt takes either password), or after opening a restricted file that needed no password (#995, #1077): Unlock… on the security notice and in Properties ▸ Security, and changing security asks for it first. The CLI's info, text, render and audit take either password too (#2670). Not yet: an automation tool to unlock an open document (reopen with doc_open and the password instead)"
 
 [[feature]]
 id = "core.permissions-enforced"
@@ -286,8 +286,8 @@ milestone = "M1"
 status = "shipped"
 commands = ["file.save"]
 tools = ["doc_save"]
-evidence = ["crates/ui-egui/tests/editing.rs::save_writes_an_incremental_update_and_clears_dirty", "crates/engine/src/tests.rs::save_is_incremental_stamps_mod_date_and_rebases", "crates/organize/src/tests.rs::successive_incremental_saves_stack_revisions", "crates/automation/src/lib.rs::staging_never_writes_through_a_file_planted_at_its_name", "crates/ui-egui/src/editing.rs::saving_never_writes_through_a_file_planted_at_the_staging_name"]
-notes = "The atomic write stages to a new, randomly named file created with create_new, so a file or link planted at the staging path is never written through (desktop app, automation and CLI)."
+evidence = ["crates/platform/src/staging.rs::atomic_saves_keep_finder_tags_and_binary_extended_attributes", "crates/platform/src/staging.rs::a_growing_resource_fork_refuses_publication_and_keeps_original", "crates/automation/tests/automation.rs::saving_a_pdf_keeps_the_destinations_extended_attributes", "crates/automation/tests/automation.rs::a_metadata_preservation_error_keeps_the_pdf_and_unsaved_edit", "crates/ui-egui/tests/editing.rs::save_writes_an_incremental_update_and_clears_dirty", "crates/engine/src/tests.rs::save_is_incremental_stamps_mod_date_and_rebases", "crates/organize/src/tests.rs::successive_incremental_saves_stack_revisions", "crates/automation/src/lib.rs::staging_never_writes_through_a_file_planted_at_its_name", "crates/ui-egui/src/editing.rs::saving_never_writes_through_a_file_planted_at_the_staging_name"]
+notes = "The atomic write stages to a new, randomly named file created with create_new, so a file or link planted at the staging path is never written through (desktop app, automation and CLI). On macOS, accessible destination xattrs (including Finder tags) are copied before flush/rename; errors, metadata limits or a changed post-read size refuse the save without replacing the file. System-managed provenance is excluded. Permissions, ACLs, hard-link identity and creation dates are not preserved by this change (#2658)."
 
 [[feature]]
 id = "core.save-as-full-rewrite"
@@ -1321,9 +1321,9 @@ tier = "P0"
 milestone = "M3"
 status = "shipped"
 commands = []
-tools = ["doc_info"]
-evidence = ["crates/render/src/raster.rs::layer_override_hides_content", "crates/engine/src/tests.rs::layer_choices_survive_edits"]
-notes = ""
+tools = ["doc_info", "layer_set"]
+evidence = ["crates/render/src/raster.rs::layer_override_hides_content", "crates/engine/src/tests.rs::layer_choices_survive_edits", "crates/automation/tests/automation.rs::layers_and_hidden_comments_change_what_page_render_draws"]
+notes = "layer_set shows or hides a layer by name (every group with that name, as CAD exporters repeat names) or by position, and page_render draws with the document's layer visibility. Still missing: Reset to initial visibility (view.layers-reset), layer properties, and /OC on annotations (#2176)."
 
 [[feature]]
 id = "view.layers-reset"
@@ -7000,8 +7000,8 @@ milestone = "M10"
 status = "partial"
 commands = ["export.docx"]
 tools = ["doc_export_office"]
-evidence = ["crates/export/src/lib.rs::word_does_not_invent_borders_for_aligned_invoice_fields", "crates/export/src/lib.rs::word_overlap_does_not_consume_invoice_body_space", "crates/export/src/lib.rs::word_keeps_a_page_with_a_clear_image_and_big_title_in_flow", "crates/export/src/lib.rs::word_rotated_pages_keep_separate_page_sizes_and_unique_shapes", "crates/engine/src/tests.rs::office_export_positions_follow_the_displayed_crop_rotation_and_units", "crates/automation/tests/automation.rs::exporting_an_invoice_to_word_keeps_the_watermark_out_of_flow", "crates/export/src/lib.rs::docx_is_a_word_package", "crates/export/src/lib.rs::text_colour_survives_every_format", "crates/engine/src/tests.rs::exporting_office_files_keeps_text_colour", "crates/export/src/lib.rs::grid_text_becomes_a_real_table_in_every_format", "crates/export/src/lib.rs::a_link_inside_a_sentence_is_not_a_table_column", "crates/export/src/lib.rs::sentences_that_run_on_into_links_are_not_a_table", "crates/export/src/lib.rs::a_superscript_beside_a_number_keeps_its_table", "crates/export/src/lib.rs::word_opens_text_with_control_characters_and_long_pages", "crates/engine/src/tests.rs::exporting_office_files_keeps_images", "crates/automation/tests/automation.rs::exporting_to_word_html_and_rtf", "crates/ui-egui/tests/compare.rs::export_to_word_html_and_rtf"]
-notes = "Flowing Word document: paragraphs, Heading 1/2 from larger text, bold/italic, text colour (fill as sRGB; gray/CMYK converted naively, colour spaces via cs/sc read as black), borderless detected tables with spans/empty cells (a row whose blocks run on into each other, such as a link or superscript inside a sentence, or overlap, as a paragraph's lines do, is text and not a table row, #2806), per-page sections/sizes, and positioned editable text/artwork only for pages with rotated text or text overlapped by an image or watermark-sized text, other pages flowing with inline images (#773); synthetic invoice regression; the emitted package validates with Open XML SDK 2.20 (Office 2010 schema). Word/LibreOffice rendering of the positioned output remains unverified. Pictures on positioned pages are DrawingML anchors behind the text (a VML rectangle with an image showed no picture, #1936; not yet opened in Word); a Word file embeds at most 1000 pictures and 512 MiB of them. The earlier flowing output was checked with macOS textutil and opened in Microsoft Word (Windows). Characters XML forbids are dropped; the page size stays within Word's 22 in. Not yet: exact font matching, vector rules, arbitrary paint-order/transparency, colour per run within a paragraph, general exact layout fidelity."
+evidence = ["crates/edit/src/tests.rs::reading_keeps_dotted_leader_entries_whole_and_in_order", "crates/engine/src/tests.rs::exporting_office_keeps_dotted_leader_entries_as_paragraphs", "crates/export/src/lib.rs::word_does_not_invent_borders_for_aligned_invoice_fields", "crates/export/src/lib.rs::word_overlap_does_not_consume_invoice_body_space", "crates/export/src/lib.rs::word_keeps_a_page_with_a_clear_image_and_big_title_in_flow", "crates/export/src/lib.rs::word_rotated_pages_keep_separate_page_sizes_and_unique_shapes", "crates/engine/src/tests.rs::office_export_positions_follow_the_displayed_crop_rotation_and_units", "crates/automation/tests/automation.rs::exporting_an_invoice_to_word_keeps_the_watermark_out_of_flow", "crates/export/src/lib.rs::docx_is_a_word_package", "crates/export/src/lib.rs::text_colour_survives_every_format", "crates/engine/src/tests.rs::exporting_office_files_keeps_text_colour", "crates/export/src/lib.rs::grid_text_becomes_a_real_table_in_every_format", "crates/export/src/lib.rs::a_link_inside_a_sentence_is_not_a_table_column", "crates/export/src/lib.rs::sentences_that_run_on_into_links_are_not_a_table", "crates/export/src/lib.rs::a_superscript_beside_a_number_keeps_its_table", "crates/export/src/lib.rs::word_opens_text_with_control_characters_and_long_pages", "crates/engine/src/tests.rs::exporting_office_files_keeps_images", "crates/automation/tests/automation.rs::exporting_to_word_html_and_rtf", "crates/ui-egui/tests/compare.rs::export_to_word_html_and_rtf", "crates/export/src/lib.rs::docx_keeps_a_shared_page_background", "crates/edit/src/tests.rs::a_page_painted_first_with_a_full_page_fill_has_that_background", "crates/engine/src/tests.rs::exporting_to_word_keeps_the_page_background"]
+notes = "Flowing Word document: paragraphs, Heading 1/2 from larger text, bold/italic, text colour (fill as sRGB; gray/CMYK converted naively, colour spaces via cs/sc read as black), borderless detected tables with spans/empty cells (a row whose blocks run on into each other, such as a link or superscript inside a sentence, or overlap, as a paragraph's lines do, is text and not a table row, #2806), per-page sections/sizes, the page colour (a full-page opaque fill painted first, such as Edit a PDF ▸ Background) as the document background when every page shares one non-white colour (Word has no per-page background, so differing colours are dropped; #2992; checked in the XML only, not yet opened in Word), and positioned editable text/artwork only for pages with rotated text or text overlapped by an image or watermark-sized text, other pages flowing with inline images (#773); synthetic invoice regression; dotted-leader contents entries keep the title, dots and page number together in separate paragraphs (#1757); the emitted package validates with Open XML SDK 2.20 (Office 2010 schema). Word/LibreOffice rendering of the positioned output remains unverified. Pictures on positioned pages are DrawingML anchors behind the text (a VML rectangle with an image showed no picture, #1936; not yet opened in Word); a Word file embeds at most 1000 pictures and 512 MiB of them. The earlier flowing output was checked with macOS textutil and opened in Microsoft Word (Windows). Characters XML forbids are dropped; the page size stays within Word's 22 in. Not yet: exact font matching, vector rules, arbitrary paint-order/transparency, colour per run within a paragraph, general exact layout fidelity."
 
 [[feature]]
 id = "create.export-rtf"
@@ -7076,8 +7076,8 @@ milestone = "M10"
 status = "shipped"
 commands = ["export.image"]
 tools = ["doc_export_images"]
-evidence = ["crates/engine/src/tests.rs::pages_export_as_png_jpeg_and_tiff", "crates/automation/tests/automation.rs::exporting_images_and_text_through_tools"]
-notes = "JPEG with quality, TIFF; flattened onto white"
+evidence = ["crates/engine/src/tests.rs::pages_export_as_png_jpeg_and_tiff", "crates/automation/tests/automation.rs::exporting_images_and_text_through_tools", "crates/engine/src/export.rs::rasters_of_the_wrong_length_are_rejected"]
+notes = "JPEG with quality, TIFF; flattened onto white; a raster that is not exactly its width × height in pixels is refused, as for PNG"
 
 [[feature]]
 id = "create.export-jpeg2000"
@@ -7284,7 +7284,7 @@ milestone = "M11"
 status = "partial"
 commands = ["optimize.advanced"]
 tools = ["doc_optimize"]
-evidence = ["crates/ui-egui/tests/create.rs::the_pdf_optimizer_dialog_saves_an_optimized_copy", "crates/automation/tests/automation.rs::optimizing_through_tools", "crates/ui-egui/src/optimize_ui.rs::the_progress_card_shows_the_stage_and_cancels", "crates/engine/src/tests.rs::an_optimize_job_reports_its_stages_and_can_be_cancelled", "crates/optimize/tests/optimize.rs::images_and_forms_nothing_draws_are_dropped", "crates/automation/tests/automation.rs::a_deleted_image_is_not_kept_by_reduce_or_optimize", "crates/ui-egui/tests/create.rs::the_pdf_optimizer_dialog_picks_a_preset", "crates/automation/tests/automation.rs::a_page_printed_in_strips_gets_small_through_tools", "crates/optimize/tests/optimize.rs::the_mobile_preset_makes_a_printed_page_small"]
+evidence = ["crates/automation/tests/optimize_content_boundaries.rs::fragment_merge_preserves_a_comment_across_content_pieces", "crates/ui-egui/tests/create.rs::the_pdf_optimizer_dialog_saves_an_optimized_copy", "crates/automation/tests/automation.rs::optimizing_through_tools", "crates/ui-egui/src/optimize_ui.rs::the_progress_card_shows_the_stage_and_cancels", "crates/engine/src/tests.rs::an_optimize_job_reports_its_stages_and_can_be_cancelled", "crates/optimize/tests/optimize.rs::images_and_forms_nothing_draws_are_dropped", "crates/automation/tests/automation.rs::a_deleted_image_is_not_kept_by_reduce_or_optimize", "crates/ui-egui/tests/create.rs::the_pdf_optimizer_dialog_picks_a_preset", "crates/automation/tests/automation.rs::a_page_printed_in_strips_gets_small_through_tools", "crates/optimize/tests/optimize.rs::the_mobile_preset_makes_a_printed_page_small"]
 notes = "Settings menu with the Standard and Mobile presets (Custom once an option changes; doc_optimize preset), Images (with Merge image fragments: a page picture drawn as one-pixel strips, as some PDF printers write it, is put back together so it can be resampled), Discard Objects, Discard User Data, Clean Up (also drops images and forms the pages list but never draw, such as deleted images); runs in the background with a progress bar (per image) and Cancel; no Fonts or Transparency panels, no saved custom presets, no space audit"
 
 [[feature]]
@@ -7917,11 +7917,11 @@ title = "Remove PDF/A or PDF/X identification"
 area = "K"
 tier = "P2"
 milestone = "M11"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "shipped"
+commands = ["standards.pdfa"]
+tools = ["standards_remove_id"]
+evidence = ["crates/organize/src/tests.rs::removing_the_pdfx_identification_keeps_the_output_intent_and_other_claims", "crates/organize/src/tests.rs::removing_the_pdfa_identification_removes_its_xmp_properties_in_either_form", "crates/automation/tests/automation.rs::pdfa_through_tools", "crates/ui-egui/tests/compare.rs::pdfa_dialog_verifies_and_converts"]
+notes = "Standards ▸ PDF/A ▸ Remove PDF/A identification, and the standards_remove_id tool (pdfa or pdfx): removes the pdfaid: XMP properties, or GTS_PDFXVersion and GTS_PDFXConformance from the document information and the pdfxid: XMP properties. Output intents and other claims (PDF/UA) stay; a packet that can't be edited safely is left as it is. Not yet: PDF/X removal in the interface (there is no PDF/X dialog yet)"
 
 [[feature]]
 id = "optimize.pdfx5-reference-xobjects"

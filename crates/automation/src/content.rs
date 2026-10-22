@@ -73,9 +73,9 @@ impl Automation {
             .iter()
             .map(|it| {
                 let index = per_page.entry(it.page).or_default();
-                let ph = doc.info.pages[it.page].height as f64;
-                let mut v =
-                    json!({ "page": it.page + 1, "index": *index + 1, "rect": to_view(it.content.rect(), ph).map(|x| (x * 100.0).round() / 100.0) });
+                // Unchanged on a page the viewer could not read (#2660), like `crate::view_rect`.
+                let rect = doc.info.pages.get(it.page).map_or(it.content.rect(), |p| to_view(it.content.rect(), p.height as f64));
+                let mut v = json!({ "page": it.page + 1, "index": *index + 1, "rect": rect.map(|x| (x * 100.0).round() / 100.0) });
                 *index += 1;
                 match &it.content {
                     AddedContent::Text(t) => {

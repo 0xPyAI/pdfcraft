@@ -1427,12 +1427,42 @@ fn owner_password_of_older_revisions_opens_the_viewer_too() {
     }
 }
 
+/// Render paths outside a session (the CLI's `info`, `text`, `render`) get the password the
+/// renderer takes: the recovered user password for an R2–R4 owner password, else as given.
+#[test]
+fn render_password_for_recovers_the_user_password_of_older_revisions() {
+    for alg in [pdfcraft_cos::Algorithm::Rc4_40, pdfcraft_cos::Algorithm::Rc4_128, pdfcraft_cos::Algorithm::Aes128, pdfcraft_cos::Algorithm::Aes256] {
+        let mut doc = pdfcraft_cos::Document::open(Arc::new(fixture(1))).unwrap();
+        doc.set_encryption(&pdfcraft_cos::NewEncryption {
+            algorithm: alg,
+            user_password: "u",
+            owner_password: "o",
+            permissions: 0,
+            encrypt_metadata: true,
+            seed: [1; 32],
+        })
+        .unwrap();
+        let bytes = Arc::new(pdfcraft_cos::write_full(&doc, &Default::default()).unwrap());
+        let owner = crate::render_password_for(bytes.clone(), Some("o"));
+        let expected = if alg == pdfcraft_cos::Algorithm::Aes256 { "o" } else { "u" };
+        assert_eq!(owner.as_deref(), Some(expected), "{alg:?}");
+        assert!(pdfcraft_render::inspect(bytes.clone(), owner.as_deref()).is_ok(), "{alg:?}: the renderer opens it");
+        assert_eq!(crate::render_password_for(bytes.clone(), Some("u")).as_deref(), Some("u"), "{alg:?}");
+        assert_eq!(crate::render_password_for(bytes.clone(), Some("wrong")).as_deref(), Some("wrong"), "{alg:?}");
+        assert_eq!(crate::render_password_for(bytes, None), None, "{alg:?}");
+    }
+}
+
 #[test]
 fn autosave_snapshots_only_changed_documents() {
     let (mut s, id) = session_with(2);
+    assert!(!s.has_pending_autosave());
     assert!(s.autosave_snapshots().is_empty(), "clean documents are not snapshotted");
     s.apply(id, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    assert!(s.has_pending_autosave());
+    assert!(s.has_pending_autosave(), "checking a deadline must not consume a snapshot");
     let snaps = s.autosave_snapshots();
+    assert!(!s.has_pending_autosave());
     assert_eq!(snaps.len(), 1);
     assert_eq!(snaps[0].bytes, s.get(id).unwrap().bytes, "the working file");
     assert!(s.autosave_snapshots().is_empty(), "nothing new since the last snapshot");
@@ -7022,4 +7052,51 @@ fn scripted_display_changes_survive_warm_cache_and_new_edit() {
         assert!(runner.output.errors.is_empty());
         assert!(next.output.errors.is_empty());
     }
+}
+
+/// #2992: a page coloured with Edit a PDF ▸ Background exports to Word with that page colour,
+/// behind its text.
+#[test]
+fn exporting_to_word_keeps_the_page_background() {
+    let mut s = Session::new();
+    let text = s.create_from_text("t", "Blue text on teal").unwrap();
+    let id = s.open("t.pdf", None, text, None).unwrap();
+    assert_eq!(s.get(id).unwrap().export_pages()[0].background, None, "no background yet");
+    s.apply(
+        id,
+        Edit::AddBackground {
+            pages: vec![0],
+            settings: Background { color: [0.0, 0.5, 0.5], opacity: 1.0, ..Background::default() },
+            replace: false,
+            file: None,
+        },
+    )
+    .unwrap();
+    let d = s.get(id).unwrap();
+    let page = &d.export_pages()[0];
+    assert!(page.background.is_some_and(|c| c.iter().zip([0.0, 0.5, 0.5]).all(|(a, b)| (a - b).abs() < 1e-6)), "{:?}", page.background);
+    assert!(page.blocks.iter().any(|b| b.text.contains("Blue text")), "the text is still there");
+    let docx = d.export_office(compare::OfficeFormat::Docx);
+    assert!(docx.windows(b"word/settings.xml".len()).any(|w| w == b"word/settings.xml"), "Word is told to show the page colour");
+}
+
+#[test]
+fn exporting_office_keeps_dotted_leader_entries_as_paragraphs() {
+    let mut content = String::new();
+    for (title, page, y) in [("Art.1. Scope", "3", 200), ("Art.2. Eligibility", "7", 180), ("Art.3. Application", "12", 160)] {
+        content.push_str(&format!(
+            "BT /F1 12 Tf 72 {y} Td ({title}) Tj ET \
+             BT /F1 12 Tf 250 {y} Td (....................) Tj ET \
+             BT /F1 12 Tf 500 {y} Td ({page}) Tj ET\n"
+        ));
+    }
+    let pdf = one_line_page("/Font << /F1 4 0 R >>", &content);
+    let mut session = Session::new();
+    let id = session.open("contents.pdf", None, Arc::new(pdf), None).unwrap();
+    let doc = session.get(id).unwrap();
+    let html = String::from_utf8(doc.export_office(compare::OfficeFormat::Html)).unwrap();
+    assert!(!html.contains("<table>"), "contents entries are paragraphs: {html}");
+    let entries = ["Art.1. Scope .................... 3", "Art.2. Eligibility .................... 7", "Art.3. Application .................... 12"];
+    let positions: Vec<_> = entries.iter().map(|entry| html.find(&format!("<p>{entry}</p>")).expect("one paragraph per entry")).collect();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "reading order: {html}");
 }

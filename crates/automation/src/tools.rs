@@ -781,6 +781,11 @@ pub fn tools() -> Vec<ToolDef> {
             comment_ref(json!({ "locked": { "type": "boolean", "description": "Default true." } })),
             &["doc"],
         )),
+        t("layer_set", "Show or hide a layer", "Show or hide a layer (optional content group), as the Layers panel's eye icon does. layer is its name as doc_info lists it (every layer with that name) or its 1-based position in that list. A view setting: page_render draws with it, and the file doesn't change. Returns every layer with its visibility.")
+            .with(schema(
+                json!({ "doc": doc(), "layer": { "type": ["string", "integer"], "description": "A layer name, or a 1-based position in doc_info's layers." }, "visible": { "type": "boolean" } }),
+                &["doc", "layer", "visible"],
+            )),
         t("comments_hide", "Hide all comments", "Hide or show every comment on the page (fields and links still draw). A view setting: the file doesn't change.")
             .cmd("comment.hide_all")
             .with(schema(json!({ "doc": doc(), "hidden": { "type": "boolean", "description": "Default true." } }), &["doc"])),
@@ -1100,6 +1105,8 @@ pub fn tools() -> Vec<ToolDef> {
         t("pdfa_convert", "Save as PDF/A", "Standards ▸ Save as PDF/A: fix what can be fixed for PDF/A-2b or 3b (XMP identification and metadata, an sRGB output intent, forbidden actions and JavaScript, annotation print flags, image interpolation, encryption). Returns what was fixed and what remains (e.g. fonts that aren't embedded). Undoable; save the document to keep it.")
             .cmd("standards.pdfa")
             .with(schema(json!({ "doc": doc(), "level": { "type": "string", "enum": ["2b", "3b"] } }), &["doc"])),
+        t("standards_remove_id", "Remove PDF/A or PDF/X identification", "Remove what identifies the document as PDF/A (its pdfaid: XMP properties) or PDF/X (GTS_PDFXVersion and GTS_PDFXConformance, in the document information and as pdfxid: XMP properties), e.g. after edits it no longer meets. Output intents and other metadata stay. Fails when the document declares nothing of the kind. Undoable.")
+            .with(schema(json!({ "doc": doc(), "standard": { "type": "string", "enum": ["pdfa", "pdfx"] } }), &["doc", "standard"])),
         t("action_list", "List actions", "Action Wizard: the built-in actions (name, description, steps) and every step an action can use (id, label, whether it takes a text argument).")
             .ro()
             .cmd("actions.wizard")

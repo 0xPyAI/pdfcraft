@@ -71,8 +71,62 @@ pub(super) fn group_blocks(lines: &[TextLine]) -> Vec<TextBlock> {
 
 /// Exporters currently represent a block with one style. Keep their style boundaries until
 /// they support rich runs, while edit selection may encompass the complete visual region.
+/// Dotted-leader entries stay on one row and use the title run's style.
 pub(super) fn group_reading_blocks(lines: &[TextLine]) -> Vec<TextBlock> {
-    group_layout(lines, false)
+    let mut blocks = Vec::new();
+    let mut start = 0;
+    let mut offset = 0;
+    for row in lines.chunk_by(|a, b| same_plane(a, b) && (a.origin.baseline - b.origin.baseline).abs() < a.size.min(b.size) * 0.2) {
+        let mut text = String::new();
+        for (i, line) in row.iter().enumerate() {
+            if !text.ends_with(char::is_whitespace)
+                && !line.text.starts_with(char::is_whitespace)
+                && i.checked_sub(1).and_then(|i| row.get(i)).is_some_and(|prev| line.rect[0] - prev.rect[2] > line.size * 0.12)
+            {
+                text.push(' ');
+            }
+            text.push_str(&line.text);
+        }
+        if leader_entry(&text)
+            && let Some(first) = row.first()
+        {
+            // Tab leaders are a single reading row, even when the title, dots and page
+            // number are separate text objects far apart. Do not merge neighbouring entries.
+            blocks.extend(group_layout(lines.get(start..offset).unwrap_or_default(), false));
+            let mut line = first.clone();
+            line.text = text;
+            line.rect = row.iter().map(|line| line.rect).reduce(union).unwrap_or(first.rect);
+            blocks.extend(group_layout(std::slice::from_ref(&line), false));
+            start = offset + row.len();
+        }
+        offset += row.len();
+    }
+    blocks.extend(group_layout(lines.get(start..).unwrap_or_default(), false));
+    blocks
+}
+
+/// Dotted leaders end in a page number, with a title before the dots. A dot in an article
+/// number, or an ellipsis in ordinary prose, is not enough to make a contents entry.
+fn leader_entry(text: &str) -> bool {
+    let text = text.trim_end();
+    let prefix = text.trim_end_matches(|c: char| {
+        c.is_ascii_digit() || matches!(c, 'i' | 'v' | 'x' | 'l' | 'c' | 'd' | 'm' | 'I' | 'V' | 'X' | 'L' | 'C' | 'D' | 'M')
+    });
+    if prefix.len() == text.len() {
+        return false;
+    }
+    let title = prefix.trim_end_matches(|c: char| c.is_whitespace() || matches!(c, '.' | '…'));
+    let dots = prefix
+        .get(title.len()..)
+        .unwrap_or_default()
+        .chars()
+        .map(|c| match c {
+            '.' => 1,
+            '…' => 3,
+            _ => 0,
+        })
+        .sum::<usize>();
+    dots >= 3 && title.chars().any(char::is_alphabetic)
 }
 
 /// Text-space units → user space along the baseline. It is the vertical scale ([`Origin::k`])
