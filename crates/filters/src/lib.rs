@@ -140,6 +140,12 @@ pub(crate) type Step = Result<Vec<u8>, Failure>;
 /// [`FilterError::Unsupported`] (callers keep such data encoded), as does a chain longer than
 /// [`MAX_CHAIN`]. `max_output` bounds every intermediate buffer.
 pub fn decode(chain: &[(Filter, Params)], data: &[u8], max_output: usize) -> Result<Vec<u8>, FilterError> {
+    decode_counted(chain, data, max_output).map_err(|(e, _)| e)
+}
+
+/// Like [`decode`], but a failure also gives the bytes decoded before it, across the stages
+/// that ran: the work a caller charging an allowance spent finding out.
+pub fn decode_counted(chain: &[(Filter, Params)], data: &[u8], max_output: usize) -> Result<Vec<u8>, (FilterError, usize)> {
     run(chain, data, max_output, true).map(|(v, _)| v)
 }
 
@@ -147,22 +153,24 @@ pub fn decode(chain: &[(Filter, Params)], data: &[u8], max_output: usize) -> Res
 /// reports `partial = true` (the behaviour viewers expect). The remaining filters of the
 /// chain still run on the partial data. Limit and unsupported errors are still errors.
 pub fn decode_tolerant(chain: &[(Filter, Params)], data: &[u8], max_output: usize) -> Result<(Vec<u8>, bool), FilterError> {
-    run(chain, data, max_output, false)
+    run(chain, data, max_output, false).map_err(|(e, _)| e)
 }
 
 /// Longest filter chain decoded. Real streams use one to three filters; every stage may produce
 /// up to the output limit, so the chain length multiplies the work.
 pub const MAX_CHAIN: usize = 8;
 
-fn run(chain: &[(Filter, Params)], data: &[u8], max: usize, strict: bool) -> Result<(Vec<u8>, bool), FilterError> {
+/// The decoded data and whether it is partial, or the error and the bytes decoded before it.
+fn run(chain: &[(Filter, Params)], data: &[u8], max: usize, strict: bool) -> Result<(Vec<u8>, bool), (FilterError, usize)> {
     if chain.len() > MAX_CHAIN {
-        return Err(FilterError::Unsupported(format!("a chain of {} filters", chain.len())));
+        return Err((FilterError::Unsupported(format!("a chain of {} filters", chain.len())), 0));
     }
     if let Some((f, _)) = chain.iter().find(|(f, _)| !f.is_decodable()) {
-        return Err(FilterError::Unsupported(f.name().to_owned()));
+        return Err((FilterError::Unsupported(f.name().to_owned()), 0));
     }
     let mut cur: Cow<[u8]> = Cow::Borrowed(data);
     let mut partial = false;
+    let mut spent = 0usize;
     for (filter, params) in chain {
         #[cfg(test)]
         STAGE_BYTES.with(|c| c.set(c.get() + cur.len()));
@@ -172,8 +180,9 @@ fn run(chain: &[(Filter, Params)], data: &[u8], max: usize, strict: bool) -> Res
                 partial = true;
                 out
             }
-            Err(f) => return Err(f.error),
+            Err(f) => return Err((f.error, spent.saturating_add(f.partial.len()))),
         });
+        spent = spent.saturating_add(cur.len());
     }
     Ok((cur.into_owned(), partial))
 }

@@ -299,17 +299,18 @@ impl Stream {
 
     /// Decoded data, bounded by [`MAX_DECODED`]; any corruption is an error.
     pub fn decoded_strict(&self) -> Result<Vec<u8>, CosError> {
-        self.decoded_strict_within_typed(MAX_DECODED).map_err(|e| CosError::Filter(e.to_string()))
+        self.decoded_strict_within_typed(MAX_DECODED).map_err(|(e, _)| CosError::Filter(e.to_string()))
     }
 
-    /// [`Stream::decoded_strict`] bounded by `max`, with the filter error kept typed.
-    pub(crate) fn decoded_strict_within_typed(&self, max: usize) -> Result<Vec<u8>, pdfcraft_filters::FilterError> {
+    /// [`Stream::decoded_strict`] bounded by `max`, with the filter error kept typed and the
+    /// bytes decoded before it.
+    pub(crate) fn decoded_strict_within_typed(&self, max: usize) -> Result<Vec<u8>, (pdfcraft_filters::FilterError, usize)> {
         let max = max.min(MAX_DECODED);
-        let chain = self.readable_filters()?;
+        let chain = self.readable_filters().map_err(|e| (e, 0))?;
         if chain.is_empty() {
-            return self.raw_within_typed(max);
+            return self.raw_within_typed(max).map_err(|e| (e, 0));
         }
-        pdfcraft_filters::decode(&chain, &self.raw, max)
+        pdfcraft_filters::decode_counted(&chain, &self.raw, max)
     }
 
     /// Data after the first filter alone, bounded by `max`: the rest of the chain stays encoded.
