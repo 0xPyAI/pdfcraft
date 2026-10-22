@@ -628,6 +628,51 @@ fn weak_digests_say_so_in_words_that_are_pinned() {
 }
 
 #[test]
+fn small_rsa_keys_say_so_and_others_do_not() {
+    let rsa = |n: Vec<u8>| PublicKey::Rsa { n, e: vec![1, 0, 1] };
+    let note = Some(
+        "This signature uses an RSA key shorter than 2048 bits, which is no longer considered strong enough for signatures. It still validates, but it should not be relied on.",
+    );
+    // 1024 bits, with and without the leading zero byte of a DER INTEGER.
+    assert_eq!(rsa(vec![0xC0; 128]).weakness(), note);
+    assert_eq!(rsa([vec![0], vec![0xC0; 128]].concat()).weakness(), note);
+    // 2047 bits is still short; 2048 bits and more are not.
+    assert_eq!(rsa([vec![0x7F], vec![0xFF; 255]].concat()).weakness(), note);
+    assert_eq!(rsa([vec![0, 0x80], vec![0; 255]].concat()).weakness(), None);
+    assert_eq!(rsa(vec![0xFF; 512]).weakness(), None);
+    assert_eq!(rsa(Vec::new()).weakness(), note, "an empty modulus is not a strong key");
+    // The key description counts the same bits, so it never says 2048 next to the warning.
+    assert_eq!(rsa([vec![0], vec![0xC0; 128]].concat()).describe(), "RSA 1024-bit");
+    assert_eq!(rsa([vec![0x7F], vec![0xFF; 255]].concat()).describe(), "RSA 2047-bit");
+    assert_eq!(rsa([vec![0, 0x80], vec![0; 255]].concat()).describe(), "RSA 2048-bit");
+    assert_eq!(PublicKey::P256(vec![4; 65]).weakness(), None);
+    let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    assert_eq!(id.certificate.public_key.weakness(), None, "the 2048-bit test identity");
+}
+
+/// A synthetic 1024-bit key made for this test (`openssl genrsa 1024`, e = 65537) and its
+/// PKCS #1 v1.5 SHA-256 signature of `hello`.
+const RSA_1024_N: &str = "ae561814194f0a06475c002fc7633b81e83a738ad3f35ba1ded959be6f6b62302028d58707403f44b7bda959e446f13849896711985ac4815e58d7d323aee664771c35bf2dc3db1bcdc49ac61ae7282a24ec7a5af9f6ebe98945e6a71c4998ed31c41bbb997c4873fb4b8271fd3cf76648efcbff76972ab7bcaf831b9e203d47";
+const RSA_1024_SIG: &str = "0de5110137e768a6b00201cf8340688c81a901fe309489f2c8186b7dc56e67f7e64188970a9bea926b9bd99b19985adfb0489956ffd5e0264468b678c4fd49a155a895fcb9ab127d0c3742b7a07866b3deec20a5b2f61af4cbfd2901517dc268e4d6edf4e905e0f4e05cdc740c3180971c1ec1470c1476f90ea988e2ab4cbb18";
+
+#[test]
+fn a_signature_made_with_a_small_rsa_key_verifies_with_the_note() {
+    use pdfcraft_sign::keys::Scheme;
+    let key = PublicKey::Rsa { n: unhex(RSA_1024_N), e: vec![1, 0, 1] };
+    let weak = key.weakness().expect("a 1024-bit key is short");
+    let sig = unhex(RSA_1024_SIG);
+    let mut notes = Vec::new();
+    let digest = DigestAlg::Sha256.digest(&[b"hello"]);
+    assert!(key.verify_noting(Scheme::RsaPkcs1, DigestAlg::Sha256, &digest, &sig, &mut notes).unwrap());
+    assert_eq!(notes, [weak]);
+    // A signature that doesn't verify says nothing about the key.
+    let mut notes = Vec::new();
+    let other = DigestAlg::Sha256.digest(&[b"hullo"]);
+    assert!(!key.verify_noting(Scheme::RsaPkcs1, DigestAlg::Sha256, &other, &sig, &mut notes).unwrap());
+    assert!(!notes.contains(&weak), "{notes:?}");
+}
+
+#[test]
 fn an_rsa_signature_value_not_below_the_modulus_is_refused() {
     use pdfcraft_sign::keys::{DigestAlg, PssParams, Scheme};
     // RFC 8017 §5.2.2 (RSAVP1): a signature representative s must be below n. Otherwise s and
