@@ -1504,3 +1504,11 @@ fn typed_signature_uses_nonzero_winding_fill() {
     assert!(ap.ends_with("h\nf\n"), "expected non-zero winding fill (`f`), got: {ap}");
     assert!(!ap.contains("f*"), "must not use even-odd fill (`f*`): {ap}");
 }
+
+#[test]
+fn cloud_outline_has_a_bump_budget() {
+    // 50 long edges would each ask for 10,000 bumps of radius 1.
+    let pts: Vec<(f64, f64)> = (0..50).map(|i| (f64::from(i) * std::f64::consts::TAU / 50.0).sin_cos()).map(|(s, c)| (1e7 * c, 1e7 * s)).collect();
+    let bumps = appearance::cloud_path(&pts, 1.0).lines().filter(|l| l.ends_with(" c")).count();
+    assert!((pts.len()..=appearance::MAX_CLOUD_BUMPS + 2 * pts.len()).contains(&bumps), "{bumps} bumps");
+}
