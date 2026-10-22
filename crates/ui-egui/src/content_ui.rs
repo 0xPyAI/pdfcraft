@@ -560,6 +560,13 @@ pub(crate) fn editor(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, ad
             // The box is white in every theme, so the caret must not follow the theme (pale in dark mode) (#655).
             ui.visuals_mut().text_cursor.stroke.color = crate::edit_text_ui::caret_color_on(Color32::WHITE);
             let [cr, cg, cb] = t.style.color.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
+            // Laid out as the page draws it, so opening the box doesn't show it realigned.
+            // shortcut: justified text is shown left-aligned here (TextEdit can't justify), until the editor gets its own layouter.
+            let halign = match t.style.align {
+                pdfcraft_engine::TextAlign::Center => egui::Align::Center,
+                pdfcraft_engine::TextAlign::Right => egui::Align::Max,
+                pdfcraft_engine::TextAlign::Left | pdfcraft_engine::TextAlign::Justify => egui::Align::Min,
+            };
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 let resp = ui.add(
@@ -567,6 +574,7 @@ pub(crate) fn editor(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, ad
                         .font(font)
                         .desired_width(r.width().max(60.0))
                         .desired_rows(1)
+                        .horizontal_align(halign)
                         .background_color(if background_ready { Color32::TRANSPARENT } else { Color32::WHITE })
                         .text_color(Color32::from_rgb(cr, cg, cb))
                         .hint_text(tl!("Type text"))
