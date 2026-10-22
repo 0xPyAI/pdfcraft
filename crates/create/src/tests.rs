@@ -1197,3 +1197,28 @@ fn a_cyclic_indexed_colour_space_is_refused() {
     assert!(out.images.is_empty());
     assert_eq!(out.skipped.len(), 1, "{:?}", out.skipped);
 }
+
+/// A TIFF of `pages` 64×64 gray pages, then (with `unreadable`) one whose samples Create can't read.
+fn gray_tiff(pages: usize, unreadable: bool) -> Vec<u8> {
+    let mut tif = std::io::Cursor::new(Vec::new());
+    let mut enc = tiff::encoder::TiffEncoder::new(&mut tif).unwrap();
+    for _ in 0..pages {
+        enc.write_image::<tiff::encoder::colortype::Gray8>(64, 64, &[128; 64 * 64]).unwrap();
+    }
+    if unreadable {
+        enc.write_image::<tiff::encoder::colortype::RGB32Float>(1, 1, &[0.5; 3]).unwrap();
+    }
+    tif.into_inner()
+}
+
+/// Many small IFDs can each decode to a large page: the pages a TIFF keeps in memory together
+/// are bounded, and embedding one image reads only its first page.
+#[test]
+fn tiff_pages_are_decoded_within_a_total_budget() {
+    let tif = gray_tiff(3, false);
+    assert!(matches!(tiff_pages_within("t.tif", &tif, usize::MAX, 10_000), Err(CreateError::Image(..))), "12 KiB of pages past a 10 KB budget");
+    assert_eq!(tiff_pages_within("t.tif", &tif, usize::MAX, 20_000).unwrap().len(), 3);
+    let tif = gray_tiff(1, true);
+    let mut doc = Document::new_empty();
+    assert!(image_xobject(&mut doc, "t.tif", &tif).is_ok(), "the unreadable last page is never decoded");
+}

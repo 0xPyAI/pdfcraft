@@ -402,8 +402,17 @@ fn decoded(name: &str, bytes: &[u8], format: image::ImageFormat) -> Result<Embed
 /// twice over.
 const MAX_DECODED_BYTES: usize = 2 << 30;
 
-/// Every page of a TIFF (multi-page scans become multi-page PDFs).
-fn tiff_pages(name: &str, bytes: &[u8]) -> Result<Vec<Embedded>, CreateError> {
+/// Most decoded bytes all the pages of one TIFF may take together: its pages stay in memory until
+/// they are embedded, and many small directories can share one compressed strip.
+const MAX_DECODED_TOTAL: usize = 2 * MAX_DECODED_BYTES;
+
+/// The first `wanted` pages of a TIFF (multi-page scans become multi-page PDFs).
+fn tiff_pages(name: &str, bytes: &[u8], wanted: usize) -> Result<Vec<Embedded>, CreateError> {
+    tiff_pages_within(name, bytes, wanted, MAX_DECODED_TOTAL)
+}
+
+/// [`tiff_pages`], refused once the pages kept take more than `budget` bytes.
+fn tiff_pages_within(name: &str, bytes: &[u8], wanted: usize, budget: usize) -> Result<Vec<Embedded>, CreateError> {
     use tiff::ColorType as C;
     use tiff::decoder::{Decoder, DecodingResult, Limits};
     use tiff::tags::Tag;
@@ -415,6 +424,7 @@ fn tiff_pages(name: &str, bytes: &[u8]) -> Result<Vec<Embedded>, CreateError> {
     limits.decoding_buffer_size = MAX_DECODED_BYTES;
     let mut dec = Decoder::new(std::io::Cursor::new(bytes)).map_err(|e| bad(e.to_string()))?.with_limits(limits);
     let mut out = Vec::new();
+    let mut kept = 0usize;
     loop {
         let (w, h) = dec.dimensions().map_err(|e| bad(e.to_string()))?;
         let ct = dec.colortype().map_err(|e| bad(e.to_string()))?;
@@ -469,8 +479,12 @@ fn tiff_pages(name: &str, bytes: &[u8]) -> Result<Vec<Embedded>, CreateError> {
             }
             other => return Err(bad(format!("{other:?} TIFF images aren't supported yet"))),
         };
+        kept = kept.saturating_add(page.data.len()).saturating_add(page.smask.as_ref().map_or(0, |(_, alpha)| alpha.len()));
+        if kept > budget {
+            return Err(bad(format!("the TIFF's pages take more than {} MiB together", budget >> 20)));
+        }
         out.push(page);
-        if !dec.more_images() {
+        if out.len() >= wanted || !dec.more_images() {
             break;
         }
         dec.next_image().map_err(|e| bad(e.to_string()))?;
@@ -526,14 +540,15 @@ pub fn source_kind(name: &str, bytes: &[u8]) -> Option<SourceKind> {
     (lower.ends_with(".txt") || lower.ends_with(".text")).then_some(SourceKind::Text)
 }
 
-/// Detect the image format from its bytes; a TIFF may hold several pages.
-fn embed(name: &str, bytes: &[u8]) -> Result<Vec<Embedded>, CreateError> {
+/// Detect the image format from its bytes; a TIFF may hold several pages, of which the first
+/// `wanted` are read.
+fn embed(name: &str, bytes: &[u8], wanted: usize) -> Result<Vec<Embedded>, CreateError> {
     if bytes.starts_with(&[0xFF, 0xD8]) {
         Ok(vec![jpeg(name, &upright_image::upright(bytes))?])
     } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         Ok(vec![png_image(name, bytes)?])
     } else if is_tiff(bytes) {
-        tiff_pages(name, bytes)
+        tiff_pages(name, bytes, wanted)
     } else if bytes.starts_with(b"BM") {
         Ok(vec![decoded(name, bytes, image::ImageFormat::Bmp)?])
     } else if is_gif(bytes) {
@@ -548,7 +563,7 @@ fn embed(name: &str, bytes: &[u8]) -> Result<Vec<Embedded>, CreateError> {
 /// Embed an image file (its first page, for TIFFs) as an image XObject in `doc`. Returns the
 /// object and the image's natural size in points (from its resolution).
 pub fn image_xobject(doc: &mut Document, name: &str, bytes: &[u8]) -> Result<(ObjRef, (f64, f64)), CreateError> {
-    let img = embed(name, bytes)?.into_iter().next().ok_or_else(|| CreateError::Image(name.into(), "the file has no image".into()))?;
+    let img = embed(name, bytes, 1)?.into_iter().next().ok_or_else(|| CreateError::Image(name.into(), "the file has no image".into()))?;
     let size = (img.px.0 as f64 * 72.0 / img.dpi.0, img.px.1 as f64 * 72.0 / img.dpi.1);
     Ok((add_image(doc, img, &mut Vec::new()), size))
 }
@@ -580,7 +595,7 @@ pub fn from_images_with_resolution(images: &[(String, Vec<u8>)], resolution: Ima
     }
     let mut doc = Document::new_empty();
     let mut profiles = Vec::new();
-    for img in images.iter().map(|(name, bytes)| embed(name, bytes)).collect::<Result<Vec<_>, _>>()?.into_iter().flatten() {
+    for img in images.iter().map(|(name, bytes)| embed(name, bytes, usize::MAX)).collect::<Result<Vec<_>, _>>()?.into_iter().flatten() {
         let dpi = match resolution {
             ImageResolution::Embedded => img.dpi,
             ImageResolution::Dpi(dpi) => (dpi, dpi),
