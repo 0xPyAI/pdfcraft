@@ -62,6 +62,8 @@ pub(crate) fn panel_header(ui: &mut egui::Ui, t: &Tokens, title: &str, lead: Opt
     (go_back, close)
 }
 
+/// The All tools sidebar: Expand (the full view) and Close, then the tool list, the first few
+/// tools until View more shows them all.
 fn all_tools(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
     // Labels distinct from the Combine grid's Expand and Collapse, which can show beside them.
     let (expand, close) = panel_header(ui, t, "All tools", Some(("maximize-2", tl!("Expand all tools"))));

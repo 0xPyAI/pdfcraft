@@ -2712,7 +2712,12 @@ impl PdfCraftApp {
                 self.select_tool(g.id);
             }
             ("left", _) => self.left_open = value != "closed",
-            ("home", _) => self.active = None,
+            ("home", _) => {
+                self.active = None;
+                // With no document open the expanded All tools view covers Home itself, so no
+                // other tab comes forward to put it away.
+                self.all_tools_full = false;
+            }
             ("dialog", _) => {
                 self.dialog = match value {
                     "properties" => Some(Dialog::Properties(PropsTab::Description)),

@@ -36,6 +36,8 @@ fn matches(query: &str, group: &ToolGroup) -> Option<Vec<&'static str>> {
     (!items.is_empty()).then_some(items)
 }
 
+/// Draw the view over the workspace: the title with Collapse, the search field, and each
+/// category's tiles that match the search. Choosing a tile opens that tool's panel.
 pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     // A dialog or prompt over the view owns Escape.
@@ -103,6 +105,9 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     }
 }
 
+/// One tool's tile: its icon and name, then the `items` the search found it by or, when there are
+/// none, its availability (a planned tool is greyed out with its milestone). A name or note cut
+/// short shows in full on hover.
 fn tile(ui: &mut egui::Ui, t: &Tokens, g: &ToolGroup, items: &[&'static str]) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(TILE, Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!(g.label)));

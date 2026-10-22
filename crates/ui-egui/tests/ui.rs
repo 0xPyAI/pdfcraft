@@ -241,6 +241,16 @@ fn another_tab_coming_forward_puts_the_expanded_all_tools_away() {
 }
 
 #[test]
+fn going_home_with_no_document_puts_the_expanded_all_tools_away() {
+    // Home is already the tab in front, so only the option itself can put the view away.
+    let mut h = harness(|app| app.set_option("tools", "full").unwrap());
+    h.state_mut().set_option("home", "").unwrap();
+    h.run_steps(3);
+    assert!(!h.state().all_tools_full);
+    h.get_by_label_contains("Welcome to PdfCraft");
+}
+
+#[test]
 fn expanding_all_tools_from_read_mode_restores_the_right_panel() {
     use pdfcraft_ui_egui::{Mode, RightPanel};
     let mut h = harness(|app| app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens"));
