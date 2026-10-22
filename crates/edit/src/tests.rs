@@ -6355,3 +6355,14 @@ fn reading_keeps_dotted_leader_entries_whole_and_in_order() {
         ]
     );
 }
+
+#[test]
+fn added_text_is_wrapped_once_per_write() {
+    let mut doc = fixture();
+    let lines: Vec<String> = (0..40).map(|i| format!("line {i}")).collect();
+    let text = AddedText { rect: [72.0, 100.0, 300.0, 700.0], text: lines.join("\n"), size: 10.0, align: Align::Justify, ..AddedText::default() };
+    added::WRAP_CALLS.with(|c| c.set(0));
+    add_content(&mut doc, 0, &Content::Text(text)).unwrap();
+    let calls = added::WRAP_CALLS.with(std::cell::Cell::get);
+    assert!(calls <= 4, "the text was wrapped {calls} times for 40 lines");
+}
