@@ -1131,6 +1131,14 @@ impl Layouter<'_> {
         }
     }
 
+    /// The face a field's text is laid out in: at its horizontal scale when the layout draws
+    /// the text itself (a non-interactive field), as designed when the forms layer draws it in
+    /// a widget, whose appearances have no horizontal scaling.
+    fn field_text_face(f: &Field, font: &Font) -> Face {
+        let face = Face::of(font);
+        if f.access == Access::NonInteractive { face } else { face.unscaled() }
+    }
+
     /// The height the text of a multi-line text field takes (its value in the data, else the
     /// template's), for a field without a fixed height, which grows to hold its text. `ctx`
     /// is the field's own (its SOM ends in the field). Zero for anything else.
@@ -1147,9 +1155,11 @@ impl Layouter<'_> {
         };
         let w = (inner_w - beside - f.ui_margin.horizontal() - 4.0).max(1.0);
         let font = ctx.font.apply(&f.common.font);
-        text::measure_height(&text::plain(value.trim_end()), w, &ctx.para, &Face::of(&font), &|_| String::new())
+        text::measure_height(&text::plain(value.trim_end()), w, &ctx.para, &Self::field_text_face(f, &font), &|_| String::new())
     }
 
+    /// The height of an exclusion group's fields at `inner_w`, by the group's layout: stacked
+    /// top to bottom, at their own positions, or packed in rows.
     fn group_height(&self, g: &ExclGroup, inner_w: f64, ctx: &Ctx, depth: usize) -> f64 {
         let nodes: Vec<Node> = g.fields.iter().map(|f| Node::Field(Box::new(f.clone()))).collect();
         match g.layout {
@@ -1657,14 +1667,16 @@ impl Layouter<'_> {
                     right: f.ui_margin.right + 2.0,
                 };
                 let para = Para { v_align: VAlign::Top, ..fctx.para.clone() };
-                let block = text::layout(&text::plain(value.trim_end()), ui.inset(&m), &para, &Face::of(&fctx.font), &|_| String::new());
+                // In the face it was measured in, so it takes the lines it was given.
+                let face = Self::field_text_face(f, &fctx.font);
+                let block = text::layout(&text::plain(value.trim_end()), ui.inset(&m), &para, &face, &|_| String::new());
                 return self.push_block(block);
             }
         }
         let face = match (&f.ui, &f.caption) {
             // Buttons show their caption in the caption's font.
-            (Ui::Button, Some(cap)) => Face::of(&ctx.font.apply(&cap.font)),
-            _ => Face::of(&fctx.font),
+            (Ui::Button, Some(cap)) => Face::of(&ctx.font.apply(&cap.font)).unscaled(),
+            _ => Face::of(&fctx.font).unscaled(),
         };
         let h_align = match (&f.ui, &f.caption) {
             (Ui::Button, Some(cap)) => ctx.para.apply(&cap.para).h_align,

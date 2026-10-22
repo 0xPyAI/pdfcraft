@@ -16,14 +16,18 @@ use crate::layout::WidgetKind;
 use crate::model::*;
 use crate::script::{NodeKind, Overrides, apply_overrides, fields_by_som, form_tree, overrides, rerender, set_overrides};
 
+/// The widgets laid out on `page`, in order.
 fn widgets(page: &Page) -> Vec<&Widget> {
     page.items.iter().filter_map(|i| if let Item::Widget(w) = i { Some(w.as_ref()) } else { None }).collect()
 }
 
+/// The text of each text span laid out on `page`, in order.
 fn texts(page: &Page) -> Vec<String> {
     page.items.iter().filter_map(|i| if let Item::Text(s) = i { Some(s.text.clone()) } else { None }).collect()
 }
 
+/// Measurements in points, inches, millimeters and centimeters convert to points, a bare
+/// number is points, and an `em` length, a non-number or a NaN is `None`.
 #[test]
 fn measurements_convert_to_points() {
     assert_eq!(measure("72pt"), Some(72.0));
@@ -36,6 +40,113 @@ fn measurements_convert_to_points() {
     assert_eq!(measure("NaNpt"), None);
 }
 
+/// Two draws of the same text, one at `fontHorizontalScale="80%"`, each 90% as wide as the
+/// text is at full width, and a rich-text draw condensed to half by its span style.
+fn scaled_text_template() -> (String, &'static str) {
+    const TEXT: &str = "Approving authority name and title";
+    let w = pdfcraft_fonts::helvetica_width(TEXT, 10.0) * 0.9;
+    let xdp = format!(
+        r##"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <draw name="narrow" w="{w}pt" h="0.5in"><value><text>{TEXT}</text></value><font typeface="Arial" size="10pt" fontHorizontalScale="80%"/></draw>
+ <draw name="plain" w="{w}pt" h="0.5in"><value><text>{TEXT}</text></value><font typeface="Arial" size="10pt"/></draw>
+ <draw name="rich" w="7in" h="0.3in"><value><exData contentType="text/html"><body xmlns="http://www.w3.org/1999/xhtml"><p>Full <span style="xfa-font-horizontal-scale:50%">half</span></p></body></exData></value><font typeface="Arial" size="10pt"/></draw>
+</subform>
+</template></xdp:xdp>"##
+    );
+    (xdp, TEXT)
+}
+
+/// `fontHorizontalScale` is read as a percentage and text is measured at it: the 80% draw
+/// fits its box on one line where the full-width one takes two, and a span's own scale
+/// applies to that span alone.
+#[test]
+fn horizontally_scaled_text_is_measured_and_drawn_narrower() {
+    let (xdp, text) = scaled_text_template();
+    let (tpl, _) = parse(&xdp).unwrap();
+    let Node::Draw(narrow) = &tpl.root.children[0] else { panic!() };
+    assert_eq!(narrow.common.font.h_scale, Some(0.8), "fontHorizontalScale is a percentage");
+    let form = layout_xml(&xdp).unwrap();
+    let spans: Vec<&text::Span> = form.pages[0].items.iter().filter_map(|i| if let Item::Text(s) = i { Some(s) } else { None }).collect();
+    let lines = |scale: f64, words: &[&str]| {
+        let mut b: Vec<i64> = spans
+            .iter()
+            .filter(|s| s.face.h_scale == scale && words.iter().any(|w| s.text.contains(w)))
+            .map(|s| (s.baseline * 100.0).round() as i64)
+            .collect();
+        b.dedup();
+        b.len()
+    };
+    let words: Vec<&str> = text.split(' ').collect();
+    // At 80% the text is 72% of its full width: it fits the 90% box on one line.
+    assert_eq!(lines(0.8, &words), 1, "{spans:?}");
+    // At full width it doesn't: two lines.
+    assert_eq!(lines(1.0, &["Approving", "title"]), 2, "{spans:?}");
+    // A span's own scale applies to it alone.
+    let half = spans.iter().find(|s| s.text.contains("half")).expect("the half span");
+    let full = spans.iter().find(|s| s.text.contains("Full")).expect("the full span");
+    assert_eq!((half.face.h_scale, full.face.h_scale), (0.5, 1.0));
+    assert!((half.face.width("half") - full.face.width("half") / 2.0).abs() < 1e-9);
+}
+
+/// A growing non-interactive field is measured in the face its text is drawn in: condensed,
+/// its text takes fewer lines and the field grows only to hold them.
+#[test]
+fn a_non_interactive_field_is_measured_at_the_scale_its_text_is_drawn() {
+    // A growing, non-interactive text field (drawn as text by the layout, not as a widget),
+    // then a draw below it. However condensed the field's text is, the draw sits the same
+    // distance below its last line: the field is as tall as the lines it shows.
+    // Long enough to take more than a multi-line field's three lines at either scale.
+    const TEXT: &str = "Remarks that run over several lines of a narrow box, and then over several more lines again, until the box has grown well past the three lines it starts with";
+    let gap = |scale: u32| {
+        let xdp = format!(
+            r##"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <field name="note" w="100pt" access="nonInteractive"><ui><textEdit multiLine="1"/></ui><value><text>{TEXT}</text></value><font typeface="Arial" size="10pt" fontHorizontalScale="{scale}%"/></field>
+ <draw name="after" w="100pt" h="20pt"><value><text>AFTER</text></value><font typeface="Arial" size="10pt"/></draw>
+</subform>
+</template></xdp:xdp>"##
+        );
+        let form = layout_xml(&xdp).unwrap();
+        let spans: Vec<&text::Span> = form.pages[0].items.iter().filter_map(|i| if let Item::Text(s) = i { Some(s) } else { None }).collect();
+        let after = spans.iter().find(|s| s.text.contains("AFTER")).expect("the draw").baseline;
+        let lines: std::collections::BTreeSet<i64> =
+            spans.iter().filter(|s| !s.text.contains("AFTER")).map(|s| (s.baseline * 100.0).round() as i64).collect();
+        let last = *lines.iter().next_back().expect("the field's lines") as f64 / 100.0;
+        (lines.len(), after - last)
+    };
+    let (full_lines, full_gap) = gap(100);
+    let (narrow_lines, narrow_gap) = gap(60);
+    assert!(narrow_lines < full_lines, "condensed, the text takes fewer lines: {narrow_lines} vs {full_lines}");
+    assert!((narrow_gap - full_gap).abs() < 0.01, "the field shrinks with its text: gap {narrow_gap} vs {full_gap}");
+}
+
+/// Condensed text is written with `Tz` inside a `q`/`Q` pair of its own, and full-width text
+/// sets no scale, so none carries over from the text before it.
+#[test]
+fn horizontally_scaled_text_is_written_with_tz_inside_its_own_graphics_state() {
+    let (xdp, _) = scaled_text_template();
+    let mut doc = Document::open(Arc::new(shell(&xdp))).unwrap();
+    render_into(&mut doc).unwrap();
+    let root = doc.get(doc.root().unwrap());
+    let pages = doc.resolve(root.as_dict().unwrap().get(b"Pages").unwrap());
+    let kid = pages.as_dict().unwrap().get(b"Kids").unwrap().as_array().unwrap()[0].clone();
+    let page = doc.resolve(&kid);
+    let contents = doc.resolve(page.as_dict().unwrap().get(b"Contents").unwrap());
+    let Object::Stream(c) = &*contents else { panic!("a content stream") };
+    let ops = String::from_utf8_lossy(&c.decoded().unwrap()).into_owned();
+    let scaled: Vec<&str> = ops.lines().filter(|l| l.contains(" Tz ")).collect();
+    assert!(!scaled.is_empty() && scaled.iter().all(|l| l.starts_with("q BT ") && l.ends_with(" ET Q")), "{ops}");
+    assert!(scaled.iter().any(|l| l.contains(" 80 Tz ")) && scaled.iter().any(|l| l.contains(" 50 Tz ")), "{ops}");
+    // Full-width text sets no scale, and none is left over from the condensed text before it.
+    assert!(ops.lines().filter(|l| l.contains(" Tj ") && !l.contains(" Tz ")).all(|l| l.starts_with("BT ")), "{ops}");
+}
+
+/// The sample template parses without warnings into what the layout uses: its page areas,
+/// page-number draws, rich-text title, field font, caption and widget border, check box,
+/// date field, radio group, table columns and page break all come through.
 #[test]
 fn the_template_parses_with_fonts_captions_and_rich_text() {
     let (tpl, warnings) = parse(&template(2)).unwrap();

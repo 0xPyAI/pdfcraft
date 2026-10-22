@@ -75,9 +75,14 @@ pub struct Face {
     pub size: f64,
     pub color: [f64; 3],
     pub underline: bool,
+    /// Horizontal scale of the glyphs (`fontHorizontalScale`), as a fraction: widths are
+    /// measured at it and the text is written with `Tz`.
+    pub h_scale: f64,
 }
 
 impl Face {
+    /// The face a resolved font is drawn in: the standard-14 family its typeface maps to,
+    /// with its size and horizontal scale clamped to a drawable range.
     pub fn of(font: &Font) -> Face {
         Face {
             family: Family::of(&font.typeface),
@@ -86,9 +91,12 @@ impl Face {
             size: font.size.clamp(1.0, 300.0),
             color: font.color.0,
             underline: font.underline,
+            h_scale: font.h_scale.clamp(0.01, 10.0),
         }
     }
 
+    /// This face with what a rich-text run sets in place of its own: weight, posture,
+    /// underline, size and horizontal scale. The family and color stay.
     pub fn with_run(&self, run: &Run) -> Face {
         Face {
             family: self.family,
@@ -97,20 +105,30 @@ impl Face {
             size: run.size.unwrap_or(self.size).clamp(1.0, 300.0),
             color: self.color,
             underline: run.underline.unwrap_or(self.underline),
+            h_scale: run.h_scale.unwrap_or(self.h_scale).clamp(0.01, 10.0),
         }
     }
 
+    /// This face as designed, without a horizontal scale: field text is drawn by the forms
+    /// layer, whose appearances have none, so it is measured that way too.
+    pub fn unscaled(self) -> Face {
+        Face { h_scale: 1.0, ..self }
+    }
+
+    /// The resource name of this face's standard font, as content streams and `/DA` strings
+    /// refer to it.
     pub fn resource_name(&self) -> &'static str {
         self.family.resource_name(self.bold, self.italic)
     }
 
     /// Advance of `s` at this face's size.
     pub fn width(&self, s: &str) -> f64 {
-        match self.family {
+        let designed = match self.family {
             Family::Courier => s.chars().count() as f64 * 0.6 * self.size,
             Family::Helvetica => pdfcraft_fonts::helvetica_width(s, self.size) * if self.bold { 1.04 } else { 1.0 },
             Family::Times => pdfcraft_fonts::helvetica_width(s, self.size) * if self.bold { 0.96 } else { 0.92 },
-        }
+        };
+        designed * self.h_scale
     }
 }
 
