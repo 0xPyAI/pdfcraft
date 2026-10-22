@@ -2694,3 +2694,6 @@ key	Space	Mellomrom
 # Page gaps (AI-assisted, not separately native-reviewed)
 	Show gaps between pages	Vis mellomrom mellom sidene
 	Hide gaps to join page edges. Margins inside the PDF remain unchanged.	Skjul mellomrommene slik at sidekantene møtes. Margene inne i PDF-en endres ikke.
+
+# AI-assisted additions for restoring the last view (#1767) (2026-10-22); not reviewed by a native speaker.
+	Restore the last view (page, zoom and page display) when a document is opened again	Gjenopprett den siste visningen (side, zoom og sidevisning) når et dokument åpnes igjen

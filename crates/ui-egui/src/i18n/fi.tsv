@@ -2783,3 +2783,6 @@ theme	Appearance	Teema
 	field names can't contain a period: {name}	kenttien nimissä ei voi olla pistettä: {name}
 	two cells would both be named {name}	kahdella solulla olisi sama nimi {name}
 	a field named {name} already exists	kenttä nimeltä {name} on jo olemassa
+
+# AI-assisted additions for restoring the last view (#1767) (2026-10-22); not reviewed by a native speaker.
+	Restore the last view (page, zoom and page display) when a document is opened again	Palauta viimeisin näkymä (sivu, zoomaus ja sivunäyttö), kun asiakirja avataan uudelleen

@@ -2751,3 +2751,6 @@ theme	Appearance	Tampilan
 	field names can't contain a period: {name}	nama kolom tidak boleh berisi titik: {name}
 	two cells would both be named {name}	dua sel akan sama-sama bernama {name}
 	a field named {name} already exists	kolom bernama {name} sudah ada
+
+# AI-assisted additions for restoring the last view (#1767) (2026-10-22); not reviewed by a native speaker.
+	Restore the last view (page, zoom and page display) when a document is opened again	Pulihkan tampilan terakhir (halaman, zoom, dan tampilan halaman) saat dokumen dibuka lagi
