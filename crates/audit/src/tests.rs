@@ -644,3 +644,34 @@ fn later_text_on_the_line_does_not_clear_an_earlier_cover() {
     assert_eq!(findings.len(), 1, "{findings:?}");
     assert!(findings[0].covered_text.contains("SECRET"), "{findings:?}");
 }
+
+/// Many covers over the same long line repeat its text in every finding: a small file must not
+/// expand into an unbounded report. Past the budget the audit fails rather than truncate.
+#[test]
+fn covered_text_across_findings_is_bounded() {
+    let text = "X".repeat(60_000);
+    let mut content = format!("BT /F1 1 Tf 0 700 Td ({text}) Tj ET\n0 g\n").into_bytes();
+    for i in 0..1_200 {
+        content.extend_from_slice(format!("-{i} 690 50000 20 re f\n").as_bytes());
+    }
+    let result = audit_redactions(&open(one_page(&content, "")));
+    assert!(matches!(result, Err(crate::AuditError::TooMuchOutput)), "{:?}", result.map(|f| f.len()));
+}
+
+/// Covers compared against lines are bounded per page, so content that is quadratic in its
+/// covers and lines fails the audit instead of running for hours.
+#[test]
+fn cover_and_line_comparisons_are_bounded() {
+    let mut content = Vec::new();
+    for i in 0..20 {
+        content.extend_from_slice(format!("BT /F1 12 Tf 72 {} Td (Line {i}) Tj ET\n", 700 - 14 * i).as_bytes());
+    }
+    for _ in 0..20 {
+        content.extend_from_slice(b"1 g 0 0 10 10 re f\n");
+    }
+    let doc = open(one_page(&content, ""));
+    let limits = crate::Limits { comparisons: 399, covered_text: usize::MAX };
+    assert!(matches!(crate::audit(&doc, limits), Err(crate::AuditError::TooManyComparisons)));
+    let limits = crate::Limits { comparisons: 400, covered_text: usize::MAX };
+    assert!(crate::audit(&doc, limits).expect("within the budget").is_empty());
+}

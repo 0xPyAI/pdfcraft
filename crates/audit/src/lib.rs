@@ -79,6 +79,10 @@ pub enum AuditError {
     TooDeep,
     #[error("page has a malformed /Annots entry")]
     BadAnnots,
+    #[error("page has more covers and text lines than the audit compares")]
+    TooManyComparisons,
+    #[error("covered text exceeds the audit's report budget")]
+    TooMuchOutput,
     #[error(transparent)]
     Cos(#[from] pdfcraft_cos::CosError),
     #[error(transparent)]
@@ -95,41 +99,77 @@ const WORD_FRACTION: f64 = 0.5;
 const COVER_CONTRAST: f64 = 3.0;
 
 /// Audit every page for faux redactions and unapplied redaction marks. Fails closed: any
-/// content that cannot be decoded is returned as an error, never as an empty finding list.
+/// content that cannot be decoded, or that needs more work or report than the audit's bounds, is
+/// returned as an error, never as an empty finding list.
 pub fn audit_redactions(doc: &Document) -> Result<Vec<AuditFinding>, AuditError> {
+    audit(doc, Limits::DEFAULT)
+}
+
+/// Work and output bounds for one audit.
+#[derive(Clone, Copy)]
+struct Limits {
+    /// Cover-against-line comparisons per page.
+    comparisons: usize,
+    /// Bytes of covered text across all findings.
+    covered_text: usize,
+}
+
+impl Limits {
+    /// Every cover is compared with every line of its page, and each finding repeats the text
+    /// it covers, so both grow with the square of the content: a few megabytes of covers over
+    /// one long line would otherwise take hours and gigabytes.
+    const DEFAULT: Limits = Limits { comparisons: 50_000_000, covered_text: 64 << 20 };
+}
+
+/// The work and report the audit has spent against its [`Limits`].
+struct Budget {
+    limits: Limits,
+    comparisons: usize,
+    covered_text: usize,
+}
+
+impl Budget {
+    /// The text of the `lines` that `hides`, joined with single spaces.
+    fn hidden_text(&mut self, lines: &[TextLine], hides: impl Fn(&TextLine) -> bool) -> Result<String, AuditError> {
+        self.comparisons = self.comparisons.saturating_add(lines.len());
+        if self.comparisons > self.limits.comparisons {
+            return Err(AuditError::TooManyComparisons);
+        }
+        let mut covered = String::new();
+        for line in lines.iter().filter(|l| hides(l)) {
+            let text = line.text.trim();
+            self.covered_text = self.covered_text.saturating_add(text.len() + 1);
+            if self.covered_text > self.limits.covered_text {
+                return Err(AuditError::TooMuchOutput);
+            }
+            if !covered.is_empty() {
+                covered.push(' ');
+            }
+            covered.push_str(text);
+        }
+        Ok(covered)
+    }
+}
+
+fn audit(doc: &Document, limits: Limits) -> Result<Vec<AuditFinding>, AuditError> {
+    let mut budget = Budget { limits, comparisons: 0, covered_text: 0 };
     let mut out = Vec::new();
     for (n, page) in pdfcraft_model::pages(doc).iter().enumerate() {
         let lines = pdfcraft_edit::text_lines(doc, n).map_err(|e| AuditError::Text(n, e.to_string()))?;
+        budget.comparisons = 0;
         // 1. Opaque filled rectangles over extractable text.
         for r in cover::filled_rects(doc, &page.dict)? {
-            let mut covered = String::new();
-            for line in &lines {
-                if is_cover(&r, line) {
-                    if !covered.is_empty() {
-                        covered.push(' ');
-                    }
-                    covered.push_str(line.text.trim());
-                }
-            }
+            let covered = budget.hidden_text(&lines, |line| is_cover(&r, line))?;
             if !covered.trim().is_empty() {
                 out.push(AuditFinding { page: n, kind: FindingKind::CoveredText, rect: r.rect, covered_text: covered });
             }
         }
         // 2. Annotation covers over extractable text.
         for annot in annots(doc, &page.dict)? {
-            let mut covered = String::new();
-            for line in &lines {
-                let hidden = match &annot {
-                    AnnotationCover::Redact(rect) => covers(rect, line),
-                    AnnotationCover::Square { rect, rgb } => covers(rect, line) && contrast(line.color, *rgb) < COVER_CONTRAST,
-                };
-                if hidden {
-                    if !covered.is_empty() {
-                        covered.push(' ');
-                    }
-                    covered.push_str(line.text.trim());
-                }
-            }
+            let covered = budget.hidden_text(&lines, |line| match &annot {
+                AnnotationCover::Redact(rect) => covers(rect, line),
+                AnnotationCover::Square { rect, rgb } => covers(rect, line) && contrast(line.color, *rgb) < COVER_CONTRAST,
+            })?;
             if !covered.trim().is_empty() {
                 let (kind, rect) = match annot {
                     AnnotationCover::Redact(rect) => (FindingKind::UnappliedMark, rect),
