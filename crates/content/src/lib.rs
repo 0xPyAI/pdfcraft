@@ -219,17 +219,36 @@ fn inline_image(data: &[u8], pos: usize) -> Result<(Dict, Vec<u8>, usize), usize
                 return Ok((dict, Vec::new(), data.len()));
             }
             // Without an `EI` after it, the image runs to the end of the stream.
-            return Err(end_of_image(data, at).map_or(data.len(), |(_, end)| end));
+            return Err(end_of_image(data, at, b"").map_or(data.len(), |(_, end)| end));
         };
         dict.set(k, v);
     }
     // One whitespace byte separates ID from the data.
     let begin = (lx.pos + 1).min(data.len());
-    let end = unfiltered_image_end(data, begin, &dict).or_else(|| end_of_image(data, begin));
+    let end = unfiltered_image_end(data, begin, &dict).or_else(|| end_of_image(data, begin, filter_eod(&dict)));
     Ok(match end {
         Some((end_data, end)) => (dict, data[begin..end_data].to_vec(), end),
         None => (dict, data[begin..].to_vec(), data.len()),
     })
+}
+
+/// The end-of-data marker (`>` for ASCIIHex, `~>` for ASCII85) of the outer stream filter, if any.
+fn filter_eod(dict: &Dict) -> &'static [u8] {
+    for key in [b"Filter".as_slice(), b"F"] {
+        if let Some(filter) = dict.get(key) {
+            let name = match filter {
+                Object::Name(name) => Some(name.as_slice()),
+                Object::Array(filters) => filters.first().and_then(Object::as_name),
+                _ => None,
+            };
+            return match name {
+                Some(b"ASCIIHexDecode" | b"AHx") => b">",
+                Some(b"ASCII85Decode" | b"A85") => b"~>",
+                _ => b"",
+            };
+        }
+    }
+    b""
 }
 
 /// An unfiltered image's samples determine its length, including byte padding per row.
@@ -293,23 +312,24 @@ fn unfiltered_image_end(data: &[u8], begin: usize, dict: &Dict) -> Option<(usize
     let row = width.checked_mul(components)?.checked_mul(bits)?.div_ceil(8);
     let end_data = begin.checked_add(row.checked_mul(height)?)?;
     let after = data.get(end_data..)?;
-    if !after.first().is_some_and(|b| is_ws(*b)) {
+    let separator = after.iter().position(|b| !is_ws(*b))?;
+    if separator == 0 && data.get(end_data.checked_sub(1)?).is_some_and(|b| is_ws(*b)) {
         return None;
     }
-    let separator = after.iter().position(|b| !is_ws(*b))?;
     let ei = end_data.checked_add(separator)?;
     let end = ei.checked_add(2)?;
     if data.get(ei..end) == Some(b"EI") && data.get(end).is_none_or(|b| is_ws(*b) || is_delim(*b)) { Some((end_data, end)) } else { None }
 }
 
 /// Where inline image data starting at `begin` ends: (end of the data, position after `EI`). The
-/// data ends at whitespace + `EI` + (whitespace, a delimiter or the end).
-fn end_of_image(data: &[u8], begin: usize) -> Option<(usize, usize)> {
+/// data ends at whitespace (or `eod`: `>` for ASCIIHex, `~>` for ASCII85) + `EI` + (whitespace,
+/// a delimiter or the end).
+fn end_of_image(data: &[u8], begin: usize, eod: &[u8]) -> Option<(usize, usize)> {
     let mut i = begin;
     while i + 2 <= data.len() {
         if data[i] == b'E'
             && data.get(i + 1) == Some(&b'I')
-            && (i == begin || is_ws(data[i - 1]))
+            && (i == begin || is_ws(data[i - 1]) || (!eod.is_empty() && data[begin..i].ends_with(eod)))
             && data.get(i + 2).is_none_or(|b| is_ws(*b) || is_delim(*b))
         {
             let end_data = if i > begin && is_ws(data[i - 1]) { i - 1 } else { i };
