@@ -1037,8 +1037,9 @@ const LOCKED: i64 = 128;
 /// An existing annotation an import must never replace, move or unlock: one the user locked, a
 /// redaction mark (replacing it would drop the region the user marked to remove), or a form
 /// widget or field (replacing it would set the field's value and policy around the form setter).
-fn import_protected(x: &Dict) -> bool {
-    x.int(b"F").unwrap_or(0) & LOCKED != 0 || matches!(x.name(b"Subtype"), Some(b"Redact" | b"Widget")) || x.contains(b"FT")
+fn import_protected(doc: &Document, x: &Dict) -> bool {
+    let flags = x.get(b"F").and_then(|f| doc.resolve(f).as_int()).unwrap_or(0);
+    flags & LOCKED != 0 || matches!(x.name(b"Subtype"), Some(b"Redact" | b"Widget")) || x.contains(b"FT")
 }
 
 fn place(doc: &mut Document, page_ref: ObjRef, mut d: Dict) -> Result<ObjRef, DataError> {
@@ -1089,7 +1090,7 @@ fn place(doc: &mut Document, page_ref: ObjRef, mut d: Dict) -> Result<ObjRef, Da
     for a in annots {
         let existing = a.as_ref().and_then(|r| doc.get(r).as_dict().cloned());
         let same = nm.is_some() && existing.as_ref().and_then(|x| x.get(b"NM").and_then(|n| doc.resolve(n).as_string().map(|s| s.to_text()))) == nm;
-        if same && existing.as_ref().is_some_and(import_protected) {
+        if same && existing.as_ref().is_some_and(|x| import_protected(doc, x)) {
             clash = true;
             kept.push(a);
         } else if same {

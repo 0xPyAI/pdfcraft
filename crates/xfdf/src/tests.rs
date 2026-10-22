@@ -1842,3 +1842,26 @@ fn xfdf_line_ending_names_are_escaped() {
     let want = String::from_utf8(hostile).unwrap();
     assert_eq!((el.attribute("head"), el.attribute("tail")), (Some(want.as_str()), Some(want.as_str())));
 }
+
+/// A comment locked through an indirect `/F` is as protected from a same-named import as one
+/// with the flag written inline.
+#[test]
+fn a_comment_locked_by_an_indirect_flag_is_not_replaced_by_an_import() {
+    let mut doc = blank();
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    let flag = doc.add(Object::Int(128)); // Locked
+    let mut note = Dict::new();
+    note.set(b"Type".to_vec(), Object::name("Annot"));
+    note.set(b"Subtype".to_vec(), Object::name("Text"));
+    note.set(b"NM".to_vec(), PdfString::text("n1"));
+    note.set(b"Rect".to_vec(), Object::Array(vec![10.into(), 10.into(), 30.into(), 30.into()]));
+    note.set(b"F".to_vec(), Object::Ref(flag));
+    let note = doc.add(Object::Dict(note));
+    doc.update_dict(page, |p| p.set(b"Annots".to_vec(), Object::Array(vec![Object::Ref(note)]))).unwrap();
+    let before = doc.get(note);
+    let xfdf = br#"<xfdf><annots><text page="0" name="n1" rect="0,0,1,1"/></annots></xfdf>"#;
+    assert_eq!(import(&mut doc, xfdf).unwrap().comments, 1);
+    let annots = doc.get(page).as_dict().and_then(|p| p.get(b"Annots").and_then(Object::as_array).cloned()).unwrap();
+    assert!(annots.contains(&Object::Ref(note)), "the locked comment was replaced");
+    assert_eq!(doc.get(note), before, "the locked comment was changed");
+}
