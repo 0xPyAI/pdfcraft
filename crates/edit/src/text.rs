@@ -255,6 +255,9 @@ impl TextState {
     ///
     /// Only fill, stroke and fill-then-stroke (`Tr` 0–2) are restated: invisible text is revealed
     /// by [`reveal_ops`] and clipping text is refused, so neither is ever drawn this way.
+    ///
+    /// A `gs` has no inverse, so a selection `current` has and this state doesn't stays in force:
+    /// run these inside a `q`/`Q` that starts from `current`, one per state drawn.
     fn paint_ops(&self, current: &TextState) -> Vec<Op> {
         let n = pdfcraft_content::num;
         let mut v = Vec::new();
@@ -263,6 +266,8 @@ impl TextState {
         for name in self.ext_gstate.iter().skip(shared) {
             v.push(Op::new("gs", vec![Object::Name(name.clone())]));
         }
+        // A reselected ExtGState may set `/LW`, so the width (already the effective one) follows it.
+        let reselected = !v.is_empty();
         if self.stroke != current.stroke {
             if self.stroke.is_empty() {
                 // The initial stroke colour: black in DeviceGray.
@@ -272,7 +277,7 @@ impl TextState {
             }
         }
         let width = self.line_width.unwrap_or(1.0);
-        if width != current.line_width.unwrap_or(1.0) {
+        if reselected || width != current.line_width.unwrap_or(1.0) {
             v.push(Op::new("w", vec![n(width)]));
         }
         if (0..=2).contains(&self.render_mode) && self.render_mode != current.render_mode {
@@ -660,7 +665,7 @@ struct Ts {
     unreadable: Option<Rc<str>>,
     /// The operators that set the current stroke colour (`G`, `RG`, `K`, or `CS` + `SC`/`SCN`).
     stroke: Vec<Op>,
-    /// The line width a `w` set (`None`: the initial 1.0).
+    /// The line width a `w` or an ExtGState's `/LW` set (`None`: the initial 1.0).
     line_width: Option<f64>,
     /// The ExtGState resources selected with `gs`, oldest first (see [`select_gs`]).
     ext_gstate: Vec<Vec<u8>>,
@@ -1147,6 +1152,9 @@ fn interpret(
                 let params = op.name(0).and_then(|name| states.get(name)).map(|p| doc.resolve(p));
                 if let Some(params) = params.as_deref().and_then(Object::as_dict) {
                     ts.gs.apply(doc, params);
+                    // `/LW` sets the line width as `w` does (ISO 32000-2 §8.4.5).
+                    let lw = params.get(b"LW").and_then(|w| doc.resolve(w).as_f64()).filter(|w| w.is_finite());
+                    ts.line_width = lw.or(ts.line_width);
                 }
             }
             b"Do" => {
@@ -1426,7 +1434,11 @@ fn text_lines_in(doc: &Document, p: &pdfcraft_model::Page, actual_text: bool) ->
                 && (s.text.trim().is_empty() || lines.last().is_some_and(|l| same_font(l, &s.font, &s.base_font, s.face.as_deref())))
                 && (s.text.trim().is_empty()
                     || lines.last().is_some_and(|l| {
-                        (s.size - l.size).abs() < 0.01 && s.bold == l.bold && s.italic == l.italic && fill_color(&s.state.fill) == l.color
+                        (s.size - l.size).abs() < 0.01
+                            && s.bold == l.bold
+                            && s.italic == l.italic
+                            && fill_color(&s.state.fill) == l.color
+                            && same_paint(l, &s.state)
                     }))
                 && near
                 // An OCR layer is one text object over the whole scan: its words continue a line
@@ -1532,7 +1544,11 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
             && (s.text.trim().is_empty() || lines.last().is_some_and(|l| same_font(l, &s.font, &s.base_font, s.face.as_deref())))
             && (s.text.trim().is_empty()
                 || lines.last().is_some_and(|l| {
-                    (s.size - l.size).abs() < 0.01 && s.bold == l.bold && s.italic == l.italic && fill_color(&s.state.fill) == l.color
+                    (s.size - l.size).abs() < 0.01
+                        && s.bold == l.bold
+                        && s.italic == l.italic
+                        && fill_color(&s.state.fill) == l.color
+                        && same_paint(l, &s.state)
                 }))
             && pen.continues(&s, if bt == s.bt { 3.0 } else { 1.5 }).0
     });
@@ -1890,6 +1906,26 @@ fn fonts_shown(doc: &Document, page: &Dict, resources: &Dict) -> Option<std::col
 /// another subset of the same face.
 fn same_font(line: &TextLine, font: &[u8], base_font: &str, face: Option<&str>) -> bool {
     line.font.as_bytes() == font || same_base_font(&line.base_font, base_font) || (line.face.is_some() && line.face.as_deref() == face)
+}
+
+/// Whether a run painted with `ts` continues `line` as it is painted: a line is rewritten in the
+/// state of its first run, so a `Tr`, stroke colour or line width that changes partway starts
+/// another run (see [`TextState::paint_ops`]; the `gs` parameters are compared as [`Paint`]).
+/// The stroke colour and width only count for text that is stroked, so a rule drawn between two
+/// words doesn't split their line.
+///
+/// Only the visible modes (`Tr` 0–2) that `paint_ops` restates are compared: a line that goes on
+/// as invisible or clipping text stays one line, which the clipping refusal reads whole (#3447).
+///
+/// Known gap: two ExtGStates with the same transparency but another parameter that [`Paint`]
+/// doesn't compare (a dash `/D`, a line cap `/LC`) still join one line, which is then rewritten
+/// with the first run's selections. Comparing the names here would split lines #3310 keeps whole.
+fn same_paint(line: &TextLine, ts: &Ts) -> bool {
+    let a = &line.origin.state;
+    let visible = |m: i64| (0..=2).contains(&m);
+    let same_mode = a.render_mode == ts.render_mode || !visible(a.render_mode) || !visible(ts.render_mode);
+    let stroked = matches!((a.render_mode, ts.render_mode), (1 | 2, 1 | 2));
+    same_mode && (!stroked || (a.stroke == ts.stroke && a.line_width == ts.line_width))
 }
 
 /// Whether two `/BaseFont` names name the same font: a subset's six-letter tag and `+` prefix do

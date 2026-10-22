@@ -811,9 +811,6 @@ pub(super) fn rewrite_styled_block(
         .any(|(i, op)| matches!(op.op.as_slice(), b"Tj" | b"TJ" | b"'" | b"\"") && !drop.contains(&(o.bt_op + i)));
     // What is in force where the rewrite is drawn, and what the text after it expects.
     let after = if split { &o.state } else { &o.bt_state };
-    // How the block paints text so far: each run restates what its source set inside its text
-    // object (`gs`, stroke, line width, `Tr`; #3508/#3509) when it differs.
-    let mut paint = after.clone();
     for (row, _) in rows.iter().zip(&kept).filter(|(_, k)| !**k) {
         let text: String = row.iter().map(|v| v.0).collect();
         if pdfcraft_fonts::source_shaping::required(&text) && row.first().is_some_and(|first| row.iter().any(|v| v.1 != first.1 || v.2 != first.2)) {
@@ -924,9 +921,11 @@ pub(super) fn rewrite_styled_block(
             tm[4] += ax;
             tm[5] += ay;
             let mut segment_width = segment_advances.get(&(row_index, pos)).copied().unwrap_or(0.0);
-            block_ops.extend(state.paint_ops(&paint));
-            // Only the painting fields are read from `paint`.
-            paint.clone_from(&state);
+            // Each run in its own graphics state, restating what its source set inside its text
+            // object (`gs`, stroke, line width, `Tr`; #3508/#3509) from the state the rewrite is
+            // drawn in: a `gs` has no inverse, so one run's ExtGState would stay for the next.
+            block_ops.push(Op::new("q", vec![]));
+            block_ops.extend(state.paint_ops(after));
             if let Some((_, shaped, _)) = shaped_runs.get(&(row_index, pos)) {
                 let resource = glyph_resources.get(&(row_index, pos)).ok_or_else(|| EditError::Invalid("shaped font is missing".into()))?;
                 let mut properties = Dict::new();
@@ -1007,16 +1006,13 @@ pub(super) fn rewrite_styled_block(
                 let underline_size = size_of(source, item.1) * source.origin.k;
                 let (x0, y0) = back.apply(x - o.ctm[4], baseline - o.ctm[5] - underline_size * 0.12);
                 let (x1, y1) = back.apply(x + segment_width - o.ctm[4], baseline - o.ctm[5] - underline_size * 0.12);
-                let stroke = Op::new("RG", vec![n(r), n(g), n(b)]);
-                let width = underline_size * 0.06 / o.ctm[2].hypot(o.ctm[3]).max(1e-6);
-                block_ops.push(stroke.clone());
-                block_ops.push(Op::new("w", vec![n(width)]));
-                paint.stroke = vec![stroke];
-                paint.line_width = Some(width);
+                block_ops.push(Op::new("RG", vec![n(r), n(g), n(b)]));
+                block_ops.push(Op::new("w", vec![n(underline_size * 0.06 / o.ctm[2].hypot(o.ctm[3]).max(1e-6))]));
                 block_ops.push(Op::new("m", vec![n(x0), n(y0)]));
                 block_ops.push(Op::new("l", vec![n(x1), n(y1)]));
                 block_ops.push(Op::new("S", vec![]));
             }
+            block_ops.push(Op::new("Q", vec![]));
             x += segment_width;
             pos = end;
         }
