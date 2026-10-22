@@ -112,7 +112,8 @@ pub fn audit_redactions(doc: &Document) -> Result<Vec<AuditFinding>, AuditError>
 /// Work and output bounds for one audit.
 #[derive(Clone, Copy)]
 struct Limits {
-    /// Cover-against-line comparisons per page.
+    /// Cover-against-line comparisons per page, counting a line once per word box it has (at
+    /// least once), since [`covers`] walks them.
     comparisons: usize,
     /// Bytes of covered text across all findings.
     covered_text: usize,
@@ -129,13 +130,21 @@ impl Limits {
 struct Budget {
     limits: Limits,
     comparisons: usize,
+    /// What comparing one cover with every line of the current page costs.
+    page_cost: usize,
     covered_text: usize,
 }
 
 impl Budget {
+    /// Resets the comparison count for a page with these `lines`.
+    fn start_page(&mut self, lines: &[TextLine]) {
+        self.comparisons = 0;
+        self.page_cost = lines.iter().fold(0, |n, line| n.saturating_add(line.ink.len().max(1)));
+    }
+
     /// The text of the `lines` that `hides`, joined with single spaces.
     fn hidden_text(&mut self, lines: &[TextLine], hides: impl Fn(&TextLine) -> bool) -> Result<String, AuditError> {
-        self.comparisons = self.comparisons.saturating_add(lines.len());
+        self.comparisons = self.comparisons.saturating_add(self.page_cost);
         if self.comparisons > self.limits.comparisons {
             return Err(AuditError::TooManyComparisons);
         }
@@ -157,11 +166,11 @@ impl Budget {
 
 fn audit(doc: &Document, limits: Limits) -> Result<Vec<AuditFinding>, AuditError> {
     let copying = doc.permissions().is_none_or(|p| p.copy());
-    let mut budget = Budget { limits, comparisons: 0, covered_text: 0 };
+    let mut budget = Budget { limits, comparisons: 0, page_cost: 0, covered_text: 0 };
     let mut out = Vec::new();
     for (n, page) in pdfcraft_model::pages(doc).iter().enumerate() {
         let lines = pdfcraft_edit::text_lines(doc, n).map_err(|e| AuditError::Text(n, e.to_string()))?;
-        budget.comparisons = 0;
+        budget.start_page(&lines);
         // 1. Opaque filled rectangles over extractable text.
         for r in cover::filled_rects(doc, &page.dict)? {
             let covered = budget.hidden_text(&lines, |line| is_cover(&r, line))?;

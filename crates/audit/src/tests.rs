@@ -659,7 +659,8 @@ fn covered_text_across_findings_is_bounded() {
 }
 
 /// Covers compared against lines are bounded per page, so content that is quadratic in its
-/// covers and lines fails the audit instead of running for hours.
+/// covers and lines fails the audit instead of running for hours. A line costs one comparison per
+/// word: 20 covers against 20 two-word lines are 800.
 #[test]
 fn cover_and_line_comparisons_are_bounded() {
     let mut content = Vec::new();
@@ -670,9 +671,9 @@ fn cover_and_line_comparisons_are_bounded() {
         content.extend_from_slice(b"1 g 0 0 10 10 re f\n");
     }
     let doc = open(one_page(&content, ""));
-    let limits = crate::Limits { comparisons: 399, covered_text: usize::MAX };
+    let limits = crate::Limits { comparisons: 799, covered_text: usize::MAX };
     assert!(matches!(crate::audit(&doc, limits), Err(crate::AuditError::TooManyComparisons)));
-    let limits = crate::Limits { comparisons: 400, covered_text: usize::MAX };
+    let limits = crate::Limits { comparisons: 800, covered_text: usize::MAX };
     assert!(crate::audit(&doc, limits).expect("within the budget").is_empty());
 }
 
