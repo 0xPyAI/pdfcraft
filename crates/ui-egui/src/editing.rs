@@ -900,6 +900,8 @@ impl PdfCraftApp {
     /// Close tab `index` for a close request, then ask about the next dirty document, or quit.
     fn close_and_continue(&mut self, ctx: &egui::Context, index: usize, req: CloseRequest) {
         self.close_tab(index);
+        // Its question is answered: a question about the next document is a new one.
+        self.save_prompt_seen = false;
         // A newer prompt wins: the user may have started another close while a save was pending.
         if (req == CloseRequest::Quit || req == CloseRequest::All) && self.close_request.is_none() {
             match self.first_dirty() {
@@ -969,18 +971,22 @@ impl PdfCraftApp {
     /// makes it for a modal panel that an inactive app presents: the Dock icon bounces until
     /// PdfCraft is active, Windows flashes the taskbar button until the window is in front, and
     /// X11 sets the urgency hint, which stays until it is reset. A question that opens in front
-    /// asks nothing, and neither does leaving it open: the user has seen it.
+    /// asks nothing, and neither does leaving it open: the user has seen it. Each document asked
+    /// about when quitting is a new question, so one that opens in the background asks even after
+    /// a question the user saw; a request that still stands carries over to it.
     pub(crate) fn attend_save_prompt(&mut self, ctx: &egui::Context) {
         let open = self.close_request.is_some();
         let focused = ctx.input(|i| i.focused);
-        if open && !self.save_prompt_was_open && !focused {
+        if self.save_prompt_attention {
+            if focused || !open {
+                ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Reset));
+                self.save_prompt_attention = false;
+            }
+        } else if open && !self.save_prompt_seen && !focused {
             ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Critical));
             self.save_prompt_attention = true;
-        } else if self.save_prompt_attention && (focused || !open) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Reset));
-            self.save_prompt_attention = false;
         }
-        self.save_prompt_was_open = open;
+        self.save_prompt_seen = open;
     }
 }
 

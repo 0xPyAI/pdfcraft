@@ -276,17 +276,41 @@ fn attention_during(h: &mut Harness<'static, PdfCraftApp>, c: &ControlClient, me
     panic!("{method}: no reply after 30 frames");
 }
 
-/// An agent quits while another app is in front, then answers the prompt itself: the request is
-/// withdrawn, so the taskbar or the window list stops flagging a window with nothing to ask.
+/// Open `name` with an unsaved change, in a tab of its own.
+fn open_unsaved(h: &mut Harness<'static, PdfCraftApp>, name: &str) {
+    let app = h.state_mut();
+    app.open_bytes(name, None, fixture(1)).unwrap();
+    app.active = Some(app.views.len() - 1);
+    app.apply_edit(pdfcraft_engine::Edit::RotatePages { pages: vec![0], degrees: 90 });
+}
+
+/// An agent quits while another app is in front, then answers the prompts itself. Quitting asks
+/// about each unsaved document in turn; the request made for the first question stands for the
+/// next, and answering the last withdraws it, so the taskbar or the window list stops flagging a
+/// window with nothing to ask. Each question is a new one: when the first opened in front, the
+/// next one asks when it opens in the background.
 #[test]
 fn a_save_prompt_answered_in_the_background_withdraws_its_attention_request() {
     use egui::UserAttentionType::{Critical, Reset};
     let (mut h, c) = harness();
     ok(&mut h, &c, "ui.command", json!({"id": "page.insert_blank"}));
+    open_unsaved(&mut h, "second.pdf");
     h.input_mut().focused = false;
     assert_eq!(attention_during(&mut h, &c, "ui.quit", json!({})), [Critical]);
+    assert!(attention_during(&mut h, &c, "ui.click", json!({"label": "Don't save"})).is_empty(), "the request stands");
     assert_eq!(attention_during(&mut h, &c, "ui.click", json!({"label": "Cancel"})), [Reset]);
-    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["close_prompt"], false);
+
+    open_unsaved(&mut h, "third.pdf");
+    h.input_mut().focused = true;
+    assert!(attention_during(&mut h, &c, "ui.quit", json!({})).is_empty(), "the first question opens in front");
+    h.input_mut().focused = false;
+    assert!(attention_during(&mut h, &c, "ui.state", json!({})).is_empty(), "leaving it open asks nothing");
+    assert_eq!(attention_during(&mut h, &c, "ui.click", json!({"label": "Don't save"})), [Critical], "the next opens in the background");
+    assert_eq!(attention_during(&mut h, &c, "ui.click", json!({"label": "Cancel"})), [Reset]);
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    assert_eq!(state["close_prompt"], false);
+    let left: Vec<_> = state["documents"].as_array().unwrap().iter().map(|d| (d["name"].clone(), d["dirty"].clone())).collect();
+    assert_eq!(left, [(json!("third.pdf"), json!(true))], "Don't save closed doc.pdf and second.pdf; Cancel kept third.pdf");
 }
 
 #[test]

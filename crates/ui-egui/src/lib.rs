@@ -642,8 +642,9 @@ pub struct PdfCraftApp {
     pub close_request: Option<CloseRequest>,
     /// The button of the "save changes?" question the keyboard has chosen; Save when it opens.
     pub(crate) save_prompt_button: dialogs::PromptButton,
-    /// Whether the "save changes?" question was pending last frame, to tell the frame it opens.
-    save_prompt_was_open: bool,
+    /// `attend_save_prompt` has seen the pending "save changes?" question. It is false again once
+    /// the question is answered, so the next document's question is told apart from it.
+    save_prompt_seen: bool,
     /// The "save changes?" question asked for the user's attention and the request still stands
     /// (see `attend_save_prompt`).
     save_prompt_attention: bool,
@@ -1023,7 +1024,7 @@ impl PdfCraftApp {
             host_dirty: None,
             close_request: None,
             save_prompt_button: Default::default(),
-            save_prompt_was_open: false,
+            save_prompt_seen: false,
             save_prompt_attention: false,
             #[cfg(not(target_arch = "wasm32"))]
             pending_overwrite: None,
