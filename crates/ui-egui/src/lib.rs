@@ -2323,6 +2323,8 @@ impl PdfCraftApp {
         // Set outside json! above, which is at serde_json's macro recursion limit.
         v["hide_empty_highlight_hover"] = serde_json::Value::Bool(self.comment_prefs.hide_empty_highlight_hover);
         v["organize_zoom"] = serde_json::json!(self.organize_zoom);
+        // Canonical names survive changes to the order of PAPERS and do not depend on UI language.
+        v["print_paper"] = serde_json::json!(pdfcraft_engine::print::PAPERS.get(self.print_draft.paper).map(|(name, _)| *name));
         v.to_string()
     }
 
@@ -2383,6 +2385,13 @@ impl PdfCraftApp {
         }
         if let Ok(units) = serde_json::from_value::<units::Unit>(v["units"].clone()) {
             self.units = units;
+        }
+        if let Some(paper) = v
+            .get("print_paper")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|name| pdfcraft_engine::print::PAPERS.iter().position(|(canonical, _)| *canonical == name))
+        {
+            self.print_draft.paper = paper;
         }
         if let Some(on) = v["highlight_fields"].as_bool() {
             self.view_defaults.highlight_fields = on;

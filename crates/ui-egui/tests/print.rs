@@ -6,9 +6,16 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use pdfcraft_ui_egui::{Dialog, PdfCraftApp};
 
 fn harness() -> Harness<'static, PdfCraftApp> {
-    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+    harness_with_settings(None)
+}
+
+fn harness_with_settings(settings: Option<String>) -> Harness<'static, PdfCraftApp> {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
         app.set_option("language", "en").unwrap();
+        if let Some(json) = &settings {
+            app.restore(json);
+        }
         app.open_bytes("form.pdf", None, include_bytes!("data/form.pdf").to_vec()).unwrap();
         app
     });
@@ -735,4 +742,126 @@ fn print_without_a_document_does_not_blame_security() {
     h.get_by_label("Print (Ctrl+P)").hover();
     h.run_steps(30);
     assert!(h.query_by_label_contains("don't allow printing").is_none());
+}
+
+#[test]
+fn paper_choice_survives_cancel_and_settings_restore() {
+    use pdfcraft_engine::print::{Orientation, PAPERS};
+    let a4 = PAPERS.iter().position(|(name, _)| *name == "A4").unwrap();
+    let letter = PAPERS.iter().position(|(name, _)| *name == "US Letter").unwrap();
+    let mut h = harness();
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    h.get_by_value("US Letter").click();
+    h.run_steps(2);
+    h.get_by_label("A4").click();
+    h.run_steps(2);
+    assert_eq!(h.state().print_draft.paper, a4);
+    // Only paper should be added to persistence; these choices still belong to this session.
+    let draft = &mut h.state_mut().print_draft;
+    draft.copies = 5;
+    draft.which = pdfcraft_ui_egui::PrintWhich::Range;
+    draft.range = "1".into();
+    draft.orientation = Orientation::Landscape;
+    draft.grayscale = true;
+    let before_cancel = draft.clone();
+    h.get_by_label("Cancel").click();
+    h.run_steps(2);
+    assert_eq!(h.state().dialog, None);
+    assert_eq!(h.state().print_draft, before_cancel, "cancel keeps the existing draft behavior");
+    let saved = h.state().persist();
+    let json: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(json["print_paper"], "A4", "store the canonical name, not its position");
+    let mut app = PdfCraftApp::new();
+    app.restore(&saved);
+    let expected = pdfcraft_ui_egui::PrintDraft { paper: a4, ..Default::default() };
+    assert_eq!(app.print_draft, expected, "no other print preference becomes persistent");
+    let mut restarted = harness_with_settings(Some(saved));
+    assert!(restarted.state_mut().execute("print.dialog"));
+    restarted.run_steps(3);
+    restarted.get_by_value("A4");
+    assert_eq!(restarted.state().print_draft.paper, a4);
+    restarted.get_by_value("A4").click();
+    restarted.run_steps(2);
+    restarted.get_by_label("US Letter").click();
+    restarted.run_steps(2);
+    restarted.get_by_label("Cancel").click();
+    restarted.run_steps(2);
+    let saved = restarted.state().persist();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&saved).unwrap()["print_paper"], "US Letter");
+    let mut again = harness_with_settings(Some(saved));
+    assert!(again.state_mut().execute("print.dialog"));
+    again.run_steps(3);
+    again.get_by_value("US Letter");
+    assert_eq!(again.state().print_draft.paper, letter);
+}
+
+#[test]
+fn paper_restore_accepts_canonical_names_and_ignores_invalid_settings() {
+    use pdfcraft_engine::print::PAPERS;
+    for (index, (name, _)) in PAPERS.iter().enumerate() {
+        let mut app = PdfCraftApp::new();
+        app.restore(&serde_json::json!({"print_paper": name}).to_string());
+        assert_eq!(app.print_draft.paper, index);
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&app.persist()).unwrap()["print_paper"], *name);
+    }
+    for invalid in [
+        "not JSON",
+        "{}",
+        r#"{"print_paper":null}"#,
+        r#"{"print_paper":true}"#,
+        r#"{"print_paper":[]}"#,
+        r#"{"print_paper":{}}"#,
+        r#"{"print_paper":"unknown"}"#,
+        r#"{"print_paper":"a4"}"#,
+        r#"{"print_paper":4}"#,
+        r#"{"print_paper":-1}"#,
+        r#"{"print_paper":4294967296}"#,
+        r#"{"print_paper":18446744073709551615}"#,
+        r#"{"print_paper":1e100}"#,
+    ] {
+        let mut app = PdfCraftApp::new();
+        let factory = app.print_draft.paper;
+        app.restore(invalid);
+        assert_eq!(app.print_draft.paper, factory, "{invalid}");
+        app.restore(r#"{"print_paper":"A4"}"#);
+        let selected = app.print_draft.paper;
+        app.restore(invalid);
+        assert_eq!(app.print_draft.paper, selected, "invalid input must not replace a valid choice: {invalid}");
+    }
+    let mut app = PdfCraftApp::new();
+    app.print_draft.paper = usize::MAX;
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&app.persist()).unwrap()["print_paper"], serde_json::Value::Null);
+}
+
+#[test]
+fn restored_paper_keeps_preview_and_saved_sheet_dimensions() {
+    use pdfcraft_engine::print::{self, PAPERS};
+    let a4 = PAPERS.iter().find(|(name, _)| *name == "A4").unwrap().1;
+    let mut h = harness_with_settings(Some(r#"{"print_paper":"A4"}"#.into()));
+    assert!(h.state_mut().execute("print.dialog"));
+    h.run_steps(3);
+    h.get_by_value("A4");
+    h.get_by_label("Sheet 1 of 1");
+    let id = h.state().views[h.state().active.unwrap()].id;
+    let doc = h.state().session.get(id).unwrap();
+    let sizes: Vec<_> = doc.info.pages.iter().map(|p| (f64::from(p.width), f64::from(p.height))).collect();
+    let labels: Vec<_> = doc.info.pages.iter().map(|p| p.label.clone()).collect();
+    let settings = h.state().print_draft.settings(sizes.len(), &labels).unwrap();
+    assert_eq!(settings.paper, a4);
+    let sheets = print::layout(&sizes, &settings).unwrap();
+    assert_eq!(sheets.len(), 1);
+    assert_eq!(sheets[0].size, a4, "preview uses the restored paper");
+    let out = std::env::temp_dir().join(format!("pdfcraft-restored-paper-{}.pdf", std::process::id()));
+    h.state_mut().print_draft.printer = None;
+    h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    h.get_by_label("Save as PDF").click();
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, None);
+    let printed = pdfcraft_cos::Document::open(std::sync::Arc::new(std::fs::read(&out).unwrap())).unwrap();
+    let pages = pdfcraft_model::pages(&printed);
+    assert_eq!(pages.len(), sheets.len());
+    let size = pages[0].display_size(&printed);
+    assert!((size.0 - a4.0).abs() < 0.01 && (size.1 - a4.1).abs() < 0.01, "saved sheet: {size:?}");
+    std::fs::remove_file(out).unwrap();
 }
