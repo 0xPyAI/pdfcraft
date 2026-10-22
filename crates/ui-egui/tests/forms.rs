@@ -1282,11 +1282,12 @@ fn mode_tab(h: &Harness<'static, PdfCraftApp>, label: &str) -> egui::Rect {
 }
 
 /// Scroll the page until `what` (on screen) lies across the mode bar, then the cursor over each
-/// tab it lies under: with the All tools panel closed, Read, Edit, Convert and E-Sign.
+/// tab it lies under: with the All tools panel closed, Edit, Convert and E-Sign (the name field
+/// starts right of All tools).
 fn mode_tab_cursors(
     h: &mut Harness<'static, PdfCraftApp>,
     what: impl Fn(&Harness<'static, PdfCraftApp>) -> egui::Rect,
-) -> [(&'static str, egui::CursorIcon); 4] {
+) -> [(&'static str, egui::CursorIcon); 3] {
     let page = |h: &Harness<'static, PdfCraftApp>| h.state().views[0].page_screen_rect(0).expect("on screen");
     let y = what(h).center().y - page(h).top();
     let tabs = mode_tab(h, "Convert").center().y;
@@ -1296,7 +1297,7 @@ fn mode_tab_cursors(
     h.state_mut().views[0].goto = Some((0, (top - (tabs - y)) / page(h).height()));
     h.run_steps(4);
     let under = what(h);
-    ["Read", "Edit", "Convert", "E-Sign"].map(|label| {
+    ["Edit", "Convert", "E-Sign"].map(|label| {
         let at = mode_tab(h, label).center();
         assert!(under.contains(at), "{under:?} lies under {label} at {at:?}");
         h.hover_at(at);
@@ -1305,12 +1306,8 @@ fn mode_tab_cursors(
     })
 }
 
-const HAND_ON_EVERY_TAB: [(&str, egui::CursorIcon); 4] = [
-    ("Read", egui::CursorIcon::PointingHand),
-    ("Edit", egui::CursorIcon::PointingHand),
-    ("Convert", egui::CursorIcon::PointingHand),
-    ("E-Sign", egui::CursorIcon::PointingHand),
-];
+const HAND_ON_EVERY_TAB: [(&str, egui::CursorIcon); 3] =
+    [("Edit", egui::CursorIcon::PointingHand), ("Convert", egui::CursorIcon::PointingHand), ("E-Sign", egui::CursorIcon::PointingHand)];
 
 /// A text field scrolled up under the mode bar leaves its tabs the hand (#2755). The field gave
 /// them its I-beam, and its open editor floated over them and took their clicks.
