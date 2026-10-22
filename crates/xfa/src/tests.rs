@@ -2670,3 +2670,17 @@ fn a_long_word_breaks_in_linear_work() {
     assert_eq!(b.spans.iter().map(|s| s.text.len()).sum::<usize>(), 20_000);
     assert!(measured < 200_000, "{measured} bytes measured for a 20000-byte word");
 }
+
+/// Rich text that embeds one long field value many times lays out a bounded amount of it.
+#[test]
+fn embedded_field_values_expand_to_a_bounded_amount_of_text() {
+    let face = text::Face::of(&Font { typeface: "Arial".into(), size: 10.0, ..Font::default() });
+    let value = "word ".repeat(3_300);
+    let run = Run { embed: Some("f".into()), ..Run::default() };
+    let rich = RichText { paragraphs: vec![Paragraph { runs: vec![run; 100], h_align: None }] };
+    let b = text::layout(&rich, Rect::new(0.0, 0.0, 500.0, 0.0), &Para::default(), &face, &|_| value.clone());
+    let kept: usize = b.spans.iter().map(|s| s.text.len()).sum();
+    assert!(kept > 0);
+    assert!(kept <= text::MAX_EMBEDDED, "{kept} bytes of embedded text laid out");
+    assert!(text::natural_width(&rich, &Para::default(), &face, &|_| value.clone()) <= face.width(&value) * 70.0);
+}

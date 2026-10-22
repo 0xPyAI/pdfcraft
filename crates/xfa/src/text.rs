@@ -177,13 +177,27 @@ fn ink_width(w: &Word) -> f64 {
     if ink.len() == w.text.len() { w.width } else { w.face.width(ink) }
 }
 
+/// Most bytes of embedded field values one text block shows, as much as a text of its own
+/// holds: a value embedded over and over is expanded only so far.
+pub(crate) const MAX_EMBEDDED: usize = 1 << 20;
+
 /// Break the runs of a paragraph into words (spaces stay attached to the word before them).
-fn words(runs: &[Run], base: &Face, embed: &dyn Fn(&str) -> String) -> Vec<Word> {
+/// Embedded values take from `embed_left` bytes and are cut when it runs out.
+fn words(runs: &[Run], base: &Face, embed: &dyn Fn(&str) -> String, embed_left: &mut usize) -> Vec<Word> {
     let mut out = Vec::new();
     for run in runs {
         let face = base.with_run(run);
         let text: String = match &run.embed {
-            Some(id) => embed(id),
+            Some(_) if *embed_left == 0 => String::new(),
+            Some(id) => {
+                let mut v = embed(id);
+                if v.len() > *embed_left {
+                    let end = v.char_indices().map(|(i, _)| i).take_while(|i| *i <= *embed_left).last().unwrap_or(0);
+                    v.truncate(end);
+                }
+                *embed_left = embed_left.saturating_sub(v.len());
+                v
+            }
             None => run
                 .text
                 .chars()
@@ -224,8 +238,9 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
     let avail = (rect.w - para.margin_left - para.margin_right).max(1.0);
     let mut lines: Vec<(Line, Option<HAlign>)> = Vec::new();
     let mut total = 0.0;
+    let mut embed_left = MAX_EMBEDDED;
     for (pi, p) in rich.paragraphs.iter().enumerate() {
-        let ws = words(&p.runs, base, embed);
+        let ws = words(&p.runs, base, embed, &mut embed_left);
         let mut line = Line { words: Vec::new(), width: 0.0, size: base.size, first: true };
         let mut first_in_para = true;
         let indent = |first: bool| if first { para.text_indent.max(0.0) } else { 0.0 };
@@ -336,7 +351,9 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
 /// margins and first-line indent): how wide a box without an explicit width grows.
 pub fn natural_width(rich: &RichText, para: &Para, base: &Face, embed: &dyn Fn(&str) -> String) -> f64 {
     let indent = para.text_indent.max(0.0);
-    let widest = rich.paragraphs.iter().map(|p| words(&p.runs, base, embed).iter().map(|w| w.width).sum::<f64>()).fold(0.0, f64::max);
+    let mut embed_left = MAX_EMBEDDED;
+    let widest =
+        rich.paragraphs.iter().map(|p| words(&p.runs, base, embed, &mut embed_left).iter().map(|w| w.width).sum::<f64>()).fold(0.0, f64::max);
     (para.margin_left + indent + widest + para.margin_right).max(0.0)
 }
 
