@@ -239,7 +239,7 @@ pub static LANGUAGES: [LangInfo; 30] = [
     // Romanian; every `ro-*` locale (`ro-RO`, `ro_RO.UTF-8`, `ro-MD`) resolves here. Three plural forms (one, few, other).
     LangInfo { code: "ro", name: "Română", source: include_str!("ro.tsv"), plural: plural_ro, rtl: false, catalog: OnceLock::new() },
     // Lao; every `lo-*` locale (`lo-LA`, `lo_LA.UTF-8` ...) resolves here.
-    LangInfo { code: "lo", name: "ພາສາລາວ", source: include_str!("lo.tsv"), plural: plural_none, rtl: false,  catalog: OnceLock::new() },
+    LangInfo { code: "lo", name: "ພາສາລາວ", source: include_str!("lo.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
 ];
 
 impl LangInfo {
