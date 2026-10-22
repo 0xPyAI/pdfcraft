@@ -504,7 +504,8 @@ pub struct DocView {
     pub(crate) applied_editor: Option<crate::edit_text_ui::LineEditor>,
     /// The box a click switched to while another paragraph was being edited: it opens once the
     /// queued edit has applied, so its index and geometry come from the document it now is (#2022).
-    pub(crate) pending_text_open: Option<(usize, usize)>,
+    /// It is held as the paragraph's text and box, not an index: the edit can regroup the page.
+    pub(crate) pending_text_open: Option<(usize, pdfcraft_engine::BlockKey)>,
     pub(crate) text_background: crate::edit_text_ui::TextBackground,
     pub(crate) move_background: crate::content_ui::MoveBackground,
     /// Edit text & images: the images per page (by document generation), and the selected one.

@@ -859,8 +859,8 @@ pub mod indic;
 mod linebreak;
 pub mod text;
 pub use text::{
-    BlockStyle, LineEdit, MAX_FORM_DEPTH, MAX_FORM_VISITS, RangeStyle, ReadingBlocks, TextBlock, TextLine, TextSession, clear_block, reading_blocks,
-    reading_blocks_checked, replace_block, replace_line, rewrite_block, text_blocks, text_lines,
+    BlockKey, BlockStyle, LineEdit, MAX_FORM_DEPTH, MAX_FORM_VISITS, RangeStyle, ReadingBlocks, TextBlock, TextLine, TextSession, block_overlapping,
+    clear_block, reading_blocks, reading_blocks_checked, replace_block, replace_line, rewrite_block, text_blocks, text_lines,
 };
 pub mod added;
 pub use added::{
