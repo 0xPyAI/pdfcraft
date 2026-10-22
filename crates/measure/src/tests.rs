@@ -403,3 +403,14 @@ fn a_scale_ratio_converts_its_page_side_to_points() {
         assert!(Scale::ratio([0.0, 0.0], [1.0, 0.0], page, PageUnit::Mm, real, "mm", 2).is_err(), "{page} {real}");
     }
 }
+/// A content stream reads its `/XObject` resources once, not again (as a copy of a direct
+/// dictionary) for every `Do`.
+#[test]
+fn xobject_resources_are_read_once_per_stream() {
+    let d = fixture(&"/Missing Do\n".repeat(10_000), "", &[]);
+    snap::XOBJECT_DICT_READS.with(|c| c.set(0));
+    let paths = snap::geometry(&d, 0).unwrap();
+    assert!(paths.segments.is_empty());
+    let reads = snap::XOBJECT_DICT_READS.with(std::cell::Cell::get);
+    assert!(reads <= 1, "{reads} reads of the page's XObject resources");
+}
