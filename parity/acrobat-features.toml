@@ -1190,8 +1190,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/comments.rs::hovering_a_comment_shows_its_author_and_text"]
-notes = "a popup with the author and the comment text, as Acrobat shows"
+evidence = ["crates/ui-egui/tests/comments.rs::hovering_a_comment_shows_its_author_and_text", "crates/ui-egui/tests/comments.rs::multiline_markup_hover_stays_on_marked_lines", "crates/ui-egui/tests/comments.rs::neighboring_markup_hover_changes_to_its_own_comment", "crates/ui-egui/tests/comments.rs::overlapping_markup_hover_shows_the_topmost_comment", "crates/ui-egui/tests/comments.rs::overlapping_markup_hover_uses_annotation_index_with_different_top_edges", "crates/ui-egui/tests/comments.rs::markup_hover_without_quads_keeps_the_rectangle_fallback", "crates/ui-egui/tests/comments.rs::markup_hover_skips_popup_containers", "crates/ui-egui/tests/comments.rs::preference_hides_author_only_highlight_hover_previews"]
+notes = "A popup with the author and comment text. Text markup uses selection's per-quad screen bounds, including page and view rotation, so unmarked parts of a multiline Rect do not claim the hover (#3541). The last-painted eligible comment wins where annotations overlap (#3620), using the original /Annots index independently of spatial inspection order. Missing complete quads retain the Rect fallback; author-only highlight hiding and dialog suppression remain. Bounds are rectangular, not exact hit testing of skewed quadrilaterals. Pointer feedback is UI-only, reachable through the opt-in control channel, with no document automation tool."
 
 [[feature]]
 id = "view.page-size-hover"
@@ -3716,8 +3716,8 @@ milestone = "M5"
 status = "shipped"
 commands = ["comment.eraser"]
 tools = []
-evidence = ["crates/annot/src/tests.rs::the_eraser_cuts_strokes_and_removes_empty_drawings", "crates/ui-egui/tests/comments.rs::erasing_part_of_a_drawing"]
-notes = "cuts strokes where the eraser passes; an emptied drawing is deleted; one undo step"
+evidence = ["crates/annot/src/tests.rs::the_eraser_cuts_strokes_and_removes_empty_drawings", "crates/ui-egui/tests/comments.rs::erasing_part_of_a_drawing", "crates/ui-egui/tests/comments.rs::the_eraser_rubs_as_wide_as_its_thickness_setting"]
+notes = "cuts strokes where the eraser passes; an emptied drawing is deleted; one undo step. Its thickness setting sizes it on screen (3 to 72 pixels across; the default 2 pt is 12), preview included (#3747)"
 
 [[feature]]
 id = "comment.line"
@@ -3970,6 +3970,18 @@ commands = ["comment.list"]
 tools = ["comment_delete"]
 evidence = ["crates/ui-egui/tests/comments.rs::comments_are_selected_moved_and_deleted_with_the_select_tool", "crates/annot/src/tests.rs::delete_takes_popup_and_reply_chain"]
 notes = "deletes the pop-up and the reply thread"
+
+[[feature]]
+id = "comment.reshape"
+title = "Change a line's ends and a polygon's corners after drawing"
+area = "E"
+tier = "P1"
+milestone = "M5"
+status = "shipped"
+commands = []
+tools = ["comment_edit"]
+evidence = ["crates/annot/src/tests.rs::lines_and_polygons_are_reshaped_by_their_points", "crates/ui-egui/tests/comments.rs::line_ends_are_dragged_to_change_length_and_angle", "crates/automation/tests/automation.rs::comments_are_reshaped_through_the_tool"]
+notes = "A selected line, arrow, connected lines, polygon or cloud has a handle on each end or corner (instead of the frame); dragging one changes the length and angle (Shift holds it to 45° from the point before), with the new shape drawn while dragging, as one undo step (Edit::ReshapeAnnotation). The drawing tools keep drawing from an end (a new line starts there); the Select tool reshapes. /Rect follows the points with room for the width and arrowheads, and the appearance is drawn anew. Headless: comment_edit `points`; comment_list reports them. Measurements keep the points they measured; locked comments keep their shape. Not yet: adding or removing a corner."
 
 [[feature]]
 id = "comment.edit-comment-text"

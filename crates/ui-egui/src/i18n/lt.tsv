@@ -2737,3 +2737,5 @@ theme	Appearance	Išvaizda
 	Thumbnail size	Miniatiūrų dydis
 	Smaller thumbnails	Mažesnės miniatiūros
 	Larger thumbnails	Didesnės miniatiūros
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Keisti komentaro formą

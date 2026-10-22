@@ -2493,3 +2493,5 @@ animation effects	Off	Ανενεργά
 	Thumbnail size	Μέγεθος μικρογραφιών
 	Smaller thumbnails	Μικρότερες μικρογραφίες
 	Larger thumbnails	Μεγαλύτερες μικρογραφίες
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Αλλαγή σχήματος σχολίου

@@ -1301,6 +1301,21 @@ impl DocView {
         self.current = page;
     }
 
+    /// Reveal a user-space rectangle without changing zoom, centred where the scroll bounds allow.
+    pub(crate) fn reveal_rect(&mut self, page: usize, rect: [f32; 4], info: &DocInfo) {
+        self.go_to_page(page);
+        self.goto_point = None;
+        let Some(p) = info.pages.get(self.current) else { return };
+        if !rect.iter().all(|v| v.is_finite()) {
+            return;
+        }
+        // Halve before adding so even large finite coordinates cannot overflow the midpoint.
+        let x = rect[0] * 0.5 + rect[2] * 0.5;
+        let y = rect[1] * 0.5 + rect[3] * 0.5;
+        let [fx, fy] = p.dest_fraction(Some(x), Some(y), self.rotation);
+        self.goto_point = Some((self.current, fx, fy, vec2(self.viewport_w, self.viewport_h) / 2.0));
+    }
+
     /// Go to a destination, a bookmark's or a link's (ISO 32000-2 §12.3.2.2): its page, scrolled
     /// and zoomed as `dest` asks, as Acrobat does. `/XYZ` puts (left, top) at the window's
     /// top-left at its zoom (null or 0 keeps the zoom); `/Fit`, `/FitH` and `/FitV` switch to fit
@@ -2284,6 +2299,13 @@ pub struct PageXform {
 }
 
 impl PageXform {
+    /// Screen pixels per page point. The view's rotation swaps the rectangle's sides, so a page
+    /// turned a quarter shows its width down the screen.
+    pub(crate) fn zoom(&self) -> f32 {
+        let across = if self.rot % 180 == 90 { self.rect.height() } else { self.rect.width() };
+        across / self.pw.max(1.0)
+    }
+
     /// Draw an image in the PDF user-space `rect` as a custom stamp's appearance draws it: turned
     /// back by `turn` (the page /Rotate it was placed for), so with the page's own rotation it
     /// reads upright as displayed.
@@ -3729,16 +3751,22 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 // freehand, where it would cover the next stroke (#429).
                 let freehand = matches!(tool, QuickTool::Comment(comments::CommentTool::Ink | comments::CommentTool::Eraser));
                 let gesturing = view.comments.gesture.is_some() || freehand;
-                for a in info.annotations.iter().filter(|a| a.page == i && !gesturing) {
-                    let sr = xf.user_rect(info, i, a.rect);
-                    let hidden = prefs.hide_empty_highlight_hover && a.subtype == "Highlight" && a.contents.as_deref().is_none_or(str::is_empty);
-                    if sr.contains(p)
-                        && hover_text.is_none()
-                        && !hidden
-                        && let Some(text) = annotation_hover_text(a)
-                    {
-                        hover_text = Some((p, text));
-                    }
+                // Inspection sorts annotations spatially, but the renderer paints in /Annots
+                // order. Keep the shared list intact and choose the last eligible raw index.
+                if hover_text.is_none()
+                    && !gesturing
+                    && let Some((_, text)) = info
+                        .annotations
+                        .iter()
+                        .filter(|a| a.page == i)
+                        .filter(|a| {
+                            !(prefs.hide_empty_highlight_hover && a.subtype == "Highlight" && a.contents.as_deref().is_none_or(str::is_empty))
+                        })
+                        .filter(|a| pcx.screen_rects(a).any(|r| r.contains(p)))
+                        .filter_map(|a| annotation_hover_text(a).map(|text| (a.index, text)))
+                        .max_by_key(|(index, _)| *index)
+                {
+                    hover_text = Some((p, text));
                 }
             }
             for (mp, mr, mc) in &view.compare_marks {
@@ -5653,6 +5681,7 @@ mod tests {
             locked: false,
             intent: None,
             fill_sign,
+            points: Vec::new(),
         }
     }
 
@@ -5728,6 +5757,18 @@ mod tests {
         let signatures: Vec<_> = hostile.into_iter().map(|rect| signature(true, true, Some(0), Some(rect))).collect();
         let badges = signature_badges(&signatures, 0);
         assert_eq!(badges.len(), 1);
+    }
+
+    #[test]
+    fn page_zoom_reads_the_side_the_page_width_is_on() {
+        // A 200 x 100 pt page at 2 pixels per point: 400 x 200 on screen, or 200 x 400 turned.
+        let xf = |rot: u16, size: Vec2| PageXform { rect: Rect::from_min_size(Pos2::ZERO, size), rot, pw: 200.0, ph: 100.0 };
+        for rot in [0, 180] {
+            assert_eq!(xf(rot, vec2(400.0, 200.0)).zoom(), 2.0, "{rot}");
+        }
+        for rot in [90, 270] {
+            assert_eq!(xf(rot, vec2(200.0, 400.0)).zoom(), 2.0, "{rot}: the width runs down the screen");
+        }
     }
 
     #[test]

@@ -196,6 +196,59 @@ fn rubber_stamps_point_left_as_displayed_on_rotated_pages() {
     }
 }
 
+/// #2392: Fill & Sign marks are drawn as displayed on every page rotation, including after save:
+/// a checkmark's long stroke rises to the right, and a line runs across.
+#[test]
+fn fill_sign_marks_are_upright_as_displayed_on_rotated_pages() {
+    for degrees in [0, 90, 180, 270] {
+        let (mut session, id) = rotated_blank(degrees);
+        let info = session.get(id).unwrap().info.pages[0].clone();
+        // Displayed boxes: a 40 pt checkmark centred at (50, 50), an 80 × 8 pt line at (130, 50).
+        for (mark, vx, w, h) in [(FillMark::Check, 50.0, 40.0, 40.0), (FillMark::Line, 130.0, 80.0, 8.0)] {
+            let shape = Shape::Mark { rect: displayed_rect(&info, vx, 50.0, w, h), mark };
+            session
+                .apply(
+                    id,
+                    Edit::AddAnnotation(NewAnnotation {
+                        page: 0,
+                        style: Style::default_for(&shape),
+                        shape,
+                        contents: String::new(),
+                        author: "Test".into(),
+                    }),
+                )
+                .unwrap();
+        }
+        let check = |session: &Session, id: DocId| {
+            let rendered = render_page(session, id);
+            // Dark pixels in a displayed box, rendered at scale 2.
+            let ink = |x0: u32, y0: u32, x1: u32, y1: u32| -> Vec<(u32, u32)> {
+                (y0 * 2..y1 * 2)
+                    .flat_map(|y| (x0 * 2..x1 * 2).map(move |x| (x, y)))
+                    .filter(|&(x, y)| stamp_pixel(&rendered, x, y)[..3].iter().all(|c| *c < 128))
+                    .collect()
+            };
+            let tick = ink(30, 30, 70, 70);
+            assert!(!tick.is_empty(), "rotation {degrees}: no checkmark drawn");
+            let top = tick.iter().min_by_key(|p| p.1).unwrap();
+            let bottom = tick.iter().max_by_key(|p| p.1).unwrap();
+            // The long stroke ends at the top right; the short one meets it low, left of centre.
+            assert!(top.0 > bottom.0 + 20, "rotation {degrees}: highest ink {top:?} should be right of the lowest {bottom:?}");
+            assert!(bottom.0 < 100 && top.0 > 110, "rotation {degrees}: checkmark {bottom:?} .. {top:?} is not upright");
+            let line = ink(85, 40, 175, 60);
+            assert!(!line.is_empty(), "rotation {degrees}: no line drawn");
+            let (x0, x1) = (line.iter().map(|p| p.0).min().unwrap(), line.iter().map(|p| p.0).max().unwrap());
+            let (y0, y1) = (line.iter().map(|p| p.1).min().unwrap(), line.iter().map(|p| p.1).max().unwrap());
+            assert!((x1 - x0) > 10 * (y1 - y0 + 1), "rotation {degrees}: line {x0}..{x1} x {y0}..{y1} should run across");
+        };
+        check(&session, id);
+        let saved = session.save_bytes(id).unwrap();
+        let mut reopened = Session::new().with_clock(|| 1_700_000_000);
+        let again = reopened.open("drawing.pdf", None, saved, None).unwrap();
+        check(&reopened, again);
+    }
+}
+
 /// Fill & Sign text and text boxes read across as displayed on turned pages (scanned forms are
 /// often stored sideways with `/Rotate`), including after save.
 #[test]
@@ -2552,6 +2605,60 @@ fn comment_text(s: &Session, id: DocId) -> Vec<String> {
     let mut t: Vec<String> = s.get(id).unwrap().info.annotations.iter().map(|a| a.contents.clone().unwrap_or_default()).collect();
     t.sort();
     t
+}
+
+/// A dragged stamp's layers: the page without it (its text and other comments kept) and the
+/// stamp alone on a transparent page. Preparing them changes nothing in the document.
+#[test]
+fn stamp_preview_layers_split_the_stamp_from_its_page() {
+    let (mut s, id) = session_with(1);
+    s.apply(id, fill_item(Shape::Mark { rect: [30.0, 60.0, 130.0, 66.0], mark: FillMark::Line }, "")).unwrap();
+    s.apply(id, rect_comment(0, [140.0, 40.0, 190.0, 90.0])).unwrap();
+    let doc = s.get(id).unwrap();
+    let (generation, dirty) = (doc.edit_generation(), doc.dirty);
+    let preview = doc.stamp_preview(0, 0).unwrap().expect("the line is a stamp");
+    let (stamp, background) = (preview.render_stamp(1.0).unwrap(), preview.render_background(1.0).unwrap());
+    let px = |p: &pdfcraft_render::RenderedPage, x: u32, y: u32| -> [u8; 4] {
+        p.rgba[(((300 - y) * p.width + x) * 4) as usize..][..4].try_into().unwrap()
+    };
+    let line = |x: u32, y: u32| (30..=130).contains(&x) && (59..=67).contains(&y);
+    let (mut drawn, mut stray) = (0, Vec::new());
+    for y in 1..300 {
+        for x in 0..200 {
+            match (line(x, y), px(&stamp, x, y)) {
+                (true, [.., 255]) => drawn += 1,
+                (false, v) if v != [0, 0, 0, 0] => stray.push((x, y)),
+                _ => {}
+            }
+        }
+    }
+    assert!(drawn > 100, "the line is drawn opaque: {drawn} pixels");
+    assert!(stray.is_empty(), "only the line is drawn on its layer: {:?}", &stray[..stray.len().min(8)]);
+    assert!((30..=130).all(|x| px(&background, x, 63) == [255, 255, 255, 255]), "the page beneath has no line");
+    assert!((138..=142).any(|x| px(&background, x, 65) != [255, 255, 255, 255]), "other comments stay");
+    assert!((20..120).any(|x| (150..170).any(|y| px(&background, x, y)[0] < 128)), "the page text stays");
+    assert!(doc.stamp_preview(0, 1).unwrap().is_none(), "a rectangle isn't a stamp");
+    assert!(doc.stamp_preview(0, 9).unwrap().is_none());
+    let doc = s.get(id).unwrap();
+    assert_eq!((doc.edit_generation(), doc.dirty, doc.can_undo()), (generation, dirty, Some("Add rectangle")), "the document is unchanged");
+
+    // Another app's comments without appearances: beneath a dragged stamp they are drawn as on
+    // screen, and such a stamp has nothing to lay over the page.
+    let bare = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R] >> endobj
+4 0 obj << /Type /Annot /Subtype /Square /Rect [140 40 190 90] /C [1 0 0] >> endobj
+5 0 obj << /Type /Annot /Subtype /Stamp /Rect [20 20 80 40] /Name /Draft >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+    let mut s = Session::new();
+    let id = s.open("bare.pdf", None, Arc::new(bare.to_vec()), None).unwrap();
+    s.apply(id, fill_item(Shape::Mark { rect: [30.0, 60.0, 130.0, 66.0], mark: FillMark::Line }, "")).unwrap();
+    let doc = s.get(id).unwrap();
+    let background = doc.stamp_preview(0, 2).unwrap().expect("the line is a stamp").render_background(1.0).unwrap();
+    assert!((138..=142).any(|x| px(&background, x, 65)[..3] == [255, 0, 0]), "the square without an appearance is drawn beneath");
+    assert!(doc.stamp_preview(0, 1).unwrap().is_none(), "a stamp without an appearance");
 }
 
 #[test]

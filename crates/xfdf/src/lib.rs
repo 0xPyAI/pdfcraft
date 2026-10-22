@@ -312,9 +312,7 @@ fn xfdf_annots(doc: &Document, out: &mut String) {
             }
             let flags = d.get(b"F").and_then(|f| doc.resolve(f).as_int()).unwrap_or(0);
             let fl: Vec<&str> = FLAGS.iter().filter(|(b, _)| flags & b != 0).map(|(_, s)| *s).collect();
-            if !fl.is_empty() {
-                let _ = write!(attrs, " flags=\"{}\"", fl.join(","));
-            }
+            let _ = write!(attrs, " flags=\"{}\"", fl.join(","));
             if let Some(c) = hex(&nums_of(doc, d.get(b"C"))) {
                 let _ = write!(attrs, " color=\"{c}\"");
             }

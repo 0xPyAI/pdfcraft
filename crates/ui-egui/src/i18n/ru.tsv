@@ -2400,3 +2400,5 @@ animation effects	Off	Выкл
 	Thumbnail size	Размер миниатюр
 	Smaller thumbnails	Уменьшить миниатюры
 	Larger thumbnails	Увеличить миниатюры
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Изменить форму комментария

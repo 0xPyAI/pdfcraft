@@ -2487,3 +2487,5 @@ animation effects	Off	オフ
 	Thumbnail size	サムネイルのサイズ
 	Smaller thumbnails	サムネイルを小さく
 	Larger thumbnails	サムネイルを大きく
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	コメントの形状を変更

@@ -2487,3 +2487,5 @@ animation effects	Off	Désactivés
 	Thumbnail size	Taille des vignettes
 	Smaller thumbnails	Réduire les vignettes
 	Larger thumbnails	Agrandir les vignettes
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Modifier la forme du commentaire

@@ -2763,3 +2763,5 @@ certificate	Version	الإصدار
 	Thumbnail size	حجم الصور المصغرة
 	Smaller thumbnails	تصغير الصور المصغرة
 	Larger thumbnails	تكبير الصور المصغرة
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	إعادة تشكيل التعليق

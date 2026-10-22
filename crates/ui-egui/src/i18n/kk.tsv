@@ -2485,3 +2485,5 @@ animation effects	Off	Өшірулі
 	Thumbnail size	Нобай өлшемі
 	Smaller thumbnails	Кішірек нобайлар
 	Larger thumbnails	Үлкенірек нобайлар
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Пікір пішінін өзгерту

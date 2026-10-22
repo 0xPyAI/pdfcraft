@@ -2739,3 +2739,5 @@ key	Space	Space
 	Thumbnail size	Kích thước hình thu nhỏ
 	Smaller thumbnails	Giảm kích thước hình thu nhỏ
 	Larger thumbnails	Tăng kích thước hình thu nhỏ
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Đổi hình dạng nhận xét

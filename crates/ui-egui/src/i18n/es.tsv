@@ -2627,3 +2627,5 @@ animation effects	Off	Desactivados
 	Thumbnail size	Tamaño de las miniaturas
 	Smaller thumbnails	Miniaturas más pequeñas
 	Larger thumbnails	Miniaturas más grandes
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Cambiar la forma del comentario

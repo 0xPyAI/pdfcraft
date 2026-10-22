@@ -676,8 +676,7 @@ pub(crate) fn page_input(
         },
         mark => {
             let mark = mark.mark()?;
-            let (w, h) = if mark == FillMark::Line { (36.0, 4.0) } else { (12.0, 12.0) };
-            let rect = [at[0] - w / 2.0, at[1] - h / 2.0, at[0] + w / 2.0, at[1] + h / 2.0];
+            let rect = mark.rect_at(at, rotation);
             Some(FillAction::Edit(Box::new(new(page, Shape::Mark { rect, mark }, String::new(), author))))
         }
     }

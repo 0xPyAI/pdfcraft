@@ -2483,3 +2483,5 @@ animation effects	Off	Kapalı
 	Thumbnail size	Küçük resim boyutu
 	Smaller thumbnails	Küçük resimleri küçült
 	Larger thumbnails	Küçük resimleri büyüt
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Yorumun şeklini değiştir

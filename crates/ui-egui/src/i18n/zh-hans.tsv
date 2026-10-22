@@ -2451,3 +2451,5 @@ animation effects	Off	关
 	Thumbnail size	缩略图大小
 	Smaller thumbnails	缩小缩略图
 	Larger thumbnails	放大缩略图
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	更改注释形状

@@ -2699,3 +2699,5 @@ certificate	SHA-256 digest	Impronta SHA-256
 	Thumbnail size	Dimensione miniature
 	Smaller thumbnails	Miniature più piccole
 	Larger thumbnails	Miniature più grandi
+# Lines, connected lines and polygons reshaped by their ends and corners (M5).
+	Reshape comment	Modifica la forma del commento
