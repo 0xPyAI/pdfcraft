@@ -1033,7 +1033,6 @@ mod tests {
         assert_eq!(xml.matches(">Meter</w:t>").count(), 2);
     }
 
-    /// One part of a package written by [`Zip`], inflated.
     /// #2992: pages that share a background colour get it as the Word document's page colour
     /// (with the setting that makes Word show it); differing or white backgrounds don't.
     #[test]
@@ -1058,6 +1057,7 @@ mod tests {
         }
     }
 
+    /// One part of a package written by [`Zip`], inflated.
     pub(crate) fn part(zip: &[u8], name: &str) -> String {
         let at = |i: usize, n: usize| zip[i..i + n].iter().rev().fold(0usize, |v, b| v << 8 | *b as usize);
         let mut i = 0;
