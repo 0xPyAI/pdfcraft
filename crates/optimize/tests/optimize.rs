@@ -1022,3 +1022,29 @@ fn images_are_not_resampled_when_some_uses_could_not_be_measured() {
     let refs = pdfcraft_annot::page_refs(&doc).unwrap();
     assert_eq!(effective_resolutions(&doc, &refs)[&img], f64::INFINITY);
 }
+
+#[test]
+fn image_resolution_keeps_comments_across_content_pieces() {
+    for ending in ["", "\n", "\r", "\r\n"] {
+        let mut doc = Document::new_empty();
+        let visible = image(&mut doc, 20, 20, 3, false, None);
+        let hidden = image(&mut doc, 20, 20, 3, false, None);
+        let page = page(&mut doc, &[("Visible", visible), ("Hidden", hidden)], "");
+        let first = doc
+            .add(Object::Stream(Stream::from_raw(Dict::new(), format!("q 72 0 0 72 0 0 cm /Visible Do Q\n% trailing comment{ending}").into_bytes())));
+        let second = doc.add(Object::Stream(Stream::from_raw(Dict::new(), b"q 144 0 0 144 0 0 cm /Hidden Do Q\n".to_vec())));
+        doc.update_dict(page, |dict| {
+            dict.set(b"Contents".to_vec(), Object::Array(vec![Object::Ref(first), Object::Int(17), Object::Ref(second)]));
+        })
+        .unwrap();
+        let measured = effective_resolutions(&doc, &[page]);
+        assert_eq!(measured.get(&visible), Some(&20.0));
+        if ending.is_empty() {
+            assert_eq!(measured.len(), 1);
+            assert_eq!(measured.get(&hidden), None, "a comment must hide the next piece's first line");
+        } else {
+            assert_eq!(measured.len(), 2);
+            assert_eq!(measured.get(&hidden), Some(&10.0), "a real line ending exposes the image");
+        }
+    }
+}

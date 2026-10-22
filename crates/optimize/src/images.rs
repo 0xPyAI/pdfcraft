@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use pdfcraft_content::Matrix;
+use pdfcraft_content::{Matrix, Pieces};
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, Stream};
 
 use crate::{Compression, ImageSettings, OptimizeError, Report, Settings, Stage};
@@ -26,17 +26,16 @@ pub(crate) fn page_resources(doc: &Document, page: ObjRef) -> Option<Dict> {
 pub(crate) fn content_bytes(doc: &Document, contents: &Object) -> Vec<u8> {
     match &*doc.resolve(contents) {
         Object::Stream(s) => s.decoded().unwrap_or_default(),
-        Object::Array(a) => a
-            .iter()
-            .flat_map(|c| match &*doc.resolve(c) {
-                Object::Stream(s) => {
-                    let mut v = s.decoded().unwrap_or_default();
-                    v.push(b'\n');
-                    v
-                }
-                _ => Vec::new(),
-            })
-            .collect(),
+        Object::Array(a) => {
+            let pieces: Vec<_> = a
+                .iter()
+                .filter_map(|c| match &*doc.resolve(c) {
+                    Object::Stream(s) => Some(s.decoded().unwrap_or_default()),
+                    _ => None,
+                })
+                .collect();
+            Pieces::join(&pieces).data().to_vec()
+        }
         _ => Vec::new(),
     }
 }
