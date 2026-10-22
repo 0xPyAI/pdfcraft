@@ -544,13 +544,16 @@ fn named_dest(src: &Document, name: &[u8]) -> Option<Object> {
     }
     let names = src.resolve(catalog.get(b"Names")?);
     let tree = names.as_dict()?.get(b"Dests")?.clone();
-    name_tree_lookup(src, &tree, name, 0)
+    name_tree_lookup(src, &tree, name, 0, &mut HashSet::new())
 }
 
-fn name_tree_lookup(src: &Document, node: &Object, key: &[u8], depth: u8) -> Option<Object> {
-    if depth > 32 {
+/// Name trees are read once per node: a node listed twice (or a cycle) is skipped.
+fn name_tree_lookup(src: &Document, node: &Object, key: &[u8], depth: u8, seen: &mut HashSet<ObjRef>) -> Option<Object> {
+    if depth > 32 || node.as_ref().is_some_and(|r| !seen.insert(r)) {
         return None;
     }
+    #[cfg(test)]
+    crate::work(1);
     let node = src.resolve(node);
     let d = node.as_dict()?;
     if let Some(names) = d.get(b"Names").map(|n| src.resolve(n)).and_then(|n| n.as_array().cloned()) {
@@ -563,14 +566,16 @@ fn name_tree_lookup(src: &Document, node: &Object, key: &[u8], depth: u8) -> Opt
         }
     }
     let kids = d.get(b"Kids").map(|k| src.resolve(k)).and_then(|k| k.as_array().cloned()).unwrap_or_default();
-    kids.iter().find_map(|k| name_tree_lookup(src, k, key, depth + 1))
+    kids.iter().find_map(|k| name_tree_lookup(src, k, key, depth + 1, seen))
 }
 
-/// All (key, value) pairs of a name tree, in order.
-fn name_tree_entries(src: &Document, node: &Object, depth: u8, out: &mut Vec<(Vec<u8>, Object)>) {
-    if depth > 32 {
+/// All (key, value) pairs of a name tree, in order, each node read once.
+fn name_tree_entries(src: &Document, node: &Object, depth: u8, seen: &mut HashSet<ObjRef>, out: &mut Vec<(Vec<u8>, Object)>) {
+    if depth > 32 || node.as_ref().is_some_and(|r| !seen.insert(r)) {
         return;
     }
+    #[cfg(test)]
+    crate::work(1);
     let node = src.resolve(node);
     let Some(d) = node.as_dict() else { return };
     if let Some(names) = d.get(b"Names").map(|n| src.resolve(n)).and_then(|n| n.as_array().cloned()) {
@@ -583,7 +588,7 @@ fn name_tree_entries(src: &Document, node: &Object, depth: u8, out: &mut Vec<(Ve
         }
     }
     for k in d.get(b"Kids").map(|k| src.resolve(k)).and_then(|k| k.as_array().cloned()).unwrap_or_default() {
-        name_tree_entries(src, &k, depth + 1, out);
+        name_tree_entries(src, &k, depth + 1, seen, out);
     }
 }
 
@@ -1163,7 +1168,7 @@ fn collect_attachments(dst: &mut Document, src: &Document, out: &mut Vec<(Vec<u8
         return Ok(());
     };
     let mut entries = Vec::new();
-    name_tree_entries(src, &tree, 0, &mut entries);
+    name_tree_entries(src, &tree, 0, &mut HashSet::new(), &mut entries);
     let mut copier = Copier::new(src, HashMap::new(), HashMap::new());
     for (k, v) in entries {
         let v = copier.copy_value(dst, &v, None)?;

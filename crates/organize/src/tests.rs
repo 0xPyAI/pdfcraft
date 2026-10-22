@@ -3191,3 +3191,33 @@ fn annotation_actions_share_the_objects_they_copy() {
         .count();
     assert_eq!(copies, 1, "the shared URI is copied once, not once per action");
 }
+
+#[test]
+fn name_trees_with_shared_kids_are_walked_once_per_node() {
+    // Each level lists the next one twice: 2^depth paths through `depth` nodes.
+    let depth = 10;
+    let first = 6; // after the catalog, pages, page, content and the link
+    let mut extra = Vec::new();
+    for tree in 0..2 {
+        let base = first + tree * (depth + 1);
+        for level in 0..depth {
+            let next = base + level + 1;
+            extra.push(format!("<< /Kids [{next} 0 R {next} 0 R] >>"));
+        }
+        extra.push(if tree == 0 {
+            "<< /Names [(a.txt) << /Type /Filespec /F (a.txt) >>] >>".into()
+        } else {
+            "<< /Names [(other) [3 0 R /Fit]] >>".into()
+        });
+    }
+    let link = "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /Dest (missing) >>".to_string();
+    let catalog_extra = format!("/Names << /EmbeddedFiles {first} 0 R /Dests {} 0 R >>", first + depth + 1);
+    let src = page_with_annots(&[link], &extra, &catalog_extra);
+    take_work();
+    let out = combine(&[("a", &src)]).unwrap();
+    let work = take_work();
+    assert!(work <= 8 * (depth + 1), "{work} name-tree nodes visited");
+    let names = out.resolve(catalog(&out).get(b"Names").unwrap()).as_dict().cloned().unwrap();
+    let tree = out.resolve(names.get(b"EmbeddedFiles").unwrap()).as_dict().cloned().unwrap();
+    assert_eq!(tree.get(b"Names").and_then(|n| n.as_array()).map(Vec::len), Some(2), "one attachment, listed once");
+}
