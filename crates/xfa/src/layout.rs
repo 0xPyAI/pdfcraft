@@ -1148,12 +1148,15 @@ impl Layouter<'_> {
         }
         let value = self.data.and_then(|d| d.value_at(&data_path(self.tpl, &ctx.som))).filter(|t| !t.trim().is_empty()).or_else(|| f.value.plain());
         let Some(value) = value.filter(|t| !t.trim().is_empty()) else { return 0.0 };
-        // Beside a caption the text has what the caption leaves; 2pt of padding on each side.
+        // Beside a caption the text has what the caption leaves; a widget's text has 2pt of
+        // padding on each side, a non-interactive field's (drawn as text) none, so it wraps
+        // where it is drawn.
         let beside = match self.caption_reserve(f, inner_w, ctx) {
             Some((Placement::Top | Placement::Bottom, _)) | None => 0.0,
             Some((_, r)) => r,
         };
-        let w = (inner_w - beside - f.ui_margin.horizontal() - 4.0).max(1.0);
+        let padding = if f.access == Access::NonInteractive { 0.0 } else { 4.0 };
+        let w = (inner_w - beside - f.ui_margin.horizontal() - padding).max(1.0);
         let font = ctx.font.apply(&f.common.font);
         text::measure_height(&text::plain(value.trim_end()), w, &ctx.para, &Self::field_text_face(f, &font), &|_| String::new())
     }
