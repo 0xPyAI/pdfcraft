@@ -92,6 +92,8 @@ const INDEX_FROM: usize = 32;
 pub struct Dict {
     entries: Vec<(Name, Object)>,
     /// Key to position in `entries`, kept once the dictionary reaches [`INDEX_FROM`] entries.
+    /// Boxed so that every `Dict`, and so every `Object`, grows by one pointer, not by a map.
+    #[allow(clippy::box_collection)]
     index: Option<Box<std::collections::HashMap<Name, usize>>>,
 }
 
