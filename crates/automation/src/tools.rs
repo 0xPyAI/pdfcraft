@@ -60,7 +60,10 @@ fn color() -> Value {
 fn comment_ref(mut extra: Value) -> Value {
     if let Some(props) = extra.as_object_mut() {
         props.insert("doc".into(), doc());
-        props.insert("id".into(), json!({ "type": "string", "description": "The comment's id (from comment_list)." }));
+        props.insert(
+            "id".into(),
+            json!({ "type": "string", "description": "The comment's id (from comment_list). An id several comments share is refused: pass page and index." }),
+        );
         props.insert("page".into(), json!({ "type": "integer", "minimum": 1, "description": "With `index`, instead of `id`." }));
         props.insert(
             "index".into(),

@@ -158,8 +158,13 @@ impl Automation {
     fn comment_target(&self, a: &Args) -> Result<(usize, usize)> {
         let all = self.comments(a)?;
         if let Some(id) = a.opt_str("id")? {
-            let c =
-                all.iter().find(|c| c.name.as_deref() == Some(id)).ok_or_else(|| failed(format!("no comment with id {id:?} (see comment_list)")))?;
+            // `/NM` need not be unique (PyMuPDF names the first comment on every page `fitz-A0`):
+            // the first match could be another page's comment, so a shared id is refused.
+            let mut named = all.iter().filter(|c| c.name.as_deref() == Some(id));
+            let c = named.next().ok_or_else(|| failed(format!("no comment with id {id:?} (see comment_list)")))?;
+            if named.next().is_some() {
+                return Err(failed(format!("several comments have the id {id:?}: pass page and index instead (see comment_list)")));
+            }
             return Ok((c.page, c.index));
         }
         let (Some(page), Some(index)) = (a.opt_int("page")?, a.opt_int("index")?) else {
