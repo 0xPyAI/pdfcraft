@@ -172,11 +172,12 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
-- **2026-10-22 (M2, #3107 / PR #3438):** Inline-image parsing falls back to the existing EI heuristic when missing declared samples, headers or terminators exceed the content-window budget, instead of waiting for an impossible allocation. Exact-length parsing for available samples and ordinary large streamed images is retained. Estimates unchanged.
-
+- **2026-10-20 (M6, calculation order):** The order a form's fields calculate in (`/CO`) is read, checked, fixed and set headlessly with `form_calculation_order`: it says which fields read one calculated later (they show stale values), which read each other in a loop, and which the PDF's order leaves out; Fix order moves only what must move, in one undo step, and the form recalculates. Editing a formula no longer moves its field to the end of the order, and a field the order lists twice calculates once. Estimates unchanged.
 - **2026-10-19 (M6, renames keep formulas):** Renaming a field renames it in every calculation that reads it, in the same undo step: `AFSimple_Calculate` field lists, simplified field notation (the comment and the JavaScript after it) and `getField` calls naming it in one string literal; the rest of each script is kept as written. A sum used to drop the renamed field, notation read it as 0 and a script kept a stale value. Field Properties says how many formulas changed and `form_set_props` lists them as `formulas_updated`. Names built at run time and other events' scripts are not rewritten. Estimates unchanged.
 
 - **2026-10-19 (M14, #3373):** The main menu and its long submenus scroll in short windows, keeping their commands reachable. Estimates unchanged.
+
+- **2026-10-22 (M2, #3107 / PR #3438):** Inline-image parsing falls back to the existing EI heuristic when missing declared samples, headers or terminators exceed the content-window budget, instead of waiting for an impossible allocation. Exact-length parsing for available samples and ordinary large streamed images is retained. Estimates unchanged.
 
 - **2026-10-19 (M3, #3387):** Save-prompt shortcuts yield to later consent and utility dialogs; a synthetic UI regression checks that an edited document stays open. Estimates unchanged.
 
