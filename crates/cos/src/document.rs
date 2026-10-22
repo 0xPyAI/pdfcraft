@@ -1968,9 +1968,10 @@ impl Document {
         } else {
             HashSet::new()
         };
+        let odd: HashSet<u32> = self.xref_oddities.iter().map(|(_, n)| *n).collect();
         let mut found = 0usize;
         for (&num, &(offset, generation)) in &located {
-            let left_out = past_shift.contains(&num) || self.xref_oddities.iter().any(|(_, n)| *n == num);
+            let left_out = past_shift.contains(&num) || odd.contains(&num);
             if num != 0 && !filled.contains_key(&num) && left_out {
                 filled.insert(num, XrefEntry::InFile { offset, generation });
                 found += 1;
