@@ -990,6 +990,46 @@ impl<'a> Inspector<'a> {
         out
     }
 
+    /// The first entry of an embedded-files name tree whose key is `key`, in the order
+    /// [`Self::name_tree`] lists them, with no key budget. It keeps no key, and converts a key
+    /// object or `/Names` array that several places reference only once (a second visit cannot
+    /// match, since the first would have returned).
+    fn name_tree_find(&self, node: &'a Dictionary, key: &str, seen: &mut NameTreeSeen, depth: u32) -> Option<&'a Object> {
+        if depth > 32 || !seen.nodes.insert(node as *const _) {
+            return None;
+        }
+        let names = node.get(b"Names").ok();
+        if let Some(names) = names
+            && self.resolved_id(names).is_none_or(|id| seen.objects.insert(id))
+            && let Object::Array(pairs) = self.resolve(names)
+        {
+            for pair in pairs.chunks(2) {
+                if let [k, v] = pair {
+                    if self.resolved_id(k).is_some_and(|id| !seen.objects.insert(id)) {
+                        continue;
+                    }
+                    let found = match self.resolve(k) {
+                        Object::String(bytes, _) => text_string(bytes) == key,
+                        _ => key.is_empty(),
+                    };
+                    if found {
+                        return Some(v);
+                    }
+                }
+            }
+        }
+        if let Ok(Object::Array(kids)) = node.get(b"Kids").map(|o| self.resolve(o)) {
+            for k in kids {
+                if let Some(d) = self.dict(k)
+                    && let Some(v) = self.name_tree_find(d, key, seen, depth + 1)
+                {
+                    return Some(v);
+                }
+            }
+        }
+        None
+    }
+
     // ── outline ─────────────────────────────────────────────────────────────────────────────
 
     /// The window `DocInfo::outline` keeps: the first `OUTLINE_WINDOW` bookmarks in outline order,
@@ -1700,6 +1740,14 @@ fn text_string(bytes: &[u8]) -> String {
     pdfcraft_cos::PdfString::literal(bytes).to_text()
 }
 
+/// What [`Inspector::name_tree_find`] has visited: node dictionaries, and the key and `/Names`
+/// array objects it reached by reference.
+#[derive(Default)]
+struct NameTreeSeen {
+    nodes: HashSet<*const Dictionary>,
+    objects: HashSet<ObjectId>,
+}
+
 /// A string or name value as text, without surrounding NULs and white space.
 fn trimmed_text(o: &Object) -> Option<String> {
     let s = match o {
@@ -1800,9 +1848,7 @@ pub fn attachment_data(bytes: &[u8], password: Option<&str>, att: &Attachment) -
             AttachmentSource::Document { key } => {
                 let names = doc.catalog().ok().and_then(|c| c.get(b"Names").ok()).and_then(|o| insp.dict(o)).ok_or("no /Names")?;
                 let ef = names.get(b"EmbeddedFiles").ok().and_then(|o| insp.dict(o)).ok_or("no /EmbeddedFiles")?;
-                let mut seen = HashSet::new();
-                let mut budget = MAX_LINK_ATTACHMENT_TEXT_BYTES;
-                insp.name_tree(ef, &mut seen, 0, &mut budget).into_iter().find(|(k, _)| k == key).map(|(_, v)| v).ok_or("attachment not found")?
+                insp.name_tree_find(ef, key, &mut NameTreeSeen::default(), 0).ok_or("attachment not found")?
             }
             AttachmentSource::Annotation { page, index } => {
                 let (&pid, _) = insp.page_index.iter().find(|(_, i)| **i == *page).ok_or("page not found")?;
@@ -2835,6 +2881,30 @@ trailer << /Root 1 0 R >>
         // Past the budget an attachment still has the generic name.
         let generic = info.attachments.len() * "attachment".len();
         assert!(kept <= MAX_LINK_ATTACHMENT_TEXT_BYTES + generic, "{kept} bytes kept");
+    }
+
+    /// An embedded file the listing keeps is extracted, though earlier keys the listing could not
+    /// keep would fill a fresh key budget before it.
+    #[test]
+    fn a_listed_embedded_file_is_extracted_past_keys_the_listing_left_out() {
+        let skipped = "6 0 R 7 0 R ".repeat(9);
+        let pdf = format!(
+            "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles << /Names [{skipped}(b.txt) 9 0 R] >> >> >> endobj\n\
+             2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+             3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [\
+             << /Subtype /Link /Rect [0 0 1 1] /A << /S /URI /URI ({}) >> >>] >> endobj\n\
+             6 0 obj ({}) endobj\n\
+             7 0 obj << /Type /Filespec /F (a.txt) >> endobj\n\
+             8 0 obj << /Type /EmbeddedFile /Length 5 >> stream\nhello\nendstream endobj\n\
+             9 0 obj << /Type /Filespec /F (b.txt) /EF << /F 8 0 R >> >> endobj\n\
+             trailer << /Root 1 0 R >>\n%%EOF",
+            "u".repeat(15 << 20),
+            "k".repeat(2 << 20),
+        );
+        let bytes = Arc::new(pdf.into_bytes());
+        let info = inspect(bytes.clone(), None).expect("opens");
+        let listed = info.attachments.iter().find(|a| a.name == "b.txt").expect("b.txt is listed");
+        assert_eq!(attachment_data(&bytes, None, listed).as_deref(), Ok(&b"hello"[..]));
     }
 
     /// Links and attachments sharing one long string each keep a copy only within
