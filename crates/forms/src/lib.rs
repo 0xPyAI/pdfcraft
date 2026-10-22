@@ -826,12 +826,8 @@ fn walk(
         }
         return;
     }
-    let widget_refs: Vec<ObjRef> = if d.contains(b"Rect") { vec![r] } else { kids };
-    let widget_refs: Vec<ObjRef> = widget_refs.into_iter().filter(|w| seen.widgets.insert(*w)).collect();
-    let actions = actions_of(doc, d, &widget_refs, &mut seen.scripts);
-    let button = (inh.ft.as_deref() == Some(b"Btn") && inh.ff.unwrap_or(0) & flags::PUSH_BUTTON != 0)
-        .then(|| button_action(doc, d, &widget_refs, &mut seen.scripts))
-        .flatten();
+    // A field of no kind this reads is skipped before it claims widgets or scripts, which a later
+    // field listing them then reads.
     let ff = inh.ff.unwrap_or(0);
     let kind = match inh.ft.as_deref() {
         Some(b"Tx") => FieldKind::Text,
@@ -843,6 +839,12 @@ fn walk(
         Some(b"Sig") => FieldKind::Signature,
         _ => return,
     };
+    let widget_refs: Vec<ObjRef> = if d.contains(b"Rect") { vec![r] } else { kids };
+    let widget_refs: Vec<ObjRef> = widget_refs.into_iter().filter(|w| seen.widgets.insert(*w)).collect();
+    let actions = actions_of(doc, d, &widget_refs, &mut seen.scripts);
+    let button = (inh.ft.as_deref() == Some(b"Btn") && inh.ff.unwrap_or(0) & flags::PUSH_BUTTON != 0)
+        .then(|| button_action(doc, d, &widget_refs, &mut seen.scripts))
+        .flatten();
     let widgets = widget_refs
         .into_iter()
         .filter_map(|w| {
