@@ -232,6 +232,16 @@ fn checked_rect(rect: [f64; 4]) -> Result<[f64; 4], AnnotError> {
 /// Add a link over `rect` (user space). Returns its index in the page's `/Annots`.
 pub fn add(doc: &mut Document, page: usize, rect: [f64; 4], action: &LinkAction, style: &LinkStyle) -> Result<usize, AnnotError> {
     let p = page_ref(doc, page)?;
+    let obj = new_link(doc, p, rect, action, style)?;
+    let mut list = annots(doc, p);
+    list.push(Object::Ref(obj));
+    let index = list.len() - 1;
+    set_annots(doc, p, list)?;
+    Ok(index)
+}
+
+/// A link annotation object for page `p`, not yet on the page's `/Annots`.
+fn new_link(doc: &mut Document, p: ObjRef, rect: [f64; 4], action: &LinkAction, style: &LinkStyle) -> Result<ObjRef, AnnotError> {
     let r = checked_rect(rect)?;
     if matches!(action, LinkAction::Other(_)) {
         return Err(AnnotError::Invalid("choose a page or a web address".into()));
@@ -244,12 +254,7 @@ pub fn add(doc: &mut Document, page: usize, rect: [f64; 4], action: &LinkAction,
     d.set(b"F".to_vec(), Object::Int(4));
     write_style(&mut d, style);
     write_action(doc, &mut d, action)?;
-    let obj = doc.add(Object::Dict(d));
-    let mut list = annots(doc, p);
-    list.push(Object::Ref(obj));
-    let index = list.len() - 1;
-    set_annots(doc, p, list)?;
-    Ok(index)
+    Ok(doc.add(Object::Dict(d)))
 }
 
 fn link_at(doc: &Document, page: usize, index: usize) -> Result<(ObjRef, ObjRef), AnnotError> {
@@ -414,12 +419,30 @@ pub fn find_urls(chars: &[char]) -> Vec<(std::ops::Range<usize>, String)> {
 /// Create links for found URLs: `(page, quads, uri)` with quads in user space (one link per
 /// line rectangle). Returns how many links were added.
 pub fn add_many(doc: &mut Document, links: &[(usize, Vec<[f64; 4]>, String)], style: &LinkStyle) -> Result<usize, AnnotError> {
+    let pages = page_refs(doc)?;
+    // Each page's `/Annots` is extended once, with its new links in the order given.
+    let mut added: Vec<(ObjRef, Vec<Object>)> = Vec::new();
+    let mut slot: std::collections::HashMap<ObjRef, usize> = std::collections::HashMap::new();
     let mut n = 0;
     for (page, rects, uri) in links {
+        let p = pages.get(*page).copied().ok_or(AnnotError::NoSuchPage(*page))?;
+        let action = LinkAction::Uri(uri.clone());
         for r in rects {
-            add(doc, *page, *r, &LinkAction::Uri(uri.clone()), style)?;
+            let obj = new_link(doc, p, *r, &action, style)?;
+            let k = *slot.entry(p).or_insert_with(|| {
+                added.push((p, Vec::new()));
+                added.len() - 1
+            });
+            if let Some((_, list)) = added.get_mut(k) {
+                list.push(Object::Ref(obj));
+            }
             n += 1;
         }
+    }
+    for (p, new) in added {
+        let mut list = annots(doc, p);
+        list.extend(new);
+        set_annots(doc, p, list)?;
     }
     Ok(n)
 }

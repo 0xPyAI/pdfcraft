@@ -728,7 +728,16 @@ fn page_ref(doc: &Document, page: usize) -> Result<ObjRef, AnnotError> {
 fn annots(doc: &Document, page: ObjRef) -> Vec<Object> {
     let obj = doc.get(page);
     let Some(a) = obj.as_dict().and_then(|d| d.get(b"Annots")) else { return Vec::new() };
-    doc.resolve(a).as_array().cloned().unwrap_or_default()
+    let list = doc.resolve(a).as_array().cloned().unwrap_or_default();
+    #[cfg(test)]
+    ANNOTS_ENTRIES_COPIED.with(|n| n.set(n.get() + list.len()));
+    list
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Entries copied out of pages' `/Annots` arrays.
+    static ANNOTS_ENTRIES_COPIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Replace a page's `/Annots`, writing into the shared array object when it is indirect.

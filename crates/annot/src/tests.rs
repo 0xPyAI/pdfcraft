@@ -1526,3 +1526,18 @@ fn page_walk_reads_a_shared_kids_array_once() {
     assert_eq!(pages, [first, second]);
     assert!(walk.examined <= 10_000, "{} kids entries read", walk.examined);
 }
+
+/// Adding many links to a page extends its `/Annots` once, not once per link.
+#[test]
+fn many_links_extend_a_page_annotation_list_once() {
+    let mut doc = fixture();
+    let before = annots(&doc, page_refs(&doc).unwrap()[0]).len();
+    let n = 2_000;
+    let rects: Vec<[f64; 4]> = (0..n).map(|i| [10.0, i as f64 * 0.1, 50.0, i as f64 * 0.1 + 5.0]).collect();
+    ANNOTS_ENTRIES_COPIED.with(|c| c.set(0));
+    let added = links::add_many(&mut doc, &[(0, rects, "https://example.com".into())], &links::LinkStyle::default()).unwrap();
+    let copied = ANNOTS_ENTRIES_COPIED.with(std::cell::Cell::get);
+    assert_eq!(added, n);
+    assert_eq!(annots(&doc, page_refs(&doc).unwrap()[0]).len(), before + n);
+    assert!(copied <= 4 * n, "{copied} annotation entries copied for {n} links");
+}
