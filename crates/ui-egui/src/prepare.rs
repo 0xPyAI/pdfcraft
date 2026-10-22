@@ -1035,7 +1035,10 @@ pub(crate) fn body(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::theme::Toke
                         if ui.add(widgets::checkbox(&mut auto, tl!("Auto"))).changed() {
                             d.font_size = if auto { 0.0 } else { 12.0 };
                         }
-                        ui.add_enabled(!auto, egui::DragValue::new(&mut d.font_size).range(2.0..=100.0).speed(0.25).suffix(" pt"));
+                        ui.add_enabled(
+                            !auto,
+                            egui::DragValue::new(&mut d.font_size).range(2.0..=100.0).clamp_existing_to_range(false).speed(0.25).suffix(" pt"),
+                        );
                     });
                     ui.end_row();
                     if let Some(l) = d.look.as_mut() {
