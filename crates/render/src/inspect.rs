@@ -472,6 +472,11 @@ impl Annotation {
 /// object, a pop-up, the annotation itself or a loop leaves it a comment of its own, so it stays
 /// in view instead of hanging off nothing. Both comment readers (inspect, and the engine's list
 /// after an edit) run this.
+///
+/// Only comments can be parents: both readers leave links, form widgets, pop-ups and other
+/// non-markup annotations out of `annotations` (`pdfcraft_annot::is_comment_subtype`), so an
+/// `/IRT` to one of those finds no parent here. Pop-ups are skipped again in case a caller's list
+/// has them.
 pub fn link_replies(annotations: &mut [Annotation]) {
     let at: HashMap<(usize, usize), usize> =
         annotations.iter().enumerate().filter(|(_, a)| a.subtype != "Popup").map(|(i, a)| ((a.page, a.index), i)).collect();

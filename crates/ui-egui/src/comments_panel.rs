@@ -169,8 +169,10 @@ pub(crate) fn show(
     let mut page_counts: HashMap<usize, usize> = HashMap::new();
     // Replies find their parent by reference (`/NM` need not be unique) and keep source order.
     // A reply at any depth joins the thread of the comment it starts from, as comment_list lists
-    // it; a status or checkmark stays with the annotation it was set on. Page badges count roots
-    // before filtering.
+    // it. A status or checkmark stays with the annotation it was set on (its `/IRT` names it,
+    // ISO 32000-2 §12.5.6.2): one set on a reply, at any depth, is that reply's and not the
+    // comment's, so the card's badge and checkmark leave it out (comment_list reports it on the
+    // reply). Page badges count roots before filtering.
     let tops = pdfcraft_render::thread_tops(&info.annotations);
     for a in &info.annotations {
         if let Some(parent) = a.parent {
