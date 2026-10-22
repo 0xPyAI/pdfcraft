@@ -60,6 +60,11 @@ live in `plan/execution-plan.md` (local-only, gitignored).
 Keep it current: update the milestone row and the [ROADMAP.md](../ROADMAP.md) progress log at the
 end of every session; re-estimate when a milestone lands.
 
+Recovery scheduling (#2663): a native window with a pending dirty snapshot requests a
+repaint at the existing 60-second autosave deadline, even with no mouse or keyboard input.
+Clean and already-snapshotted documents do not schedule recovery wakeups. Snapshot contents,
+encryption and storage-write retry behavior are unchanged; this does not resolve #1803.
+
 ## Alpha gate
 
 The stage standard's gate: Acrobat Pro's everyday core workflows must each work end to end on the

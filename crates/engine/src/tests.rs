@@ -1306,9 +1306,13 @@ fn owner_password_of_older_revisions_opens_the_viewer_too() {
 #[test]
 fn autosave_snapshots_only_changed_documents() {
     let (mut s, id) = session_with(2);
+    assert!(!s.has_pending_autosave());
     assert!(s.autosave_snapshots().is_empty(), "clean documents are not snapshotted");
     s.apply(id, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    assert!(s.has_pending_autosave());
+    assert!(s.has_pending_autosave(), "checking a deadline must not consume a snapshot");
     let snaps = s.autosave_snapshots();
+    assert!(!s.has_pending_autosave());
     assert_eq!(snaps.len(), 1);
     assert_eq!(snaps[0].bytes, s.get(id).unwrap().bytes, "the working file");
     assert!(s.autosave_snapshots().is_empty(), "nothing new since the last snapshot");
