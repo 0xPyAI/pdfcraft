@@ -5,7 +5,7 @@ use crate::device::Device;
 use crate::function::{Function, interpolate};
 use crate::interpret::path::get_paint;
 use crate::interpret::state::ActiveTransferFunction;
-use crate::{BlendMode, CacheKey, ClipPath, Image, RasterImage, StencilImage};
+use crate::{BlendMode, CacheKey, ClipPath, Image, Paint, RasterImage, StencilImage};
 use crate::{FillRule, InterpreterWarning, WarningSinkFn, interpret};
 use crate::{ImageData, LumaData, RgbData};
 use hayro_syntax::bit_reader::BitReader;
@@ -262,10 +262,18 @@ pub(crate) fn draw_image_xobject<'a, 'b>(
 
     device.set_soft_mask(None);
     device.set_blend_mode(BlendMode::default());
+    // PdfCraft patch (35): the group just pushed applies the fill opacity, so a stencil mask's
+    // paint (the fill colour) must not carry it again: at `ca 0.5` a mask was drawn at a
+    // quarter of its opacity (#2975). The state is restored below.
+    context.get_mut().graphics_state.non_stroke_alpha = 1.0;
 
     let image = if x_object.is_mask {
         Image::Stencil(StencilImage {
-            paint: get_paint(context, false),
+            // A pattern paint keeps the opacity it was set with: drop it too (patch 35).
+            paint: match get_paint(context, false) {
+                Paint::Pattern(pattern) => Paint::Pattern(Box::new(pattern.without_opacity())),
+                paint => paint,
+            },
             image_xobject: x_object.clone(),
         })
     } else {
