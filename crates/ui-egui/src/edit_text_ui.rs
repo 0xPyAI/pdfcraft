@@ -179,9 +179,8 @@ impl TextBackground {
         // the page raster (with the old text) shows until the new one arrives instead.
         let settled =
             self.settling.as_ref().filter(|look| look.page == page && look.rot == xf.rot && (look.page_width - xf.rect.width()).abs() < 0.5);
-        let ready = for_editor
-            || draft.is_some_and(|d| d.page == page && d.index.is_some_and(|index| self.ready_added(page, index)))
-            || settled.is_some();
+        let ready =
+            for_editor || draft.is_some_and(|d| d.page == page && d.index.is_some_and(|index| self.ready_added(page, index))) || settled.is_some();
         if !ready {
             return;
         }
