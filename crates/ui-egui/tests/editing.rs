@@ -2975,8 +2975,8 @@ fn a_paragraph_whose_edit_fails_stays_open_with_its_typing() {
     let top = egui::pos2(r.left() + 30.0 * k, r.top() + (300.0 - 228.0) * k);
     click_at(&mut h, top);
     assert_eq!(h.state().views[0].line_editor.as_ref().map(|e| e.text.as_str()), Some("Top"));
-    // U+049B (Kazakh and Uzbek Cyrillic): neither the page's font nor a fallback face draws it.
-    h.state_mut().views[0].line_editor.as_mut().unwrap().text = "Top қ".into();
+    // U+0E01 (Thai): neither the page's font nor a fallback face draws it.
+    h.state_mut().views[0].line_editor.as_mut().unwrap().text = "Top ก".into();
     h.run_steps(1);
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     h.run_steps(3);
@@ -2984,7 +2984,7 @@ fn a_paragraph_whose_edit_fails_stays_open_with_its_typing() {
     assert!(s.toast.as_ref().is_some_and(|(m, _)| m.starts_with("Edit text failed")), "the failure is said: {:?}", s.toast);
     assert_eq!(s.session.get(s.views[0].id).unwrap().can_undo(), None, "nothing was applied");
     let ed = s.views[0].line_editor.as_ref().expect("the paragraph is still open");
-    assert_eq!((ed.block, ed.text.as_str()), (0, "Top қ"), "with what was typed");
+    assert_eq!((ed.block, ed.text.as_str()), (0, "Top ก"), "with what was typed");
     // Taking the letter out applies it.
     h.state_mut().views[0].line_editor.as_mut().unwrap().text = "Top edited".into();
     h.run_steps(1);
