@@ -827,6 +827,12 @@ impl<'a> Inspector<'a> {
         self.doc.dereference(o).map(|(_, o)| o).unwrap_or(o)
     }
 
+    /// The object a reference ends at after following any chain of references; `None` for a
+    /// direct object or a broken reference.
+    fn resolved_id(&self, o: &Object) -> Option<ObjectId> {
+        self.doc.dereference(o).ok().and_then(|(id, _)| id)
+    }
+
     fn dict(&self, o: &'a Object) -> Option<&'a Dictionary> {
         match self.resolve(o) {
             Object::Dictionary(d) => Some(d),
@@ -1163,23 +1169,26 @@ impl<'a> Inspector<'a> {
         let mut pages: Vec<(ObjectId, usize)> = self.page_index.iter().map(|(&id, &page)| (id, page)).collect();
         pages.sort_unstable_by_key(|&(_, page)| page);
         // An annotation, or a whole `/Annots` array, that several entries or pages list is on the
-        // first of them (§12.5.2 allows one page per annotation).
-        let mut seen = HashSet::new();
+        // first of them (§12.5.2 allows one page per annotation). Both are told apart by the object
+        // a reference resolves to, since an indirect object may itself hold a reference.
+        let mut seen_arrays = HashSet::new();
+        let mut seen_annotations = HashSet::new();
         let mut kept = 0usize;
         // Once the comment budget is spent, comments are no longer built, but links and attachments
         // are still listed.
         let mut comments_full = false;
         for (id, page) in pages {
             let Ok(page_dict) = self.doc.get_dictionary(id) else { continue };
-            if let Ok(Object::Reference(r)) = page_dict.get(b"Annots")
-                && !seen.insert(*r)
+            if let Ok(annots) = page_dict.get(b"Annots")
+                && let Some(r) = self.resolved_id(annots)
+                && !seen_arrays.insert(r)
             {
                 continue;
             }
             let Ok(Object::Array(annots)) = page_dict.get(b"Annots").map(|o| self.resolve(o)) else { continue };
             for (index, a) in annots.iter().enumerate() {
-                if let Object::Reference(r) = a
-                    && !seen.insert(*r)
+                if let Some(r) = self.resolved_id(a)
+                    && !seen_annotations.insert(r)
                 {
                     continue;
                 }
@@ -2654,6 +2663,31 @@ trailer << /Root 1 0 R >>
         assert!(notes.iter().all(|a| a.page == 0), "the shared array is the first page's");
         assert!(notes.len() > 1);
         assert!(notes.iter().map(retained).sum::<usize>() <= MAX_ANNOTATION_BYTES);
+    }
+
+    /// A link reached through an indirect object that holds only a reference to it is the same
+    /// annotation as the link itself, and so is a page array reached the same way: each is listed once.
+    #[test]
+    fn an_annotation_reached_through_a_reference_chain_is_listed_once() {
+        let pdf = "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+             2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj\n\
+             3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots 7 0 R >> endobj\n\
+             4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots 8 0 R >> endobj\n\
+             5 0 obj 6 0 R endobj\n\
+             6 0 obj << /Type /Annot /Subtype /Link /Rect [0 0 1 1] /A << /S /URI /URI (https://example.com) >> >> endobj\n\
+             7 0 obj [5 0 R 6 0 R] endobj\n\
+             8 0 obj 7 0 R endobj\n\
+             trailer << /Root 1 0 R >>\n%%EOF";
+        let mut doc = Document::load_mem(pdf.as_bytes()).expect("loads");
+        let mut saved = Vec::new();
+        doc.save_to(&mut saved).expect("saves");
+        let lazy = LazyStructure::new(Arc::new(saved), None).expect("opens");
+        let page = PageInfo { width: 200.0, height: 200.0, crop: [0.0, 0.0, 200.0, 200.0], rotation: 0, label: String::new() };
+        for reader in [&doc as &dyn Structure, &lazy] {
+            let mut info = DocInfo { pages: vec![page.clone(), page.clone()], ..Default::default() };
+            Inspector::new(reader).fill(&mut info);
+            assert_eq!(info.links.len(), 1, "{:?}", info.links);
+        }
     }
 
     /// Links and attachments after the comment budget fills are still listed, and a JavaScript link
