@@ -558,8 +558,7 @@ impl Automation {
                     "line" => FillMark::Line,
                     other => return Err(ToolError::InvalidArgs(format!("unknown type {other:?}"))),
                 };
-                let (w, h) = if mark == FillMark::Line { (36.0, 4.0) } else { (12.0, 12.0) };
-                (Shape::Mark { rect: [at[0] - w / 2.0, at[1] - h / 2.0, at[0] + w / 2.0, at[1] + h / 2.0], mark }, String::new())
+                (Shape::Mark { rect: mark.rect_at(at, i64::from(info.rotation)), mark }, String::new())
             }
         };
         let style = Style::default_for(&shape);

@@ -125,6 +125,14 @@ impl FillMark {
             FillMark::Line => "Line",
         }
     }
+
+    /// The user-space box of the mark placed at `at` on a page turned by `rotation`: centred
+    /// there and sized in displayed axes, so a line runs across the page as displayed (#2392).
+    pub fn rect_at(self, at: [f64; 2], rotation: i64) -> [f64; 4] {
+        let (w, h) = if self == FillMark::Line { (36.0, 4.0) } else { (12.0, 12.0) };
+        let (w, h) = if matches!(rotation.rem_euclid(360), 90 | 270) { (h, w) } else { (w, h) };
+        [at[0] - w / 2.0, at[1] - h / 2.0, at[0] + w / 2.0, at[1] + h / 2.0]
+    }
 }
 
 /// The stamps of Acrobat's stamp palette (drawn in PdfCraft's own style).
@@ -1081,6 +1089,11 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
             d.set(b"C".to_vec(), rgb(style.color));
             d.set(b"Name".to_vec(), Object::name(mark.name()));
             border(&mut d);
+            // Drawn upright for the page as displayed, as a stamp is (#2392).
+            let turn = pdfcraft_model::pages(doc).get(new.page).map_or(0, |p| p.rotation(doc));
+            if matches!(turn, 90 | 180 | 270) {
+                d.set(b"PCStampRotate".to_vec(), Object::Int(turn));
+            }
         }
         Shape::Stamp { stamp, by, .. } => {
             d.set(b"C".to_vec(), rgb(style.color));
