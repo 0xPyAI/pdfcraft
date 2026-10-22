@@ -3160,3 +3160,18 @@ fn registering_many_imported_fields_is_linear() {
     let form = out.resolve(catalog(&out).get(b"AcroForm").unwrap()).as_dict().cloned().unwrap();
     assert_eq!(form.get(b"Fields").and_then(|f| f.as_array()).map(Vec::len), Some(n));
 }
+
+#[test]
+fn renaming_many_same_named_fields_resumes_the_suffix_search() {
+    let n = 2_000;
+    let widgets: Vec<String> = (0..n).map(|_| "<< /Type /Annot /Subtype /Widget /FT /Tx /T (x) /Rect [0 0 10 10] >>".to_string()).collect();
+    let src = page_with_annots(&widgets, &[], "");
+    take_work();
+    let renames = combine_field_conflicts(&[&src]).remove(0);
+    let work = take_work();
+    assert!(work <= 4 * n, "{work} suffix attempts for {n} fields");
+    // Still the first free variant, in order.
+    assert_eq!(renames.len(), n - 1);
+    assert_eq!(renames.first(), Some(&("x".to_string(), "x-1".to_string())));
+    assert_eq!(renames.last(), Some(&("x".to_string(), format!("x-{}", n - 1))));
+}

@@ -680,11 +680,19 @@ pub fn combine_field_conflicts(sources: &[&Document]) -> Vec<Vec<(String, String
 /// Read-only: returns (node, new `/T`, old name, new name). Cycle- and depth-safe.
 fn plan_renames(doc: &Document, roots: &[ObjRef], taken: &mut std::collections::HashSet<String>) -> Vec<(ObjRef, String, String, String)> {
     let mut planned = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut walk = RenameWalk::default();
     for &root in roots {
-        plan_renames_under(doc, root, "", taken, &mut seen, 0, &mut planned);
+        plan_renames_under(doc, root, "", taken, &mut walk, 0, &mut planned);
     }
     planned
+}
+
+/// What one [`plan_renames`] call remembers: the nodes it visited, and for each colliding name
+/// the suffix to try next.
+#[derive(Default)]
+struct RenameWalk {
+    seen: HashSet<ObjRef>,
+    next: HashMap<String, u32>,
 }
 
 /// One node of [`plan_renames`].
@@ -693,11 +701,11 @@ fn plan_renames_under(
     node: ObjRef,
     prefix: &str,
     taken: &mut std::collections::HashSet<String>,
-    seen: &mut std::collections::HashSet<ObjRef>,
+    walk: &mut RenameWalk,
     depth: u8,
     planned: &mut Vec<(ObjRef, String, String, String)>,
 ) {
-    if depth > 32 || !seen.insert(node) {
+    if depth > 32 || !walk.seen.insert(node) {
         return;
     }
     let Some(d) = doc.get(node).as_dict().cloned() else { return };
@@ -705,14 +713,19 @@ fn plan_renames_under(
     if !name.is_empty() {
         let fqn = qualified(prefix, &name);
         if taken.contains(&fqn) {
-            let mut n = 1u32;
+            // `taken` only grows, so every suffix below the last one handed out for this name is
+            // still taken: resume there instead of at 1.
+            let mut n = walk.next.get(&fqn).copied().unwrap_or(1);
             let mut variant;
             while {
+                #[cfg(test)]
+                crate::work(1);
                 variant = format!("{name}-{n}");
                 taken.contains(&qualified(prefix, &variant))
             } {
-                n += 1;
+                n = n.saturating_add(1);
             }
+            walk.next.insert(fqn.clone(), n.saturating_add(1));
             let new_fqn = qualified(prefix, &variant);
             planned.push((node, variant.clone(), fqn, new_fqn.clone()));
             taken.insert(new_fqn);
@@ -724,7 +737,7 @@ fn plan_renames_under(
     let prefix = qualified_optional(prefix, &name);
     let kids = d.get(b"Kids").map(|k| doc.resolve(k)).and_then(|k| k.as_array().cloned()).unwrap_or_default();
     for kid in kids.iter().filter_map(|k| k.as_ref()) {
-        plan_renames_under(doc, kid, &prefix, taken, seen, depth + 1, planned);
+        plan_renames_under(doc, kid, &prefix, taken, walk, depth + 1, planned);
     }
 }
 
