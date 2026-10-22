@@ -844,12 +844,26 @@ fn register_fields(dst: &mut Document, fields: &[ObjRef]) -> Result<(), Organize
 
 /// A new document containing copies of `pages` from `src` (Extract Pages / Split).
 /// Document information (title, author…) is carried over, and so is the print standard the
-/// source declares (PDF/X: its output intents and identification, #263).
+/// source declares (PDF/X: its output intents and identification, #263), and the bookmarks that
+/// go to the copied pages.
 pub fn extract_pages(src: &Document, pages: &[usize]) -> Result<Document, OrganizeError> {
     let mut out = Document::new_empty();
     // One source: nothing to deduplicate. Its fields keep their names (a source with two
     // same-named field roots stays one field, as it was), so Extract and Split never rename.
     let imported = import_pages_mapped(&mut out, src, pages, 0, FieldConflicts::Merge)?;
+    // The bookmarks of these pages come along, mapped to the copies (#4020).
+    let outline = kept_bookmarks(source_outline(src, imported.page_map));
+    if !outline.is_empty() {
+        let root = crate::outline::container(&mut out, &[])?;
+        if let Some((first, last, _)) = write_outline_level(&mut out, root, &outline)? {
+            out.update_dict(root, |d| {
+                d.set(b"First".to_vec(), Object::Ref(first));
+                d.set(b"Last".to_vec(), Object::Ref(last));
+            })?;
+            let top = crate::outline::children(&out, root);
+            crate::outline::relink_and_recount(&mut out, root, &top)?;
+        }
+    }
     for key in crate::INFO_KEYS {
         if let Some(v) = crate::info(src, key) {
             crate::set_info(&mut out, key, &v)?;
@@ -1219,6 +1233,18 @@ fn source_outline(src: &Document, pages: HashMap<ObjRef, ObjRef>) -> Vec<Outline
     let mapper = Copier::new(src, HashMap::new(), pages);
     let mut budget = 10_000usize;
     outline_level(&mapper, first, 0, &mut budget)
+}
+
+/// `nodes` without the bookmarks whose page was not copied (no destination left), unless a bookmark
+/// under them stays. [`outline_level`] already bounds the depth.
+fn kept_bookmarks(nodes: Vec<OutlineNode>) -> Vec<OutlineNode> {
+    nodes
+        .into_iter()
+        .filter_map(|mut n| {
+            n.children = kept_bookmarks(n.children);
+            (n.dest.is_some() || !n.children.is_empty()).then_some(n)
+        })
+        .collect()
 }
 
 /// One level of bookmarks from `first` (its siblings), each with its children. Cycle- and size-safe:
