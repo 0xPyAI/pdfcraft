@@ -345,8 +345,34 @@ fn date_pattern_of(doc: &Document, f: &FieldDatum) -> Option<String> {
     Some(body[..body.find('"')?].to_string())
 }
 
-/// The tokens of a date pattern: `yyyy`, `yy`, `mm`, `m`, `dd`, `d`, or a literal character.
-fn date_tokens(pattern: &str) -> Vec<String> {
+const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const WEEKDAYS: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+/// The weekday (0 = Sunday) of a proleptic Gregorian date.
+fn weekday(y: u32, m: u32, d: u32) -> usize {
+    const T: [i64; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let y = i64::from(y) - i64::from(m < 3);
+    let t = T.get((m as usize).wrapping_sub(1)).copied().unwrap_or(0);
+    ((y + y / 4 - y / 100 + y / 400 + t + i64::from(d)).rem_euclid(7)) as usize
+}
+
+/// The index and length of the name in `names` that `text` starts with (ignoring case),
+/// cut to `abbr` letters when that is set.
+fn name_at(text: &str, names: &[&str], abbr: bool) -> Option<(usize, usize)> {
+    names.iter().enumerate().find_map(|(i, n)| {
+        let n = if abbr { n.get(..3)? } else { n };
+        text.get(..n.len()).filter(|t| t.eq_ignore_ascii_case(n)).map(|_| (i, n.len()))
+    })
+}
+
+/// Whether `token` is a run of the date letters (`y`, `m`, `d`) rather than a literal.
+fn is_date_run(token: &str) -> bool {
+    token.starts_with(['y', 'm', 'd'])
+}
+
+/// The tokens of a date pattern: runs of `y`, `m` and `d` (`yyyy`, `yy`, `mmmm`, `mmm`, `mm`,
+/// `m`, `dddd`, `ddd`, `dd`, `d` are understood), or a literal character.
+pub(crate) fn date_tokens(pattern: &str) -> Vec<String> {
     let mut out = Vec::new();
     let chars: Vec<char> = pattern.chars().collect();
     let mut i = 0;
@@ -367,8 +393,8 @@ fn date_tokens(pattern: &str) -> Vec<String> {
     out
 }
 
-/// `2001-02-03` shown in `pattern` (`mm/dd/yyyy` → `02/03/2001`). Unknown patterns and
-/// non-dates come back as they are.
+/// `2001-02-03` shown in `pattern` (`mm/dd/yyyy` → `02/03/2001`, `mmm d, yyyy` →
+/// `Feb 3, 2001`). Patterns with a token this doesn't know and non-dates come back as they are.
 pub fn iso_to_pattern(iso: &str, pattern: &str) -> String {
     let parts: Vec<&str> = iso.trim().splitn(3, '-').collect();
     let [y, m, d] = parts[..] else { return iso.to_string() };
@@ -382,6 +408,21 @@ pub fn iso_to_pattern(iso: &str, pattern: &str) -> String {
             "m" => out.push_str(&m.to_string()),
             "dd" => out.push_str(&format!("{d:02}")),
             "d" => out.push_str(&d.to_string()),
+            "mmm" | "mmmm" => {
+                let Some(name) = m.checked_sub(1).and_then(|i| MONTHS.get(i as usize)) else { return iso.to_string() };
+                match t.len() {
+                    3 => out.push_str(name.get(..3).unwrap_or(name)),
+                    _ => out.push_str(name),
+                }
+            }
+            "ddd" | "dddd" => {
+                let name = WEEKDAYS.get(weekday(y, m, d)).copied().unwrap_or_default();
+                match t.len() {
+                    3 => out.push_str(name.get(..3).unwrap_or(name)),
+                    _ => out.push_str(name),
+                }
+            }
+            other if is_date_run(other) => return iso.to_string(),
             other => out.push_str(other),
         }
     }
@@ -392,6 +433,7 @@ pub fn iso_to_pattern(iso: &str, pattern: &str) -> String {
 pub fn pattern_to_iso(text: &str, pattern: &str) -> Option<String> {
     let text = text.trim();
     let (mut y, mut m, mut d) = (None, None, None);
+    let mut day_name = None;
     let mut rest = text;
     let tokens = date_tokens(pattern);
     for (i, t) in tokens.iter().enumerate() {
@@ -417,6 +459,17 @@ pub fn pattern_to_iso(text: &str, pattern: &str) -> Option<String> {
                     _ => d = Some(v),
                 }
             }
+            "mmm" | "mmmm" => {
+                let (i, len) = name_at(rest, &MONTHS, t.len() == 3)?;
+                m = Some(i as u32 + 1);
+                rest = rest.get(len..)?;
+            }
+            "ddd" | "dddd" => {
+                let (i, len) = name_at(rest, &WEEKDAYS, t.len() == 3)?;
+                day_name = Some(i);
+                rest = rest.get(len..)?;
+            }
+            run if is_date_run(run) => return None,
             lit => {
                 rest = rest.strip_prefix(lit)?;
             }
@@ -427,6 +480,9 @@ pub fn pattern_to_iso(text: &str, pattern: &str) -> Option<String> {
         return None;
     }
     let (y, m, d) = (y?, m?, d?);
+    if day_name.is_some_and(|w| w != weekday(y, m, d)) {
+        return None;
+    }
     (1..=12).contains(&m).then(|| format!("{y:04}-{m:02}-{d:02}")).filter(|_| (1..=31).contains(&d))
 }
 
@@ -553,6 +609,8 @@ fn path_of(tpl: Option<&Template>, som: &str) -> DataPath {
     }
 }
 
+/// The values the datasets should hold for `fields`, by data path: dates in each field's data
+/// picture (or ISO), check and radio states, choice values as saved.
 fn wanted(doc: &Document, fields: &[FieldDatum], tpl: Option<&Template>) -> Vec<Want> {
     let mut out = Vec::new();
     for f in fields {
@@ -1049,7 +1107,9 @@ fn merge_values(src: &str, data: roxmltree::Node, wants: &[Want], edits: &mut Ve
             let current: String = node.children().filter(|c| c.is_text()).filter_map(|c| c.text()).collect();
             if node.children().any(|c| c.is_element()) {
                 let all: String = node.descendants().filter(|c| c.is_text()).filter_map(|c| c.text()).collect();
-                if all.trim() != w.text.trim() {
+                // Ignore existing XML indentation, but not whitespace in the accepted value.
+                // A skipped mismatch must warn: relayout would otherwise use stale data.
+                if all.trim() != w.text {
                     skipped(warnings, STRUCTURED, &w.som);
                 }
                 continue;
@@ -1636,6 +1696,8 @@ pub fn read_values_with(doc: &Document, tpl: Option<&Template>, fields: &[FieldD
     with_template(doc, tpl, |t| values_at(doc, t, fields))
 }
 
+/// The values the document's datasets hold for `fields`, read in each field's data picture and
+/// shown in its own pattern; only fields the data mentions.
 fn values_at(doc: &Document, tpl: Option<&Template>, fields: &[FieldDatum]) -> Vec<(String, FieldData)> {
     let Ok(Some(p)) = crate::read_packets(doc) else { return Vec::new() };
     let Some(data) = parse_datasets(&p.xdp) else { return Vec::new() };
