@@ -6,6 +6,8 @@
 //! `pdfcraft-engine`.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+// The settings object in `persist` is one `json!` literal past the default limit of 128.
+#![recursion_limit = "256"]
 
 /// Whether `a` and `b` name the same file: equal, or equal once made absolute against the
 /// current directory (links are not resolved, as in `last_session`).
@@ -582,6 +584,9 @@ pub struct PdfCraftApp {
     quit_session: Option<last_session::LastSession>,
     /// Preferences: reload a document when its file changes on disk (#431).
     pub reload_changed_files: bool,
+    /// Preferences: open every document at Default zoom and Default page display, whatever
+    /// layout or zoom it asks for (#1618).
+    pub always_default_view: bool,
     /// Open documents' files, watched for changes on disk.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) watch: file_watch::FileWatch,
@@ -952,6 +957,7 @@ impl PdfCraftApp {
             last_session: Default::default(),
             quit_session: None,
             reload_changed_files: true,
+            always_default_view: false,
             #[cfg(not(target_arch = "wasm32"))]
             watch: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
@@ -1106,7 +1112,8 @@ impl PdfCraftApp {
     }
 
     /// Open a document the way it asks to be opened: navigation panel, layout, magnification,
-    /// page (Document Properties ▸ Initial View).
+    /// page (Document Properties ▸ Initial View). With Always use my default zoom and page
+    /// layout on, the layout and magnification stay at the defaults the view opened with.
     fn apply_initial_view(&mut self, index: usize, v: &pdfcraft_engine::InitialView) {
         use pdfcraft_engine::{InitialLayout as L, Magnification as M, Navigation as N};
         let pages = self.session.get(self.views[index].id).map_or(0, |d| d.info.pages.len());
@@ -1120,28 +1127,30 @@ impl PdfCraftApp {
             }
         }
         let view = &mut self.views[index];
-        match v.layout {
-            // The view opened in Default page display already.
-            L::Default => {}
-            L::SinglePage => (view.layout, view.continuous) = (canvas::PageLayout::Single, false),
-            L::SinglePageContinuous => (view.layout, view.continuous) = (canvas::PageLayout::Single, true),
-            L::TwoUp => (view.layout, view.continuous) = (canvas::PageLayout::TwoUp, false),
-            L::TwoUpContinuous => (view.layout, view.continuous) = (canvas::PageLayout::TwoUp, true),
-            L::TwoUpCoverPage => {
-                (view.layout, view.continuous, view.cover) = (canvas::PageLayout::TwoUp, false, true);
+        if !self.always_default_view {
+            match v.layout {
+                // The view opened in Default page display already.
+                L::Default => {}
+                L::SinglePage => (view.layout, view.continuous) = (canvas::PageLayout::Single, false),
+                L::SinglePageContinuous => (view.layout, view.continuous) = (canvas::PageLayout::Single, true),
+                L::TwoUp => (view.layout, view.continuous) = (canvas::PageLayout::TwoUp, false),
+                L::TwoUpContinuous => (view.layout, view.continuous) = (canvas::PageLayout::TwoUp, true),
+                L::TwoUpCoverPage => {
+                    (view.layout, view.continuous, view.cover) = (canvas::PageLayout::TwoUp, false, true);
+                }
+                L::TwoUpContinuousCoverPage => {
+                    (view.layout, view.continuous, view.cover) = (canvas::PageLayout::TwoUp, true, true);
+                }
             }
-            L::TwoUpContinuousCoverPage => {
-                (view.layout, view.continuous, view.cover) = (canvas::PageLayout::TwoUp, true, true);
+            match v.magnification {
+                // The view opened at the default zoom already.
+                M::Default => {}
+                M::ActualSize => view.set_zoom(1.0),
+                M::Percent(p) => view.set_zoom((p / 100.0) as f32),
+                M::FitPage | M::FitVisible => view.fit = canvas::Fit::Page,
+                M::FitWidth => view.fit = canvas::Fit::Width,
+                M::FitHeight => view.fit = canvas::Fit::Height,
             }
-        }
-        match v.magnification {
-            // The view opened at the default zoom already.
-            M::Default => {}
-            M::ActualSize => view.set_zoom(1.0),
-            M::Percent(p) => view.set_zoom((p / 100.0) as f32),
-            M::FitPage | M::FitVisible => view.fit = canvas::Fit::Page,
-            M::FitWidth => view.fit = canvas::Fit::Width,
-            M::FitHeight => view.fit = canvas::Fit::Height,
         }
         if v.page > 0 && v.page < pages {
             view.go_to_page(v.page);
@@ -2307,6 +2316,7 @@ impl PdfCraftApp {
             "default_mode": self.default_mode,
             "default_layout": canvas::display_token(self.view_defaults.layout, self.view_defaults.continuous),
             "default_zoom": self.view_defaults.zoom_name(),
+            "always_default_view": self.always_default_view,
             "highlight_fields": self.view_defaults.highlight_fields,
             "units": self.units,
             "language": self.language,
@@ -2415,6 +2425,9 @@ impl PdfCraftApp {
         }
         if let Ok(units) = serde_json::from_value::<units::Unit>(v["units"].clone()) {
             self.units = units;
+        }
+        if let Some(on) = v["always_default_view"].as_bool() {
+            self.always_default_view = on;
         }
         if let Some(on) = v["highlight_fields"].as_bool() {
             self.view_defaults.highlight_fields = on;
@@ -2671,6 +2684,13 @@ impl PdfCraftApp {
             ("default-zoom", _) => {
                 self.view_defaults =
                     self.view_defaults.with_zoom(value).ok_or("default-zoom must be fit-width, fit-page or a percentage from 8 to 6400")?;
+            }
+            ("always-default-view", _) => {
+                self.always_default_view = match value {
+                    "on" => true,
+                    "off" => false,
+                    _ => return Err("always-default-view must be on or off".into()),
+                };
             }
             ("tools-side", _) => self.docking.set_tools_on_right(match value {
                 "left" => false,
