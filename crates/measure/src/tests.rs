@@ -403,3 +403,23 @@ fn a_scale_ratio_converts_its_page_side_to_points() {
         assert!(Scale::ratio([0.0, 0.0], [1.0, 0.0], page, PageUnit::Mm, real, "mm", 2).is_err(), "{page} {real}");
     }
 }
+#[test]
+fn listing_skips_repeated_refs_and_caps_what_it_keeps() {
+    let mut d = fixture("", "", &[]);
+    let points: Vec<Point> = (0..MAX_POINTS).map(|i| [i as f64 * 0.1, 0.0]).collect();
+    add(&mut d, &new(Kind::Perimeter, points), &Meta::default()).unwrap();
+    let (r, mut annotation) = annot(&d, 0, 0).unwrap();
+    let page = pdfcraft_model::pages(&d)[0].obj;
+    let set_annots = |d: &mut Document, list: Vec<Object>| d.update_dict(page, |p| p.set(b"Annots".to_vec(), Object::Array(list))).unwrap();
+    // One annotation referenced 1000 times is one measurement.
+    set_annots(&mut d, vec![Object::Ref(r); 1000]);
+    assert_eq!(list(&d).measurements.len(), 1);
+    // Many small annotations sharing one 2048-point vertex array stop at the retained budget.
+    let vertices = d.add(annotation.get(b"Vertices").unwrap().clone());
+    annotation.set(b"Vertices".to_vec(), Object::Ref(vertices));
+    set_annots(&mut d, vec![Object::Dict(annotation); 1200]);
+    let listing = list(&d);
+    assert!(listing.truncated);
+    assert!(listing.measurements.iter().map(retained).sum::<usize>() <= MAX_LISTED_BYTES);
+    assert!(!listing.measurements.is_empty());
+}
