@@ -709,3 +709,18 @@ fn copy_restricted_documents_withhold_covered_text() {
     let short = crate::Limits { covered_text: exact.covered_text - 1, ..exact };
     assert!(matches!(crate::audit(&owner, short), Err(crate::AuditError::TooMuchOutput)));
 }
+
+/// Withheld text is never assembled: covers over one long line would otherwise copy the line once
+/// per cover, a volume neither the comparison nor the output bound charges.
+#[test]
+fn withheld_covered_text_is_not_assembled() {
+    let doc = open(one_page(b"BT /F1 24 Tf 100 700 Td (SECRET DATA 123) Tj ET\n", ""));
+    let lines = pdfcraft_edit::text_lines(&doc, 0).expect("text");
+    let mut budget = crate::Budget { limits: crate::Limits::DEFAULT, comparisons: 0, page_cost: 0, covered_text: 0 };
+    budget.start_page(&lines);
+    let withheld = budget.hidden_text(&lines, false, |_| true).expect("within the budget");
+    assert_eq!(withheld.map(|t| t.capacity()), Some(0), "a finding, with no text built for it");
+    assert_eq!(budget.hidden_text(&lines, false, |_| false).expect("within the budget"), None);
+    let copied = budget.hidden_text(&lines, true, |_| true).expect("within the budget");
+    assert_eq!(copied.as_deref(), Some("SECRET DATA 123"));
+}

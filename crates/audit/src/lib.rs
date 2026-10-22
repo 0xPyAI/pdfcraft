@@ -142,11 +142,16 @@ impl Budget {
         self.page_cost = lines.iter().fold(0, |n, line| n.saturating_add(line.ink.len().max(1)));
     }
 
-    /// The text of the `lines` that `hides`, joined with single spaces.
-    fn hidden_text(&mut self, lines: &[TextLine], hides: impl Fn(&TextLine) -> bool) -> Result<String, AuditError> {
+    /// The text of the `lines` that `hides`, joined with single spaces, or `None` when they show
+    /// no text. Without `copying` the text is empty and never assembled: one long line under many
+    /// covers would otherwise be copied once per cover, outside both bounds.
+    fn hidden_text(&mut self, lines: &[TextLine], copying: bool, hides: impl Fn(&TextLine) -> bool) -> Result<Option<String>, AuditError> {
         self.comparisons = self.comparisons.saturating_add(self.page_cost);
         if self.comparisons > self.limits.comparisons {
             return Err(AuditError::TooManyComparisons);
+        }
+        if !copying {
+            return Ok(lines.iter().any(|line| hides(line) && !line.text.trim().is_empty()).then(String::new));
         }
         let mut covered = String::new();
         for line in lines.iter().filter(|l| hides(l)) {
@@ -155,7 +160,7 @@ impl Budget {
             }
             covered.push_str(line.text.trim());
         }
-        Ok(covered)
+        Ok((!covered.trim().is_empty()).then_some(covered))
     }
 
     /// The text a finding reports for `covered`: none when copying is withheld. Charges what it
@@ -179,19 +184,17 @@ fn audit(doc: &Document, limits: Limits) -> Result<Vec<AuditFinding>, AuditError
         budget.start_page(&lines);
         // 1. Opaque filled rectangles over extractable text.
         for r in cover::filled_rects(doc, &page.dict)? {
-            let covered = budget.hidden_text(&lines, |line| is_cover(&r, line))?;
-            if !covered.trim().is_empty() {
+            if let Some(covered) = budget.hidden_text(&lines, copying, |line| is_cover(&r, line))? {
                 let covered_text = budget.report_text(covered, copying)?;
                 out.push(AuditFinding { page: n, kind: FindingKind::CoveredText, rect: r.rect, covered_text });
             }
         }
         // 2. Annotation covers over extractable text.
         for annot in annots(doc, &page.dict)? {
-            let covered = budget.hidden_text(&lines, |line| match &annot {
+            if let Some(covered) = budget.hidden_text(&lines, copying, |line| match &annot {
                 AnnotationCover::Redact(rect) => covers(rect, line),
                 AnnotationCover::Square { rect, rgb } => covers(rect, line) && contrast(line.color, *rgb) < COVER_CONTRAST,
-            })?;
-            if !covered.trim().is_empty() {
+            })? {
                 let (kind, rect) = match annot {
                     AnnotationCover::Redact(rect) => (FindingKind::UnappliedMark, rect),
                     AnnotationCover::Square { rect, .. } => (FindingKind::CoveredText, rect),
