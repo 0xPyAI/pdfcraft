@@ -33,7 +33,7 @@ Limits, by design and documented rather than hidden:
   less than 40% of its words (a sliver of a long value) is not flagged.
 
 It fails closed: an undecodable content stream, malformed `/Annots`, form XObjects nested deeper
-than 32 or in a cycle, a walk past the operator bound, more than 50 million cover-against-line
+than 32 or in a cycle, a walk past the operator bound, more than 50 million cover-against-word
 comparisons on a page, or more than 64 MiB of covered text in the report is an error, never "no
 findings".
 
