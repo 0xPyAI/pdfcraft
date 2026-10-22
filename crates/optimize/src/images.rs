@@ -127,6 +127,10 @@ impl Walk<'_> {
             }
             self.rewalks += 1;
         }
+        if !self.budget.enter_form() {
+            self.complete = false;
+            return;
+        }
         let Ok(data) = self.budget.decode(s) else {
             self.complete = false;
             return;
