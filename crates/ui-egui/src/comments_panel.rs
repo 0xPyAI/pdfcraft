@@ -324,8 +324,10 @@ fn card(
                 ui.set_width(ui.available_width());
                 if editing && let Some((_, _, text)) = view.comments.editing.as_mut() {
                     let r = ui.add(crate::widgets::block(text).desired_rows(2).desired_width(f32::INFINITY).id_salt(("comment-edit", key)));
-                    if !r.has_focus() && !ui.memory(|m| m.focused().is_some()) {
-                        r.request_focus();
+                    match view.comments.editor_focus.take() {
+                        Some(crate::comments::EditorFocus::Take) => r.request_focus(),
+                        Some(crate::comments::EditorFocus::Release) => r.surrender_focus(),
+                        None => {}
                     }
                     let submit = crate::comments::submit_key(ui, &r, false);
                     ui.horizontal(|ui| {
@@ -434,7 +436,7 @@ fn card(
         *nav = Some(Nav::Flash(a.page, a.rect));
     }
     if click.double_clicked() && allowed {
-        view.comments.editing = Some((a.page, a.index, a.contents.clone().unwrap_or_default()));
+        view.comments.open_editor(a.page, a.index, a.contents.clone().unwrap_or_default());
     }
     let menu_id = ui.id().with(("card-menu", key));
     if open_menu {
@@ -450,7 +452,7 @@ fn card(
             ui.set_min_width(160.0);
             crate::comments::attachment_items(ui, view, info, a);
             if ui.button(tl_ctx!("comment menu", "Edit")).clicked() {
-                view.comments.editing = Some((a.page, a.index, a.contents.clone().unwrap_or_default()));
+                view.comments.open_editor(a.page, a.index, a.contents.clone().unwrap_or_default());
                 ui.close();
             }
             ui.menu_button(tl!("Set status"), |ui| {

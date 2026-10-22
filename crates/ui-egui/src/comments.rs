@@ -521,6 +521,19 @@ pub struct CommentView {
     pub context_at: Option<(usize, [f64; 2])>,
     /// A one-shot tool just finished; the app returns to the Select tool unless pinned.
     pub tool_done: bool,
+    /// What the inline editor (`editing`) does with the keyboard the next time it is drawn.
+    pub(crate) editor_focus: Option<EditorFocus>,
+}
+
+/// A one-off change to the keyboard focus of the Comments panel's inline editor. The editor
+/// never asks for the keyboard on its own: when it did so on every frame, it took the keyboard
+/// back after every click elsewhere, and the tool keys (V, H) were typed into it (#2669).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EditorFocus {
+    /// The editor just opened: it takes the keyboard, once.
+    Take,
+    /// Another comment was added: the editor keeps its text but gives the keyboard back.
+    Release,
 }
 
 impl CommentView {
@@ -536,6 +549,25 @@ impl CommentView {
             self.gesture = None;
         }
         true
+    }
+
+    /// Open the inline editor on comment (page, index) with `text`. It takes the keyboard once,
+    /// as it opens; after that the keyboard goes wherever the user clicks.
+    pub(crate) fn open_editor(&mut self, page: usize, index: usize, text: String) {
+        self.editing = Some((page, index, text));
+        self.editor_focus = Some(EditorFocus::Take);
+    }
+
+    /// A comment was just added. The editor open on another one must not keep the keyboard, or
+    /// the tool keys pressed next are typed into it (#2669): an empty editor closes, and one
+    /// holding text stays open with it, without the keyboard.
+    pub(crate) fn comment_added(&mut self) {
+        if self.editing.as_ref().is_some_and(|(_, _, text)| !text.is_empty()) {
+            self.editor_focus = Some(EditorFocus::Release);
+        } else {
+            self.editing = None;
+            self.editor_focus = None;
+        }
     }
 }
 

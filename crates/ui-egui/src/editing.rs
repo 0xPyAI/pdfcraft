@@ -126,6 +126,9 @@ impl PdfCraftApp {
                 } else {
                     view.document_changed(info);
                 }
+                if matches!(edit, Edit::AddAnnotation(_)) {
+                    view.comments.comment_added();
+                }
                 // Keep the pages the user acted on selected, where they now are.
                 match edit {
                     Edit::MovePages { pages, to } => {
@@ -157,9 +160,9 @@ impl PdfCraftApp {
                         // unless a note typed into another card is still unsaved.
                         if let (pdfcraft_engine::Shape::TextMarkup { kind: pdfcraft_engine::Markup::Highlight, .. }, Some(n)) = (&a.shape, newest)
                             && a.contents.is_empty()
-                            && view.comments.editing.as_ref().is_none_or(|(_, _, text)| text.is_empty())
+                            && view.comments.editing.is_none()
                         {
-                            view.comments.editing = Some((a.page, n, String::new()));
+                            view.comments.open_editor(a.page, n, String::new());
                         }
                     }
                     Edit::DeleteAnnotation { .. } => view.comments.selected = None,
