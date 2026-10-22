@@ -2042,7 +2042,8 @@ fn appears_in_pdf(bytes: &Arc<Vec<u8>>, needle: &str) -> bool {
 }
 
 /// #3926: a value typed into a text field with the Password flag stays in the open document but
-/// is written to no file: Save, a full rewrite, Reduce File Size or a recovery snapshot. ISO
+/// is written to no file: Save, a full rewrite, Reduce File Size, a recovery snapshot, or a new
+/// file made from its pages (Extract, Split, Combine). ISO
 /// 32000-2 §12.7.5.3, Table 231, note to the Password flag: PDF processors should never store
 /// the value in the PDF file.
 #[test]
@@ -2065,6 +2066,15 @@ fn password_field_values_are_kept_in_memory_but_written_to_no_file() {
     let snaps = s.autosave_snapshots();
     assert_eq!(snaps.len(), 1);
     assert!(!appears_in_pdf(&snaps[0].bytes, "hunter2"), "the recovery snapshot");
+    // New files built from its pages too (#3943 review): Extract copies the fields of the pages it
+    // takes, and Split writes each part the same way.
+    let extracted = s.extract(id, &[0]).unwrap();
+    assert!(!appears_in_pdf(&extracted, "hunter2"), "Extract Pages");
+    assert!(appears_in_pdf(&extracted, "*******"), "the extracted page keeps the masked appearance");
+    for (_, _, part) in s.split_by_size(id, 1).unwrap() {
+        assert!(!appears_in_pdf(&part, "hunter2"), "Split");
+    }
+    assert!(!appears_in_pdf(&s.combine(&[("form.pdf".into(), s.get(id).unwrap().bytes.clone())]).unwrap(), "hunter2"), "Combine");
     // Reopened, the field is empty, as in any reader.
     let mut t = Session::new();
     let reopened = t.open("saved.pdf", None, saved, None).unwrap();
