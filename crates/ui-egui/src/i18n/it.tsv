@@ -2696,3 +2696,16 @@ certificate	SHA-256 digest	Impronta SHA-256
 
 # Entries the other catalogs had and Italian lacked (2026-10-21)
 	The password must have at least 8 characters.	La password deve contenere almeno 8 caratteri.
+
+# Entries from #1523 that the catalog lacked.
+	Color	Colore
+	Comment	Commento
+	Error	Errore
+	Next	Avanti
+	On	Attivo
+	Rotate view clockwise (⇧⌘+)	Ruota la vista in senso orario (⇧⌘+)
+	Save (M4)	Salva (M4)
+	Save changes?	Salvare le modifiche?
+	System	Sistema
+	Zoom in / out (also pinch or ⌘-scroll)	Ingrandisci / riduci (anche con il pizzico o ⌘+scorrimento)
+	of	di
