@@ -779,6 +779,117 @@ fn edit_undo_redo_and_save_round_trip() {
     assert_eq!(after.windows(5).filter(|w| w == b"%%EOF").count(), 2);
 }
 
+/// A shallow-object destination tree: `depth` single-child nodes above `count` names.
+fn destination_graph_fixture(depth: usize, count: usize) -> Vec<u8> {
+    use pdfcraft_cos::{Dict, Document, Object, PdfString, SaveOptions};
+    let mut doc = Document::open(std::sync::Arc::new(fixture(3))).unwrap();
+    let pages = pdfcraft_organize::pages(&doc).unwrap();
+    let pairs = (0..count)
+        .flat_map(|i| {
+            let page = if i % 2 == 0 { pages[0].obj } else { pages[2].obj };
+            [Object::String(PdfString::text(&format!("dest-{i:05}"))), Object::Array(vec![Object::Ref(page), Object::name("Fit")])]
+        })
+        .collect();
+    let mut leaf = Dict::new();
+    leaf.set(b"Names".to_vec(), Object::Array(pairs));
+    let mut tree = doc.add(leaf);
+    for _ in 0..depth {
+        let mut node = Dict::new();
+        node.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(tree)]));
+        tree = doc.add(node);
+    }
+    let mut names = Dict::new();
+    names.set(b"Dests".to_vec(), Object::Ref(tree));
+    doc.update_dict(doc.root().unwrap(), |d| d.set(b"Names".to_vec(), Object::Dict(names))).unwrap();
+    pdfcraft_cos::write_incremental(&doc, &SaveOptions::default()).unwrap()
+}
+
+/// Inspect the actual working bytes, not just page counts or history labels. The fixture has
+/// exactly `depth` single-child nodes, so this checks its leaf without a second general walker.
+fn assert_destination_state(a: &Automation, doc: u64, depth: usize, count: usize, deleted: bool) {
+    use pdfcraft_cos::{Document, Object};
+    let bytes = a.session().get(pdfcraft_engine::DocId(doc)).unwrap().bytes.clone();
+    let parsed = Document::open(bytes).unwrap();
+    let pages = pdfcraft_organize::pages(&parsed).unwrap();
+    assert_eq!(pages.len(), if deleted { 2 } else { 3 });
+    let catalog = parsed.get(parsed.root().unwrap());
+    let names = parsed.resolve(catalog.as_dict().unwrap().get(b"Names").unwrap());
+    let mut node = parsed.resolve(names.as_dict().unwrap().get(b"Dests").unwrap());
+    for _ in 0..depth {
+        let kids = node.as_dict().unwrap().get(b"Kids").unwrap().as_array().unwrap();
+        assert_eq!(kids.len(), 1);
+        let child = kids[0].clone();
+        node = parsed.resolve(&child);
+    }
+    let pairs = node.as_dict().unwrap().get(b"Names").and_then(Object::as_array).unwrap();
+    assert_eq!(pairs.len(), if deleted { count / 2 * 2 } else { count * 2 });
+    let expected = (0..count).filter(|i| !deleted || i % 2 == 1);
+    for (pair, i) in pairs.as_chunks::<2>().0.iter().zip(expected) {
+        assert_eq!(pair[0].as_string().unwrap().to_text(), format!("dest-{i:05}"));
+        let target = if i % 2 == 0 { pages[0].obj } else { pages.last().unwrap().obj };
+        assert_eq!(pair[1].as_array().unwrap()[0].as_ref(), Some(target), "destination {i}");
+    }
+}
+
+/// Exercise the real tools, including named destinations after undo and redo, and check both
+/// kinds of save explicitly: a full copy, followed by an incremental update of that copy.
+fn delete_destination_tree_through_tools(depth: usize, count: usize, label: &str) {
+    let dir = workdir(label);
+    let original = destination_graph_fixture(depth, count);
+    std::fs::write(dir.join("source.pdf"), &original).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path":"source.pdf"}))["doc"].as_u64().unwrap();
+    assert_destination_state(&a, doc, depth, count, false);
+    let render = a.call("page_render", &json!({"doc":doc,"page":2,"dpi":72})).unwrap();
+    ok(&mut a, "doc_set_info", json!({"doc":doc,"key":"Title","value":"Unsaved work"}));
+    ok(&mut a, "page_delete", json!({"doc":doc,"pages":[1]}));
+    assert_destination_state(&a, doc, depth, count, true);
+    assert_eq!(page_text(&mut a, doc), ["Page 2", "Page 3"]);
+    assert_eq!(a.call("page_render", &json!({"doc":doc,"page":1,"dpi":72})).unwrap(), render);
+    ok(&mut a, "edit_undo", json!({"doc":doc}));
+    assert_destination_state(&a, doc, depth, count, false);
+    assert_eq!(page_text(&mut a, doc), ["Page 1", "Page 2", "Page 3"]);
+    assert_eq!(ok(&mut a, "doc_info", json!({"doc":doc}))["title"], "Unsaved work");
+    ok(&mut a, "edit_redo", json!({"doc":doc}));
+    assert_destination_state(&a, doc, depth, count, true);
+    assert_eq!(page_text(&mut a, doc), ["Page 2", "Page 3"]);
+    assert_eq!(ok(&mut a, "doc_info", json!({"doc":doc}))["title"], "Unsaved work");
+
+    let saved = ok(&mut a, "doc_save", json!({"doc":doc,"path":"saved.pdf","full":true}));
+    assert_eq!(saved["incremental"], false);
+    let full = std::fs::read(dir.join("saved.pdf")).unwrap();
+    let mut b = auto(&dir);
+    let reopened = ok(&mut b, "doc_open", json!({"path":"saved.pdf"}))["doc"].as_u64().unwrap();
+    assert_destination_state(&b, reopened, depth, count, true);
+    assert_eq!(b.call("page_render", &json!({"doc":reopened,"page":1,"dpi":72})).unwrap(), render);
+
+    assert_eq!(ok(&mut b, "doc_info", json!({"doc":reopened}))["title"], "Unsaved work");
+    ok(&mut b, "doc_set_info", json!({"doc":reopened,"key":"Author","value":"Incremental probe"}));
+    let saved = ok(&mut b, "doc_save", json!({"doc":reopened}));
+    assert_eq!(saved["incremental"], true);
+    let incremental = std::fs::read(dir.join("saved.pdf")).unwrap();
+    assert!(incremental.len() > full.len() && incremental.starts_with(&full));
+    let mut b = auto(&dir);
+    let reopened = ok(&mut b, "doc_open", json!({"path":"saved.pdf"}))["doc"].as_u64().unwrap();
+    assert_destination_state(&b, reopened, depth, count, true);
+    assert_eq!(page_text(&mut b, reopened), ["Page 2", "Page 3"]);
+    assert_eq!(b.call("page_render", &json!({"doc":reopened,"page":1,"dpi":72})).unwrap(), render);
+    let info = ok(&mut b, "doc_info", json!({"doc":reopened}));
+    assert_eq!(info["title"], "Unsaved work");
+    assert_eq!(info["author"], "Incremental probe");
+    assert_eq!(std::fs::read(dir.join("source.pdf")).unwrap(), original);
+}
+
+#[test]
+fn page_delete_handles_deep_destination_trees_with_history_and_reopen() {
+    delete_destination_tree_through_tools(16_384, 2, "deep-destinations");
+}
+
+#[test]
+fn page_delete_handles_sixty_thousand_destinations_with_history_and_reopen() {
+    delete_destination_tree_through_tools(0, 60_000, "many-destinations");
+}
+
 /// Issue #1329: an in-place save says it was incremental only when it kept the file it was
 /// saving over: protecting or sanitizing rewrites the file, and the result says so.
 #[test]
