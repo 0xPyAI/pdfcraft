@@ -545,9 +545,22 @@ impl PdfCraftApp {
     fn commit_open_text_edits(&mut self, id: pdfcraft_engine::DocId) -> bool {
         let Some(doc) = self.session.get(id) else { return true };
         let Some(view) = self.views.iter_mut().find(|v| v.id == id) else { return true };
+        // Both are taken out of the view before either edit runs, so keep what is needed to put
+        // back whichever one the document refuses: typed text must not be lost.
+        let (draft, select_added, editor) = (view.content.draft.clone(), view.content.select_added, view.line_editor.clone());
         let added = view.content.finish_draft(doc.added());
         let paragraph = view.line_editor.take_if(|ed| ed.has_changes()).and_then(crate::edit_text_ui::finished_edit);
-        added.into_iter().chain(paragraph).all(|edit| self.apply_edit(edit))
+        let added_ok = added.is_none_or(|edit| self.apply_edit(edit));
+        let paragraph_ok = paragraph.is_none_or(|edit| self.apply_edit(edit));
+        if let Some(view) = self.views.iter_mut().find(|v| v.id == id) {
+            if !added_ok {
+                (view.content.draft, view.content.select_added) = (draft, select_added);
+            }
+            if !paragraph_ok {
+                view.line_editor = editor;
+            }
+        }
+        added_ok && paragraph_ok
     }
 
     /// The Fill & Sign type box commits on click-away. Save does that first, so the text is in
