@@ -324,18 +324,8 @@ impl<'a> Lexer<'a> {
         if s.contains('.') {
             // Tolerate forms like "--5", "5-" or "1.2.3" by parsing the longest valid prefix.
             let cleaned: String = s.trim_start_matches('+').replacen("--", "-", 1);
-            let mut end = cleaned.len();
-            while end > 0 {
-                // Only cut at character boundaries: a token can hold multi-byte UTF-8 (fuzzing
-                // found ".—", which panicked here).
-                if cleaned.is_char_boundary(end)
-                    && let Ok(v) = cleaned[..end].parse::<f64>()
-                {
-                    return Ok(Object::Real(v));
-                }
-                end -= 1;
-            }
-            return Ok(Object::Real(0.0));
+            let v = cleaned.get(..real_prefix_len(cleaned.as_bytes())).and_then(|p| parse_counted::<f64>(p).ok());
+            return Ok(Object::Real(v.unwrap_or(0.0)));
         }
         // Tolerate a doubled sign ("--280") like the real branch does.
         let t = s.trim_start_matches('+');
@@ -348,6 +338,44 @@ impl<'a> Lexer<'a> {
             }
         }
     }
+}
+
+/// Length of the longest prefix of `s` that reads as a decimal number: a sign, digits with at
+/// most one `.`, and an exponent with digits. Zero when that prefix has no digit. Found in one
+/// pass so a long damaged token is converted once, not once per shorter prefix.
+fn real_prefix_len(s: &[u8]) -> usize {
+    let digits = |from: usize| s.get(from..).map_or(0, |r| r.iter().take_while(|b| b.is_ascii_digit()).count());
+    let mut at = usize::from(matches!(s.first(), Some(b'+' | b'-')));
+    let int = digits(at);
+    at += int;
+    let mut frac = 0;
+    if s.get(at) == Some(&b'.') {
+        frac = digits(at + 1);
+        at += 1 + frac;
+    }
+    if int + frac == 0 {
+        return 0;
+    }
+    if matches!(s.get(at), Some(b'e' | b'E')) {
+        let sign = usize::from(matches!(s.get(at + 1), Some(b'+' | b'-')));
+        let exp = digits(at + 1 + sign);
+        if exp > 0 {
+            at += 1 + sign + exp;
+        }
+    }
+    at
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Bytes handed to number conversion on this thread.
+    static NUMBER_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn parse_counted<T: std::str::FromStr>(s: &str) -> Result<T, T::Err> {
+    #[cfg(test)]
+    NUMBER_BYTES.with(|c| c.set(c.get() + s.len()));
+    s.parse()
 }
 
 fn hexval(b: u8) -> Option<u8> {
@@ -481,6 +509,22 @@ mod tests {
             let _ = Lexer::new(t.as_bytes(), 0).object();
         }
         assert_eq!(Lexer::new("1.5\u{2014}".as_bytes(), 0).object().unwrap(), Object::Real(1.5));
+    }
+
+    #[test]
+    fn a_damaged_real_is_converted_once() {
+        let token = format!("1.{}{}", "5".repeat(2_000), "x".repeat(20_000));
+        NUMBER_BYTES.with(|c| c.set(0));
+        let Ok(Object::Real(v)) = Lexer::new(token.as_bytes(), 0).object() else { panic!("not a real") };
+        let converted = NUMBER_BYTES.with(|c| c.get());
+        assert!(converted <= token.len(), "{converted} bytes converted for a {}-byte token", token.len());
+        assert!((v - 1.5555).abs() < 1e-3);
+        // The longest numeric prefix wins, as before.
+        for (t, want) in
+            [("1.2.3", 1.2), ("--5.", -5.0), ("+.5x", 0.5), ("5.-", 5.0), ("1.5e3", 1500.0), ("1.5e+", 1.5), ("-.x", 0.0), (".", 0.0), ("-inf.", 0.0)]
+        {
+            assert_eq!(Lexer::new(t.as_bytes(), 0).object().ok(), Some(Object::Real(want)), "{t}");
+        }
     }
 
     fn obj(s: &str) -> Object {
