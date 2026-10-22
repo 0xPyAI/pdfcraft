@@ -1331,6 +1331,13 @@ fn lines_grow_and_shrink_with_their_handles_before_release() {
     let _gpu = gpu();
     for (document_rotation, view_rotation) in [(0, 0), (90, 0), (0, 90), (90, 270)] {
         let rot = (document_rotation, view_rotation);
+        // A line runs across the page as /Rotate displays it (#3781): along user y on a quarter turn.
+        // `d` is the distance along the line from the click at (100, 250).
+        let along =
+            |h: &Harness<'static, PdfCraftApp>, d: f32| if document_rotation == 90 { at(h, 100.0, 250.0 + d) } else { at(h, 100.0 + d, 250.0) };
+        let line = |from: f32, to: f32| {
+            if document_rotation == 90 { [98.0, 250.0 + from, 102.0, 250.0 + to] } else { [100.0 + from, 248.0, 100.0 + to, 252.0] }
+        };
         let mut h = harness();
         if document_rotation != 0 {
             h.state_mut().apply_edit(pdfcraft_engine::Edit::RotatePages { pages: vec![0], degrees: document_rotation });
@@ -1341,36 +1348,36 @@ fn lines_grow_and_shrink_with_their_handles_before_release() {
         h.run_steps(3);
         assert!(h.state_mut().execute("sign.fill.line"));
         click(&mut h, 100.0, 250.0);
-        assert_rect(rects(&h)[0], [82.0, 248.0, 118.0, 252.0]);
+        assert_rect(rects(&h)[0], line(-18.0, 18.0));
         // In line mode a click on the line picks it up, with its handles.
         click(&mut h, 100.0, 250.0);
         assert_eq!(h.state().views[0].comments.selected, Some((0, 0)), "{rot:?}");
         let generation = h.state().session.get(h.state().views[0].id).unwrap().edit_generation();
 
-        // The handle at the line's end, dragged out to 160.
-        h.drag_at(at(&h, 118.0, 250.0));
+        // The handle at the line's end, dragged out to 60 from the middle.
+        h.drag_at(along(&h, 18.0));
         h.run_steps(1);
-        h.hover_at(at(&h, 160.0, 250.0));
+        h.hover_at(along(&h, 60.0));
         // Wait only for the one-time layers. Later pointer frames are immediate.
         let mut grown = h.render().unwrap();
         for _ in 0..50 {
-            if ink_near(&grown, at(&h, 150.0, 250.0)) {
+            if ink_near(&grown, along(&h, 50.0)) {
                 break;
             }
             h.run_steps(2);
             std::thread::sleep(std::time::Duration::from_millis(10));
             grown = h.render().unwrap();
         }
-        assert!(ink_near(&grown, at(&h, 150.0, 250.0)), "{rot:?}: the line grows with the handle before release");
-        assert!(ink_near(&grown, at(&h, 90.0, 250.0)), "{rot:?}: from where it starts");
+        assert!(ink_near(&grown, along(&h, 50.0)), "{rot:?}: the line grows with the handle before release");
+        assert!(ink_near(&grown, along(&h, -10.0)), "{rot:?}: from where it starts");
 
         // Back in, shorter than it was, still without letting go.
-        h.hover_at(at(&h, 100.0, 250.0));
+        h.hover_at(along(&h, 0.0));
         h.run_steps(2);
         let shrunk = h.render().unwrap();
-        assert!(ink_near(&shrunk, at(&h, 90.0, 250.0)), "{rot:?}: the line still starts where it did");
-        for x in [110.0, 150.0] {
-            assert!(!ink_near(&shrunk, at(&h, x, 250.0)), "{rot:?}: the line shrinks with the handle before release (ink at {x})");
+        assert!(ink_near(&shrunk, along(&h, -10.0)), "{rot:?}: the line still starts where it did");
+        for d in [10.0, 50.0] {
+            assert!(!ink_near(&shrunk, along(&h, d)), "{rot:?}: the line shrinks with the handle before release (ink at {d})");
         }
         let doc = h.state().session.get(h.state().views[0].id).unwrap();
         assert_eq!((doc.edit_generation(), doc.can_undo()), (generation, Some("Add line")), "{rot:?}: pointer frames never edit the document");
@@ -1378,12 +1385,12 @@ fn lines_grow_and_shrink_with_their_handles_before_release() {
             grown.save(format!("{dir}/line-live-grow-{document_rotation}-{view_rotation}.png")).unwrap();
             shrunk.save(format!("{dir}/line-live-shrink-{document_rotation}-{view_rotation}.png")).unwrap();
         }
-        h.drop_at(at(&h, 100.0, 250.0));
+        h.drop_at(along(&h, 0.0));
         h.run_steps(3);
         let doc = h.state().session.get(h.state().views[0].id).unwrap();
         assert_eq!(doc.can_undo(), Some("Resize comment"), "{rot:?}");
         let [now] = rects(&h)[..] else { panic!("{rot:?}: still one line: {:?}", rects(&h)) };
-        assert!(now.iter().zip([82.0, 248.0, 100.0, 252.0]).all(|(a, b)| (a - b).abs() < 0.01), "{rot:?}: {now:?}");
+        assert!(now.iter().zip(line(-18.0, 0.0)).all(|(a, b)| (a - b).abs() < 0.01), "{rot:?}: {now:?}");
     }
 }
 
