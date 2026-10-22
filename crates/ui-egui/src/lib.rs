@@ -1117,7 +1117,8 @@ impl PdfCraftApp {
     fn apply_initial_view(&mut self, index: usize, v: &pdfcraft_engine::InitialView) {
         use pdfcraft_engine::{InitialLayout as L, Magnification as M, Navigation as N};
         let pages = self.session.get(self.views[index].id).map_or(0, |d| d.info.pages.len());
-        if self.active == Some(index) {
+        // A right panel the user closed stays closed, whatever the document asks for (#2884).
+        if self.active == Some(index) && !self.right_panel_closed {
             match v.navigation {
                 N::PageOnly => {}
                 N::Bookmarks => self.right = Some(RightPanel::Bookmarks),

@@ -162,6 +162,26 @@ fn closed_side_panes_stay_closed_after_a_restart_and_opening_a_pdf() {
     assert!(!h.state().left_open);
 }
 
+/// #2884: a right panel the user closed stays closed when a PDF asks for its outline
+/// (`/PageMode /UseOutlines`), within a session and after a restart.
+#[test]
+fn closed_right_panel_stays_closed_for_a_document_asking_for_its_outline() {
+    use pdfcraft_ui_egui::RightPanel;
+    let pdf = || String::from_utf8(FIXTURE.to_vec()).unwrap().replace("/Outlines 6 0 R", "/Outlines 6 0 R /PageMode /UseOutlines").into_bytes();
+    let mut h = harness(|app| app.open_bytes("fixture.pdf", None, FIXTURE.to_vec()).expect("fixture opens"));
+    assert_eq!(h.state().right, Some(RightPanel::Comments));
+    h.state_mut().choose_right_panel(None);
+    h.state_mut().open_bytes("outline.pdf", None, pdf()).unwrap();
+    h.run_steps(3);
+    assert_eq!(h.state().right, None, "the outline request reopened the closed right panel");
+    let saved = h.state().persist();
+    let h = harness(move |app| {
+        app.restore(&saved);
+        app.open_bytes("outline.pdf", None, pdf()).expect("outline PDF opens");
+    });
+    assert_eq!(h.state().right, None, "the closed right panel reopened after a restart");
+}
+
 /// Read mode hides the tools, not the navigation panes: the rail's Bookmarks button opens the
 /// bookmarks when Read is the default workspace (#932), and the left tool pane stays hidden.
 #[test]
@@ -184,7 +204,9 @@ fn read_mode_rail_buttons_open_their_panels() {
     h.run_steps(3);
     assert_eq!(h.state().right, None);
     assert!(h.query_by_label("Alpha section").is_none());
-    // A document that asks for its outline (/PageMode /UseOutlines) shows it in Read mode too.
+    // A document that asks for its outline (/PageMode /UseOutlines) shows it in Read mode too,
+    // unless the user closed the panel (#2884), so forget that closing here.
+    h.state_mut().right_panel_closed = false;
     let pdf = String::from_utf8(FIXTURE.to_vec()).unwrap().replace("/Outlines 6 0 R", "/Outlines 6 0 R /PageMode /UseOutlines");
     h.state_mut().open_bytes("outline.pdf", None, pdf.into_bytes()).unwrap();
     h.run_steps(3);
