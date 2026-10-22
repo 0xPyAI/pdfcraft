@@ -275,6 +275,70 @@ fn typing_moving_styling_and_deleting_added_content() {
     assert!(img.flip_h);
 }
 
+/// #2494: ⌘V / Ctrl+V with a picture on the system clipboard (a screenshot, a picture copied in a
+/// browser) places it on the current page, as Add Image does.
+#[test]
+fn a_picture_on_the_clipboard_is_pasted_onto_the_page() {
+    use pdfcraft_ui_egui::Clip;
+    let mut h = harness();
+    let v = |pressed, modifiers| egui::Event::Key { key: egui::Key::V, physical_key: None, pressed, repeat: false, modifiers };
+    let images = |h: &Harness<'static, PdfCraftApp>| added(h).iter().filter(|a| matches!(a.content, pdfcraft_engine::AddedContent::Image(_))).count();
+    // Text on the clipboard: egui gets a Paste event instead of the press; nothing lands on the page.
+    h.state_mut().clipboard_override = Some(Clip::Text("hello".into()));
+    h.event(egui::Event::Paste("hello".into()));
+    h.event(v(false, egui::Modifiers::COMMAND));
+    h.run_steps(3);
+    assert_eq!(images(&h), 0);
+    h.state_mut().clipboard_override = Some(Clip::Image { width: 30, height: 20, rgba: [90u8, 90, 90, 255].repeat(30 * 20) });
+    // A plain V comes through pressed and released: it picks the Select tool, it doesn't paste.
+    h.event(v(true, egui::Modifiers::NONE));
+    h.run_steps(1);
+    h.event(v(false, egui::Modifiers::NONE));
+    h.run_steps(3);
+    assert_eq!(images(&h), 0, "a plain V doesn't paste");
+    // A picture alone: egui-winit sends no Paste event and swallows the press, so only the
+    // release of V arrives.
+    h.event(v(false, egui::Modifiers::COMMAND));
+    h.run_steps(3);
+    let a = added(&h);
+    assert_eq!(a.len(), 1);
+    let pdfcraft_engine::AddedContent::Image(img) = &a[0].content else { panic!("an image was added") };
+    assert_eq!(img.rect, [135.0, 190.0, 165.0, 210.0], "in the middle of the page, at its own size");
+    assert_eq!(h.state().views[0].content.selected, Some((0, 0)));
+    {
+        let s = h.state();
+        assert_eq!(s.session.get(s.views[0].id).unwrap().can_undo(), Some("Add image"));
+    }
+    // Ctrl let go a moment before V: the release comes without the modifier, and still pastes.
+    h.event(v(false, egui::Modifiers::NONE));
+    h.run_steps(3);
+    assert_eq!(images(&h), 2, "Ctrl released first");
+    // A text field with the keyboard keeps ⌘V for itself.
+    assert!(h.state_mut().execute("edit.find"));
+    h.run_steps(3);
+    h.event(v(false, egui::Modifiers::COMMAND));
+    h.run_steps(3);
+    assert_eq!(images(&h), 2, "the Find field has the keyboard");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    // Organize Pages keeps ⌘V for pages.
+    assert!(h.state_mut().execute("page.organize"));
+    h.run_steps(4);
+    assert!(h.state().views[0].organize);
+    h.event(v(false, egui::Modifiers::COMMAND));
+    h.run_steps(3);
+    assert_eq!(images(&h), 2, "Organize Pages pastes pages");
+    h.state_mut().views[0].organize = false;
+    h.run_steps(3);
+    // Prepare Form keeps ⌘V for form fields.
+    assert!(h.state_mut().execute("form.prepare"));
+    h.run_steps(3);
+    assert!(h.state().is_preparing());
+    h.event(v(false, egui::Modifiers::COMMAND));
+    h.run_steps(3);
+    assert_eq!(images(&h), 2, "Prepare Form pastes fields");
+}
+
 /// #125: text the standard fonts can't draw stays in the editor with a warning instead of being
 /// written to the page as `?` (or lost).
 #[test]

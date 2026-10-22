@@ -793,6 +793,45 @@ impl crate::PdfCraftApp {
             self.left_open = true;
         }
     }
+
+    /// Whether ⌘V / Ctrl+V was let go this frame. egui-winit swallows that press (with a Paste
+    /// event only if the clipboard holds text), while a plain V press always comes through: a
+    /// release of V with no press of V since the last one is the shortcut, even when ⌘ or Ctrl
+    /// was let go first. Read every frame, dialogs or not, so a press is never missed.
+    pub(crate) fn paste_key_released(&mut self, ctx: &egui::Context) -> bool {
+        let mut released = false;
+        ctx.input(|inp| {
+            for e in &inp.events {
+                if let egui::Event::Key { key: egui::Key::V, pressed, .. } = e {
+                    released |= !*pressed && !self.v_pressed;
+                    self.v_pressed = *pressed;
+                }
+            }
+        });
+        released
+    }
+
+    /// ⌘V / Ctrl+V with a picture on the system clipboard (a screenshot, a picture copied in a
+    /// browser) places it on the current page, as Add Image does.
+    /// Organize Pages keeps ⌘V for pages, Prepare Form for fields, and text fields for text.
+    pub(crate) fn paste_image_key(&mut self, i: usize, ctx: &egui::Context, pasted: bool) {
+        let free = self.dialog.is_none() && !self.palette_open && !ctx.egui_wants_keyboard_input();
+        let Some(view) = self.views.get(i) else { return };
+        if !pasted || !free || view.organize || view.forms.focus.is_some() || self.is_preparing() {
+            return;
+        }
+        let clip = match self.clipboard_override.clone() {
+            Some(c) => Some(c),
+            #[cfg(not(target_arch = "wasm32"))]
+            None if self.system_clipboard => crate::create_ui::read_clipboard(),
+            None => None,
+        };
+        let Some(crate::create_ui::Clip::Image { width, height, rgba }) = clip else { return };
+        match crate::create_ui::png_from_rgba(width, height, &rgba) {
+            Ok(png) => self.add_image("Pasted image.png".into(), png),
+            Err(e) => self.notify_fmt("Couldn't read {name}: {e}", &[("name", tl!("Clipboard")), ("e", &e)]),
+        }
+    }
 }
 
 /// What the image tools ask for.
