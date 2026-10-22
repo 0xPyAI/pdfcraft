@@ -2081,6 +2081,23 @@ fn password_field_values_are_kept_in_memory_but_written_to_no_file() {
     assert!(t.get(reopened).unwrap().form.iter().find(|f| f.name == "name").unwrap().value.iter().all(|v| v.is_empty()));
 }
 
+/// #3926 / #3943 review: signing writes the signed file from the same copy a save does, so a
+/// typed Password-field value is not signed into the file either.
+#[test]
+fn a_signed_file_carries_no_password_field_value() {
+    let p12 = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12")).unwrap();
+    let digital_id = sign::pkcs12::open(&p12, "test").unwrap();
+    let fixture = String::from_utf8(form_fixture()).unwrap().replace("/T (name)", "/T (name) /Ff 8192");
+    // After the test certificate's start date (2026-10-02).
+    let mut s = Session::new().with_clock(|| 1_800_000_000);
+    let id = s.open("form.pdf", None, Arc::new(fixture.into_bytes()), None).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "name".into(), value: FieldValue::Text("hunter2".into()) }).unwrap();
+    assert!(appears_in_pdf(&s.get(id).unwrap().bytes, "hunter2"), "the working bytes hold it");
+    let signed = s.sign(id, &digital_id, SignOptions { rect: None, ..SignOptions::default() }).unwrap();
+    assert!(!appears_in_pdf(&signed, "hunter2"), "the signed file");
+    assert!(appears_in_pdf(&signed, "*******"), "the masked appearance is signed in");
+}
+
 /// A value its field's font can't draw is kept, and the edit that drew it reports it in
 /// `edit_notices` (the interface shows it, tools return it): not a later unrelated edit, not a
 /// failed one, and not a value that can be drawn. The form (an inline AcroForm here) asks other

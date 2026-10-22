@@ -5104,7 +5104,9 @@ impl Session {
         if opts.date.is_empty() {
             opts.date = self.signing_date();
         }
-        Ok(Arc::new(pdfcraft_sign::sign(&editor.cos, id, &opts)?))
+        // A typed Password-field value is not signed into the file (#3926), as it isn't saved.
+        let cos = writable(&editor.cos)?;
+        Ok(Arc::new(pdfcraft_sign::sign(&cos, id, &opts)?))
     }
 
     /// [`Session::sign`], embedding an RFC 3161 signature timestamp (PAdES B-T) produced by
@@ -5121,7 +5123,8 @@ impl Session {
         if opts.date.is_empty() {
             opts.date = self.signing_date();
         }
-        let signed = Arc::new(pdfcraft_sign::sign_with_timestamp(&editor.cos, id, &opts, tsa)?);
+        let cos = writable(&editor.cos)?;
+        let signed = Arc::new(pdfcraft_sign::sign_with_timestamp(&cos, id, &opts, tsa)?);
         // Checked like a save before anyone writes it (#2166).
         self.check_save(doc, &signed)?;
         Ok(signed)
@@ -5133,7 +5136,8 @@ impl Session {
         let d = self.get(doc).ok_or(EditError::NoDocument)?;
         let editor = d.editor.as_ref().ok_or_else(|| EditError::ReadOnly(d.read_only_reason.clone().unwrap_or_default()))?;
         let date = if date.is_empty() { self.signing_date() } else { date };
-        let stamped = Arc::new(pdfcraft_sign::timestamp_document(&editor.cos, tsa, &date)?);
+        let cos = writable(&editor.cos)?;
+        let stamped = Arc::new(pdfcraft_sign::timestamp_document(&cos, tsa, &date)?);
         self.check_save(doc, &stamped)?;
         Ok(stamped)
     }
@@ -5143,7 +5147,8 @@ impl Session {
     pub fn embed_ltv(&self, doc: DocId, evidence: &pdfcraft_sign::dss::Evidence) -> Result<Arc<Vec<u8>>, EditError> {
         let d = self.get(doc).ok_or(EditError::NoDocument)?;
         let editor = d.editor.as_ref().ok_or_else(|| EditError::ReadOnly(d.read_only_reason.clone().unwrap_or_default()))?;
-        let embedded = Arc::new(pdfcraft_sign::dss::embed(&editor.cos, evidence)?);
+        let cos = writable(&editor.cos)?;
+        let embedded = Arc::new(pdfcraft_sign::dss::embed(&cos, evidence)?);
         self.check_save(doc, &embedded)?;
         Ok(embedded)
     }
