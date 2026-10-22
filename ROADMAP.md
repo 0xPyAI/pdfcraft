@@ -4,7 +4,7 @@
 
 **Stage: alpha** · next: beta, ~25% (ready for real work 50% → 75%) and ~400–700 h away
 
-> **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M5, PR #1971: bounded nested FDF export excludes source page/page-tree dictionaries; refreshed against upstream 4db6ac4a; estimates unchanged)
+> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (M4: initial-view options resolve indirect boolean preferences; estimates unchanged)
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M7: the Edit text caret is as tall as the row it is on; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M6: CSV tab-containing headers; estimates unchanged)
 > **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M3, #3149: discard render demand after page geometry changes and check the GPU texture limit before upload; estimates unchanged)
@@ -174,6 +174,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-20 (M4, initial view):** Window and interface options read indirect boolean ViewerPreferences values. Synthetic regressions cover true/false, direct/indirect preference dictionaries and save/reopen; malformed entries retain false defaults. Estimates unchanged.
 - **2026-10-20 (M3, #3535):** Escape with a menu open closes the menu and keeps the text selection; the next Escape clears it, as before. One keypress used to do both. A synthetic UI regression checks it. Estimates unchanged.
 - **2026-10-16 (M3, close prompt keyboard):** The "Save changes?" prompt opens with Save chosen (Enter saves, as before) and the arrow keys and Tab / Shift+Tab move the choice to Cancel or Don't save, shown with a focus ring; Enter or Space press the chosen button and Escape still cancels. Before, Enter always saved whatever was Tab-focused. Estimates unchanged.
 - **2026-10-21 (M3, #3808):** Page thumbnails in the Inspector can be resized independently from the document and Organize, with a slider, buttons and `thumbnail-zoom` control option. Selection, page following and reload are covered by regressions. Estimates unchanged.
@@ -564,6 +565,7 @@ Newest first: the date, what moved, and the new overall estimate.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | M4: initial-view window and interface options resolve indirect boolean ViewerPreferences values; synthetic true/false and save/reopen regressions retain defaults for malformed entries. Estimates unchanged. |
 | 2026-10-18 | minor | M5, PR #1971: nested source `/Page` and `/Pages` dictionaries export as null without traversing page content or the page tree. Synthetic saved/reopened three-page regression retains unrelated metadata and aliases. FDF import semantics, copied-graph limits and estimates unchanged. |
 | 2026-10-15 | minor | M5: budget retained FDF entries before cloning; discovery keeps lazy array owners and annotation positions, with alias/cache-eviction stress fixtures. Limits cover the copied graph; source parsing/page discovery retain existing COS/parser limits, with no total source-memory bound. FDF import semantics and estimates unchanged. |
 | 2026-10-15 | minor | M7: the Edit text caret is as tall as the row it is on in a region with several sizes; estimates unchanged. |
