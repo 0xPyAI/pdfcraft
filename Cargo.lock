@@ -4134,6 +4134,7 @@ dependencies = [
  "pdfcraft-redact",
  "pdfcraft-render",
  "pdfcraft-sign",
+ "pdfcraft-testkit",
  "pdfcraft-xfa",
  "pdfcraft-xfdf",
  "png 0.18.1",

@@ -4819,6 +4819,22 @@ impl Session {
         true
     }
 
+    /// Show each layer as the file opens (Acrobat's Layers ▸ Reset to Initial Visibility). Returns
+    /// `true` if any layer changed; callers must drop cached rasters and text for the document,
+    /// as for [`Self::set_layer_visible`].
+    pub fn reset_layers(&mut self, id: DocId) -> bool {
+        let Some(doc) = self.docs.iter_mut().find(|d| d.id == id) else { return false };
+        let mut changed = false;
+        for l in &mut doc.info.layers {
+            changed |= l.visible != l.initial;
+            l.visible = l.initial;
+        }
+        if changed {
+            use_layer_choices(doc);
+        }
+        changed
+    }
+
     /// Hide or show every comment on the page (Acrobat's Comments ▸ Hide all comments). Form
     /// fields and links still draw. Returns whether anything changed.
     pub fn set_hide_comments(&mut self, id: DocId, hide: bool) -> bool {

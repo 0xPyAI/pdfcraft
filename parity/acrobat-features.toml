@@ -1331,11 +1331,11 @@ title = "Reset layers to initial visibility; list for all or current pages"
 area = "B"
 tier = "P2"
 milestone = "M12"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["doc_info"]
+evidence = ["crates/engine/src/tests.rs::reset_layers_returns_to_the_files_visibility", "crates/render/src/inspect.rs::initial_layer_visibility_is_the_default_configuration"]
+notes = "Layers panel ▸ Layer options ▸ Reset to Initial Visibility shows each layer as the default configuration (/OCProperties /D) has it; doc_info reports it as `initial`. Not yet: listing the layers of all pages or the current page only."
 
 [[feature]]
 id = "view.destinations-panel"

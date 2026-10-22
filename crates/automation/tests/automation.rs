@@ -5832,12 +5832,13 @@ fn doc_info_says_when_a_runaway_script_turned_the_forms_scripts_off() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// doc_info describes a link's set-layer-visibility action by layer name.
+/// doc_info describes a link's set-layer-visibility action by layer name, and each layer's
+/// visibility now and as the file opens.
 #[test]
 fn doc_info_describes_set_layer_links() {
     let dir = workdir("layer-links");
     let objs = [
-        "<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [4 0 R 5 0 R] /D << >> >> >>",
+        "<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [4 0 R 5 0 R] /D << /OFF [5 0 R] >> >> >>",
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [6 0 R] >>",
         "<< /Type /OCG /Name (Red) >>",
@@ -5868,6 +5869,7 @@ fn doc_info_describes_set_layer_links() {
             "preserve_rb": false,
         })
     );
+    assert_eq!(info["layers"], json!([{ "name": "Red", "visible": true, "initial": true }, { "name": "Green", "visible": false, "initial": false }]));
 }
 
 mod close_argument_tests {
