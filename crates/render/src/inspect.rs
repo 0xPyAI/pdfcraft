@@ -461,6 +461,13 @@ impl Annotation {
         self.parent.is_some()
     }
 
+    /// A comment of its own: not a reply, and not a status or checkmark. One whose comment can't
+    /// be found (deleted from another page, or never listed) has nothing to show, so it is listed
+    /// nowhere: not as a card, on the page or in a count.
+    pub fn is_comment(&self) -> bool {
+        !self.is_reply() && self.state.is_none()
+    }
+
     /// Whether this annotation's `/IRT` points at `other`.
     pub fn replies_to(&self, other: &Annotation) -> bool {
         self.parent == Some((other.page, other.index))

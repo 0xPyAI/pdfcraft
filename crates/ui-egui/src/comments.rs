@@ -624,7 +624,7 @@ impl PageCx<'_> {
 
     /// Top-level comments on this page, in paint order.
     fn comments(&self) -> impl Iterator<Item = &Annotation> {
-        self.info.annotations.iter().filter(move |a| !self.hidden && a.page == self.page && !a.is_reply() && a.subtype != "Popup")
+        self.info.annotations.iter().filter(move |a| !self.hidden && a.page == self.page && a.is_comment() && a.subtype != "Popup")
     }
 
     /// Where a comment is on screen: one rectangle, or one per marked line for text markup.

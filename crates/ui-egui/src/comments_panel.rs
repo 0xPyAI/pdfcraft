@@ -91,7 +91,7 @@ pub fn is_marked(thread: &[&Annotation]) -> bool {
 /// The number shown in the header: comments, not their replies or status changes (as Acrobat
 /// counts them).
 pub fn count(info: &DocInfo) -> usize {
-    info.annotations.iter().filter(|a| !a.is_reply() && a.state.is_none()).count()
+    info.annotations.iter().filter(|a| a.is_comment()).count()
 }
 
 /// The replies under the header's count, at any depth: not status changes, checkmarks or a
@@ -178,7 +178,7 @@ pub(crate) fn show(
         if let Some(parent) = a.parent {
             let key = if a.state.is_none() { tops.get(&(a.page, a.index)).copied().unwrap_or(parent) } else { parent };
             replies.entry(key).or_default().push(a);
-        } else {
+        } else if a.is_comment() {
             let count = page_counts.entry(a.page).or_default();
             *count = count.saturating_add(1);
         }
@@ -190,7 +190,7 @@ pub(crate) fn show(
     let mut roots: Vec<&Annotation> = info
         .annotations
         .iter()
-        .filter(|a| !a.is_reply())
+        .filter(|a| a.is_comment())
         .filter(|a| query.as_deref().is_none_or(|q| matches(a, q) || replies_of(a).iter().any(|r| matches(r, q))))
         .filter(|a| !cv.hidden_types.iter().any(|t| t == kind_label(a)))
         .filter(|a| !cv.hidden_authors.contains(&a.author.clone().unwrap_or_default()))
@@ -550,13 +550,13 @@ fn legible(c: Color32, t: &Tokens) -> Color32 {
 pub(crate) fn header_controls(ui: &mut egui::Ui, info: &DocInfo, view: &mut DocView, hidden: bool) -> Option<&'static str> {
     let mut command = None;
     let cv = &mut view.comments;
-    let mut types: Vec<String> = info.annotations.iter().filter(|a| !a.is_reply()).map(|a| kind_label(a).to_string()).collect();
+    let mut types: Vec<String> = info.annotations.iter().filter(|a| a.is_comment()).map(|a| kind_label(a).to_string()).collect();
     types.sort();
     types.dedup();
-    let mut authors: Vec<String> = info.annotations.iter().filter(|a| !a.is_reply()).map(|a| a.author.clone().unwrap_or_default()).collect();
+    let mut authors: Vec<String> = info.annotations.iter().filter(|a| a.is_comment()).map(|a| a.author.clone().unwrap_or_default()).collect();
     authors.sort();
     authors.dedup();
-    let mut colors: Vec<(String, Option<[f32; 3]>)> = info.annotations.iter().filter(|a| !a.is_reply()).map(|a| (color_key(a), a.color)).collect();
+    let mut colors: Vec<(String, Option<[f32; 3]>)> = info.annotations.iter().filter(|a| a.is_comment()).map(|a| (color_key(a), a.color)).collect();
     colors.sort_by(|a, b| a.0.cmp(&b.0));
     colors.dedup_by(|a, b| a.0 == b.0);
     let active = !(cv.hidden_types.is_empty()

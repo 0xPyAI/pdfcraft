@@ -1206,12 +1206,13 @@ trailer << /Root 1 0 R >>
 %%EOF";
 
 // Contributor-original PDF. Page 1: an unnamed comment with a reply and a reply to that reply,
-// and a Replace Text strikeout with its grouped caret. Page 2: an `/IRT` to the annotation
-// itself, to an annotation no page lists (object 11), to a pop-up, to a link and to a form field.
+// a Replace Text strikeout with its grouped caret, and a hidden status whose comment no page
+// lists. Page 2: an `/IRT` to the annotation itself, to an annotation no page lists (object 11),
+// to a pop-up, to a link and to a form field.
 const THREAD_EDGES: &[u8] = b"%PDF-1.7
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj
-3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [5 0 R 6 0 R 7 0 R 8 0 R 9 0 R] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [5 0 R 6 0 R 7 0 R 8 0 R 9 0 R 19 0 R] >> endobj
 4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [10 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R 18 0 R] >> endobj
 5 0 obj << /Type /Annot /Subtype /Text /Rect [20 160 40 180] /T (Alpha) /Contents (Unnamed parent) >> endobj
 6 0 obj << /Type /Annot /Subtype /Text /Rect [20 160 40 180] /IRT 5 0 R /T (Beta) /Contents (Direct reply) >> endobj
@@ -1227,12 +1228,16 @@ const THREAD_EDGES: &[u8] = b"%PDF-1.7
 16 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (field) /Rect [200 60 260 80] >> endobj
 17 0 obj << /Type /Annot /Subtype /Text /Rect [20 50 40 70] /IRT 15 0 R /T (Delta) /Contents (Points at a link) >> endobj
 18 0 obj << /Type /Annot /Subtype /Text /Rect [20 20 40 40] /IRT 16 0 R /T (Delta) /Contents (Points at a form field) >> endobj
+19 0 obj << /Type /Annot /Subtype /Text /Rect [240 20 260 40] /F 30 /IRT 11 0 R /T (Delta) /StateModel /Review /State /Accepted /Contents (Stray status) >> endobj
 trailer << /Root 1 0 R >>
 %%EOF";
 
 #[test]
 fn replies_that_lead_nowhere_stay_comments_and_deeper_replies_join_their_thread() {
-    let h = harness_with_bytes(THREAD_EDGES.to_vec(), |app| app.set_option("panel", "comments").unwrap());
+    let mut h = harness_with_bytes(THREAD_EDGES.to_vec(), |app| {
+        app.set_option("panel", "comments").unwrap();
+        app.set_option("quick", "select").unwrap();
+    });
     // An `/IRT` that reaches no listed comment leaves its annotation a comment of its own,
     // rather than a reply shown nowhere.
     // Links, form widgets and pop-ups are never parents: neither reader lists them as comments.
@@ -1248,6 +1253,11 @@ fn replies_that_lead_nowhere_stay_comments_and_deeper_replies_join_their_thread(
     // replies, not the Replace Text caret grouped with its strikeout.
     h.get_by_label("7");
     h.get_by_label("2 replies");
+    // A status whose comment no page lists is not a comment: no card, and nothing to pick on the
+    // page where it sits.
+    assert_eq!(h.query_all_by_label("Stray status").count(), 0);
+    click_pt(&mut h, (250.0, 30.0));
+    assert_eq!(h.state().views[0].comments.selected, None);
 }
 
 // Contributor-original PDF: a comment, a reply, and a checkmark and a status set on the reply.

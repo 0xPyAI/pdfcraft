@@ -2122,21 +2122,24 @@ trailer << /Root 1 0 R >>
 }
 
 /// A status or checkmark belongs to the annotation its `/IRT` names: one set on a reply is not
-/// its comment's, as the Comments panel shows it, and is reported on the reply.
+/// its comment's, as the Comments panel shows it, and is reported on the reply. One whose
+/// annotation can't be found is not a comment of its own.
 #[test]
 fn a_checkmark_on_a_reply_is_not_its_comments() {
     let dir = workdir("reply-checkmark");
-    // Contributor-original PDF: a comment, a reply, and a checkmark and a status on the reply.
+    // Contributor-original PDF: a comment, a reply, a checkmark and a status on the reply, and a
+    // status whose annotation (object 9) doesn't exist.
     std::fs::write(
         dir.join("checked.pdf"),
         b"%PDF-1.7
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
-3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [4 0 R 5 0 R 6 0 R 7 0 R] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [4 0 R 5 0 R 6 0 R 7 0 R 8 0 R] >> endobj
 4 0 obj << /Type /Annot /Subtype /Text /Rect [100 100 120 120] /T (Alpha) /Contents (COMMENT) >> endobj
 5 0 obj << /Type /Annot /Subtype /Text /Rect [100 60 120 80] /IRT 4 0 R /T (Beta) /Contents (REPLY) >> endobj
 6 0 obj << /Type /Annot /Subtype /Text /Rect [100 60 120 80] /IRT 5 0 R /T (Beta) /StateModel /Marked /State /Marked >> endobj
 7 0 obj << /Type /Annot /Subtype /Text /Rect [100 60 120 80] /IRT 5 0 R /T (Beta) /StateModel /Review /State /Accepted >> endobj
+8 0 obj << /Type /Annot /Subtype /Text /Rect [200 20 220 40] /F 30 /IRT 9 0 R /T (Gamma) /StateModel /Review /State /Rejected >> endobj
 trailer << /Root 1 0 R >>
 %%EOF",
     )

@@ -228,7 +228,7 @@ impl Automation {
         };
         let roots: Vec<Value> = all
             .iter()
-            .filter(|c| !c.is_reply() && only.is_none_or(|p| c.page == p))
+            .filter(|c| c.is_comment() && only.is_none_or(|p| c.page == p))
             .map(|c| {
                 let mut v = view(c);
                 states(c, &mut v);

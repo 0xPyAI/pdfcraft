@@ -5331,7 +5331,7 @@ pub fn comment_kind(a: &pdfcraft_render::Annotation) -> &str {
 /// pop-ups; the number is the comment's position on its page.
 pub fn comment_summary(name: &str, all: &[pdfcraft_render::Annotation], sort: SummarySort) -> String {
     use std::fmt::Write;
-    let top: Vec<&pdfcraft_render::Annotation> = all.iter().filter(|a| !a.is_reply() && a.state.is_none()).collect();
+    let top: Vec<&pdfcraft_render::Annotation> = all.iter().filter(|a| a.is_comment()).collect();
     // Each reply under the annotation its `/IRT` points at, in document order, gathered once.
     type Children<'a> = std::collections::HashMap<(usize, usize), Vec<&'a pdfcraft_render::Annotation>>;
     let mut children = Children::new();
