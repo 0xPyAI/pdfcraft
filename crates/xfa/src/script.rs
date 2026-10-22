@@ -618,6 +618,12 @@ pub fn template_of(doc: &Document) -> Result<Template, XfaError> {
     crate::parse(&packets.xdp).map(|(t, _)| t)
 }
 
+/// Whether the template field at `som` is multiline text without a fixed height.
+/// A change to its value can require a new layout, including new continuation pages.
+pub fn field_grows_with_text(tpl: &Template, som: &str) -> bool {
+    crate::data::template_field(tpl, som).is_some_and(Field::grows_with_text)
+}
+
 /// Give the field at `som` in `live`, and every other field bound to the same data node (a
 /// field inside an area shares its node with one outside, since areas are left out of data
 /// paths), the value [`form_tree`] would give it from `data` now, so a value change needs no
