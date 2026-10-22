@@ -5307,3 +5307,29 @@ fn a_page_painted_first_with_a_full_page_fill_has_that_background() {
     assert_eq!(page("1 0 0 rg 2.5 3.5 495 693 re f", ""), Some([1.0, 0.0, 0.0]), "on the tolerance's edge");
     assert_eq!(page("1 0 0 rg 3 4 494 692 re f", ""), None, "past the tolerance");
 }
+
+#[test]
+fn reading_keeps_dotted_leader_entries_whole_and_in_order() {
+    let mut content = String::new();
+    for (title, page, y) in [("Art.1. Scope", "3", 700), ("Art.2. Eligibility", "7", 680), ("Art.3. Application", "12", 660)] {
+        content.push_str(&format!(
+            "BT /F1 12 Tf 72 {y} Td ({title}) Tj ET \
+             BT /F1 12 Tf 250 {y} Td (....................) Tj ET \
+             BT /F1 12 Tf 500 {y} Td ({page}) Tj ET\n"
+        ));
+    }
+    content.push_str("BT /F1 12 Tf 72 640 Td (Appendix) Tj ET BT /F1 12 Tf 250 640 Td (\\205\\205\\205) Tj ET BT /F1 12 Tf 500 640 Td (iv) Tj ET\n");
+    content.push_str("BT /F1 12 Tf 72 600 Td (Ordinary body text.) Tj ET BT /F1 12 Tf 72 582 Td (Still the same paragraph.) Tj ET");
+    let doc = text_page(&content);
+    let blocks: Vec<_> = text::reading_blocks(&doc, 0).unwrap().into_iter().map(|b| b.text).collect();
+    assert_eq!(
+        blocks,
+        [
+            "Art.1. Scope .................... 3",
+            "Art.2. Eligibility .................... 7",
+            "Art.3. Application .................... 12",
+            "Appendix ……… iv",
+            "Ordinary body text. Still the same paragraph.",
+        ]
+    );
+}
