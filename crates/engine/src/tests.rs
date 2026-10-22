@@ -2253,12 +2253,17 @@ fn setting_the_calculation_order_recalculates_and_undoes() {
 /// One 612×300 page with the content stream `body`. Object 4 is Helvetica; `resources` is what
 /// the page's /Resources holds.
 fn one_line_page(resources: &str, body: &str) -> Vec<u8> {
+    one_line_page_with(resources, "", body)
+}
+
+/// [`one_line_page`] with `stream_entries` added to the content stream's dictionary.
+fn one_line_page_with(resources: &str, stream_entries: &str, body: &str) -> Vec<u8> {
     let objs = [
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 300] >>".to_string(),
         format!("<< /Type /Page /Parent 2 0 R /Resources << {resources} >> /Contents 5 0 R >>"),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string(),
-        format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()),
+        format!("<< /Length {} {stream_entries} >>\nstream\n{body}\nendstream", body.len()),
     ];
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();
@@ -2289,31 +2294,76 @@ fn mark_shown_text(s: &mut Session, id: DocId, needle: &str) {
     s.apply(id, mark).unwrap();
 }
 
-/// Redaction removes text by the positions its own interpreter works out. Here the font and size
-/// come from an ExtGState /Font entry (`gs`), which the renderer honours and the interpreter does
-/// not model, so it places no glyph under the mark the user drew over the word as displayed: it
-/// used to report success and leave the word in the file. The renderer is asked now, and the edit
-/// is refused.
+/// Redaction removes text by the positions its own interpreter works out, and the renderer has
+/// the last word: where the two disagree, a page that still shows a glyph mostly under a mark
+/// fails the edit. The check is run here on a page nothing was removed from, as if the
+/// interpreter had placed the word elsewhere. Only the overlay streams an apply added are left
+/// out: a content stream of the input labelled like one (`/PCMark /Redaction`) is checked too.
 #[test]
-fn redaction_is_refused_when_the_page_still_shows_text_under_a_mark() {
+fn the_renderer_check_refuses_text_still_shown_under_a_mark() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let page = one_line_page_with("/Font << /F1 4 0 R >>", "/PCMark /Redaction", "BT /F1 16 Tf 20 150 Td (Public words then SECRET42) Tj ET");
+    let id = s.open("shown.pdf", None, Arc::new(page), None).unwrap();
+    mark_shown_text(&mut s, id, "SECRET42");
+    let doc = s.get(id).unwrap();
+    let mut cos = doc.editor.as_ref().unwrap().cos.clone();
+    let marks = pdfcraft_redact::marks(&cos);
+    let refused = |cos: &pdfcraft_cos::Document| {
+        let shown = shown_under_redactions(cos, &marks, &[], &doc.info.pages, None);
+        matches!(shown, Err(EditError::Redact(pdfcraft_redact::RedactError::Residue(n))) if n > 0)
+    };
+    assert!(refused(&cos));
+    // The page's contents as an array, as they are once an apply has added its overlay.
+    let page = pdfcraft_model::pages(&cos).swap_remove(0);
+    let contents = page.dict.get(b"Contents").cloned().unwrap();
+    cos.update_dict(page.obj, |d| d.set(b"Contents".to_vec(), pdfcraft_cos::Object::Array(vec![contents]))).unwrap();
+    assert!(refused(&cos), "the labelled input stream was not checked");
+}
+
+/// Inline image data `7FEI 1 0 0 1 200 0 cm` holds an `EI` the renderer ends the image at, so it
+/// runs the `cm` and shows SECRET 200 pt to the right. Redaction reads the image the same way, so
+/// a mark drawn over the word as shown takes it out of the file.
+#[test]
+fn text_after_an_inline_image_is_redacted_where_the_page_shows_it() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let page = one_line_page(
+        "/Font << /F1 4 0 R >>",
+        "BI /W 1 /H 1 /CS /G /BPC 8 /F /AHx ID 7FEI 1 0 0 1 200 0 cm EI BT /F1 10 Tf 10 100 Td (SECRET) Tj ET",
+    );
+    let id = s.open("inline.pdf", None, Arc::new(page), None).unwrap();
+    mark_shown_text(&mut s, id, "SECRET");
+    s.apply(id, Edit::ApplyRedactions { pages: None }).unwrap();
+    assert!(!page_texts(&s, id).concat().contains("SECRET"));
+    let saved = s.save_bytes(id).unwrap();
+    let held = |d: &[u8]| d.windows(6).any(|w| w == b"SECRET");
+    assert!(!held(&saved), "the saved file holds the redacted word");
+    let reopened = pdfcraft_cos::Document::open(saved).unwrap();
+    assert!(
+        !reopened.scan_objects().any(|(_, o)| matches!(&*o, pdfcraft_cos::Object::Stream(st) if st.decoded().is_ok_and(|d| held(&d)))),
+        "a saved stream holds the redacted word"
+    );
+}
+
+/// A word whose font and size an ExtGState /Font entry (`gs`) sets is placed where the renderer
+/// draws it, so a mark drawn over it as displayed takes it out of the file.
+#[test]
+fn a_word_in_a_font_set_by_an_extgstate_is_redacted() {
     let line = "Public words then SECRET42 and more";
     let mut s = Session::new().with_clock(|| 1_700_000_000);
     let by_gs = one_line_page("/ExtGState << /GS1 << /Type /ExtGState /Font [4 0 R 16] >> >>", &format!("BT /GS1 gs 20 150 Td ({line}) Tj ET"));
     let id = s.open("gs.pdf", None, Arc::new(by_gs), None).unwrap();
     mark_shown_text(&mut s, id, "SECRET42");
-    let refused = s.apply(id, Edit::ApplyRedactions { pages: None });
-    assert!(matches!(refused, Err(EditError::Redact(pdfcraft_redact::RedactError::Residue(n))) if n > 0), "{refused:?}");
-    // Nothing was changed: the mark is still pending and the page still shows the line.
-    assert_eq!(s.get(id).unwrap().redaction_marks(), 1);
-    assert_eq!(page_texts(&s, id), [line]);
-
-    // The same line with its font set by `Tf`: the mark is applied and the word is gone.
-    let by_tf = one_line_page("/Font << /F1 4 0 R >>", &format!("BT /F1 16 Tf 20 150 Td ({line}) Tj ET"));
-    let id = s.open("tf.pdf", None, Arc::new(by_tf), None).unwrap();
-    mark_shown_text(&mut s, id, "SECRET42");
     s.apply(id, Edit::ApplyRedactions { pages: None }).unwrap();
     let shown = page_texts(&s, id).swap_remove(0);
     assert!(shown.starts_with("Public words then") && shown.ends_with("and more") && !shown.contains("SECRET42"), "{shown}");
+    let saved = s.save_bytes(id).unwrap();
+    let held = |d: &[u8]| d.windows(8).any(|w| w == b"SECRET42");
+    assert!(!held(&saved), "the saved file holds the redacted word");
+    let reopened = pdfcraft_cos::Document::open(saved).unwrap();
+    assert!(
+        !reopened.scan_objects().any(|(_, o)| matches!(&*o, pdfcraft_cos::Object::Stream(st) if st.decoded().is_ok_and(|d| held(&d)))),
+        "a saved stream holds the redacted word"
+    );
 }
 
 #[test]
