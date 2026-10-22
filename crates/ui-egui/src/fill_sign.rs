@@ -495,7 +495,8 @@ pub(crate) fn script_preview(text: &str, w: usize, h: usize) -> egui::ColorImage
     }
     let k = ((h as f64 * 0.9) / span).min((w as f64 * 0.95) / width);
     let x0 = (w as f64 - width * k) / 2.0;
-    // Device points (y down), then an even-odd scanline fill.
+    // Device points (y down), then a non-zero winding scanline fill so overlapping same-direction
+    // TrueType contours (such as Inter's composite Ђ and ћ) stay filled where strokes cross.
     let polys: Vec<Vec<(f64, f64)>> = o
         .contours
         .iter()
@@ -503,20 +504,29 @@ pub(crate) fn script_preview(text: &str, w: usize, h: usize) -> egui::ColorImage
         .collect();
     for y in 0..h {
         let sy = y as f64 + 0.5;
-        let mut xs: Vec<f64> = Vec::new();
+        let mut xs: Vec<(f64, i32)> = Vec::new();
         for poly in &polys {
             for i in 0..poly.len() {
                 let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
                 if (a.1 <= sy) != (b.1 <= sy) {
-                    xs.push(a.0 + (sy - a.1) / (b.1 - a.1) * (b.0 - a.0));
+                    let dir = if a.1 < b.1 { 1 } else { -1 };
+                    xs.push((a.0 + (sy - a.1) / (b.1 - a.1) * (b.0 - a.0), dir));
                 }
             }
         }
-        xs.sort_by(|a, b| a.total_cmp(b));
-        for pair in xs.as_chunks::<2>().0 {
-            let (from, to) = (pair[0].round().clamp(0.0, w as f64) as usize, pair[1].round().clamp(0.0, w as f64) as usize);
-            for x in from..to {
-                img[(x, y)] = Color32::BLACK;
+        xs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut winding = 0i32;
+        let mut start = 0.0;
+        for (x, dir) in xs {
+            if winding == 0 {
+                start = x;
+            }
+            winding += dir;
+            if winding == 0 {
+                let (from, to) = (start.round().clamp(0.0, w as f64) as usize, x.round().clamp(0.0, w as f64) as usize);
+                for px in from..to {
+                    img[(px, y)] = Color32::BLACK;
+                }
             }
         }
     }
@@ -1269,5 +1279,25 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn overlapping_glyph_contours_fill_without_holes_while_keeping_counters() {
+        let runs =
+            |img: &egui::ColorImage, y: usize| (0..img.width()).filter(|&x| img[(x, y)].a() > 0 && (x == 0 || img[(x - 1, y)].a() == 0)).count();
+        // #1786: Inter's Ђ (T + right hook) and ћ (h + crossbar) have two same-direction contours
+        // that overlap on the stem; non-zero winding fills the join instead of punching a hole.
+        let dje = super::script_preview("Ђ", 200, 200);
+        assert_eq!(dje[(97, 108)], egui::Color32::BLACK, "stem-hook overlap of Ђ is filled");
+        assert_eq!(runs(&dje, 108), 2, "stem and right loop of Ђ are two solid strokes");
+        let tshe = super::script_preview("ћ", 200, 200);
+        assert_eq!(tshe[(93, 53)], egui::Color32::BLACK, "stem-crossbar overlap of ћ is filled");
+        assert_eq!(runs(&tshe, 53), 1, "crossbar of ћ is one unbroken stroke across the stem");
+        // Counter-clockwise inner contours remain open holes.
+        let omicron = super::script_preview("О", 200, 200);
+        assert_eq!(omicron[(109, 94)].a(), 0, "counter of О stays transparent");
+        assert_eq!(runs(&omicron, 94), 2);
+        assert!(super::script_preview("", 200, 200).pixels.iter().all(|p| p.a() == 0));
+        assert!(super::script_preview("Ђћ", 0, 0).pixels.is_empty());
     }
 }

@@ -290,7 +290,7 @@ fn visible_signatures_show_a_drawn_typed_or_image_graphic() {
     let typed = Graphic::Outlines(vec![vec![[0.0, 0.0], [1.0, 0.0], [1.0, 0.5], [0.0, 0.5]], vec![[0.2, 0.1], [0.8, 0.1], [0.5, 0.4]]]);
     for (graphic, drawn) in [
         (strokes, " c\n"),
-        (typed, "f*\n"),
+        (typed, "f\n"),
         // 40 x 10 in the left half (94 x 44 inside the padding): 94 wide, centred vertically.
         (picture(true), "q 94 0 0 23.5 3 13.25 cm /Im1 Do Q"),
     ] {
