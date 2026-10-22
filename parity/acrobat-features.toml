@@ -1962,8 +1962,8 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text", "edit.text"]
 tools = ["text_edit", "content_update"]
-evidence = ["crates/edit/src/tests.rs::justify_underline_and_spacing", "crates/edit/src/tests.rs::paragraphs_take_new_formatting", "crates/ui-egui/tests/editing.rs::the_format_panel_restyles_the_paragraph_being_edited"]
-notes = "left, centre, right and justify (word spacing per line, last line left) for existing paragraphs and added text"
+evidence = ["crates/edit/src/tests.rs::justify_underline_and_spacing", "crates/edit/src/tests.rs::paragraphs_take_new_formatting", "crates/edit/src/tests.rs::a_one_row_title_keeps_its_centre_when_it_grows_and_when_it_wraps", "crates/ui-egui/tests/editing.rs::the_format_panel_restyles_the_paragraph_being_edited"]
+notes = "left, centre, right and justify (word spacing per line, last line left) for existing paragraphs and added text. A centred paragraph is found either from its ragged rows or, for a one row title, from its centre sitting on the page's own centre away from the edge the rest of the text uses, so growing or wrapping it keeps that centre (#2581)"
 
 [[feature]]
 id = "edit.line-paragraph-spacing"

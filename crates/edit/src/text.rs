@@ -22,7 +22,7 @@ use crate::EditError;
 
 #[path = "text_regions.rs"]
 mod regions;
-use regions::{group_blocks, rewrite_styled_block};
+use regions::{group_blocks, is_centred, rewrite_styled_block};
 
 /// One line of existing text.
 #[derive(Clone, Debug, PartialEq)]
@@ -2301,6 +2301,11 @@ fn rewrite_block_from(
     } else {
         members.iter().map(|l| l.frame_rect()).reduce(|a, f| [a[0].min(f[0]), a[1].min(f[1]), a[2].max(f[2]), a[3].max(f[3])]).unwrap_or(b.rect)
     };
+    // A centred title is laid out in the box it already sits in, so it keeps its centre as it
+    // grows or wraps, rather than being grown to the right up to the page's margin (#2581).
+    // Turned text is left alone: its centre lives along its own baseline, not in page space.
+    let crop = p.crop(doc);
+    let centred = upright && !rtl && style.width.is_none() && style.align.is_none() && is_centred(&b, &lines, (crop[0] + crop[2]) / 2.0, first.size);
     // A paragraph keeps its width (or takes the one asked for); a single line grows to the right
     // (to the left when right-to-left), up to the page's margin.
     let width = match style.width {
@@ -2309,14 +2314,15 @@ fn rewrite_block_from(
         Some(_) => return Err(EditError::Invalid("the paragraph's width must be a number".into())),
         // Turned text: the page's margins are along another axis. A single line grows (below).
         None if !upright => (frame[2] - frame[0]).max(size * k),
-        None if anchored_right => (b.rect[2] - b.rect[0]).max(size * k).max(b.rect[2] + dx - (p.crop(doc)[0] + 36.0)),
-        None if members.len() == 1 => (b.rect[2] - b.rect[0]).max(size * k).max(p.crop(doc)[2] - 36.0 - (b.rect[0] + dx)),
+        None if anchored_right => (b.rect[2] - b.rect[0]).max(size * k).max(b.rect[2] + dx - (crop[0] + 36.0)),
+        // A centred line is not stretched to the margin: its own box is the frame it is centred in.
+        None if members.len() == 1 && !centred => (b.rect[2] - b.rect[0]).max(size * k).max(crop[2] - 36.0 - (b.rect[0] + dx)),
         None => (b.rect[2] - b.rect[0]).max(size * k),
     };
     if !width.is_finite() {
         return Err(EditError::Invalid("the paragraph's width must be a number".into()));
     }
-    let align = style.align.or(rtl.then_some(crate::added::Align::Right));
+    let align = if centred { Some(crate::added::Align::Center) } else { style.align.or(rtl.then_some(crate::added::Align::Right)) };
     // Where a right-aligned line ends, from the paragraph's left edge (user space).
     let right_edge = if anchored_right { (b.rect[2] - b.rect[0]).max(0.0) } else { width };
     // The move and the width are checked here, before the fallback fonts are written: a refused

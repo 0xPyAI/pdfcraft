@@ -27,6 +27,43 @@ fn frame_row_rect(row: &[usize], lines: &[TextLine]) -> Option<[f64; 4]> {
     row.iter().filter_map(|i| lines.get(*i)).map(TextLine::frame_rect).reduce(union)
 }
 
+/// The left edge the rest of the page's text sits on, ignoring the rows of `block`. A single row
+/// that does not share it is not merely an indented or full-width left-aligned line, so its own
+/// centre is the only remaining explanation for where it sits.
+fn neighbour_left(lines: &[TextLine], block: &TextBlock) -> Option<f64> {
+    let mut edges: HashMap<i64, usize> = HashMap::new();
+    for (i, line) in lines.iter().enumerate() {
+        if block.lines.contains(&i) {
+            continue;
+        }
+        // Quarter-point buckets: equal edges found through different runs still agree.
+        *edges.entry((line.rect[0] * 4.0).round() as i64).or_insert(0) += 1;
+    }
+    let (best, _) = edges.into_iter().max_by_key(|(_, count)| *count)?;
+    Some(best as f64 / 4.0)
+}
+
+/// Whether a block reads as centred, and so must keep its centre when it grows or wraps.
+///
+/// Several ragged rows whose left edges disagree while their centres agree are centred. A one row
+/// block cannot say that: all of its left edges are the same, so the ragged test never fires and a
+/// centred title would be taken for left-aligned and grow to the right (#2581). Fall back to the
+/// page instead — a lone row sitting on the page's own centre, and not on the edge the rest of the
+/// text uses, is a centred title. A full-width left-aligned line still lines up with that edge, so
+/// it is not mistaken for one.
+pub(super) fn is_centred(block: &TextBlock, lines: &[TextLine], page_centre: f64, size: f64) -> bool {
+    let centre = (block.rect[0] + block.rect[2]) / 2.0;
+    let lefts: Vec<_> = block.rows.iter().filter_map(|r| row_rect(r, lines).map(|r| r[0])).collect();
+    if block.rows.len() > 1 {
+        let left_span = lefts.iter().copied().fold(f64::NEG_INFINITY, f64::max) - lefts.iter().copied().fold(f64::INFINITY, f64::min);
+        return left_span > size * 0.5
+            && block.rows.iter().all(|row| row_rect(row, lines).is_some_and(|r| ((r[0] + r[2]) / 2.0 - centre).abs() < size));
+    }
+    lefts
+        .first()
+        .is_some_and(|left| (centre - page_centre).abs() < size && neighbour_left(lines, block).is_none_or(|edge| (*left - edge).abs() > size * 0.5))
+}
+
 pub(super) fn group_blocks(lines: &[TextLine]) -> Vec<TextBlock> {
     group_layout(lines, true)
 }
@@ -685,12 +722,8 @@ pub(super) fn rewrite_styled_block(
         .ok_or_else(|| EditError::Invalid("the paragraph is drawn in a space it cannot be edited in".into()))?;
     let (tx, ty) = back.apply(dx, dy);
     block_ops.push(Op::new("cm", vec![n(1.0), n(0.0), n(0.0), n(1.0), n(tx), n(ty)]));
-    let centre = (block.rect[0] + block.rect[2]) / 2.0;
-    let lefts: Vec<_> = block.rows.iter().filter_map(|r| row_rect(r, lines).map(|r| r[0])).collect();
-    let left_span = lefts.iter().copied().fold(f64::NEG_INFINITY, f64::max) - lefts.iter().copied().fold(f64::INFINITY, f64::min);
-    let centered = block.rows.len() > 1
-        && left_span > first.size * 0.5
-        && block.rows.iter().all(|row| row_rect(row, lines).is_some_and(|r| ((r[0] + r[2]) / 2.0 - centre).abs() < first.size));
+    let crop = p.crop(doc);
+    let centered = is_centred(block, lines, (crop[0] + crop[2]) / 2.0, first.size);
     let source_leading = block
         .rows
         .windows(2)
