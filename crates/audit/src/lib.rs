@@ -77,6 +77,8 @@ pub enum AuditError {
     TooManyOps,
     #[error("form XObjects nest deeper than the audit follows")]
     TooDeep,
+    #[error("content walk entered more form XObjects than the audit follows")]
+    TooManyForms,
     #[error("page has a malformed /Annots entry")]
     BadAnnots,
     #[error(transparent)]

@@ -6355,3 +6355,96 @@ fn reading_keeps_dotted_leader_entries_whole_and_in_order() {
         ]
     );
 }
+
+/// A one-page document from the page's /Contents and /Resources, built in code.
+fn page_with(build: impl FnOnce(&mut Document) -> (Object, Dict)) -> Document {
+    let mut doc = Document::new_empty();
+    let pages = doc.add(Object::Null);
+    let (contents, resources) = build(&mut doc);
+    let page: Dict = [
+        (b"Type".to_vec(), Object::Name(b"Page".to_vec())),
+        (b"Parent".to_vec(), Object::Ref(pages)),
+        (b"MediaBox".to_vec(), Object::Array([0, 0, 200, 300].map(Object::from).to_vec())),
+        (b"Contents".to_vec(), contents),
+        (b"Resources".to_vec(), Object::Dict(resources)),
+    ]
+    .into_iter()
+    .collect();
+    let page = doc.add(page);
+    let tree: Dict = [
+        (b"Type".to_vec(), Object::Name(b"Pages".to_vec())),
+        (b"Kids".to_vec(), Object::Array(vec![Object::Ref(page)])),
+        (b"Count".to_vec(), Object::Int(1)),
+    ]
+    .into_iter()
+    .collect();
+    doc.set(pages, Object::Dict(tree));
+    let catalog: Dict = [(b"Type".to_vec(), Object::Name(b"Catalog".to_vec())), (b"Pages".to_vec(), Object::Ref(pages))].into_iter().collect();
+    let catalog = doc.add(catalog);
+    doc.trailer_mut().set(b"Root".to_vec(), Object::Ref(catalog));
+    doc
+}
+
+#[test]
+fn repeated_content_references_share_one_decode_budget() {
+    // One 1 MiB stream (a kilobyte on disk) named 300 times by the page's /Contents.
+    let doc = page_with(|doc| {
+        let spaces = doc.add(Stream::flate(Dict::new(), &vec![b' '; 1 << 20]));
+        (Object::Array(vec![Object::Ref(spaces); 300]), Dict::new())
+    });
+    match text_lines(&doc, 0) {
+        Ok(lines) => panic!("read {} lines from more content than a page may decode", lines.len()),
+        Err(e) => assert!(matches!(e, EditError::Invalid(_)), "{e}"),
+    }
+}
+
+#[test]
+fn reading_images_stops_at_the_page_record_limit() {
+    // 20 draws of a form drawing a form 20 times that draws an image 20 times: 8,000 images
+    // per level-two form, 160,000 in all, from a few hundred bytes.
+    let doc = page_with(|doc| {
+        let image: Dict = [
+            (b"Subtype".to_vec(), Object::Name(b"Image".to_vec())),
+            (b"Width".to_vec(), Object::Int(1)),
+            (b"Height".to_vec(), Object::Int(1)),
+            (b"ColorSpace".to_vec(), Object::Name(b"DeviceGray".to_vec())),
+            (b"BitsPerComponent".to_vec(), Object::Int(8)),
+        ]
+        .into_iter()
+        .collect();
+        let mut inner = doc.add(Stream::from_raw(image, vec![0]));
+        let draws = "/X Do ".repeat(20);
+        let resources = |inner: pdfcraft_cos::ObjRef| -> Dict {
+            let xobjects: Dict = [(b"X".to_vec(), Object::Ref(inner))].into_iter().collect();
+            [(b"XObject".to_vec(), Object::Dict(xobjects))].into_iter().collect()
+        };
+        for _ in 0..3 {
+            let mut d = resources(inner);
+            d = [(b"Subtype".to_vec(), Object::Name(b"Form".to_vec())), (b"Resources".to_vec(), Object::Dict(d))].into_iter().collect();
+            inner = doc.add(Stream::from_raw(d, draws.clone().into_bytes()));
+        }
+        let page = doc.add(Stream::from_raw(Dict::new(), draws.into_bytes()));
+        (Object::Ref(page), resources(inner))
+    });
+    if let Ok(images) = crate::reading_images(&doc, 0) {
+        assert!(images.len() <= crate::images::MAX_PAGE_IMAGES, "{} images", images.len());
+    }
+}
+
+#[test]
+fn reading_spends_one_decode_budget_on_content_and_forms() {
+    // 130 MiB of content and a 130 MiB form (a kilobyte each on disk): each fits a page's budget,
+    // together they don't, so reading leaves the form out and says so.
+    let doc = page_with(|doc| {
+        let mut body = b"%".to_vec();
+        body.resize(130 << 20, b'x');
+        let form: Dict = [(b"Subtype".to_vec(), Object::Name(b"Form".to_vec()))].into_iter().collect();
+        let form = doc.add(Stream::flate(form, &body));
+        let mut content = b"/X Do\n%".to_vec();
+        content.resize(130 << 20, b'x');
+        let content = doc.add(Stream::flate(Dict::new(), &content));
+        let xobjects: Dict = [(b"X".to_vec(), Object::Ref(form))].into_iter().collect();
+        (Object::Ref(content), [(b"XObject".to_vec(), Object::Dict(xobjects))].into_iter().collect())
+    });
+    assert!(crate::text::reading_blocks_checked(&doc, 0).unwrap().truncated);
+}

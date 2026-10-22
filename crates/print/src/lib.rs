@@ -18,7 +18,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use pdfcraft_content::Matrix;
-use pdfcraft_cos::{Dict, Document, ObjRef, Object, SaveOptions, Stream, write_full};
+use pdfcraft_cos::{DecodeBudget, Dict, Document, ObjRef, Object, SaveOptions, Stream, write_full};
 
 pub mod range;
 pub mod spool;
@@ -331,11 +331,14 @@ pub fn text_reads_up(doc: &Document, index: usize) -> bool {
     let to_display = Matrix(page.view_matrix(doc)).invert().unwrap_or_default();
     let res = page.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
     let mut score = 0i64;
-    text_direction(doc, &decoded_contents(doc, &page.dict), &res, to_display, 0, &mut score);
+    let mut budget = DecodeBudget::page();
+    // Content past the budget is left out: the answer is a guess from the text read so far.
+    let data = decoded_contents(doc, &page.dict, &mut budget).unwrap_or_default();
+    text_direction(doc, &data, &res, to_display, 0, &mut score, &mut budget);
     score > 0
 }
 
-fn text_direction(doc: &Document, data: &[u8], res: &Dict, base: Matrix, depth: usize, score: &mut i64) {
+fn text_direction(doc: &Document, data: &[u8], res: &Dict, base: Matrix, depth: usize, score: &mut i64, budget: &mut DecodeBudget) {
     let (mut ctm, mut tm, mut stack) = (base, Matrix::IDENTITY, Vec::new());
     for op in pdfcraft_content::parse(data).ops {
         match op.op.as_slice() {
@@ -358,8 +361,11 @@ fn text_direction(doc: &Document, data: &[u8], res: &Dict, base: Matrix, depth: 
                 }
                 let m = form.dict.get(b"Matrix").and_then(|m| doc.resolve(m).as_array().and_then(|a| Matrix::from_operands(a))).unwrap_or_default();
                 let inner = form.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_else(|| res.clone());
-                if let Ok(body) = form.decoded() {
-                    text_direction(doc, &body, &inner, m.then(&ctm), depth + 1, score);
+                if !budget.enter_form() {
+                    return;
+                }
+                if let Ok(body) = budget.decode(form) {
+                    text_direction(doc, &body, &inner, m.then(&ctm), depth + 1, score, budget);
                 }
             }
             _ => {}
@@ -676,24 +682,22 @@ fn n(v: f64) -> String {
     if s == "-0" { "0".into() } else { s.into() }
 }
 
-fn decoded_contents(doc: &Document, page: &Dict) -> Vec<u8> {
-    let list: Vec<Object> = match page.get(b"Contents") {
-        None => Vec::new(),
-        Some(c) => match &*doc.resolve(c) {
-            Object::Array(a) => a.clone(),
-            _ => vec![c.clone()],
-        },
-    };
+/// The page's content streams decoded against `budget` and joined; streams that don't decode
+/// are left out. `None` when the budget ran out, so part of the content is missing.
+fn decoded_contents(doc: &Document, page: &Dict, budget: &mut DecodeBudget) -> Option<Vec<u8>> {
+    let Some(contents) = page.get(b"Contents") else { return Some(Vec::new()) };
     let mut out = Vec::new();
-    for o in list {
-        if let Object::Stream(s) = &*doc.resolve(&o)
-            && let Ok(d) = s.decoded()
-        {
-            out.extend_from_slice(&d);
-            out.push(b'\n');
+    for data in budget.decode_contents(doc, contents) {
+        match data {
+            Ok(data) => {
+                out.extend_from_slice(&data);
+                out.push(b'\n');
+            }
+            Err(_) if budget.remaining() == 0 => return None,
+            Err(_) => {}
         }
     }
-    out
+    Some(out)
 }
 
 /// Reduce `doc`'s pages to what [`impose`] draws of them under `content`: the annotations that
@@ -782,7 +786,12 @@ fn page_form(
     let page = pages.get(index).ok_or_else(|| PrintError::Invalid(format!("there is no page {}", index.saturating_add(1))))?;
     let crop = page.crop(doc);
     let mut res = page.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
-    let mut body = if content == Content::FormFieldsOnly { Vec::new() } else { decoded_contents(doc, &page.dict) };
+    let mut body = if content == Content::FormFieldsOnly {
+        Vec::new()
+    } else {
+        decoded_contents(doc, &page.dict, &mut DecodeBudget::page())
+            .ok_or_else(|| PrintError::Invalid(format!("page {} has more content than can be printed", index + 1)))?
+    };
     // Wrap the page content so a state it leaves behind can't affect the annotations.
     if !body.is_empty() {
         let mut wrapped = b"q\n".to_vec();

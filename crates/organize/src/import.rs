@@ -1354,19 +1354,10 @@ pub fn page_as_form(dst: &mut Document, src: &Document, page: usize) -> Result<(
     let (w, h) = (bbox[2] - bbox[0], bbox[3] - bbox[1]);
     let rotate = d.get(b"Rotate").and_then(|r| src.resolve(r).as_int()).unwrap_or(0).rem_euclid(360);
     // Content: the page's streams, decoded and joined.
-    let mut content = Vec::new();
-    if let Some(c) = own.get(b"Contents") {
-        let list = match &*src.resolve(c) {
-            Object::Array(a) => a.clone(),
-            _ => vec![c.clone()],
-        };
-        for o in list {
-            if let Object::Stream(s) = &*src.resolve(&o) {
-                content.extend(s.decoded().map_err(|e| OrganizeError::Invalid(format!("page {} content: {e}", page + 1)))?);
-                content.push(b'\n');
-            }
-        }
-    }
+    let content = match own.get(b"Contents") {
+        Some(c) => crate::prune::content_bytes(src, c).map_err(|e| OrganizeError::Invalid(format!("page {} content: {e}", page + 1)))?,
+        None => Vec::new(),
+    };
     let mut copier = Copier::new(src, HashMap::new(), HashMap::new());
     let resources = match d.get(b"Resources") {
         Some(r) => copier.copy_value(dst, r, None)?,
