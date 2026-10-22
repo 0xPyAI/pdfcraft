@@ -93,6 +93,11 @@ pub fn count(info: &DocInfo) -> usize {
     info.annotations.iter().filter(|a| !a.is_reply() && a.state.is_none()).count()
 }
 
+/// The replies under the header's count (not status changes or checkmarks).
+pub fn reply_count(info: &DocInfo) -> usize {
+    info.annotations.iter().filter(|a| a.is_reply() && a.state.is_none()).count()
+}
+
 fn matches(a: &Annotation, q: &str) -> bool {
     any_contains([a.author.as_deref(), a.contents.as_deref(), Some(kind_label(a))].into_iter().flatten(), q)
 }

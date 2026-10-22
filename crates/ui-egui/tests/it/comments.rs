@@ -1177,9 +1177,33 @@ fn replies_follow_irt_references_when_names_repeat_on_every_page() {
     assert!(reply.rect().top() > h.get_by_label("Second page note").rect().top(), "the reply sits under page 2's comment");
     assert!(h.get_by_label("Page 2").rect().top() < reply.rect().top(), "not under page 1's comment, which shares the /NM");
     h.get_by_label("Answer on page two");
-    // The header counts the two comments, not their replies (Acrobat says 2, not 4).
+    // The header counts the two comments, not their replies (Acrobat says 2, not 4), and gives
+    // the replies in small text under it.
     assert_eq!(h.query_all_by_label("4").count(), 0);
+    h.get_by_label("2 replies");
 }
+
+#[test]
+fn the_header_names_no_replies_when_there_are_none() {
+    let h = harness_with_bytes(PER_PAGE_NAMES.to_vec(), |app| {
+        app.set_option("panel", "comments").unwrap();
+        app.views[0].comments.search = Some("cover".into());
+    });
+    h.get_by_label("Cover note");
+    h.get_by_label("2 replies"); // The header counts the document, not the search.
+    let h = harness_with_bytes(SINGLE_COMMENT.to_vec(), |app| app.set_option("panel", "comments").unwrap());
+    h.get_by_label("Only note");
+    assert_eq!(h.query_all_by_label_contains("repl").count(), 0, "no \"0 replies\" line");
+}
+
+// Contributor-original PDF: one comment, no replies.
+const SINGLE_COMMENT: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [4 0 R] >> endobj
+4 0 obj << /Type /Annot /Subtype /Text /Rect [20 140 40 160] /NM (only) /T (Alpha) /Contents (Only note) >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
 
 #[test]
 fn the_panel_reveals_edits_and_reopens_a_late_thread_without_changing_its_replies() {
