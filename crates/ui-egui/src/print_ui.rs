@@ -251,8 +251,8 @@ impl PrintDraft {
 /// the network. Without a source the dialog reads them as it opens, so tests stay deterministic.
 pub type PrinterSource = std::sync::Arc<dyn Fn() -> Vec<spool::Printer> + Send + Sync>;
 
-/// Where a printer's driver options come from: the spooler's (`spool::printer_options`) unless a
-/// test stands in. Called off the GUI thread.
+/// Where a printer's driver options come from: the spooler's (`spool::printer_options_in`, in the
+/// UI language) unless a test stands in. Called off the GUI thread.
 pub type OptionsSource = std::sync::Arc<dyn Fn(&str) -> Vec<spool::PrinterOption> + Send + Sync>;
 
 /// The system spooler's printers, as the desktop app's [`PrinterSource`].
@@ -464,7 +464,11 @@ impl PdfCraftApp {
         if self.print_tasks.options.iter().any(|(p, _)| *p == printer) {
             return;
         }
-        let source: OptionsSource = self.options_source.clone().unwrap_or_else(|| std::sync::Arc::new(|p: &str| spool::printer_options(p)));
+        let source: OptionsSource = self.options_source.clone().unwrap_or_else(|| {
+            // The driver's own names in the UI language, as it is when Properties… is clicked.
+            let lang = crate::i18n::current().code();
+            std::sync::Arc::new(move |p: &str| spool::printer_options_in(p, lang))
+        });
         let (tx, rx) = std::sync::mpsc::channel();
         let wake = WakeOnExit(self.ctx.clone());
         let name = printer.clone();

@@ -582,7 +582,7 @@ mod cups_options {
             (boundary_queue.as_str(), "Tray2", "Tray2"),
             (boundary_instance.as_str(), "Tray2", "Tray2"),
         ] {
-            let options = spool::printer_options_via_within(destination, &dir, command(&dir, &format!("InputSlot/Paper tray: *{current}")), LIMIT);
+            let options = spool::printer_options_via_within(destination, &dir, command(&dir, &format!("InputSlot/Paper tray: *{current}")), LIMIT, "en");
             assert_eq!(options.len(), 1, "{destination}: the queue's PPD must be read");
             assert_eq!(options[0].default, expected, "{destination}: only valid instance choices override the PPD default");
             assert_eq!(options[0].choices, [("Auto".into(), "Automatic".into()), ("Tray2".into(), "Tray 2".into())]);
@@ -623,7 +623,7 @@ mod cups_options {
             long_queue_instance.as_str(),
             long_instance.as_str(),
         ] {
-            assert!(spool::printer_options_via_within(destination, &dir, command(&dir, "InputSlot: *Auto"), LIMIT).is_empty(), "{destination:?}");
+            assert!(spool::printer_options_via_within(destination, &dir, command(&dir, "InputSlot: *Auto"), LIMIT, "en").is_empty(), "{destination:?}");
             assert!(!dir.join("args").exists(), "{destination:?}: rejected before spawning");
         }
         std::fs::remove_dir_all(dir).unwrap();
@@ -839,5 +839,35 @@ mod bounded_commands {
             assert_eq!(err.kind(), std::io::ErrorKind::TimedOut, "{mode}");
             assert!(started.elapsed() < LINGER / 2, "{mode}: returned after {:?}, when the lingering process let go", started.elapsed());
         }
+    }
+}
+
+#[test]
+fn driver_options_take_the_ppds_own_names_in_the_ui_language() {
+    use crate::spool::{PrinterOption, localize, parse_ppd, ppd_text};
+    // Latin-1 elsewhere (the é), UTF-8 in the localization lines, as drivers ship them.
+    let mut ppd = b"*cupsLanguages: \"bg pt_BR\"\n*OpenGroup: Finishing/Finishing Options\n*OpenUI *KMDuplex/Print Type: PickOne\n*DefaultKMDuplex: Single\n*KMDuplex Single/1-Sided: \"\"\n*KMDuplex Double/2-Sided: \"\"\n*CloseUI: *KMDuplex\n*OpenUI *Staple/Staple: PickOne\n*DefaultStaple: None\n*Staple None/None: \"\"\n*CloseUI: *Staple\n*CloseGroup: Finishing\n*fr.Translation KMDuplex/Type d'impression r".to_vec();
+    ppd.push(0xE9);
+    ppd.extend_from_slice("el: \"\"\n*bg.Translation Finishing/Довършителни операции: \"\"\n*bg.Translation KMDuplex/Тип печат: \"\"\n*bg.KMDuplex Single/Едностранен: \"\"\n*bg.KMDuplex Double/: \"\"\n*pt_BR.Translation KMDuplex/Tipo de impressão: \"\"\n".as_bytes());
+    let parsed = parse_ppd(&ppd_text(&ppd));
+    let label = |o: &[PrinterOption], key: &str| o.iter().find(|o| o.key == key).map(|o| o.label.clone()).unwrap();
+    let mut bg = parsed.clone();
+    localize(&mut bg, &ppd, "bg");
+    let duplex = bg.iter().find(|o| o.key == "KMDuplex").unwrap();
+    assert_eq!((duplex.label.as_str(), duplex.group.as_str()), ("Тип печат", "Довършителни операции"));
+    assert_eq!(
+        duplex.choices,
+        [("Single".to_string(), "Едностранен".to_string()), ("Double".to_string(), "2-Sided".to_string())],
+        "an empty translation keeps the driver's name"
+    );
+    assert_eq!(label(&bg, "Staple"), "Staple", "untranslated options keep theirs");
+    // Region-specific codes, then the language alone; languages the PPD lacks change nothing.
+    let mut pt = parsed.clone();
+    localize(&mut pt, &ppd, "pt-br");
+    assert_eq!(label(&pt, "KMDuplex"), "Tipo de impressão");
+    for lang in ["en", "de", "", "bg-"] {
+        let mut other = parsed.clone();
+        localize(&mut other, &ppd, lang);
+        assert_eq!(other == parsed, lang != "bg-", "{lang:?}");
     }
 }
