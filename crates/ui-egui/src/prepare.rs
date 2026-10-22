@@ -569,7 +569,8 @@ pub(crate) fn delete_selected(view: &mut DocView) -> Option<Edit> {
 /// as the object nudge does (`object_ui::nudge_keys`) and as dragging it does (#2608). The keys
 /// are consumed before the view turns the page with them; one press is one undo step.
 pub(crate) fn nudge_keys(ctx: &egui::Context, view: &mut DocView, doc: &Document) {
-    if ctx.egui_wants_keyboard_input() || view.prepare.grab.is_some() {
+    // `consume_key` lets an extra Alt through, and Alt+↑/↓ belongs to Calculation order's move.
+    if ctx.egui_wants_keyboard_input() || view.prepare.grab.is_some() || ctx.input(|i| i.modifiers.alt) {
         return;
     }
     let Some((name, wi)) = view.prepare.selected.clone() else { return };
