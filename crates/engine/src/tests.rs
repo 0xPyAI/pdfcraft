@@ -6645,7 +6645,7 @@ fn exporting_a_jpeg_logo_to_word_keeps_the_image() {
         assert!(jpeg.starts_with(&[0xFF, 0xD8]));
         let docx = d.export_office(compare::OfficeFormat::Docx);
         assert!(docx.windows(21).any(|w| w == b"word/media/image1.jpg"), "overlap {overlaps}");
-        assert!(docx.windows(jpeg.len()).any(|w| w == jpeg.as_slice()), "the JPEG is stored unchanged (overlap {overlaps})");
+        assert!(docx.windows(jpeg.len()).any(|w| w == &jpeg[..]), "the JPEG is stored unchanged (overlap {overlaps})");
     }
 }
 
