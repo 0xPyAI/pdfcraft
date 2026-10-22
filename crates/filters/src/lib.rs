@@ -137,8 +137,8 @@ pub(crate) type Step = Result<Vec<u8>, Failure>;
 /// Decodes `data` through `chain` (first element applied first).
 ///
 /// Image codecs, `Crypt` and unknown filters anywhere in the chain give
-/// [`FilterError::Unsupported`] (callers keep such data encoded). `max_output` bounds
-/// every intermediate buffer.
+/// [`FilterError::Unsupported`] (callers keep such data encoded), as does a chain longer than
+/// [`MAX_CHAIN`]. `max_output` bounds every intermediate buffer.
 pub fn decode(chain: &[(Filter, Params)], data: &[u8], max_output: usize) -> Result<Vec<u8>, FilterError> {
     run(chain, data, max_output, true).map(|(v, _)| v)
 }
@@ -150,13 +150,22 @@ pub fn decode_tolerant(chain: &[(Filter, Params)], data: &[u8], max_output: usiz
     run(chain, data, max_output, false)
 }
 
+/// Longest filter chain decoded. Real streams use one to three filters; every stage may produce
+/// up to the output limit, so the chain length multiplies the work.
+pub const MAX_CHAIN: usize = 8;
+
 fn run(chain: &[(Filter, Params)], data: &[u8], max: usize, strict: bool) -> Result<(Vec<u8>, bool), FilterError> {
+    if chain.len() > MAX_CHAIN {
+        return Err(FilterError::Unsupported(format!("a chain of {} filters", chain.len())));
+    }
     if let Some((f, _)) = chain.iter().find(|(f, _)| !f.is_decodable()) {
         return Err(FilterError::Unsupported(f.name().to_owned()));
     }
     let mut cur: Cow<[u8]> = Cow::Borrowed(data);
     let mut partial = false;
     for (filter, params) in chain {
+        #[cfg(test)]
+        STAGE_BYTES.with(|c| c.set(c.get() + cur.len()));
         cur = Cow::Owned(match decode_one(filter, params, &cur, max) {
             Ok(v) => v,
             Err(Failure { error: FilterError::Corrupt { .. }, partial: out }) if !strict => {
@@ -219,7 +228,26 @@ pub(crate) fn is_pdf_whitespace(b: u8) -> bool {
 }
 
 #[cfg(test)]
+thread_local! {
+    /// Bytes handed to decoding stages on this thread.
+    static STAGE_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
 mod tests {
+    #[test]
+    fn a_long_filter_chain_is_refused_before_decoding() {
+        // `FF FF` run-length decodes to itself, so every stage of the chain repeats the work.
+        let data = vec![0xFF; 4096];
+        let chain = |n: usize| vec![(super::Filter::RunLength, super::Params::default()); n];
+        super::STAGE_BYTES.with(|c| c.set(0));
+        let long = super::decode(&chain(1000), &data, 1 << 20);
+        let read = super::STAGE_BYTES.with(|c| c.get());
+        assert!(read <= 16 * data.len(), "{read} bytes decoded through the chain");
+        assert!(matches!(long, Err(super::FilterError::Unsupported(_))), "{long:?}");
+        assert_eq!(super::decode(&chain(super::MAX_CHAIN), &data, 1 << 20).ok(), Some(data));
+    }
+
     use super::*;
 
     #[test]
