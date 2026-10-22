@@ -4694,6 +4694,71 @@ trailer << /Root 1 0 R >>
         assert_eq!((last.width, last.height), (50, 100), "the last page is read from its own offset");
     }
 
+    /// #2946: ScanSoft PDF Create! writes the `post` table version of every font it embeds with
+    /// its 16-bit halves swapped (`00 00 00 03` for 3.0). Such a font must still be used, drawing
+    /// exactly as with a correct version; a version that is neither (9.0) is still refused and
+    /// drawn with a substitute, as before.
+    #[test]
+    fn a_font_whose_post_version_has_swapped_halves_is_still_used() {
+        let font = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
+        // The `post` table's offset, from the table directory.
+        let tables = usize::from(u16::from_be_bytes([font[4], font[5]]));
+        let post = (0..tables)
+            .map(|i| &font[12 + 16 * i..28 + 16 * i])
+            .find(|e| &e[..4] == b"post")
+            .map(|e| u32::from_be_bytes([e[8], e[9], e[10], e[11]]) as usize)
+            .expect("the test font has a post table");
+        let render_with = |version: [u8; 4], encoding: &str| -> Vec<u8> {
+            let mut program = font.to_vec();
+            program[post..post + 4].copy_from_slice(&version);
+            let content = b"BT /F1 28 Tf 10 40 Td (Hamburg 0123) Tj ET";
+            let widths = vec!["600"; 95].join(" ");
+            let objects: Vec<Vec<u8>> = vec![
+                b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+                b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+                b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 80] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_vec(),
+                [format!("<< /Length {} >>\nstream\n", content.len()).into_bytes(), content.to_vec(), b"\nendstream".to_vec()].concat(),
+                format!("<< /Type /Font /Subtype /TrueType /BaseFont /JetBrainsMono-Regular /FirstChar 32 /LastChar 126 /Widths [{widths}] /FontDescriptor 6 0 R /Encoding {encoding} >>").into_bytes(),
+                b"<< /Type /FontDescriptor /FontName /JetBrainsMono-Regular /Flags 32 /FontBBox [-1000 -300 1000 1000] /ItalicAngle 0 /Ascent 1020 /Descent -300 /CapHeight 730 /StemV 80 /FontFile2 7 0 R >>".to_vec(),
+                [format!("<< /Length {} >>\nstream\n", program.len()).into_bytes(), program, b"\nendstream".to_vec()].concat(),
+            ];
+            let mut pdf = b"%PDF-1.7\n".to_vec();
+            let mut offsets = Vec::new();
+            for (i, o) in objects.iter().enumerate() {
+                offsets.push(pdf.len());
+                pdf.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+                pdf.extend_from_slice(o);
+                pdf.extend_from_slice(b"\nendobj\n");
+            }
+            let xref = pdf.len();
+            pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+            for o in offsets {
+                pdf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+            }
+            pdf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+            let page = PageRenderer::new(Arc::new(pdf), RenderConfig::default()).render(RenderRequest {
+                page: 0,
+                kind: RequestKind::Pixels,
+                tile: None,
+                scale: 2.0,
+                tag: 0,
+                preview: false,
+            });
+            assert!(page.error.is_none(), "{:?}", page.error);
+            page.rgba.to_vec()
+        };
+        let render = |version: [u8; 4]| render_with(version, "/WinAnsiEncoding");
+        let correct = render([0, 3, 0, 0]);
+        assert_eq!(render([0, 0, 0, 3]), correct, "3.0 with swapped halves draws with the embedded font");
+        assert_eq!(render([0, 0, 0, 2]), render([0, 2, 0, 0]), "2.0 with swapped halves too");
+        assert_ne!(render([0, 9, 0, 0]), correct, "an unknown version is still refused");
+        // A /Differences name only the font's own post table knows (W's alternate, `W.cv07`)
+        // is found through a swapped 2.0 table too (review on #2949).
+        let alternate = |version: [u8; 4]| render_with(version, "<< /BaseEncoding /WinAnsiEncoding /Differences [72 /W.cv07] >>");
+        assert_ne!(alternate([0, 2, 0, 0]), render([0, 2, 0, 0]), "the alternate W draws instead of H");
+        assert_eq!(alternate([0, 0, 0, 2]), alternate([0, 2, 0, 0]), "and also with swapped halves");
+    }
+
     /// A page whose content expands far beyond its compressed stream stops at the expansion budget,
     /// which is 64 times the compressed size and at least `MAX_DECODED_STREAM`, and the page says so.
     #[test]
