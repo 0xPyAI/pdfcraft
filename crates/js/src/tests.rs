@@ -686,6 +686,22 @@ mod xfa_model {
         assert!(matches!(&o.effects[0], XfaEffect::MessageBox(m) if m.chars().count() <= 4_097));
     }
 
+    /// Past the byte budget, adding or removing a row is left out of the snapshot as well as the
+    /// effects, so the script never counts rows the form will not get.
+    #[test]
+    fn rows_changed_past_the_byte_budget_are_left_out_of_the_snapshot_too() {
+        let o = go(
+            "var s = 'x'; while (s.length < 4096) s += s; for (var i = 0; i < 9000; i++) xfa.host.gotoURL(s); \
+             table._row.removeInstance(0); var added = table._row.addInstance(1); (added === null) + ':' + table._row.count",
+            "form1[0].page1[0].go[0]",
+            "click",
+        );
+        assert_eq!(o.error, None, "{o:?}");
+        assert!(o.notes.iter().any(|n| n.contains("MiB")), "{:?}", o.notes);
+        assert!(!o.effects.iter().any(|e| matches!(e, XfaEffect::AddInstance { .. } | XfaEffect::RemoveInstance { .. })));
+        assert_eq!(o.result.as_deref(), Some("true:2"));
+    }
+
     #[test]
     fn urls_and_reset_lists_are_clipped_and_deduplicated() {
         let o = go(

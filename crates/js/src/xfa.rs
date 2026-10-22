@@ -321,6 +321,17 @@ impl XHost {
         }
     }
 
+    /// Room for one more effect holding `bytes` of text, charged now: a change to the snapshot
+    /// is made only when the effect that applies it will be kept, so a script never sees a change
+    /// its effects leave out. A drop is counted when there is no room.
+    fn reserve(&mut self, bytes: usize) -> bool {
+        if self.effects.len() >= MAX_EFFECTS {
+            self.dropped_effects += 1;
+            return false;
+        }
+        self.room(bytes)
+    }
+
     /// `e` with its text cut to the lengths an effect keeps.
     fn clip_effect(&mut self, e: XfaEffect) -> XfaEffect {
         match e {
@@ -668,18 +679,23 @@ fn renumber(h: &mut XHost, idx: usize, depth: usize) {
         let parent_som = n.parent.and_then(|p| h.nodes.get(p)).map(|p| p.som.clone()).unwrap_or_default();
         (parent_som, n.name.clone(), n.index, n.children.clone())
     };
-    let som = if name.starts_with('#') || name.is_empty() {
-        parent_som
-    } else if parent_som.is_empty() {
-        format!("{name}[{index}]")
-    } else {
-        format!("{parent_som}.{name}[{index}]")
-    };
+    let som = child_som(parent_som, &name, index);
     if let Some(n) = h.nodes.get_mut(idx) {
         n.som = som;
     }
     for k in kids {
         renumber(h, k, depth + 1);
+    }
+}
+
+/// The SOM of instance `index` of the node `name` under a parent at `parent_som`.
+fn child_som(parent_som: String, name: &str, index: usize) -> String {
+    if name.starts_with('#') || name.is_empty() {
+        parent_som
+    } else if parent_som.is_empty() {
+        format!("{name}[{index}]")
+    } else {
+        format!("{parent_som}.{name}[{index}]")
     }
 }
 
@@ -750,7 +766,14 @@ impl XHost {
         let live = instances(h, parent, name);
         let &first = live.first()?;
         let (repeatable, max) = h.nodes.get(first).map(|n| (n.repeatable, n.occur_max)).unwrap_or((false, Some(1)));
-        if !repeatable || max.is_some_and(|m| live.len() >= m) || h.added >= MAX_ADDED {
+        if !repeatable || max.is_some_and(|m| live.len() >= m) || h.added >= MAX_ADDED || h.nodes.len() >= MAX_NODES {
+            return None;
+        }
+        // The copy's SOM, as `renumber` will give it, so its effect is reserved before the copy.
+        let name = h.nodes.get(first).map(|n| n.name.clone()).unwrap_or_default();
+        let parent_som = h.nodes.get(parent).map(|p| p.som.clone()).unwrap_or_default();
+        let som = child_som(parent_som, &name, live.len());
+        if !h.reserve(som.len()) {
             return None;
         }
         let new = clone_subtree(h, first, Some(parent), 0)?;
@@ -765,8 +788,7 @@ impl XHost {
         }
         renumber(h, new, 0);
         h.added += 1;
-        let som = h.nodes.get(new).map(|n| n.som.clone()).unwrap_or_default();
-        h.push(XfaEffect::AddInstance { som });
+        h.record(XfaEffect::AddInstance { som });
         Some(new)
     }
 
@@ -803,6 +825,9 @@ impl XHost {
             return;
         }
         let som = h.nodes.get(gone).map(|n| n.som.clone()).unwrap_or_default();
+        if !h.reserve(som.len()) {
+            return;
+        }
         if let Some(n) = h.nodes.get_mut(gone) {
             n.gone = true;
         }
@@ -813,7 +838,7 @@ impl XHost {
             }
             renumber(h, inst, 0);
         }
-        h.push(XfaEffect::RemoveInstance { som });
+        h.record(XfaEffect::RemoveInstance { som });
     }
 }
 
