@@ -246,6 +246,9 @@ pub struct LineEditor {
     size: f32,
     /// Take the keyboard focus on the next frame.
     pub(crate) focus: bool,
+    /// Whether the text box had the keyboard at the end of the editor's last frame
+    /// ([`lost_focus_once`]).
+    had_focus: bool,
     /// The Format text panel's values, and what the paragraph had (to send only changes).
     pub look: pdfcraft_engine::AddedText,
     look0: pdfcraft_engine::AddedText,
@@ -1196,6 +1199,7 @@ fn open_editor(
         max_width,
         size: (l.size as f32 * scale).clamp(8.0, 72.0),
         focus: true,
+        had_focus: false,
         look: look_of(l),
         look0: look_of(l),
         family_chosen: false,
@@ -1556,8 +1560,9 @@ fn editor_galley(ui: &egui::Ui, ed: &LineEditor, text: &str, scale: f32, width: 
 
 /// The inline editor; returns the edit once the text is applied.
 pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -> Option<Edit> {
-    // Clicks outside the document (the Format text panel) keep the paragraph open.
-    let outside = ctx.input(|i| i.pointer.latest_pos()).is_some_and(|p| !view.viewport_rect().contains(p));
+    // Clicks outside the document (the Format text panel) keep the paragraph open. Where the
+    // click landed is `interact_pos`: `latest_pos` is gone on the frame a tap lifts.
+    let outside = ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| !view.viewport_rect().contains(p));
     let page = view.line_editor.as_ref()?.page;
     let xf = view.page_xform(page)?;
     let hold = view.objects.hold_editor;
@@ -1703,11 +1708,12 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
                     r.request_focus();
                     ed.focus = false;
                 }
+                let lost = lost_focus_once(&r, &mut ed.had_focus);
                 let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
                 let apply = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.command);
                 if esc {
                     done = Some(false);
-                } else if apply || (r.lost_focus() && !outside && !hold) {
+                } else if apply || (lost && !outside && !hold) {
                     done = Some(true);
                 }
             });
@@ -1740,6 +1746,16 @@ pub(crate) fn finished_edit(ed: LineEditor) -> Option<Edit> {
         text: ed.text,
         style,
     })
+}
+
+/// Whether an editor's text box `r` lost the keyboard this frame, given whether it `had` it at
+/// the end of the editor's last frame (updated here). egui's `lost_focus` holds for a second
+/// frame as well, and an editor that judges a click away by where the click landed must judge it
+/// once, on the click's frame: on the next, a tap's position is gone (egui-winit sends
+/// `PointerGone` with every touch release) and a mouse may have moved on.
+pub(crate) fn lost_focus_once(r: &egui::Response, had: &mut bool) -> bool {
+    let has = r.has_focus();
+    std::mem::replace(had, has) && !has
 }
 
 /// Caret colour that stays visible on a field filled with `fill`: black on light fills, white on dark ones.
@@ -1799,6 +1815,7 @@ mod tests {
             max_width: 400.0,
             size: block.size as f32,
             focus: true,
+            had_focus: false,
             look: look_of(&block),
             look0: look_of(&block),
             family_chosen: false,
