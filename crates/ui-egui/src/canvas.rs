@@ -2238,9 +2238,13 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_s
             view.find_step(true);
         }
     }
-    if ctx.egui_wants_keyboard_input() {
+    // A focused check box or radio button holds egui's keyboard focus only for Space, and a
+    // radio button for the arrows that move within its group: the other page keys still work.
+    let form_box = view.forms.keys.filter(|(id, _)| ctx.memory(|m| m.focused()) == Some(*id));
+    if ctx.egui_wants_keyboard_input() && form_box.is_none() {
         return;
     }
+    let arrows = !form_box.is_some_and(|(_, radio)| radio);
     // Rotation first: egui matches ⌘+ loosely with respect to Shift.
     if pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Plus))
         || pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Equals))
@@ -2287,7 +2291,7 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_s
     if pressed(cmd(Key::CloseBracket)) {
         view.view_history(true);
     }
-    let key = |k| ctx.input(|i| i.key_pressed(k));
+    let key = |k| (arrows || !matches!(k, Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown)) && ctx.input(|i| i.key_pressed(k));
     if key(Key::Escape) {
         if view.camera.is_some() || view.camera_done.is_some() {
             view.pending_action = Some(ViewAction::CancelCamera);
