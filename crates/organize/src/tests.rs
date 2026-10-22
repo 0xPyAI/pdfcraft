@@ -775,6 +775,33 @@ fn resources_split_between_page_and_tree_travel_together() {
 }
 
 #[test]
+fn a_scan_whose_xref_misses_the_image_combines_with_the_image() {
+    // A cheap image-to-PDF converter's table: "0 5" followed by the entries of objects 1 to 5,
+    // so the image (object 5) has none. Viewers rebuild the table and show the scan; the
+    // combined copy got a null image and came out blank (#1628).
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>".into(),
+        "<< /Length 26 >>\nstream\n100 0 0 100 0 0 cm /Im0 Do\nendstream".into(),
+        "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\nA\nendstream".into(),
+    ];
+    let good = build(&b, "/Root 1 0 R");
+    let text = String::from_utf8_lossy(&good).into_owned();
+    let at = text.rfind("\nxref\n").unwrap() + 1;
+    let entries: Vec<&str> = text[at..].lines().skip(3).take(5).collect();
+    let mut bytes = good[..at].to_vec();
+    bytes.extend_from_slice(format!("xref\n0 5\n{}\ntrailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{at}\n%%EOF\n", entries.join("\n")).as_bytes());
+    let src = open(bytes);
+    let out = full_roundtrip(&combine(&[("scan", &src)]).unwrap());
+    let res = out.dict(page_dict(&out, 0).get(b"Resources").unwrap()).unwrap();
+    let image = res.get(b"XObject").and_then(|x| out.dict(x)).and_then(|d| d.get(b"Im0").map(|v| out.resolve(v))).expect("the page lists its image");
+    let Object::Stream(image) = &*image else { panic!("the image is a stream, not {image:?}") };
+    assert_eq!(image.dict.name(b"Subtype"), Some(&b"Image"[..]));
+    assert_eq!(image.decoded().unwrap(), b"A");
+}
+
+#[test]
 fn links_are_rewired_to_copied_pages_or_dropped() {
     let a = doc_a();
     // Extract A3, A1 (reordered): A1's GoTo A3 must now point at the copy of A3 (index 0).
