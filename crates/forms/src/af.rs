@@ -197,6 +197,18 @@ impl Parser<'_> {
                         b'n' => out.push(b'\n'),
                         b'r' => out.push(b'\r'),
                         b't' => out.push(b'\t'),
+                        b'b' => out.push(0x08),
+                        b'f' => out.push(0x0C),
+                        b'v' => out.push(0x0B),
+                        b'0' => out.push(0),
+                        b'x' => {
+                            let digits = self.s.get(self.i..self.i.checked_add(2)?)?;
+                            let code = hex4(&[b'0', b'0', digits[0], digits[1]])?;
+                            self.i += 2;
+                            let ch = char::from_u32(u32::from(code)).unwrap_or('\u{FFFD}');
+                            let mut encoded = [0u8; 4];
+                            out.extend_from_slice(ch.encode_utf8(&mut encoded).as_bytes());
+                        }
                         b'u' => {
                             let code = hex4(self.s.get(self.i..self.i.checked_add(4)?)?)?;
                             self.i += 4;
@@ -698,6 +710,34 @@ pub fn rename_in_calculation(js: &str, old: &str, new: &str) -> Option<String> {
     (got == expected).then_some(out)
 }
 
+/// The fields a Calculate script reads by name (see [`calculation_sites`]), each once, in the
+/// order it first names them.
+pub fn calculation_reads(js: &str) -> Vec<String> {
+    let sites = calculation_sites(js);
+    unique(sites.iter().flat_map(|(_, site)| site.names()).map(str::to_owned))
+}
+
+impl Calculate {
+    /// The fields it reads, each once, in the order it first names them. A name also stands for
+    /// the fields under it (`row` for `row.0` and `row.1`), as [`calculate`] reads them.
+    pub fn reads(&self) -> Vec<String> {
+        match self {
+            Calculate::None => Vec::new(),
+            Calculate::Simple { fields, .. } => unique(fields.iter().cloned()),
+            Calculate::Notation(expr) => unique(notation_tokens(expr).into_iter().filter_map(|(_, token)| match token {
+                Notation::Name(name) => Some(name),
+                _ => None,
+            })),
+        }
+    }
+}
+
+/// `names` without repeats, in order.
+fn unique(names: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    names.into_iter().filter(|n| seen.insert(n.clone())).collect()
+}
+
 // ── running them ────────────────────────────────────────────────────────────────────────────
 
 /// AFMakeNumber: a number from typed text (currency symbols, group separators, spaces and a
@@ -884,7 +924,8 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
     // A bare trailing "p" ("5:30p") only counts when it follows a digit, not a word like "Sep".
     let bare_p = lower.strip_suffix('p').is_some_and(|rest| rest.trim_end().ends_with(|c: char| c.is_ascii_digit()));
     let pm = lower.contains("pm") || bare_p;
-    let am = lower.contains("am");
+    let bare_a = lower.strip_suffix('a').is_some_and(|rest| rest.trim_end().ends_with(|c: char| c.is_ascii_digit()));
+    let am = lower.contains("am") || bare_a;
     // Tokens: runs of digits (kept as text, so a run can be split between fields typed without
     // separators) and month names.
     let mut nums: VecDeque<String> = VecDeque::new();
@@ -1387,6 +1428,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn javascript_escapes_are_decoded() {
+        assert_eq!(
+            parse_format("AFNumber_Format(2, 0, 0, 0, \"\\x24\", true);"),
+            Some(Format::Number { decimals: 2, sep: 0, neg: 0, currency: "$".into(), prepend: true })
+        );
+        assert_eq!(parse_format("AFDate_FormatEx(\"\\b\\f\\v\\0\\q\");"), Some(Format::Date("\u{8}\u{c}\u{b}\0q".into())));
+    }
+
+    #[test]
     fn scripts_are_recognised_and_written_back() {
         assert_eq!(
             parse_format("AFNumber_Format(2, 0, 0, 0, \"$\", true);"),
@@ -1528,6 +1578,31 @@ mod tests {
             let back = renamed.as_deref().and_then(|r| rename_in_calculation(r, &new, &old));
             proptest::prop_assert_eq!(back, Some(js));
         }
+
+        /// What a formula reads is the same whether it is read from the tab's settings or from
+        /// the script they are written as.
+        #[test]
+        fn a_formula_reads_the_same_fields_as_its_script(names in proptest::collection::vec("\\PC{1,8}", 1..5), sum in proptest::bool::ANY) {
+            proptest::prop_assume!(!names.iter().any(|n| n.contains("VCALC")));
+            let c = if sum {
+                Calculate::Simple { op: CalcOp::Product, fields: names.clone() }
+            } else {
+                Calculate::Notation(names.iter().map(|n| notation_name(n)).collect::<Vec<_>>().join(" + "))
+            };
+            let js = calculate_js(&c).unwrap();
+            proptest::prop_assert_eq!(calculation_reads(&js), c.reads());
+            proptest::prop_assert_eq!(c.reads(), unique(names));
+        }
+    }
+
+    #[test]
+    fn a_calculation_reads_each_named_field_once() {
+        assert_eq!(Calculate::Simple { op: CalcOp::Sum, fields: vec!["a".into(), "b".into(), "a".into()] }.reads(), ["a", "b"]);
+        assert_eq!(Calculate::Notation("(Unit\\ Price + 2) * qty / qty".into()).reads(), ["Unit Price", "qty"]);
+        assert_eq!(Calculate::None.reads(), Vec::<String>::new());
+        let script = "var t = getField(\"sub\").value; // getField(\"x\")\nevent.value = t + getField(\"tax\").value + getField(\"row\" + 1).value;";
+        assert_eq!(calculation_reads(script), ["sub", "tax"], "names built at run time aren't known");
+        assert_eq!(calculation_reads("AFSimple_Calculate(\"SUM\", \"a, b\");"), ["a", "b"]);
     }
 
     #[test]

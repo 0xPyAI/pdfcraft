@@ -25,6 +25,14 @@ set_props(&mut doc, "email", &FieldProps {
     ..Default::default()
 })?;
 delete_field(&mut doc, "email")?;
+
+// A table of text fields (view space, y down), laid out and named before any of it is added:
+// refused whole for a cell under MIN_FIELD_SIDE or a name with a period, repeated or taken.
+let names = all.iter().map(|f| f.name.as_str());
+let base = table::free_base(names.clone());                    // "Table1", or the next one free
+let mut grid = table::FieldTable::new([40.0, 240.0, 240.0, 360.0], &base);
+grid.set_columns(2, &base);
+let cells: Vec<table::Cell> = grid.cells_for(names)?;      // "Table1_1", "Table1_c2_1", …
 ```
 
 ## Behaviour
@@ -42,8 +50,16 @@ delete_field(&mut doc, "email")?;
   that have them. Not in a document that declares PDF/A, which forbids that flag (`declares_pdfa`).
   `undrawn_fields` lists the marked fields; the engine reports each edit that draws one, and
   flattening refuses to make that `?` permanent.
+- Displaying a form that leaves its appearances to the viewer (`/NeedAppearances`, or a text or
+  choice widget with no `/AP /N`): `with_field_appearances` returns a copy with those widgets
+  drawn from their values, as typing them would draw them; the engine shows and prints that copy
+  and saves the file as it was (#3470). `with_field_appearances_cached` keeps each widget's
+  drawing while the objects it was drawn from are the same (`FieldAppearanceCache`), so typing in
+  one field redraws that field, not the form.
 - Check boxes and radio buttons switch `/V` and each widget's `/AS`. Widgets with no appearances
   get PdfCraft's own (a drawn check mark or dot; no symbol font needed).
+- Imported `/MaxLen 0` is treated as unlimited (also clearing an inherited limit), while the
+  original entry is preserved. Positive limits still apply.
 - Values are validated (options, `MaxLen`, single vs multi-select, NoToggleToOff, read-only) and a
   failed call changes nothing.
 - `FieldProps::appearance` applies a `LookPatch` independently to each widget. `None` keeps
@@ -63,6 +79,14 @@ delete_field(&mut doc, "email")?;
   script stream that isn't UTF-8, other events' scripts and a name another field still has are
   left alone. `calculations_changed` compares two readings of a form to say which formulas an
   edit rewrote.
+- The calculation order (`/CO`, §12.7.3): `calculation_order` lists the calculated fields in the
+  order `recalculate` runs them, with the fields each formula reads (`Calculate::reads`,
+  `af::calculation_reads`; names built at run time aren't known) and what is wrong with the
+  order: a field reading one that calculates later, a loop, a field `/CO` leaves out, and `/CO`
+  entries that calculate nothing. `CalculationOrder::fixed` is Fix order: a stable topological
+  sort that keeps the current order wherever it can and leaves loops as they are.
+  `set_calculation_order` writes `/CO` afresh. A field that gets a calculation joins the end of
+  the order; one whose calculation changes keeps its place.
 - `Widget::caption` reads a push button's normal label (`/MK /CA`, including indirect values).
   `FieldProps { caption: Some((widget_index, text)), ..Default::default() }` changes or clears
   that label, independently of the field name. The index is 0-based. A label-only edit redraws
