@@ -1324,6 +1324,28 @@ fn cached_appearances_are_reused_while_annotations_are_unchanged() {
     assert_eq!(a, b, "the reused appearance is byte-identical");
 }
 
+/// A comment that `/Annots` lists many times, and that a second page lists too, is drawn once in
+/// the display copy. Every listing used to add another appearance stream, so a short array of
+/// repeated references multiplied the display bytes the engine writes on each refresh.
+#[test]
+fn a_comment_listed_many_times_is_drawn_once_for_display() {
+    let first = format!("<< /Type /Page /Parent 2 0 R /Annots [{}] >>", vec!["5 0 R"; 1_000].join(" "));
+    let doc = document_of(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 612 792] >>",
+        first.as_bytes(),
+        b"<< /Type /Page /Parent 2 0 R /Annots [5 0 R] >>",
+        b"<< /Type /Annot /Subtype /Square /Rect [10 10 50 50] /C [1 0 0] >>",
+    ]);
+    let mut cache = AppearanceCache::default();
+    let display = with_missing_appearances_cached(&doc, &mut cache).expect("the square needs an appearance");
+    assert_eq!(display.object_numbers().len(), doc.object_numbers().len() + 1, "one appearance stream, not one per listing");
+    assert_eq!((cache.builds(), cache.hits()), (1, 0));
+    assert!(list(&display, 0).iter().chain(&list(&display, 1)).all(|d| d.contains(b"AP")), "every listing shows it");
+    with_missing_appearances_cached(&doc, &mut cache).expect("a refresh");
+    assert_eq!((cache.builds(), cache.hits()), (1, 1), "a refresh reuses the cached stream once");
+}
+
 /// #1908: a text box's font size changes in `/DA` (colour kept), the rich text follows, the box
 /// grows to hold the bigger text but never shrinks, and bad sizes and other subtypes are refused.
 #[test]
