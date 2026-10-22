@@ -123,6 +123,8 @@ impl Face {
 
     /// Advance of `s` at this face's size.
     pub fn width(&self, s: &str) -> f64 {
+        #[cfg(test)]
+        MEASURED.with(|m| m.set(m.get().saturating_add(s.len() as u64)));
         let designed = match self.family {
             Family::Courier => s.chars().count() as f64 * 0.6 * self.size,
             Family::Helvetica => pdfcraft_fonts::helvetica_width(s, self.size) * if self.bold { 1.04 } else { 1.0 },
@@ -130,6 +132,12 @@ impl Face {
         };
         designed * self.h_scale
     }
+}
+
+// Bytes of text measured on this thread, for tests that bound layout work.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static MEASURED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// Default line height: XFA's font leading for the standard faces.
@@ -233,11 +241,16 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
                 lines.push((done, p.h_align));
             }
             if ink > avail - indent(line.first) && line.words.is_empty() {
-                // A word longer than a line: break it by character.
+                // A word longer than a line: break it by character. The piece's advance grows by
+                // each character's (widths add up), so no prefix is measured again.
                 let mut piece = String::new();
+                let mut advance = 0.0;
+                let mut buf = [0u8; 4];
                 for ch in w.text.chars() {
+                    let ch_width = w.face.width(ch.encode_utf8(&mut buf));
                     piece.push(ch);
-                    if w.face.width(&piece) > avail - indent(line.first) && piece.chars().count() > 1 {
+                    advance += ch_width;
+                    if advance > avail - indent(line.first) && piece.len() > ch.len_utf8() {
                         piece.pop();
                         let width = w.face.width(&piece);
                         line.words.push(Word { text: std::mem::take(&mut piece), face: w.face.clone(), width });
@@ -246,6 +259,7 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
                         let done = std::mem::replace(&mut line, Line { words: Vec::new(), width: 0.0, size: base.size, first: false });
                         lines.push((done, p.h_align));
                         piece.push(ch);
+                        advance = ch_width;
                     }
                 }
                 if !piece.is_empty() {

@@ -2657,3 +2657,16 @@ fn trailing_spaces_do_not_shift_centered_or_right_aligned_text() {
     assert!((left_edge("center", "TITLE   ") - (36.0 + (w - ink) / 2.0)).abs() < 1e-6);
     assert!((left_edge("right", "TITLE   ") - (36.0 + w - ink)).abs() < 1e-6);
 }
+
+/// A word longer than its line is broken by character in work linear in its length.
+#[test]
+fn a_long_word_breaks_in_linear_work() {
+    let face = text::Face::of(&Font { typeface: "Arial".into(), size: 1.0, ..Font::default() });
+    let word = "i".repeat(20_000);
+    text::MEASURED.with(|m| m.set(0));
+    let b = text::layout(&text::plain(&word), Rect::new(0.0, 0.0, 1000.0, 0.0), &Para::default(), &face, &|_| String::new());
+    let measured = text::MEASURED.with(|m| m.get());
+    assert!(b.spans.len() > 2, "{} lines", b.spans.len());
+    assert_eq!(b.spans.iter().map(|s| s.text.len()).sum::<usize>(), 20_000);
+    assert!(measured < 200_000, "{measured} bytes measured for a 20000-byte word");
+}
