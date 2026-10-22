@@ -182,6 +182,8 @@ pub struct ViewDefaults {
     pub layout: PageLayout,
     /// Whether the base layout scrolls continuously.
     pub continuous: bool,
+    /// Separate pages with a gutter and shadow; off joins adjacent page edges.
+    pub show_page_gaps: bool,
     /// [`Fit::Width`] or [`Fit::Page`], or [`Fit::None`] for a fixed `zoom`.
     pub fit: Fit,
     /// The zoom with [`Fit::None`] (1.0 = 100%).
@@ -194,7 +196,7 @@ pub struct ViewDefaults {
 impl Default for ViewDefaults {
     fn default() -> Self {
         // Single page, scrolling continuously at fit width: the earlier "continuous" default.
-        Self { layout: PageLayout::Single, continuous: true, fit: Fit::Width, zoom: 1.0, highlight_fields: true }
+        Self { layout: PageLayout::Single, continuous: true, show_page_gaps: true, fit: Fit::Width, zoom: 1.0, highlight_fields: true }
     }
 }
 
@@ -387,6 +389,7 @@ pub struct DocView {
     pub layout: PageLayout,
     /// Whether the base layout scrolls continuously (independent of `layout`, as in Acrobat).
     pub continuous: bool,
+    pub show_page_gaps: bool,
     /// View rotation in degrees clockwise (0, 90, 180, 270); display only, never saved.
     pub rotation: u16,
     pub current: usize,
@@ -732,6 +735,7 @@ impl DocView {
             fit: defaults.fit,
             layout: defaults.layout,
             continuous: defaults.continuous,
+            show_page_gaps: defaults.show_page_gaps,
             rotation: 0,
             current: 0,
             organize: false,
@@ -889,6 +893,7 @@ impl DocView {
         fresh.fit = self.fit;
         fresh.layout = self.layout;
         fresh.continuous = self.continuous;
+        fresh.show_page_gaps = self.show_page_gaps;
         fresh.rotation = self.rotation;
         fresh.current = self.current;
         fresh.organize = self.organize;
@@ -1530,6 +1535,31 @@ impl DocView {
         self.continuous
     }
 
+    /// Change page separation without editing the PDF or losing the reader's place.
+    pub fn set_page_gaps(&mut self, show: bool) {
+        if self.show_page_gaps == show {
+            return;
+        }
+        if !self.organize && self.viewport_screen.is_positive() {
+            let at = self.viewport_screen.center();
+            if let Some((page, r)) = self
+                .screen_rects
+                .iter()
+                .filter(|(_, r)| r.is_positive())
+                .min_by(|(_, a), (_, b)| a.distance_sq_to_pos(at).total_cmp(&b.distance_sq_to_pos(at)))
+            {
+                let fraction = (at - r.min) / r.size();
+                self.zoom_anchor = Some((*page, fraction.x, fraction.y, at - self.viewport_screen.min));
+            }
+        }
+        self.show_page_gaps = show;
+    }
+
+    /// Separation between adjacent page rectangles, in logical screen points.
+    fn page_gap(&self) -> f32 {
+        if self.show_page_gaps { GAP } else { 0.0 }
+    }
+
     /// Turn continuous scrolling on or off, keeping the current page in view. A no-op when it is
     /// already in that state.
     pub fn set_continuous(&mut self, continuous: bool) {
@@ -2135,9 +2165,9 @@ impl DocView {
         let avail_w = (self.viewport_w - 2.0 * SIDE).max(100.0);
         let per_row = if self.layout == PageLayout::TwoUp { 2.0 } else { 1.0 };
         match self.fit {
-            Fit::Width => self.zoom = (avail_w - GAP * (per_row - 1.0)) / (w * PT * per_row),
+            Fit::Width => self.zoom = (avail_w - self.page_gap() * (per_row - 1.0)) / (w * PT * per_row),
             Fit::Page => {
-                let zw = (avail_w - GAP * (per_row - 1.0)) / (w * PT * per_row);
+                let zw = (avail_w - self.page_gap() * (per_row - 1.0)) / (w * PT * per_row);
                 let zh = (self.viewport_h - 2.0 * MARGIN) / (h * PT);
                 self.zoom = zw.min(zh);
             }
@@ -2158,17 +2188,27 @@ impl DocView {
     }
 
     /// Page rects in content coordinates (origin at the scroll content's top-left).
-    fn layout(&self, info: &DocInfo, content_w: f32) -> Vec<Rect> {
+    fn layout(&self, info: &DocInfo, content_w: f32, ppp: f32) -> Vec<Rect> {
         let s = self.zoom * PT;
+        let gap = self.page_gap();
+        let page_size = |p: &pdfcraft_render::PageInfo| {
+            let (w, h) = self.display_size(p);
+            if self.show_page_gaps {
+                vec2(w * s, h * s)
+            } else {
+                // Match the raster's whole physical pixels. Snapping each page's origin
+                // independently with fractional sizes would leave hairline seams.
+                vec2(device_pixels(w, s * ppp) as f32 / ppp, device_pixels(h, s * ppp) as f32 / ppp)
+            }
+        };
         let mut rects = Vec::with_capacity(info.pages.len());
         let mut y = MARGIN;
         match self.layout {
             PageLayout::Single => {
                 for p in &info.pages {
-                    let (w, h) = self.display_size(p);
-                    let size = vec2(w * s, h * s);
+                    let size = page_size(p);
                     rects.push(Rect::from_min_size(pos2(((content_w - size.x) / 2.0).max(SIDE), y), size));
-                    y += size.y + GAP;
+                    y += size.y + gap;
                 }
             }
             PageLayout::TwoUp => {
@@ -2179,15 +2219,15 @@ impl DocView {
                     info.pages.chunks(2).collect()
                 };
                 for (ri, pair) in rows.into_iter().enumerate() {
-                    let sizes: Vec<Vec2> = pair.iter().map(|p| self.display_size(p)).map(|(w, h)| vec2(w * s, h * s)).collect();
-                    let row_w: f32 = sizes.iter().map(|v| v.x).sum::<f32>() + GAP * (sizes.len() as f32 - 1.0);
+                    let sizes: Vec<Vec2> = pair.iter().map(page_size).collect();
+                    let row_w: f32 = sizes.iter().map(|v| v.x).sum::<f32>() + gap * (sizes.len() as f32 - 1.0);
                     let row_h = sizes.iter().map(|v| v.y).fold(0.0, f32::max);
-                    let mut x = if self.cover && ri == 0 { (content_w / 2.0 + GAP / 2.0).max(SIDE) } else { ((content_w - row_w) / 2.0).max(SIDE) };
+                    let mut x = if self.cover && ri == 0 { (content_w / 2.0 + gap / 2.0).max(SIDE) } else { ((content_w - row_w) / 2.0).max(SIDE) };
                     for size in sizes {
                         rects.push(Rect::from_min_size(pos2(x, y + (row_h - size.y) / 2.0), size));
-                        x += size.x + GAP;
+                        x += size.x + gap;
                     }
-                    y += row_h + GAP;
+                    y += row_h + gap;
                 }
             }
         }
@@ -2727,7 +2767,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     }
 
     let content_w = view.content_width(info, avail.width());
-    let rects = view.layout(info, content_w);
+    let rects = view.layout(info, content_w, ui.ctx().pixels_per_point());
     // When not scrolling continuously, only one row is shown at a time: the current page, or the
     // current two-page spread (with the cover rule). These indices drive paging, which pages are
     // drawn, and the content height (#752). Empty for a document with no pages.
@@ -2929,11 +2969,11 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     } else if let Some((page, frac)) = view.goto.take() {
         let page = page.min(rects.len() - 1);
         let r = rects[page];
-        // Clamped here: egui clamps only after drawing, so a page that fits was drawn MARGIN - GAP
+        // Clamped here: egui clamps only after drawing, so a page that fits was drawn MARGIN - page_gap()
         // too high for a frame and then hopped into place. (`avail` is the viewport, as the
         // scroll bars float.)
         let max_y = (content_h - avail.height()).max(0.0);
-        scroll = scroll.vertical_scroll_offset((r.top() - y_shift - GAP + frac * r.height()).max(0.0).min(max_y));
+        scroll = scroll.vertical_scroll_offset((r.top() - y_shift - view.page_gap() + frac * r.height()).max(0.0).min(max_y));
         // Horizontally too, as Acrobat does (#2665): beside a much wider page the others sit off
         // to one side. A page already shown whole, or one filling the window's width, keeps the
         // scroll, so paging through a zoomed-in document stays on the same column. Otherwise a
@@ -3147,8 +3187,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 current = i;
             }
             let xf = PageXform { rect: r, rot: view.rotation, pw: info.pages[i].width.max(1.0), ph: info.pages[i].height.max(1.0) };
-            // Soft shadow + paper.
-            painter.add(egui::epaint::Shadow { offset: [0, 3], blur: 14, spread: 0, color: t.page_shadow }.as_shape(r, CornerRadius::ZERO));
+            // Shadows would darken the preceding page when pages touch.
+            if view.show_page_gaps {
+                painter.add(egui::epaint::Shadow { offset: [0, 3], blur: 14, spread: 0, color: t.page_shadow }.as_shape(r, CornerRadius::ZERO));
+            }
             painter.rect_filled(r, CornerRadius::ZERO, paper);
             if let Some(err) = view.errors.get(&i) {
                 painter.rect_filled(r, CornerRadius::ZERO, Color32::from_rgb(0xFB, 0xF4, 0xF4));
@@ -3269,7 +3311,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 let page_tex = view.pages.get(&i).map(|p| p.tex.id());
                 view.move_background.paint(ui, painter, &xf, i, info, &view.content, page_tex);
             }
-            painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(0.5, t.border.gamma_multiply(0.8)), egui::StrokeKind::Outside);
+            if view.show_page_gaps {
+                painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(0.5, t.border.gamma_multiply(0.8)), egui::StrokeKind::Outside);
+            }
 
             // Comments: tools, selection, moving and resizing come before text selection.
             let pcx = comments::PageCx { page: i, xf: &xf, info, tool, prefs, allowed, hidden: comments_hidden, redact_mark };
@@ -3987,7 +4031,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         // below the window's top). Within a point, as for wheel paging, so layout rounding
         // can't hide an edge.
         let max_y = (out.content_size.y - out.inner_rect.height()).max(0.0);
-        (page, out.state.offset.y <= MARGIN - GAP + 1.0, out.state.offset.y >= max_y - 1.0)
+        (page, out.state.offset.y <= MARGIN - view.page_gap() + 1.0, out.state.offset.y >= max_y - 1.0)
     });
 
     view.viewport_screen = out.inner_rect;
@@ -6749,7 +6793,7 @@ trailer << /Root 1 0 R >>
         v.fit_zoom(&info);
         let narrow = v.zoom;
         // The shown page fills the width between the side gutters, not centred for the wide page.
-        let shown = v.layout(&info, v.content_width(&info, 1000.0))[0];
+        let shown = v.layout(&info, v.content_width(&info, 1000.0), 1.0)[0];
         assert!((shown.left() - SIDE).abs() < 1e-2 && (shown.width() - 860.0).abs() < 1e-2, "{shown:?}");
         v.current = 1;
         v.fit_zoom(&info);

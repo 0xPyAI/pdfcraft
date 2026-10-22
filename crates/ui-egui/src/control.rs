@@ -679,6 +679,8 @@ impl Host for crate::PdfCraftApp {
                 "zoom_percent": (v.zoom * 100.0).round(),
                 "fit": format!("{:?}", v.fit),
                 "layout": format!("{:?}", v.layout),
+                "continuous": v.continuous(),
+                "page_gaps": v.show_page_gaps,
                 "organize": v.organize,
                 "grid_zoom": v.grid_zoom(),
                 "thumbnail_zoom": v.thumbnail_zoom(),

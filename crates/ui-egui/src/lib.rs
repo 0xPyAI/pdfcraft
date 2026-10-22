@@ -2416,6 +2416,7 @@ impl PdfCraftApp {
             "right_panel_closed": self.right_panel_closed,
         });
         // Set apart: one more key inside the macro above passes serde_json's recursion limit.
+        v["default_page_gaps"] = serde_json::Value::Bool(self.view_defaults.show_page_gaps);
         v["redact_prefs"] = self.redact_defaults.to_json();
         // Set outside json! above, which is at serde_json's macro recursion limit.
         v["hide_empty_highlight_hover"] = serde_json::Value::Bool(self.comment_prefs.hide_empty_highlight_hover);
@@ -2479,6 +2480,9 @@ impl PdfCraftApp {
         }
         if let Some((layout, continuous)) = v["default_layout"].as_str().and_then(canvas::parse_display_token) {
             (self.view_defaults.layout, self.view_defaults.continuous) = (layout, continuous);
+        }
+        if let Some(show) = v["default_page_gaps"].as_bool() {
+            self.view_defaults.show_page_gaps = show;
         }
         if let Ok(units) = serde_json::from_value::<units::Unit>(v["units"].clone()) {
             self.units = units;
@@ -2722,6 +2726,21 @@ impl PdfCraftApp {
                 "off" => v.set_continuous(false),
                 _ => return Err("continuous must be on or off".into()),
             },
+            ("page-gaps", Some(_)) => {
+                let show = match value {
+                    "on" => true,
+                    "off" => false,
+                    _ => return Err("page-gaps must be on or off".into()),
+                };
+                self.set_active_page_gaps(show);
+            }
+            ("default-page-gaps", _) => {
+                self.view_defaults.show_page_gaps = match value {
+                    "on" => true,
+                    "off" => false,
+                    _ => return Err("default-page-gaps must be on or off".into()),
+                };
+            }
             ("cover", Some(v)) => {
                 let on = match value {
                     "on" => true,
@@ -2915,6 +2934,7 @@ impl PdfCraftApp {
                     "zoom",
                     "layout",
                     "continuous",
+                    "page-gaps",
                     "cover",
                     "organize",
                     "grid-zoom",

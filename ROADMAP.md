@@ -231,6 +231,10 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 - **2026-10-19 (M3, #3387):** Save-prompt shortcuts yield to later consent and utility dialogs; a synthetic UI regression checks that an edited document stays open. Estimates unchanged.
 
+- **2026-10-18 (M3, PR #3101 review):** Gap changes in Organize Pages preserve document scroll position; menu and control changes apply to both comparison panes without changing unrelated tabs. Three synthetic UI regressions were observed failing before the fixes. Readiness estimates unchanged.
+
+- **2026-10-18 (M3, PR #3101):** Optional gapless continuous page display with persisted defaults and UI control support; both new labels translated in all 22 catalogs. Rebased onto current main, preserving navigation and rendering fixes. Readiness estimates unchanged.
+
 - **2026-10-18 (M10, #3120):** Export to Word, PowerPoint, HTML and RTF reads text from form XObjects nested as deep as the renderer draws them (50 levels), and up to 50 000 forms a page (the renderer's budget for nested ones); it stopped at 12 levels and 4 096 forms and left the rest out silently. A page past those limits is listed in `doc_export_office`'s `truncated_pages`, with a warning. Estimates unchanged.
 
 - **2026-10-18 (M5, PR #1971 review):** Nested FDF annotation values that identify a source `/Page` or `/Pages` dictionary become null at every copy depth. A synthetic three-page PDF saved and reopened before export verifies that destination actions cannot pull source page content into the FDF, while unrelated nested metadata and shared references remain intact. FDF import semantics, copied-graph limits and estimates are unchanged.
