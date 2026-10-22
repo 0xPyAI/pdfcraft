@@ -106,13 +106,16 @@ pub(crate) struct Scope<'a> {
     fonts: HashMap<Vec<u8>, Rc<Metrics>>,
     used_names: Vec<Vec<u8>>,
     depth: usize,
-    /// Form entries and decoded form bytes left for this page: shared forms drawn from other
-    /// shared forms would otherwise multiply the work with every level.
+    /// Form entries and decoded bytes left for this page, its content streams already charged:
+    /// shared forms drawn from other shared forms would otherwise multiply the work with every
+    /// level.
     budget: DecodeBudget,
 }
 
 impl<'a> Scope<'a> {
-    pub fn new(rects: &'a [[f64; 4]], mode: Mode, report: &'a mut Report) -> Self {
+    /// A scope whose form walk spends `budget`, what is left of the page's allowance after its
+    /// content streams were decoded.
+    pub fn new(rects: &'a [[f64; 4]], mode: Mode, report: &'a mut Report, budget: DecodeBudget) -> Self {
         Scope {
             rects,
             mode,
@@ -127,7 +130,7 @@ impl<'a> Scope<'a> {
             fonts: HashMap::new(),
             used_names: Vec::new(),
             depth: 0,
-            budget: DecodeBudget::page(),
+            budget,
         }
     }
 
