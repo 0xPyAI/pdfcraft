@@ -181,8 +181,8 @@ pub struct Outcome {
     pub requests: Vec<Request>,
     /// The script's error (syntax error, exception, or a limit reached), if it failed.
     pub error: Option<String>,
-    /// Errors in the document-level scripts that ran first. Each failing one stops where it
-    /// failed; the others and the script itself still run, as in Acrobat (#3940).
+    /// Errors in the document-level scripts that ran first. Each is a script of its own: one
+    /// that throws stops where it failed, and the others and the script itself still run (#3940).
     pub doc_errors: Vec<String>,
     /// The script's completion value (what the console prints), unless undefined.
     pub result: Option<String>,
