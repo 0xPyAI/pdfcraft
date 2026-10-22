@@ -2406,7 +2406,7 @@ animation effects	Off	ປິດ
 	Counting words… {n} pages read	ກຳລັງນັບຄຳ… ອ່ານແລ້ວ {n} ໜ້າ
 	Word counting stopped unexpectedly.	ການນັບຄຳຢຸດລົງໂດຍບໍ່ຄາດຄິດ.
 	Word count…	ຈຳນວນຄຳ…
-@id	file.word_count	file.word_count
+@id	file.word_count	ຈຳນວນຄຳ…
 	Standard	ມາດຕະຖານ
 	Mobile	ມືຖື
 	Merge image fragments	ຮວມຊິ້ນສ່ວນຮູບພາບ
