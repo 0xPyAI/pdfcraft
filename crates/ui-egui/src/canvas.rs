@@ -2792,7 +2792,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         None => {}
     }
     // No dialog, close prompt or palette over the page: only then does page input count.
-    let unobstructed = !app.modal_open() && !app.palette_open;
+    let modal = app.modal_open();
+    let unobstructed = !modal && !app.palette_open;
     let organize_zoom = app.organize_zoom;
     let view = &mut app.views[index];
     if view.organize {
@@ -3250,9 +3251,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         let mut best_overlap = -1.0f32;
         let mut current_overlap = -1.0f32;
         let mut current_height = f32::INFINITY;
-        // The pointer as the pages see it: nothing over them, or a press they hold. The page
-        // modules read it rather than egui's raw pointer state.
-        let ptr = PagePointer::read(ui, &resp);
+        // The pointer as the pages see it: nothing over them (a dialog from the frame it opens),
+        // or a press they hold. The page modules read it rather than egui's raw pointer state.
+        let ptr = PagePointer::read(ui, &resp, modal);
         let pointer = ptr.pos;
         // A press on a page makes it the current one (as in Acrobat), so a page command with
         // no selection (Rotate, Delete) acts on the page the reader pointed at, not on a page

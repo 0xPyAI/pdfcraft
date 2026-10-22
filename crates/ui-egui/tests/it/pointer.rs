@@ -11,7 +11,7 @@ use pdfcraft_engine::StampKind;
 use pdfcraft_ui_egui::comments::CommentTool;
 use pdfcraft_ui_egui::{PdfCraftApp, QuickTool, UnlockPrompt};
 
-use crate::support::input::{coalesced_click, double_click, touch_drag, touch_tap};
+use crate::support::input::{coalesced_click, double_click, one_frame, touch_drag, touch_tap};
 
 /// A PDF of `objects`, numbered from 1 with the catalog first.
 fn pdf(objects: &[&str]) -> Vec<u8> {
@@ -358,12 +358,20 @@ fn stamp_cursor_stays_off_the_chrome_above_a_page_scrolled_under_it() {
     assert_eq!(cursor_at(&mut h, egui::pos2(x, top + 40.0)), egui::CursorIcon::Crosshair);
 }
 
+/// Whether the page's hover tip was drawn in the last frame.
+fn tip_shown(h: &Harness<'_, PdfCraftApp>) -> bool {
+    let tip = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("canvas-hover"));
+    h.ctx.memory(|m| m.areas().is_visible(&tip))
+}
+
+/// Opens the Unlock prompt, a dialog with a backdrop over the whole window, from the next frame.
+fn open_unlock_prompt(h: &mut Harness<'_, PdfCraftApp>) {
+    let doc = h.state().views[0].id;
+    h.state_mut().unlock_prompt = Some(UnlockPrompt { doc, name: "test.pdf".into(), input: String::new(), error: None, then: None });
+}
+
 #[test]
 fn link_tip_stays_under_the_unlock_prompt() {
-    let tip_shown = |h: &Harness<'_, PdfCraftApp>| {
-        let tip = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("canvas-hover"));
-        h.ctx.memory(|m| m.areas().is_visible(&tip))
-    };
     let mut h = open(link_pdf(), "300", true);
     let page = page(&h);
     let k = page.width() / 300.0;
@@ -373,8 +381,7 @@ fn link_tip_stays_under_the_unlock_prompt() {
     h.run_steps(2);
     assert!(tip_shown(&h), "the link's tip shows over an uncovered page");
 
-    let doc = h.state().views[0].id;
-    h.state_mut().unlock_prompt = Some(UnlockPrompt { doc, name: "test.pdf".into(), input: String::new(), error: None, then: None });
+    open_unlock_prompt(&mut h);
     h.hover_at(on_link + egui::vec2(1.0, 0.0));
     for _ in 0..4 {
         h.run_steps(2);
@@ -397,6 +404,34 @@ fn the_link_tip_lets_the_pointer_through_to_the_link() {
     h.hover_at(onto);
     h.run_steps(1);
     assert_eq!(h.output().platform_output.cursor_icon, egui::CursorIcon::PointingHand, "the tip must not take the pointer from the link");
+}
+
+// Dialogs are drawn after the pages, so on the frame one opens egui does not know its layer yet
+// and still gives the pages the pointer, and a press there.
+
+#[test]
+fn the_link_tip_stays_under_a_dialog_on_the_frame_it_opens() {
+    let mut h = open(link_pdf(), "150", false);
+    let p = at(&h, 100.0, 340.0);
+    assert_eq!(cursor_at(&mut h, p), egui::CursorIcon::PointingHand);
+    h.run_steps(2);
+    assert!(tip_shown(&h), "the link's tip shows over an uncovered page");
+    open_unlock_prompt(&mut h);
+    h.run_steps(1);
+    assert!(!tip_shown(&h), "the link's tip must not show over the Unlock prompt on the frame it opens");
+}
+
+#[test]
+fn a_click_on_the_frame_a_dialog_opens_places_no_stamp() {
+    let mut h = open(link_pdf(), "150", false);
+    stamp_tool(&mut h);
+    let p = at(&h, 150.0, 150.0);
+    assert_eq!(cursor_at(&mut h, p), egui::CursorIcon::Crosshair);
+    open_unlock_prompt(&mut h);
+    let button = |pressed| egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    one_frame(&mut h, [button(true), button(false)]);
+    h.run_steps(4);
+    assert_eq!(stamps(&h), 0, "a click in the frame the Unlock prompt opens places no stamp under it");
 }
 
 #[test]

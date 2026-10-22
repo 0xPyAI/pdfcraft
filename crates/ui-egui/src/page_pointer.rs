@@ -6,6 +6,9 @@
 //! a touch or a Windows pen lifts: egui-winit sends `PointerGone` with every touch release, and
 //! winit reports Windows pen input as touch. So page modules read [`PagePointer`], never egui's
 //! pointer positions or button states; a test below keeps it that way.
+//!
+//! Dialogs are drawn after the pages, so on the frame one opens egui has not met its layer yet:
+//! the reading also takes whether one is open.
 
 use egui::{Event, PointerButton, Pos2, Rect};
 
@@ -24,8 +27,9 @@ const MAX_EDGES: usize = 8;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PagePointer {
     /// Where the pointer is, while the pages are what egui has under it, or while they hold a
-    /// press (until the frame of its release, past a page's edge included). It is egui's
-    /// `interact_pos`, which still has the position on the frame a touch lifts.
+    /// press (until the frame of its release, past a page's edge included). With a dialog open
+    /// only a drag the pages already have keeps it. It is egui's `interact_pos`, which still has
+    /// the position on the frame a touch lifts.
     pub pos: Option<Pos2>,
     /// Where the press the pages hold began, also on the frame of its release when the press
     /// came in that same frame (egui has forgotten it by then). `None` for a press that began on
@@ -40,18 +44,22 @@ pub(crate) struct PagePointer {
 }
 
 impl PagePointer {
-    /// The pointer for `resp`, the content widget that holds every page, allocated in `ui`.
-    pub(crate) fn read(ui: &egui::Ui, resp: &egui::Response) -> Self {
+    /// The pointer for `resp`, the content widget that holds every page, allocated in `ui`, while
+    /// a dialog is open over the window or not (`modal`).
+    pub(crate) fn read(ui: &egui::Ui, resp: &egui::Response, modal: bool) -> Self {
         let (at, origin, edges, primary_down, any_down) =
             ui.input(|i| (i.pointer.interact_pos(), i.pointer.press_origin(), edges(&i.events), i.pointer.primary_down(), i.pointer.any_down()));
         // egui's own answer to "do the pages hold a press?": from the press on until the frame
         // of its click, release or drag stop. A drag can outlive egui's press while the
-        // pointer is outside the window.
-        let held = resp.dragged() || resp.interact_pointer_pos().is_some();
+        // pointer is outside the window. With a dialog open only a drag counts, up to the frame
+        // it stops: on the frame one opens egui still gives the pages a press that lands under
+        // it, and its click.
+        let held = resp.dragged() || resp.drag_stopped() || (!modal && resp.interact_pointer_pos().is_some());
         // `contains_pointer` alone also holds a few points under the edge of an Area over the
-        // pages (egui's interact radius), so the top layer there must be the pages' own.
+        // pages (egui's interact radius), so the top layer there must be the pages' own. A
+        // dialog covers them from the frame it opens, before egui knows its layer.
         let layer = ui.layer_id();
-        let on_top = |p: &Pos2| resp.contains_pointer() && ui.ctx().layer_id_at(*p).is_none_or(|l| l == layer);
+        let on_top = |p: &Pos2| !modal && resp.contains_pointer() && ui.ctx().layer_id_at(*p).is_none_or(|l| l == layer);
         let pos = at.filter(|p| held || on_top(p));
         if !held {
             return Self { pos, origin: None, edges: Vec::new(), primary_down, any_down };
@@ -112,11 +120,16 @@ mod tests {
     /// Runs one frame of the pages' widget (and the Area over it, with `area`) and returns what
     /// the pages see.
     fn frame(ctx: &Context, events: Vec<Event>, area: bool) -> PagePointer {
+        frame_with(ctx, events, area, false)
+    }
+
+    /// [`frame`], with a dialog open (`modal`) whose layer egui has not met.
+    fn frame_with(ctx: &Context, events: Vec<Event>, area: bool, modal: bool) -> PagePointer {
         let mut seen = PagePointer::default();
         let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))), events, ..Default::default() };
         let mut output = ctx.run_ui(input, |ui| {
             let (_, resp) = ui.allocate_exact_size(PAGES.size(), Sense::click_and_drag());
-            seen = PagePointer::read(ui, &resp);
+            seen = PagePointer::read(ui, &resp, modal);
             if area {
                 egui::Area::new(egui::Id::new("over")).fixed_pos(OVER.min).show(ui.ctx(), |ui| {
                     ui.allocate_exact_size(OVER.size(), Sense::hover());
@@ -192,6 +205,25 @@ mod tests {
         assert_eq!((up.pos, up.edges.as_slice()), (Some(end), [Edge::Release(end)].as_slice()), "the release is the pages' too");
         assert!(!up.primary_down && !up.any_down, "and the button is up");
         assert_eq!(frame(&ctx, vec![], true).pos, None, "then off the pages, the pointer is not theirs");
+    }
+
+    #[test]
+    fn a_dialog_hides_the_pointer_and_its_clicks_but_not_a_drag_the_pages_have() {
+        let ctx = Context::default();
+        let p = pos2(50.0, 50.0);
+        frame(&ctx, vec![Event::PointerMoved(p)], false);
+        assert_eq!(frame(&ctx, vec![], false).pos, Some(p));
+        assert_eq!(frame_with(&ctx, vec![], false, true).pos, None, "no pointer under a dialog, before egui knows its layer too");
+        let click = frame_with(&ctx, vec![button(p, PointerButton::Primary, true), button(p, PointerButton::Primary, false)], false, true);
+        assert_eq!((click.pos, click.origin, click.edges.as_slice()), (None, None, [].as_slice()), "nor a click egui gives the pages then");
+        // A drag the pages already have when a dialog opens goes on until its release.
+        frame(&ctx, vec![button(p, PointerButton::Primary, true)], false);
+        frame(&ctx, vec![Event::PointerMoved(pos2(80.0, 50.0))], false);
+        let q = pos2(110.0, 50.0);
+        let dragging = frame_with(&ctx, vec![Event::PointerMoved(q)], false, true);
+        assert_eq!((dragging.pos, dragging.origin), (Some(q), Some(p)), "a drag the pages have keeps its pointer under a dialog");
+        let up = frame_with(&ctx, vec![button(q, PointerButton::Primary, false)], false, true);
+        assert_eq!(up.edges.as_slice(), [Edge::Release(q)].as_slice(), "and its release");
     }
 
     #[test]
