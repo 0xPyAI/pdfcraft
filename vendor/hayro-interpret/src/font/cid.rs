@@ -264,7 +264,13 @@ impl Type0Font {
                 {
                     return Some(glyph);
                 }
-                charmap.map(character)
+                // PdfCraft patch: a substitute may lack a spacing character (#3601; e.g.
+                // Adobe-Japan1's U+2002). Draw its ordinary space instead of .notdef;
+                // the PDF's widths and Unicode mapping still determine advance and text.
+                charmap.map(character).or_else(|| match character {
+                    '\u{00a0}' | '\u{2000}'..='\u{200a}' | '\u{202f}' | '\u{205f}' | '\u{3000}' => charmap.map(' '),
+                    _ => None,
+                })
             }
             FontType::Cff(c) => {
                 // Map codepoint to glyph name via AFL, and then look it up.
