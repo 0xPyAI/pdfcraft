@@ -67,7 +67,7 @@ impl<'a> Pattern<'a> {
         }
     }
 
-    /// PdfCraft patch (35): the pattern without the fill or stroke opacity it captured when it was
+    /// PdfCraft patch (46): the pattern without the fill or stroke opacity it captured when it was
     /// set (`scn`). A stencil mask's transparency group applies the opacity in force when the mask
     /// is drawn, so a pattern paint carrying it too drew the mask at the opacity squared (#2975).
     pub(crate) fn without_opacity(mut self) -> Self {
