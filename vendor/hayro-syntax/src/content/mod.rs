@@ -299,16 +299,21 @@ impl<'a> UntypedIter<'a> {
                                 find_reader.read_bytes(next_pos)?;
 
                                 if is_ei {
-                                    let analyze_data = &tail[..find_reader.offset()];
+                                    // PdfCraft patch: a byte above 0x7F between the two "EI"s
+                                    // used to reject the candidate ("binary data in-between, so
+                                    // we for sure have not reached the end"). When the candidate
+                                    // is the real end, those bytes are the content stream that
+                                    // follows the image, and a content stream carries bytes above
+                                    // 0x7F inside its strings: WinAnsi text such as `(Grüße) Tj`,
+                                    // or the two-byte codes of any Type 0 font. A page whose text
+                                    // held one, with a capital "EI" in a later word (EINGANG,
+                                    // BEI, KLEIN), had no valid candidate left, so the image data
+                                    // ran to the end of the stream and nothing after the image
+                                    // was drawn or extracted. The operator check below is the
+                                    // discriminator, and `MAX_EI_CANDIDATES` already bounds how
+                                    // often it runs.
 
-                                    // If there is any binary data in-between, we for sure
-                                    // have not reached the end.
-                                    if analyze_data.iter().any(|c| !c.is_ascii()) {
-                                        self.reader.read_bytes(2)?;
-                                        continue 'outer;
-                                    }
-
-                                    // Otherwise, the only possibility that we reached an
+                                    // The only possibility that we reached an
                                     // "EI", even though the previous one was valid, is
                                     // that it's part of a string in the content
                                     // stream that follows the inline image. Therefore,
@@ -870,6 +875,25 @@ mod tests {
         let data = b"% comment\n1 -2.5 /Name /A#20B (a\\(b\\) \\101) <4869> [1 2] << /Key (value) >> [(a) 1] TJ BI /W 1 /H 1 /BPC 8 /CS /DeviceGray ID \x00 EI q Q";
 
         assert_eq!(operators(data), [b"TJ".to_vec(), b"BI".to_vec(), b"q".to_vec(), b"Q".to_vec()]);
+    }
+
+    #[test]
+    fn an_inline_image_ends_at_its_own_ei_when_later_text_holds_a_non_ascii_byte() {
+        // `(Grüße)` in WinAnsi, then a word holding a capital "EI": both are everyday content,
+        // and the look-ahead used to read the non-ASCII bytes of the string as image data.
+        let data = b"BI /W 1 /H 1 /BPC 8 /CS /DeviceGray ID \x00 EI BT /F1 12 Tf (Gr\xFC\xDFe) Tj (EINGANG) Tj ET";
+
+        assert_eq!(
+            operators(data),
+            [
+                b"BI".to_vec(),
+                b"BT".to_vec(),
+                b"Tf".to_vec(),
+                b"Tj".to_vec(),
+                b"Tj".to_vec(),
+                b"ET".to_vec()
+            ]
+        );
     }
 
     #[test]
