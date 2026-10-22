@@ -2563,3 +2563,11 @@ animation effects	Off	Wyłączone
 	Switch to List view to change the pages it takes.	Przełącz na widok listy, aby zmienić strony, które obejmuje.
 	The document's security settings don't allow copying text and images	Ustawienia zabezpieczeń dokumentu nie pozwalają kopiować tekstu i obrazów
 	{n} word(s) or phrase(s)	Słowa lub frazy: {n}
+	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.	Wyświetlasz rewizję {rev} dokumentu „{from}”. To migawka: zmiany wprowadzone tutaj nie wpłyną na oryginał.
+	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	Wyświetlasz podpisaną wersję dokumentu „{from}” (rewizja {rev}). To migawka: zmiany wprowadzone tutaj nie wpłyną na oryginał.
+# Untranslated: English text until a translator fills these in.
+	Float panel	Float panel
+	Move to group	Move to group
+	Panels	Panels
+	Resize panel window	Resize panel window
+	Resize panels	Resize panels
