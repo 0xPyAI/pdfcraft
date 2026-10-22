@@ -926,6 +926,16 @@ fn an_untagged_document_has_no_headings() {
     assert!(headings(&pdf(&objs, "")).is_empty());
 }
 
+/// `[(FIRSTARR)] [(LASTARR)] TJ` is malformed (a surplus array operand), but the operator still
+/// draws only the one immediately before it, as the renderer and every other reader agree (#3569)
+/// -- not the first, which is never drawn at all.
+#[test]
+fn a_heading_with_a_tj_surplus_array_reads_the_one_the_page_draws() {
+    let doc = heading_page(&["BT /F1 20 Tf 72 700 Td [(FIRSTARR)] [(LASTARR)] TJ ET".into()]);
+    let titles: Vec<String> = headings(&doc).into_iter().map(|h| h.title).collect();
+    assert_eq!(titles, ["LASTARR"]);
+}
+
 /// The text of every `"…"` literal with a space in it, outside comments and byte strings.
 fn sentences(source: &str) -> Vec<String> {
     let b = source.as_bytes();

@@ -956,7 +956,11 @@ fn interpret(
                 let Some((name, m)) = ts.font.clone() else { continue };
                 // Pieces: strings, and TJ number adjustments.
                 let pieces: Vec<Object> = match op.op.as_slice() {
-                    b"TJ" => op.operands.first().and_then(Object::as_array).cloned().unwrap_or_default(),
+                    // A surplus array (`[(A)] [(B)] TJ`) is malformed, but the operator still
+                    // takes the one immediately before it, as the renderer and every other
+                    // reader here do (#3569) -- not the first, which a reader counting operands
+                    // from the front of a surplus list would otherwise take.
+                    b"TJ" => op.operands.last().and_then(Object::as_array).cloned().unwrap_or_default(),
                     _ => op.operands.last().cloned().into_iter().collect(),
                 };
                 // Tc is already included in the pen advance; TJ may encode tracking instead.
