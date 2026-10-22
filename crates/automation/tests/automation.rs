@@ -2671,6 +2671,15 @@ fn editing_page_images_through_tools() {
     assert_eq!(cropped["visible_rect"], json!([10.0, 10.0, 25.0, 30.0]));
     ok(&mut a, "image_edit", json!({ "doc": made, "page": 1, "image": 1, "action": "rotate" }));
     ok(&mut a, "image_edit", json!({ "doc": made, "page": 1, "image": 1, "action": "flip_horizontal" }));
+    // Any angle: the box grows to the turned picture's bounds, and it undoes like a quarter turn.
+    let before = ok(&mut a, "page_images", json!({ "doc": made, "page": 1 }))["images"][0]["rect"].clone();
+    let r = ok(&mut a, "image_edit", json!({ "doc": made, "page": 1, "image": 1, "action": "rotate_by", "degrees": 30.5 }));
+    assert_eq!(r["undo"], "Rotate image");
+    let turned = ok(&mut a, "page_images", json!({ "doc": made, "page": 1 }))["images"][0]["rect"].clone();
+    assert_ne!(turned, before);
+    ok(&mut a, "edit_undo", json!({ "doc": made }));
+    assert_eq!(ok(&mut a, "page_images", json!({ "doc": made, "page": 1 }))["images"][0]["rect"], before);
+    assert!(matches!(a.call("image_edit", &json!({ "doc": made, "page": 1, "image": 1, "action": "rotate_by" })), Err(ToolError::InvalidArgs(_))));
     let saved = ok(&mut a, "image_save", json!({ "doc": made, "page": 1, "image": 1, "path": "out/picture" }));
     assert_eq!(saved["format"], "png");
     assert!(std::fs::read(dir.join("out/picture.png")).unwrap().starts_with(b"\x89PNG"));
@@ -6972,4 +6981,191 @@ fn text_box_and_callout_fill_and_border_through_tools() {
     for index in 0..2 {
         assert_eq!(session.get(saved).unwrap().comment_props(0, index).unwrap().fill, None);
     }
+}
+
+/// Three paragraphs: Alpha (two rows), Bravo (one row) and Charlie (two rows), at the leading
+/// of #2516. A third Alpha row brings its last baseline within 2.5 × size of Bravo's, so the next
+/// read groups the two as one paragraph.
+fn three_paragraph_pdf() -> Vec<u8> {
+    use pdfcraft_cos::{Dict, Document, ObjRef, Object, SaveOptions, Stream, write_full};
+    use std::sync::Arc;
+
+    let content = "BT /F1 12 Tf 14.4 TL 1 0 0 1 10 250 Tm (Alpha paragraph, first row.) Tj T* (Alpha paragraph, second row.) Tj ET \
+                   BT /F1 12 Tf 14.4 TL 1 0 0 1 10 200 Tm (Bravo paragraph, a single row.) Tj ET \
+                   BT /F1 12 Tf 14.4 TL 1 0 0 1 10 150 Tm (Charlie paragraph, first row.) Tj T* (Charlie paragraph, second row.) Tj ET";
+    let mut doc = Document::open(Arc::new(fixture(1))).unwrap();
+    doc.set(ObjRef::new(5, 0), Object::Stream(Stream::flate(Dict::new(), content.as_bytes())));
+    write_full(&doc, &SaveOptions::default()).unwrap()
+}
+
+/// A one-page PDF whose second paragraph is drawn over the first one's box, as an OCR text layer
+/// or a stamp would be.
+fn overlaid_paragraph_pdf() -> Vec<u8> {
+    use pdfcraft_cos::{Dict, Document, ObjRef, Object, SaveOptions, Stream, write_full};
+    use std::sync::Arc;
+
+    let content = "BT /F1 12 Tf 14.4 TL 1 0 0 1 10 250 Tm (Alpha paragraph, first row.) Tj T* (Alpha paragraph, second row.) Tj ET \
+                   BT /F1 12 Tf 14.4 TL 1 0 0 1 10 243 Tm (Zulu overlay.) Tj ET";
+    let mut doc = Document::open(Arc::new(fixture(1))).unwrap();
+    doc.set(ObjRef::new(5, 0), Object::Stream(Stream::flate(Dict::new(), content.as_bytes())));
+    write_full(&doc, &SaveOptions::default()).unwrap()
+}
+
+/// Emptying a paragraph that another paragraph overlaps must not hand the emptied paragraph's
+/// number to the neighbour that took over its box: the next edit by that number would rewrite it.
+#[test]
+fn an_emptied_paragraph_does_not_pass_its_number_to_an_overlapping_neighbour() {
+    let dir = workdir("text-edit-overlap-number");
+    std::fs::write(dir.join("p.pdf"), overlaid_paragraph_pdf()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path":"p.pdf"}))["doc"].as_u64().unwrap();
+    let listed = ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
+    assert_eq!(listed["count"], 2, "{listed}");
+    let k = listed["paragraphs"].as_array().unwrap().iter().position(|p| p["text"].as_str().unwrap().starts_with("Alpha")).unwrap() + 1;
+
+    let first = ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":k,"text":""}));
+    assert_eq!(first["stale_paragraphs"], json!([k]), "the emptied paragraph's number is gone: {first}");
+    let again = a.call("text_edit", &json!({"doc":doc,"page":1,"paragraph":k,"text":"Rewritten."}));
+    assert!(matches!(&again, Err(ToolError::InvalidArgs(m)) if m.contains("text_paragraphs")), "{again:?}");
+    assert!(page_text(&mut a, doc).join(" ").contains("Zulu overlay."), "the neighbour is untouched");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// #2516: a paragraph number names the paragraph `text_paragraphs` listed. When an edit regroups
+/// the page so that paragraph no longer exists on its own, the next edit by that number is
+/// refused. It used to rewrite whichever paragraph had taken the number, and that text was gone.
+#[test]
+fn text_edit_refuses_a_paragraph_number_an_earlier_edit_regrouped() {
+    let dir = workdir("text-edit-stale-number");
+    std::fs::write(dir.join("p.pdf"), three_paragraph_pdf()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path":"p.pdf"}))["doc"].as_u64().unwrap();
+    let listed = ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
+    assert_eq!(listed["count"], 3);
+    assert!(listed["paragraphs"][1]["text"].as_str().unwrap().starts_with("Bravo"));
+
+    // Listing again here would renumber the page, so the first edit's result says what moved.
+    let first = ok(
+        &mut a,
+        "text_edit",
+        json!({"doc":doc,"page":1,"paragraph":1,"text":"Alpha paragraph, first row.\nAlpha paragraph, second row.\nAlpha paragraph, a third row."}),
+    );
+    assert_eq!(first["stale_paragraphs"], json!([1, 2]), "the third row regroups Alpha with Bravo: {first}");
+
+    // Paragraph 2 of the earlier listing was Bravo, which is now part of Alpha's paragraph.
+    let stale = a.call("text_edit", &json!({"doc":doc,"page":1,"paragraph":2,"text":"Bravo paragraph, edited."}));
+    assert!(matches!(&stale, Err(ToolError::InvalidArgs(m)) if m.contains("text_paragraphs")), "{stale:?}");
+    let text = page_text(&mut a, doc).join(" ");
+    assert!(text.contains("Charlie paragraph, first row."), "Charlie is untouched: {text}");
+    assert!(text.contains("Charlie paragraph, second row."), "Charlie is untouched: {text}");
+    assert!(!text.contains("Bravo paragraph, edited."), "nothing was rewritten: {text}");
+
+    // After listing again, the number names what the listing says.
+    let relisted = ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
+    assert!(relisted["paragraphs"][1]["text"].as_str().unwrap().starts_with("Charlie"));
+    ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":2,"text":"Charlie paragraph, edited."}));
+    let text = page_text(&mut a, doc).join(" ");
+    assert!(text.contains("Charlie paragraph, edited.") && text.contains("Alpha paragraph, a third row."), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// An edit that merges its paragraph into a neighbour leaves no paragraph of its own to follow:
+/// the merged one holds the edited text too, but rewriting it by the edited paragraph's number
+/// would drop the neighbour's text (#2516).
+#[test]
+fn text_edit_does_not_follow_a_paragraph_into_the_one_it_merged_with() {
+    let dir = workdir("text-edit-merged-number");
+    std::fs::write(dir.join("p.pdf"), three_paragraph_pdf()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path":"p.pdf"}))["doc"].as_u64().unwrap();
+    ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
+    let first = ok(
+        &mut a,
+        "text_edit",
+        json!({"doc":doc,"page":1,"paragraph":1,"text":"Alpha paragraph, first row.\nAlpha paragraph, second row.\nAlpha paragraph, a third row."}),
+    );
+    assert!(first.get("paragraph").is_none(), "the result must not present the merged paragraph as the edited one: {first}");
+
+    // Paragraph 1 was Alpha. Alpha now shares a paragraph with Bravo, so the number is refused.
+    let again = a.call("text_edit", &json!({"doc":doc,"page":1,"paragraph":1,"text":"Alpha only."}));
+    assert!(matches!(&again, Err(ToolError::InvalidArgs(m)) if m.contains("text_paragraphs")), "{again:?}");
+    let text = page_text(&mut a, doc).join(" ");
+    assert!(text.contains("Bravo paragraph, a single row."), "Bravo is untouched: {text}");
+    assert!(!text.contains("Alpha only."), "nothing was rewritten: {text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The editor background preview takes the same paragraph number as `text_edit`, so it hides the
+/// paragraph the number named in the listing and refuses a number an edit made stale (#2516).
+#[test]
+fn page_render_hide_text_block_refuses_a_paragraph_number_an_earlier_edit_regrouped() {
+    let dir = workdir("hide-text-block-stale-number");
+    std::fs::write(dir.join("p.pdf"), three_paragraph_pdf()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path":"p.pdf"}))["doc"].as_u64().unwrap();
+    ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
+    ok(
+        &mut a,
+        "text_edit",
+        json!({"doc":doc,"page":1,"paragraph":1,"text":"Alpha paragraph, first row.\nAlpha paragraph, second row.\nAlpha paragraph, a third row."}),
+    );
+
+    // Paragraph 2 of the listing was Bravo, now inside Alpha's paragraph; position 2 is Charlie.
+    let stale = a.call("page_render", &json!({"doc":doc,"page":1,"dpi":72,"hide_text_block":2}));
+    assert!(matches!(&stale, Err(ToolError::InvalidArgs(m)) if m.contains("text_paragraphs")), "{:?}", stale.map(|_| ()));
+    // Paragraph 3 of the listing is Charlie, wherever it is now.
+    assert!(a.call("page_render", &json!({"doc":doc,"page":1,"dpi":72,"hide_text_block":3})).is_ok());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The listings kept for paragraph numbers are capped. A page whose listing was dropped must not
+/// fall back to reading its numbers as positions, which an edit may have regrouped: it is refused
+/// until the page is listed again (#2516).
+#[test]
+fn text_edit_refuses_a_paragraph_number_whose_listing_was_dropped_at_the_cap() {
+    let dir = workdir("text-edit-evicted-listing");
+    std::fs::write(dir.join("p.pdf"), three_paragraph_pdf()).unwrap();
+    let mut a = auto(&dir);
+    let open = |a: &mut Automation| ok(a, "doc_open", json!({"path":"p.pdf"}))["doc"].as_u64().unwrap();
+    let doc = open(&mut a);
+    ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
+    // 256 more pages fill the cap, so the next new page drops every earlier listing.
+    let others: Vec<u64> = (0..256).map(|_| open(&mut a)).collect();
+    for &other in &others {
+        ok(&mut a, "text_paragraphs", json!({"doc":other,"page":1}));
+    }
+
+    let dropped = a.call("text_edit", &json!({"doc":doc,"page":1,"paragraph":2,"text":"Bravo paragraph, edited."}));
+    assert!(matches!(&dropped, Err(ToolError::InvalidArgs(m)) if m.contains("text_paragraphs")), "{dropped:?}");
+    assert!(!page_text(&mut a, doc).join(" ").contains("Bravo paragraph, edited."), "nothing was rewritten");
+    let hidden = a.call("page_render", &json!({"doc":doc,"page":1,"dpi":72,"hide_text_block":2}));
+    assert!(matches!(&hidden, Err(ToolError::InvalidArgs(m)) if m.contains("text_paragraphs")), "{:?}", hidden.map(|_| ()));
+
+    // A page listed after the drop keeps its numbers, and so does the page once it is listed again.
+    ok(&mut a, "text_edit", json!({"doc":others[255],"page":1,"paragraph":2,"text":"Bravo paragraph, edited."}));
+    ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
+    ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":2,"text":"Bravo paragraph, edited."}));
+    assert!(page_text(&mut a, doc).join(" ").contains("Bravo paragraph, edited."));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A number from the listing keeps naming its paragraph while other paragraphs are edited, and
+/// a paragraph can be edited twice in a row by the same number.
+#[test]
+fn text_edit_numbers_survive_edits_that_do_not_regroup() {
+    let dir = workdir("text-edit-stable-number");
+    std::fs::write(dir.join("p.pdf"), three_paragraph_pdf()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path":"p.pdf"}))["doc"].as_u64().unwrap();
+    ok(&mut a, "text_paragraphs", json!({"doc":doc,"page":1}));
+    ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":3,"text":"Charlie one.\nCharlie two."}));
+    ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":1,"text":"Alpha one.\nAlpha two."}));
+    ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":1,"text":"Alpha again.\nAlpha two."}));
+    ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":3,"text":"Charlie once more.\nCharlie two."}));
+    // A rewrite rewraps at the width of the widest row, so compare without line breaks.
+    let text = page_text(&mut a, doc).join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+    for want in ["Alpha again.", "Bravo paragraph, a single row.", "Charlie once more."] {
+        assert!(text.contains(want), "{want}: {text}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }

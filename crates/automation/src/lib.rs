@@ -32,11 +32,11 @@ mod signing;
 mod text_cache;
 mod tools;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use pdfcraft_engine::{CombineSource, DocId, Document, Edit, Session, commands};
+use pdfcraft_engine::{BlockKey, CombineSource, DocId, Document, Edit, Session, TextBlock, block_overlapping, commands};
 use pdfcraft_platform::staging::{StagingName, staging_suffixes};
 use pdfcraft_render::{PageRenderer, PageText, RenderConfig, RenderRequest, RequestKind};
 use serde_json::{Value, json};
@@ -118,6 +118,12 @@ pub struct Automation {
     renderers: HashMap<DocId, (Arc<Vec<u8>>, PageRenderer)>,
     /// Extracted page text, under one memory budget across all open documents.
     texts: TextCache,
+    /// The paragraphs of the last `text_paragraphs` listing of each page, so a paragraph number
+    /// keeps naming that paragraph after edits regroup the page (#2516).
+    listed: HashMap<(DocId, usize), Vec<BlockKey>>,
+    /// Documents that lost a listing to the cap. A page of one with no listing is refused rather
+    /// than read as "a number is a position", which the page may no longer match.
+    evicted: HashSet<DocId>,
 }
 
 impl Default for Automation {
@@ -128,7 +134,15 @@ impl Default for Automation {
 
 impl Automation {
     pub fn new() -> Self {
-        Self { session: Session::new(), root: None, roots: None, renderers: HashMap::new(), texts: TextCache::default() }
+        Self {
+            session: Session::new(),
+            root: None,
+            roots: None,
+            renderers: HashMap::new(),
+            texts: TextCache::default(),
+            listed: HashMap::new(),
+            evicted: HashSet::new(),
+        }
     }
 
     /// Confine every path the tools read or write to `root` (relative paths resolve inside it).
@@ -499,6 +513,11 @@ impl Automation {
                             let (u0, u1) = (info.view_to_user(r[0] as f32, r[1] as f32), info.view_to_user(r[2] as f32, r[3] as f32));
                             ImageEdit::Move([u0[0].min(u1[0]) as f64, u0[1].min(u1[1]) as f64, u0[0].max(u1[0]) as f64, u0[1].max(u1[1]) as f64])
                         }
+                        "rotate_by" => ImageEdit::RotateBy(
+                            a.get("degrees")
+                                .and_then(Value::as_f64)
+                                .ok_or_else(|| ToolError::InvalidArgs("rotate_by needs degrees: a number (clockwise)".into()))?,
+                        ),
                         "rotate" => ImageEdit::Rotate(a.opt_int("quarters")?.unwrap_or(1) as i32),
                         "crop" => {
                             let r: Vec<f64> =
@@ -530,8 +549,9 @@ impl Automation {
                 let doc = self.doc_to_copy(&a)?;
                 let info = &doc.info.pages[page];
                 let r = |x: f32| (x as f64 * 100.0).round() / 100.0;
-                let blocks: Vec<Value> = doc
-                    .text_blocks(page)
+                let current = doc.text_blocks(page);
+                let id = doc.id;
+                let blocks: Vec<Value> = current
                     .iter()
                     .enumerate()
                     .map(|(i, b)| {
@@ -548,6 +568,7 @@ impl Automation {
                         })
                     })
                     .collect();
+                self.record_listing(id, page, &current);
                 json!({ "page": page + 1, "count": blocks.len(), "paragraphs": blocks })
             }
             "text_font_files" => {
@@ -605,10 +626,8 @@ impl Automation {
                 let doc = self.doc(&a)?;
                 let k = a.int("paragraph")?;
                 let blocks = doc.text_blocks(page);
-                if k < 1 || k as usize > blocks.len() {
-                    return Err(ToolError::InvalidArgs("paragraph is out of range".into()));
-                }
-                let source = &blocks[k as usize - 1];
+                let index = self.paragraph_index(doc.id, page, k, &blocks)?;
+                let source = blocks.get(index).ok_or_else(|| ToolError::InvalidArgs("paragraph is out of range".into()))?;
                 let text = a.opt_str("text")?.unwrap_or(&source.editor_text);
                 let style = pdfcraft_engine::BlockStyle {
                     size: a.opt_num("size")?,
@@ -617,7 +636,7 @@ impl Automation {
                     ranges: parse_style_ranges(a.get("ranges"))?,
                     ..Default::default()
                 };
-                let layout = doc.text_edit_layout(page, k as usize - 1, text, &style).map_err(failed)?;
+                let layout = doc.text_edit_layout(page, index, text, &style).map_err(failed)?;
                 let info = &doc.info.pages[page];
                 let view_rect = |r: [f64; 4]| {
                     let a = info.user_to_view(r[0] as f32, r[1] as f32);
@@ -630,12 +649,13 @@ impl Automation {
             }
             "text_edit" if a.get("paragraph").is_some() => {
                 let page = self.page(&a)?;
-                let n = self.doc(&a)?.text_blocks(page).len();
                 let k = a.int("paragraph")?;
-                if k < 1 || k as usize > n {
-                    return Err(ToolError::InvalidArgs(format!("paragraph {k} is out of range: page {} has {n} paragraphs", page + 1)));
-                }
-                let block = self.doc(&a)?.text_blocks(page)[k as usize - 1].clone();
+                let (id, blocks) = {
+                    let doc = self.doc(&a)?;
+                    (doc.id, doc.text_blocks(page))
+                };
+                let index = self.paragraph_index(id, page, k, &blocks)?;
+                let block = blocks.get(index).cloned().ok_or_else(|| ToolError::InvalidArgs(format!("paragraph {k} is out of range")))?;
                 let text = a.opt_str("text")?.map(str::to_owned).unwrap_or(block.text);
                 let mut style = pdfcraft_engine::BlockStyle {
                     ranges: parse_style_ranges(a.get("ranges"))?,
@@ -674,9 +694,24 @@ impl Automation {
                         other => return Err(ToolError::InvalidArgs(format!("unknown align {other:?}"))),
                     });
                 }
-                let mut out = self.apply(&a, Edit::EditTextBlock { page, block: k as usize - 1, text, style })?;
-                if let Some(b) = self.doc(&a)?.text_blocks(page).get(k as usize - 1) {
+                // Where the paragraph is drawn after the edit: moved by dx, dy (up is +dy).
+                let [dx, dy] = style.offset.unwrap_or([0.0, 0.0]);
+                let moved = [block.rect[0] + dx, block.rect[1] + dy, block.rect[2] + dx, block.rect[3] + dy];
+                let wanted: String = text.split_whitespace().collect();
+                let mut out = self.apply(&a, Edit::EditTextBlock { page, block: index, text, style })?;
+                let after = self.doc(&a)?.text_blocks(page);
+                // Only a paragraph that now shows exactly the requested text is the edited one. A
+                // neighbour that overlaps the old box (overlaid text, a text layer) must not take
+                // its number, and neither must a paragraph the edit merged it into: rewriting that
+                // one by this number would drop the neighbour's text.
+                let edited = block_overlapping(&after, moved)
+                    .filter(|&i| !wanted.is_empty() && after.get(i).is_some_and(|b| b.text.split_whitespace().collect::<String>() == wanted));
+                if let Some(b) = edited.and_then(|i| after.get(i)) {
                     out["paragraph"] = json!({ "text": b.text, "lines": b.lines.len(), "font": b.base_font });
+                }
+                let stale = self.follow_edit(id, page, k, edited.and_then(|i| after.get(i)), &after);
+                if !stale.is_empty() {
+                    out["stale_paragraphs"] = json!(stale);
                 }
                 out
             }
@@ -883,6 +918,59 @@ impl Automation {
         self.session.get(DocId(id)).ok_or_else(|| ToolError::Failed(format!("no open document with id {id} (see doc_list)")))
     }
 
+    /// Most pages whose paragraph listing is remembered.
+    const MAX_LISTINGS: usize = 256;
+
+    /// Remember the paragraphs `text_paragraphs` just listed for `page`, so their numbers can be
+    /// resolved against that listing.
+    fn record_listing(&mut self, doc: DocId, page: usize, blocks: &[TextBlock]) {
+        if self.listed.len() >= Self::MAX_LISTINGS && !self.listed.contains_key(&(doc, page)) {
+            self.evicted.extend(self.listed.keys().map(|(d, _)| *d));
+            self.listed.clear();
+        }
+        self.listed.insert((doc, page), blocks.iter().map(BlockKey::of).collect());
+    }
+
+    /// The index in `blocks` (the page's paragraphs now) of paragraph number `k` (1-based).
+    ///
+    /// After `text_paragraphs` a number names the paragraph that listing showed, wherever it is
+    /// now. Without a listing it is a position in `blocks`. A paragraph an edit merged into a
+    /// neighbour (or changed) is refused: the number would otherwise rewrite another paragraph
+    /// and lose its text (#2516). So is any number on a page of a document whose listings were
+    /// dropped at the cap, until the page is listed again.
+    fn paragraph_index(&self, doc: DocId, page: usize, k: i64, blocks: &[TextBlock]) -> Result<usize> {
+        let keys = self.listed.get(&(doc, page));
+        if keys.is_none() && self.evicted.contains(&doc) {
+            return Err(ToolError::InvalidArgs(format!(
+                "page {} has no paragraph listing any more: too many pages were listed and the oldest listings were dropped. List the page again with text_paragraphs",
+                page + 1
+            )));
+        }
+        let n = keys.map_or(blocks.len(), Vec::len);
+        let i = usize::try_from(k)
+            .ok()
+            .and_then(|k| k.checked_sub(1))
+            .filter(|i| *i < n)
+            .ok_or_else(|| ToolError::InvalidArgs(format!("paragraph {k} is out of range: page {} has {n} paragraphs", page + 1)))?;
+        let Some(keys) = keys else { return Ok(i) };
+        keys.get(i).and_then(|key| key.find(blocks, i)).ok_or_else(|| {
+            ToolError::InvalidArgs(format!(
+                "paragraph {k} of page {} is no longer a paragraph of its own: an edit changed it or how the page is grouped. List the page again with text_paragraphs",
+                page + 1
+            ))
+        })
+    }
+
+    /// Update the listing after paragraph `k` was edited into `edited`, one of the page's
+    /// paragraphs `after`. Returns the numbers of the listed paragraphs that are gone.
+    fn follow_edit(&mut self, doc: DocId, page: usize, k: i64, edited: Option<&TextBlock>, after: &[TextBlock]) -> Vec<usize> {
+        let Some(keys) = self.listed.get_mut(&(doc, page)) else { return Vec::new() };
+        if let (Some(edited), Some(key)) = (edited, usize::try_from(k).ok().and_then(|k| k.checked_sub(1)).and_then(|i| keys.get_mut(i))) {
+            *key = BlockKey::of(edited);
+        }
+        keys.iter().enumerate().filter(|(i, key)| key.find(after, *i).is_none()).map(|(i, _)| i + 1).collect()
+    }
+
     /// The document, if its security allows copying text and images out of it (Table 22, bit 5).
     fn doc_to_copy(&self, a: &Args) -> Result<&Document> {
         let doc = self.doc(a)?;
@@ -909,6 +997,8 @@ impl Automation {
         self.session.close(id);
         self.renderers.remove(&id);
         self.texts.remove(&id);
+        self.listed.retain(|(d, _), _| *d != id);
+        self.evicted.remove(&id);
         Ok(json!({ "closed": id.0 }))
     }
 
@@ -1836,11 +1926,13 @@ impl Automation {
             return Err(ToolError::InvalidArgs("choose only one of hide_text_block and hide_added_text".into()));
         }
         let out = if let Some(block) = block {
-            let index = usize::try_from(block)
-                .ok()
-                .and_then(|n| n.checked_sub(1))
-                .ok_or_else(|| ToolError::InvalidArgs("hide_text_block must be a positive paragraph index from text_paragraphs".into()))?;
-            self.doc(a)?.text_edit_preview(page, index).map_err(failed)?.render_background(scale).map_err(failed)?
+            if block < 1 {
+                return Err(ToolError::InvalidArgs("hide_text_block must be a positive paragraph index from text_paragraphs".into()));
+            }
+            // The number names the paragraph text_paragraphs listed, as it does for text_edit.
+            let doc = self.doc(a)?;
+            let index = self.paragraph_index(doc.id, page, block, &doc.text_blocks(page))?;
+            doc.text_edit_preview(page, index).map_err(failed)?.render_background(scale).map_err(failed)?
         } else if let Some(added) = added {
             let index = usize::try_from(added)
                 .ok()

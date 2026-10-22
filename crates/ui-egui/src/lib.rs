@@ -732,6 +732,10 @@ pub struct PdfCraftApp {
     /// system clipboard as a file when `system_clipboard` is on.
     pub last_copied_file: Option<(String, Vec<u8>)>,
     pub system_clipboard: bool,
+    /// What ⌘V reads instead of the system clipboard (tests).
+    pub clipboard_override: Option<create_ui::Clip>,
+    /// V is down as a plain key press (see [`Self::paste_key_released`]).
+    v_pressed: bool,
     /// Attach file: the file to attach instead of asking (tests, automation).
     pub attach_override: Option<(String, Vec<u8>)>,
     /// Duplicate Field: which field and onto which pages.
@@ -1034,6 +1038,8 @@ impl PdfCraftApp {
             last_copied_image: None,
             last_copied_file: None,
             system_clipboard: true,
+            clipboard_override: None,
+            v_pressed: false,
             attach_override: None,
             duplicate_draft: None,
             form_preview: false,
@@ -2814,6 +2820,7 @@ impl PdfCraftApp {
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
         use egui::Key;
+        let pasted = self.paste_key_released(ctx);
         // "Save changes?" is modal: its keys are its own (⌘D is Don't save there, not Document
         // properties; Escape cancels it rather than clearing a selection), and nothing may run
         // underneath it. They are read here, before the canvas can consume them.
@@ -2870,6 +2877,7 @@ impl PdfCraftApp {
             }
             canvas::shortcuts(&mut self.views[i], ctx, self.scroll_speed);
             self.copy_key(i, ctx);
+            self.paste_image_key(i, ctx, pasted);
             self.image_pick_keys(i, ctx);
         }
     }

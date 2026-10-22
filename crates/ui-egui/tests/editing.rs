@@ -2723,6 +2723,133 @@ fn switching_from_a_narrow_editor_keeps_one_frame_and_a_wide_heading_on_one_line
     assert!(!dirty(&h));
 }
 
+/// Clicking a paragraph changes nothing on the page but the editor's frame and caret: the page's
+/// own text stays until something is typed. The editor used to cover the paragraph (white, or
+/// dark for pale text) until its textless background was ready, and drew it again in its own fonts.
+#[test]
+fn opening_a_paragraph_leaves_the_page_as_it_is() {
+    let bytes = source_font_fixture_with_text("0 0 0.45 rg 10 180 280 70 re f 1 1 1 rg BT /F2 20 Tf 20 205 Td (White on a banner) Tj ET");
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("banner.pdf", None, bytes).expect("opens");
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    for _ in 0..100 {
+        h.run_steps(1);
+        if !h.state().render_pending() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let page = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = page.width() / 300.0;
+    let block = h.state().session.get(h.state().views[0].id).unwrap().text_blocks(0)[0].rect;
+    let r = egui::Rect::from_min_max(
+        egui::pos2(page.left() + block[0] as f32 * k, page.top() + (300.0 - block[3] as f32) * k),
+        egui::pos2(page.left() + block[2] as f32 * k, page.top() + (300.0 - block[1] as f32) * k),
+    );
+    let at = egui::pos2(r.left() + 2.0, r.center().y);
+    h.hover_at(at);
+    h.run_steps(2);
+    let before = h.render().unwrap();
+    // Inside the paragraph, away from the caret (at the click) and the frame around it.
+    let inside = r.shrink(3.0);
+    let changed = |img: &image::RgbaImage| {
+        let mut n = 0;
+        for y in inside.top() as u32..inside.bottom() as u32 {
+            for x in inside.left() as u32..inside.right() as u32 {
+                if (x as f32 - at.x).abs() < 14.0 {
+                    continue;
+                }
+                let (a, b) = (img.get_pixel(x, y).0, before.get_pixel(x, y).0);
+                if a.iter().zip(b.iter()).take(3).any(|(p, q)| (i32::from(*p) - i32::from(*q)).abs() > 40) {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    h.drag_at(at);
+    h.run_steps(1);
+    h.drop_at(at);
+    for frame in 0..8 {
+        h.step();
+        let n = changed(&h.render().unwrap());
+        assert!(n < 20, "frame {frame} after the click changed {n} pixels of the paragraph");
+    }
+    assert_eq!(h.state().views[0].line_editor.as_ref().map(|e| e.text.as_str()), Some("White on a banner"));
+}
+
+/// A quick click (press and release in one frame) from an open, unchanged paragraph straight into
+/// another one: in no frame does the first paragraph lose its text, and the new editor's frame
+/// never spans the first one (it took the first paragraph's measured extent for a frame).
+#[test]
+fn a_quick_click_into_another_paragraph_keeps_both_in_place() {
+    let bytes = source_font_fixture_with_text("BT /F1 24 Tf 20 220 Td (Top) Tj ET BT /F2 24 Tf 20 120 Td (Bottom) Tj ET");
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("boxes.pdf", None, bytes).expect("opens");
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let page = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = page.width() / 300.0;
+    let mut blocks = {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().text_blocks(0)
+    };
+    blocks.sort_by(|a, b| b.rect[1].total_cmp(&a.rect[1]));
+    let screen = |b: &pdfcraft_engine::TextBlock| {
+        egui::Rect::from_min_max(
+            egui::pos2(page.left() + b.rect[0] as f32 * k, page.top() + (300.0 - b.rect[3] as f32) * k),
+            egui::pos2(page.left() + b.rect[2] as f32 * k, page.top() + (300.0 - b.rect[1] as f32) * k),
+        )
+    };
+    let (top, bottom) = (screen(&blocks[0]), screen(&blocks[1]));
+    click_at(&mut h, top.center());
+    for _ in 0..100 {
+        h.run_steps(1);
+        if !h.state().render_pending() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(h.state().views[0].line_editor.as_ref().map(|e| e.text.as_str()), Some("Top"));
+    let ink = |pixels: &image::RgbaImage, r: egui::Rect| {
+        (r.top() as u32..r.bottom() as u32)
+            .flat_map(|y| (r.left() as u32..r.right() as u32).map(move |x| (x, y)))
+            .filter(|(x, y)| pixels.get_pixel(*x, *y).0[..3].iter().all(|v| *v < 90))
+            .count()
+    };
+    h.hover_at(bottom.center());
+    h.run_steps(1);
+    let before = ink(&h.render().unwrap(), top.shrink(2.0));
+    assert!(before > 50, "the top paragraph shows");
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: bottom.center(), button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+    }
+    for frame in 0..4 {
+        h.step();
+        let now = ink(&h.render().unwrap(), top.shrink(2.0));
+        assert!(now * 2 > before, "frame {frame}: the top paragraph lost its text ({now} of {before} dark pixels)");
+        for shape in &h.output().shapes {
+            if let egui::Shape::Rect(r) = &shape.shape
+                && r.stroke.width == 1.5
+                && r.rect.contains(bottom.center())
+            {
+                assert!(!r.rect.intersects(top), "frame {frame}: the bottom editor's frame {:?} spans the top paragraph {top:?}", r.rect);
+            }
+        }
+    }
+    assert_eq!(h.state().views[0].line_editor.as_ref().map(|e| e.text.as_str()), Some("Bottom"));
+}
+
 /// #2022: clicking straight into another text box while one is open for typing must apply the
 /// open paragraph first; the typed text used to be dropped with the editor that switched away.
 #[test]
@@ -2766,6 +2893,163 @@ fn switching_straight_to_another_box_applies_the_open_paragraph() {
     assert_eq!(doc.can_undo(), Some("Edit text"));
     let ed = s.views[0].line_editor.clone().expect("the bottom box is now open");
     assert_eq!(ed.text, "Bottom");
+}
+
+/// Dark pixels in `r`: glyph ink on a white page.
+fn ink(pixels: &image::RgbaImage, r: egui::Rect) -> usize {
+    let (x0, y0, x1, y1) = (r.left().max(0.0) as u32, r.top().max(0.0) as u32, r.right() as u32, r.bottom() as u32);
+    (y0..y1.min(pixels.height()))
+        .flat_map(|y| (x0..x1.min(pixels.width())).map(move |x| (x, y)))
+        .filter(|(x, y)| pixels.get_pixel(*x, *y).0[..3].iter().all(|v| *v < 90))
+        .count()
+}
+
+/// Applying a paragraph changes the page, whose raster still has the old text until it is
+/// rendered again. Until then the paragraph keeps the look it had in the editor; the old text
+/// used to come back under the new outline for those frames and then jump to the new one.
+#[test]
+fn an_applied_paragraph_keeps_its_edited_look_until_the_page_is_redrawn() {
+    let bytes = source_font_fixture_with_text("BT /F1 24 Tf 20 220 Td (Topmost) Tj ET BT /F2 24 Tf 20 120 Td (Bottom) Tj ET");
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("boxes.pdf", None, bytes).expect("opens");
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = r.width() / 300.0;
+    let top = {
+        let s = h.state();
+        let blocks = s.session.get(s.views[0].id).unwrap().text_blocks(0);
+        let b = blocks.iter().find(|b| b.text == "Topmost").expect("the top box").rect;
+        egui::Rect::from_min_max(
+            egui::pos2(r.left() + b[0] as f32 * k, r.top() + (300.0 - b[3] as f32) * k),
+            egui::pos2(r.left() + b[2] as f32 * k, r.top() + (300.0 - b[1] as f32) * k),
+        )
+    };
+    // "T" stays; the rest of the word goes.
+    let head = egui::Rect::from_min_max(top.min, egui::pos2(top.left() + top.width() * 0.12, top.bottom()));
+    let tail = egui::Rect::from_min_max(egui::pos2(top.left() + top.width() * 0.3, top.top()), top.max).shrink(2.0);
+    click_at(&mut h, top.center());
+    support::wait_until(&mut h, "the editor's textless page", |app| !app.render_pending());
+    h.state_mut().views[0].line_editor.as_mut().expect("the top box is open").text = "T".into();
+    h.run_steps(2);
+    h.state_mut().views[0].hold_rasters = true;
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    for frame in 0..4 {
+        h.step();
+        assert!(h.state().views[0].line_editor.is_none(), "applied");
+        let pixels = h.render().unwrap();
+        assert!(ink(&pixels, head) > 20, "frame {frame} after applying shows no text");
+        assert_eq!(ink(&pixels, tail), 0, "frame {frame} after applying shows the old text again");
+    }
+    h.state_mut().views[0].hold_rasters = false;
+    support::wait_until(&mut h, "the page drawn with the edit", |app| !app.render_pending());
+    h.run_steps(2);
+    let pixels = h.render().unwrap();
+    assert!(ink(&pixels, head) > 20, "the page draws the applied text");
+    assert_eq!(ink(&pixels, tail), 0, "and not the old one");
+    let s = h.state();
+    assert_eq!(s.session.get(s.views[0].id).unwrap().text_blocks(0).iter().map(|b| b.text.clone()).collect::<Vec<_>>(), ["T", "Bottom"]);
+}
+
+/// A paragraph whose edit fails (here a letter no font can draw) stays open with what was typed,
+/// as a form field does; the editor used to close with the error and the typing was lost.
+#[test]
+fn a_paragraph_whose_edit_fails_stays_open_with_its_typing() {
+    let bytes = source_font_fixture_with_text("BT /F1 24 Tf 20 220 Td (Top) Tj ET BT /F2 24 Tf 20 120 Td (Bottom) Tj ET");
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("boxes.pdf", None, bytes).expect("opens");
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = r.width() / 300.0;
+    let top = egui::pos2(r.left() + 30.0 * k, r.top() + (300.0 - 228.0) * k);
+    click_at(&mut h, top);
+    assert_eq!(h.state().views[0].line_editor.as_ref().map(|e| e.text.as_str()), Some("Top"));
+    // U+0E01 (Thai): neither the page's font nor a fallback face draws it.
+    h.state_mut().views[0].line_editor.as_mut().unwrap().text = "Top ก".into();
+    h.run_steps(1);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run_steps(3);
+    let s = h.state();
+    assert!(s.toast.as_ref().is_some_and(|(m, _)| m.starts_with("Edit text failed")), "the failure is said: {:?}", s.toast);
+    assert_eq!(s.session.get(s.views[0].id).unwrap().can_undo(), None, "nothing was applied");
+    let ed = s.views[0].line_editor.as_ref().expect("the paragraph is still open");
+    assert_eq!((ed.block, ed.text.as_str()), (0, "Top ก"), "with what was typed");
+    // Taking the letter out applies it.
+    h.state_mut().views[0].line_editor.as_mut().unwrap().text = "Top edited".into();
+    h.run_steps(1);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run_steps(3);
+    let s = h.state();
+    assert!(s.views[0].line_editor.is_none());
+    let doc = s.session.get(s.views[0].id).unwrap();
+    assert_eq!(doc.text_blocks(0).iter().map(|b| b.text.clone()).collect::<Vec<_>>(), ["Top edited", "Bottom"]);
+}
+
+/// Two boxes, "Top" and "Bottom", in Edit text, with egui's animations on: the window animates
+/// unless the system asks for less motion, and the test harness turns them off.
+fn two_boxes_animated() -> (Harness<'static, PdfCraftApp>, [egui::Rect; 2]) {
+    let bytes = source_font_fixture_with_text("BT /F1 24 Tf 20 220 Td (Top) Tj ET BT /F2 24 Tf 20 120 Td (Bottom) Tj ET");
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_step_dt(1.0 / 60.0).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("boxes.pdf", None, bytes).expect("opens");
+        app
+    });
+    h.ctx.all_styles_mut(|s| s.animation_time = 0.2);
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = r.width() / 300.0;
+    let mut blocks = {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().text_blocks(0)
+    };
+    blocks.sort_by(|a, b| b.rect[1].partial_cmp(&a.rect[1]).unwrap_or(std::cmp::Ordering::Equal));
+    let on_screen = |b: &pdfcraft_engine::TextBlock| {
+        egui::Rect::from_min_max(
+            egui::pos2(r.left() + b.rect[0] as f32 * k, r.top() + (300.0 - b.rect[3] as f32) * k),
+            egui::pos2(r.left() + b.rect[2] as f32 * k, r.top() + (300.0 - b.rect[1] as f32) * k),
+        )
+    };
+    (h, [on_screen(&blocks[0]), on_screen(&blocks[1])])
+}
+
+/// The colour of the editor's frame (the accent stroke around `r`) this frame, if it is painted.
+fn editor_frame_color(h: &Harness<'static, PdfCraftApp>, r: egui::Rect) -> Option<egui::Color32> {
+    h.output().shapes.iter().find_map(|shape| match &shape.shape {
+        egui::Shape::Rect(rect) if rect.stroke.width == 1.5 && rect.rect.contains(r.center()) => Some(rect.stroke.color),
+        _ => None,
+    })
+}
+
+/// A paragraph opens at once: it used to fade in over a fifth of a second, its frame dimmed and
+/// the page's own copy of the text showing through the editor's cover.
+#[test]
+fn a_paragraph_editor_opens_at_full_opacity() {
+    let (mut h, [top, _]) = two_boxes_animated();
+    h.hover_at(top.center());
+    h.run_steps(1);
+    h.drag_at(top.center());
+    h.run_steps(1);
+    h.drop_at(top.center());
+    let accent = egui::Color32::from_rgb(0x14, 0x73, 0xE6);
+    for frame in 0..8 {
+        h.step();
+        // The click's own frame opens it: the editor's frame is there from then on, at full colour.
+        assert_eq!(editor_frame_color(&h, top), Some(accent), "frame {frame} after the click");
+    }
 }
 
 #[test]
@@ -2944,6 +3228,61 @@ fn editing_existing_images_on_the_page() {
     let mut png = Vec::new();
     image::RgbImage::from_pixel(80, 40, image::Rgb([200, 40, 40])).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
     check_existing_artwork("picture.png", png);
+}
+
+#[test]
+fn dragging_the_rotate_knob_turns_a_page_image() {
+    let mut png = Vec::new();
+    image::RgbImage::from_pixel(80, 40, image::Rgb([200, 40, 40])).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("picture.png", None, png.clone()).expect("opens");
+        app
+    });
+    h.run_steps(4);
+    let id = h.state().views[0].id;
+    // A smaller picture in the middle of the page: the knob is over the page, not beside it.
+    let full = h.state().session.get(id).unwrap().page_images(0)[0].rect;
+    let (qw, qh) = ((full[2] - full[0]) / 4.0, (full[3] - full[1]) / 4.0);
+    let (mx, my) = ((full[0] + full[2]) / 2.0, (full[1] + full[3]) / 2.0);
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::EditPageImage {
+        page: 0,
+        index: 0,
+        change: pdfcraft_engine::ImageEdit::Move([mx - qw, my - qh, mx + qw, my + qh]),
+    });
+    h.run_steps(4);
+    let before = h.state().session.get(id).unwrap().page_images(0)[0].rect;
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let c = r.center();
+    // Select the picture.
+    h.hover_at(c);
+    h.run_steps(1);
+    h.drag_at(c);
+    h.run_steps(1);
+    h.drop_at(c);
+    h.run_steps(2);
+    assert!(h.state().views[0].image_selection.is_some(), "selected");
+    // Grab the knob above the top edge and swing it a quarter turn clockwise (to the right).
+    let knob = egui::pos2(c.x, c.y - r.height() / 4.0 - 22.0);
+    let to = egui::pos2(c.x + 100.0, c.y);
+    h.hover_at(knob);
+    h.run_steps(1);
+    h.drag_at(knob);
+    h.run_steps(1);
+    for k in 1..=4 {
+        h.hover_at(knob + (to - knob) * (k as f32 / 4.0));
+        h.run_steps(1);
+    }
+    h.drop_at(to);
+    h.run_steps(4);
+    let doc = h.state().session.get(id).unwrap();
+    assert_eq!(doc.can_undo(), Some("Rotate image"));
+    let turned = doc.page_images(0)[0].rect;
+    let (w, hh) = (before[2] - before[0], before[3] - before[1]);
+    assert!((turned[2] - turned[0] - hh).abs() < 1.5 && (turned[3] - turned[1] - w).abs() < 1.5, "{before:?} -> {turned:?}");
 }
 
 #[test]
@@ -3731,6 +4070,61 @@ fn a_quick_flick_on_either_edge_rewraps_the_paragraph() {
     assert_eq!(text, ["Page", "1"], "narrowed from the left edge");
     assert!(near(after[0].rect[0], b.rect[0] + inward as f64), "{:?} → {:?}", b.rect, after[0].rect);
     assert!(h.state().views[0].line_editor.is_none());
+}
+
+/// #2276: a paragraph's rewrap handle is drawn half outside its box, and the resize pointer
+/// shows a few pixels further out still. A press there started an area selection instead: its
+/// rectangle followed the pointer, and on release the box went back to its old width.
+#[test]
+fn a_paragraph_rewraps_from_the_outer_half_of_its_edge_handles() {
+    let mut h = harness(1, |_| {});
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let lines = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().text_lines(0).iter().map(|l| l.text.clone()).collect::<Vec<_>>()
+    };
+    let block = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().text_blocks(0)[0].clone()
+    };
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = r.width() / 200.0;
+    let screen = |x: f64, y: f64| egui::pos2(r.left() + x as f32 * k, r.top() + (300.0 - y as f32) * k);
+    let near = |a: [f64; 4], b: [f64; 4]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1.5);
+    // The box is 2 px outside the text and its handle 7 px wide, centred on the box's edge: press
+    // 3 px outside the box, on the handle. Near the box's top, clear of the tool's toast.
+    let outside = 2.0 + 3.0;
+    let before = block(&h);
+    let grip = screen(before.rect[2], before.rect[3] - 6.0) + egui::vec2(outside, 0.0);
+    drag(&mut h, grip, grip - egui::vec2((before.rect[2] - before.rect[0] - 45.0) as f32 * k, 0.0));
+    assert_eq!(lines(&h), ["Page", "1"], "narrowed from the right handle");
+    let narrowed = block(&h);
+    assert!(narrowed.rect[2] < before.rect[2] - 20.0 && (narrowed.rect[0] - before.rect[0]).abs() < 1.5, "{:?} → {:?}", before.rect, narrowed.rect);
+    let id = h.state().views[0].id;
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Edit text"));
+    assert!(h.state().views[0].line_editor.is_none());
+    // Saved and reopened, the paragraph keeps its new width.
+    let saved = h.state_mut().session.save_bytes(id).unwrap();
+    let mut reopen = pdfcraft_engine::Session::new();
+    let rid = reopen.open("saved.pdf", None, saved, None).unwrap();
+    assert!(near(reopen.get(rid).unwrap().text_blocks(0)[0].rect, narrowed.rect));
+    // Undo gives the old width back, redo the new one.
+    h.state_mut().undo();
+    h.run_steps(2);
+    assert_eq!(lines(&h), ["Page 1"]);
+    assert!(near(block(&h).rect, before.rect), "{:?} → {:?}", before.rect, block(&h).rect);
+    h.state_mut().redo();
+    h.run_steps(2);
+    assert!(near(block(&h).rect, narrowed.rect), "{:?} → {:?}", narrowed.rect, block(&h).rect);
+    // The left handle's outer half too.
+    h.state_mut().undo();
+    h.run_steps(2);
+    let grip = screen(before.rect[0], before.rect[3] - 6.0) - egui::vec2(outside, 0.0);
+    let inward = (before.rect[2] - before.rect[0] - 45.0) as f32;
+    drag(&mut h, grip, grip + egui::vec2(inward * k, 0.0));
+    assert_eq!(lines(&h), ["Page", "1"], "narrowed from the left handle");
+    assert!((block(&h).rect[0] - (before.rect[0] + f64::from(inward))).abs() < 1.5, "{:?} → {:?}", before.rect, block(&h).rect);
 }
 
 /// The Pages panel, in a window tall enough to show every thumbnail of a short fixture.
@@ -4999,4 +5393,124 @@ fn read_mode_shortcut_applies_the_open_paragraph() {
     assert_eq!(s.quick_tool, QuickTool::Select);
     assert!(s.views[0].line_editor.is_none(), "no editor stays open in Read mode");
     assert_eq!(s.session.get(s.views[0].id).unwrap().text_lines(0)[0].text, "Chapter One", "the edit is applied");
+}
+
+/// #3061: a paragraph running past its page's bottom edge (an HTML converter relying on the
+/// page clip) opens in an editor that draws on its page only. It covered the next page.
+#[test]
+fn a_paragraph_running_off_its_page_edits_without_covering_the_next_page() {
+    let text = |first: &str, count: usize, leading: usize| {
+        let mut s = String::from("BT /F1 14 Tf\n");
+        for i in 0..count {
+            s.push_str(&format!("1 0 0 1 72 {} Tm ({first} line {}: the client may cancel this) Tj\n", 720 - (leading * i) as i64, i + 1));
+        }
+        s.push_str("ET");
+        s.into_bytes()
+    };
+    // Page 1's single paragraph goes down to y = -270; page 2 is ordinary.
+    let (one, two) = (text("Page one", 56, 18), text("PAGE TWO", 3, 40));
+    let stream = |d: &[u8]| [format!("<< /Length {} >>\nstream\n", d.len()).into_bytes(), d.to_vec(), b"\nendstream".to_vec()].concat();
+    let page = |contents: usize| {
+        format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {contents} 0 R /Resources << /Font << /F1 7 0 R >> >> >>")
+            .into_bytes()
+    };
+    let objs: Vec<Vec<u8>> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>".to_vec(),
+        page(4),
+        stream(&one),
+        page(6),
+        stream(&two),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman >>".to_vec(),
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        bytes.extend_from_slice(o);
+        bytes.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    let mut h = Harness::builder().with_size(egui::vec2(1200.0, 1400.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("off-page.pdf", None, bytes).unwrap();
+        app
+    });
+    h.run_steps(4);
+    h.state_mut().views[0].fit = pdfcraft_ui_egui::canvas::Fit::Page;
+    h.run_steps(4);
+    let rects =
+        |h: &Harness<'static, PdfCraftApp>| (h.state().views[0].page_screen_rect(0).unwrap(), h.state().views[0].page_screen_rect(1).unwrap());
+    // The same pages without Edit text, so without the paragraph's outline: what the gap looks
+    // like there, pixel by pixel (review on #3070: it isn't one colour on every platform).
+    let (first, second) = rects(&h);
+    let plain = h.render().unwrap();
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(4);
+    assert_eq!(rects(&h), (first, second), "Edit text keeps the pages where they were");
+    let id = h.state().views[0].id;
+    let info = h.state().session.get(id).unwrap().info.pages[0].clone();
+    shown_on_its_page_only(&mut h, &plain, first, second, "the paragraph's outline");
+    let v = info.user_to_view(200.0, 378.0);
+    let p = first.min + egui::vec2(v[0], v[1]) * (first.width() / info.width);
+    h.hover_at(p);
+    h.run_steps(1);
+    h.drag_at(p);
+    h.run_steps(1);
+    h.drop_at(p);
+    for _ in 0..60 {
+        h.run_steps(2);
+        if !h.state().render_pending() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(
+        h.state().views[0].line_editor.as_ref().is_some_and(|e| e.page == 0 && e.text.contains("line 50")),
+        "the paragraph's off-page lines are in it"
+    );
+    shown_on_its_page_only(&mut h, &plain, first, second, "the open editor");
+    // Scrolled up past the tool bar, the editor stays inside the document area.
+    let viewport = h.state().views[0].viewport_rect();
+    let above = viewport.top() - 3.0;
+    let before = h.render().unwrap();
+    h.hover_at(egui::pos2(first.right() - 20.0, first.center().y));
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -300.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(4);
+    let scrolled = h.state().views[0].page_screen_rect(0).unwrap();
+    assert!(scrolled.top() < viewport.top() - 100.0, "scrolled: {scrolled:?} in {viewport:?}");
+    assert!(h.state().views[0].line_editor.is_some(), "still editing");
+    let after = h.render().unwrap();
+    for x in (first.left() as u32 + 70)..(first.left() as u32 + 420) {
+        assert_eq!(after.get_pixel(x, above as u32), before.get_pixel(x, above as u32), "above the document area at x = {x}");
+    }
+}
+
+/// Between pages `first` and `second`, and on `second` above its own text, across where page
+/// 1's paragraph is: what is there without it (the gap as `plain` shows it without Edit text,
+/// white paper).
+fn shown_on_its_page_only(h: &mut Harness<'static, PdfCraftApp>, plain: &image::RgbaImage, first: egui::Rect, second: egui::Rect, what: &str) {
+    let shot = h.render().unwrap();
+    let pixel = |x: f32, y: f32| shot.get_pixel(x as u32, y as u32).0;
+    let gap_y = (first.bottom() + second.top()) / 2.0;
+    for x in (first.left() as u32 + 70)..(first.left() as u32 + 420) {
+        let x = x as f32;
+        assert_eq!(pixel(x, gap_y), plain.get_pixel(x as u32, gap_y as u32).0, "{what}: between the pages at x = {x}");
+        for dy in [4.0, 20.0, 40.0] {
+            let [r, g, b, _] = pixel(x, second.top() + dy);
+            assert!(r > 240 && g > 240 && b > 240, "{what}: page 2 at {x}, +{dy}: {r},{g},{b}");
+        }
+    }
 }

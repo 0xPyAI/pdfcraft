@@ -499,9 +499,13 @@ pub struct DocView {
     /// line being edited.
     pub(crate) edit_lines: HashMap<usize, (u64, Vec<pdfcraft_engine::TextBlock>)>,
     pub line_editor: Option<crate::edit_text_ui::LineEditor>,
+    /// The paragraph editor whose edit was just queued. It opens again with its typing if the
+    /// edit fails, as a refused form field does.
+    pub(crate) applied_editor: Option<crate::edit_text_ui::LineEditor>,
     /// The box a click switched to while another paragraph was being edited: it opens once the
     /// queued edit has applied, so its index and geometry come from the document it now is (#2022).
-    pub(crate) pending_text_open: Option<(usize, usize)>,
+    /// It is held as the paragraph's text and box, not an index: the edit can regroup the page.
+    pub(crate) pending_text_open: Option<(usize, pdfcraft_engine::BlockKey)>,
     pub(crate) text_background: crate::edit_text_ui::TextBackground,
     pub(crate) move_background: crate::content_ui::MoveBackground,
     /// Edit text & images: the images per page (by document generation), and the selected one.
@@ -771,6 +775,7 @@ impl DocView {
             pending_edit: None,
             edit_lines: HashMap::new(),
             line_editor: None,
+            applied_editor: None,
             pending_text_open: None,
             text_background: Default::default(),
             move_background: Default::default(),
@@ -1047,6 +1052,12 @@ impl DocView {
     /// The whole-page raster on screen for `page` (the low-res backdrop of a tiled page), if any.
     pub(crate) fn page_raster(&self, page: usize) -> Option<egui::TextureId> {
         self.pages.get(&page).map(|p| p.tex.id())
+    }
+
+    /// Whether `page` is still drawn, somewhere, as it was before its last change: its whole-page
+    /// raster (a tiled page's backdrop too) or any of its tiles waits for a replacement.
+    pub(crate) fn page_out_of_date(&self, page: usize) -> bool {
+        self.pages.get(&page).is_some_and(|p| p.tag == STALE_TAG) || self.stale_tiles.iter().any(|k| k.0 == page)
     }
 
     /// The print preview's picture of `page`: the sheet raster when it has arrived, otherwise the
@@ -1882,6 +1893,9 @@ impl DocView {
                 self.forms.unbaked.retain(|(_, p)| *p != page);
                 self.comments.page_rendered(page);
             }
+            if !self.page_out_of_date(page) {
+                self.text_background.page_received(page);
+            }
         } else if r.request.tag & PRINT_TAG != 0 {
             let tex = ctx.load_texture(
                 format!("print-{:?}-{page}", self.id),
@@ -1901,6 +1915,9 @@ impl DocView {
             self.pages.insert(page, PageTex { tag: r.request.tag, tex });
             self.signature_drag.page_received(page);
             self.move_background.page_received(page);
+            if !self.page_out_of_date(page) {
+                self.text_background.page_received(page);
+            }
             self.comments.page_rendered(page);
             self.waiting_since.remove(&page);
             if !self.stale_tiles.iter().any(|k| k.0 == page) {

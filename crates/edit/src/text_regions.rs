@@ -6,6 +6,7 @@ fn same_plane(a: &TextLine, b: &TextLine) -> bool {
     let at = Matrix(a.origin.tm).then(&Matrix(a.origin.ctm));
     let bt = Matrix(b.origin.tm).then(&Matrix(b.origin.ctm));
     a.scope == b.scope
+        && a.paint == b.paint
         && [0, 2].iter().all(|axis| {
             let ax = at.0.get(*axis).copied().unwrap_or(0.0);
             let ay = at.0.get(axis + 1).copied().unwrap_or(0.0);
@@ -51,13 +52,49 @@ fn invisible(line: &TextLine) -> bool {
 }
 
 fn same_style(a: &TextLine, b: &TextLine) -> bool {
-    same_font(a, b.font.as_bytes(), b.face.as_deref())
-        && a.base_font == b.base_font
+    same_font(a, b.font.as_bytes(), &b.base_font, b.face.as_deref())
+        // With no `/BaseFont` (or only a subset tag) there is no name to compare: the resource or
+        // fallback face `same_font` matched is the whole identity, so keep the lines together.
+        && (same_base_font(&a.base_font, &b.base_font)
+            || (strip_subset_tag(&a.base_font).is_empty() && strip_subset_tag(&b.base_font).is_empty()))
         && a.bold == b.bold
         && a.italic == b.italic
         && a.color == b.color
         && (a.rotation() - b.rotation()).abs() < 0.01
         && (a.size - b.size).abs() < 0.01
+}
+
+/// Does a row open with a list marker? A bullet or a dash, or an ordered marker — digits (or a
+/// single letter) followed by `.` or `)` and then a space or the row's end, so prose such as
+/// `1.5` or `Dr. Smith` is left alone.
+fn opens_with_marker(text: &str) -> bool {
+    let Some(first) = text.chars().next() else { return false };
+    if matches!(first, '•' | '◦' | '▪' | '‣' | '⁃' | '*' | '-' | '–' | '—') {
+        return true;
+    }
+    if !first.is_ascii_digit() && !first.is_ascii_alphabetic() {
+        return false;
+    }
+    let digits = text.chars().take_while(|c| c.is_ascii_digit()).count();
+    let letters = text.chars().take_while(|c| c.is_ascii_alphabetic()).count();
+    // Both runs are ASCII characters, so their length in characters is their length in bytes:
+    // the slice below starts on a character boundary.
+    let rest = if digits > 0 {
+        &text[digits..]
+    } else if letters == 1 {
+        &text[1..]
+    } else {
+        return false;
+    };
+    let mut after = rest.chars();
+    matches!(after.next(), Some('.' | ')')) && after.next().is_none_or(|c| c.is_whitespace())
+}
+
+/// A row that opens with a list marker opens its own item: joining it to the row above is what
+/// let an edit of one paragraph delete every item after it (#2564). The other error, splitting
+/// an ordinary paragraph, costs one more paragraph to click and never any text — so err this way.
+fn starts_list_item(row: &[usize], lines: &[TextLine]) -> bool {
+    row.iter().filter_map(|i| lines.get(*i)).map(|l| l.text.trim_start()).find(|t| !t.is_empty()).is_some_and(opens_with_marker)
 }
 
 fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
@@ -94,17 +131,34 @@ fn group_layout(lines: &[TextLine], mixed: bool) -> Vec<TextBlock> {
         let Some(first) = row.first().and_then(|i| lines.get(*i)) else { continue };
         let (Some(rect), Some(frame)) = (row_rect(&row, lines), frame_row_rect(&row, lines)) else { continue };
         let joins = blocks.last().is_some_and(|block| {
+            // A bullet of its own opens a list item (#2564): such a row is a new paragraph, and
+            // letting it join is what made an edit of the row above delete this item and the ones
+            // after it.
+            if starts_list_item(&row, lines) {
+                return false;
+            }
             let Some(prev_row) = block.rows.last() else { return false };
             let Some(prev) = prev_row.first().and_then(|i| lines.get(*i)) else { return false };
             let Some(pr) = frame_row_rect(prev_row, lines) else { return false };
             let gap = prev.frame_origin().1 - first.frame_origin().1;
             let tol = prev.size.max(first.size).max(1.0);
-            let aligned =
-                (pr[0] - frame[0]).abs() < tol || ((pr[0] + pr[2] - frame[0] - frame[2]) / 2.0).abs() < tol || (pr[2] - frame[2]).abs() < tol;
+            // The block opens with a list marker and this row sits further right: the item's text
+            // is at a hanging indent, so the row it wrapped onto continues it (#2564). A row at
+            // the block's own left edge is already covered by the match on `pr[0]`. Both boxes are
+            // in the frame, as the rest of this comparison is, so turned text matches too.
+            let hanging = frame[0] > pr[0]
+                && frame[0] - pr[0] <= tol * 3.0
+                && block.lines.first().and_then(|&i| lines.get(i)).is_some_and(|l| opens_with_marker(l.text.trim_start()));
+            let aligned = (pr[0] - frame[0]).abs() < tol
+                || ((pr[0] + pr[2] - frame[0] - frame[2]) / 2.0).abs() < tol
+                || (pr[2] - frame[2]).abs() < tol
+                || hanging;
             // OCR lines stay apart: the scan fixes where each one is, so they never rewrap together.
             (!mixed || !(invisible(prev) || invisible(first)))
                 && (mixed || same_style(prev, first))
                 && same_plane(prev, first)
+                // The rewrite sets every row in the first one's horizontal scale.
+                && (prev.origin.state.scale - first.origin.state.scale).abs() < 1e-6
                 && aligned
                 && first.size.min(prev.size) >= first.size.max(prev.size) * 0.4
                 && gap > first.size.min(prev.size) * 0.8
@@ -764,24 +818,59 @@ pub(super) fn rewrite_styled_block(
                 properties.set(b"ActualText".to_vec(), Object::String(PdfString::text(&string)));
                 block_ops.push(Op::new("BDC", vec![Object::name("Span"), Object::Dict(properties)]));
                 state.font = Some((resource.clone(), size_of(source, item.1)));
-                // Absolute glyph matrices preserve marks and contextual positions; font-program
-                // codes are separate from Unicode and ToUnicode/ActualText keep logical text.
+                // One text object for the run: each glyph is placed where shaping put it by a TJ
+                // adjustment from where the glyph before it ends (its advance in the embedded
+                // font's widths), and raised by the text rise for a mark set above or below
+                // (ISO 32000-1 §9.4.3, §9.3.7). Font-program codes are separate from Unicode;
+                // ToUnicode and ActualText keep the logical text.
                 let size = size_of(source, item.1);
-                let mut extra = 0.0;
-                for (i, glyph) in shaped.glyphs.iter().enumerate() {
-                    let mut matrix = tm;
-                    let x = (glyph.position[0] * size + extra) * state.scale;
-                    let y = glyph.position[1] * size;
-                    matrix[4] += matrix[0] * x + matrix[2] * y;
-                    matrix[5] += matrix[1] * x + matrix[3] * y;
-                    let code = u16::try_from(i + 1).map_err(|_| EditError::Invalid("shaped glyph limit".into()))?;
-                    block_ops.push(Op::new("BT", vec![]));
-                    block_ops.extend(state.ops());
-                    block_ops.push(Op::new("Tm", matrix.map(n).to_vec()));
-                    block_ops.push(Op::new("Tj", vec![Object::String(PdfString::literal(code.to_be_bytes().to_vec()))]));
-                    block_ops.push(Op::new("ET", vec![]));
-                    extra += state.char_spacing * glyph.text.chars().count() as f64 + state.word_spacing * glyph.text.matches(' ').count() as f64;
+                let per_unit = 1000.0 / size;
+                if !per_unit.is_finite() {
+                    return Err(EditError::Invalid("the shaped text has no size".into()));
                 }
+                let shown = fonts
+                    .get(resource.as_bytes())
+                    .and_then(|f| doc.resolve(f).as_dict().cloned())
+                    .map(|d| Metrics::from_dict(doc, &d))
+                    .ok_or_else(|| EditError::Invalid("shaped font is missing".into()))?;
+                // Spacing is part of each glyph's position, so the run itself has none.
+                let (char_spacing, word_spacing, rise) = (state.char_spacing, state.word_spacing, state.rise);
+                state.char_spacing = 0.0;
+                state.word_spacing = 0.0;
+                block_ops.push(Op::new("BT", vec![]));
+                block_ops.extend(state.ops());
+                block_ops.push(Op::new("Tm", tm.iter().map(|v| n(*v)).collect()));
+                // `pen`: where the next glyph would start, in thousandths of the font size.
+                let (mut pen, mut extra, mut raised) = (0.0, 0.0, rise);
+                let mut shown_glyphs: Vec<Object> = Vec::new();
+                for (i, glyph) in shaped.glyphs.iter().enumerate() {
+                    let target = (glyph.position[0] * size + extra) * per_unit;
+                    let glyph_rise = rise + glyph.position[1] * size;
+                    if (glyph_rise - raised).abs() > 1e-9 || shown_glyphs.len() >= 4096 {
+                        if !shown_glyphs.is_empty() {
+                            block_ops.push(Op::new("TJ", vec![Object::Array(std::mem::take(&mut shown_glyphs))]));
+                        }
+                        if (glyph_rise - raised).abs() > 1e-9 {
+                            block_ops.push(Op::new("Ts", vec![n(glyph_rise)]));
+                            raised = glyph_rise;
+                        }
+                    }
+                    if (target - pen).abs() > 1e-6 {
+                        shown_glyphs.push(n(pen - target));
+                    }
+                    let code = u16::try_from(i + 1).map_err(|_| EditError::Invalid("shaped glyph limit".into()))?;
+                    shown_glyphs.push(Object::String(PdfString::literal(code.to_be_bytes().to_vec())));
+                    pen = target + shown.width(u32::from(code)) * 1000.0;
+                    extra += char_spacing * glyph.text.chars().count() as f64 + word_spacing * glyph.text.matches(' ').count() as f64;
+                }
+                if !shown_glyphs.is_empty() {
+                    block_ops.push(Op::new("TJ", vec![Object::Array(shown_glyphs)]));
+                }
+                if (raised - rise).abs() > 1e-9 {
+                    block_ops.push(Op::new("Ts", vec![n(rise)]));
+                }
+                block_ops.push(Op::new("ET", vec![]));
+                (state.char_spacing, state.word_spacing) = (char_spacing, word_spacing);
                 block_ops.push(Op::new("EMC", vec![]));
                 segment_width = (shaped.advance * size + extra) * state.scale * source.origin.k;
             } else {

@@ -409,6 +409,20 @@ pub fn turn_about_centre(rect: [f64; 4], quarters: i32, flip_h: bool, flip_v: bo
     [a, b, c, d, cx - a * cx - c * cy, cy - b * cx - d * cy]
 }
 
+/// Turn the image `degrees` clockwise (as drawn, whatever the page's `/Rotate`) about the centre
+/// of `rect`. `None` for a non-finite angle; whole turns of 360 are the identity.
+pub fn turn_by_degrees(rect: [f64; 4], degrees: f64) -> Option<[f64; 6]> {
+    if !degrees.is_finite() {
+        return None;
+    }
+    let (cx, cy) = ((rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0);
+    let t = (degrees % 360.0).to_radians();
+    let (s, c) = t.sin_cos();
+    // Clockwise in a y-up space: (x, y) -> (x cos t + y sin t, -x sin t + y cos t).
+    let (a, b, cc, d) = (c, -s, s, c);
+    Some([a, b, cc, d, cx - a * cx - cc * cy, cy - b * cx - d * cy])
+}
+
 /// For a `Do` at `op` that sits alone in `q re W n cm Do Q`: the index of the `re` and the `cm` matrix.
 /// That clip belongs to this image only, so it may move with it. A `cm` this move put before the
 /// `re` earlier (`q cm re W n cm Do Q`) keeps the pattern, so the image can be moved again.

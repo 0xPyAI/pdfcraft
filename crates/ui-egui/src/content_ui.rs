@@ -523,7 +523,9 @@ pub(crate) fn editor(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, ad
     let (mut commit, mut cancel, mut done) = (false, false, false);
     let mut undrawable = None;
     let memo = &view.content.undrawable;
-    egui::Area::new(egui::Id::new(("added-text", view.id.0))).order(egui::Order::Foreground).fixed_pos(r.min).constrain(false).show(ctx, |ui| {
+    // Shown at once, like the paragraph editor: a fade-in shows the page's copy through it.
+    let area = egui::Area::new(egui::Id::new(("added-text", view.id.0))).fade_in(false);
+    area.order(egui::Order::Foreground).fixed_pos(r.min).constrain(false).show(ctx, |ui| {
         let Some(t) = view.content.draft.as_mut() else { return };
         ui.set_width(r.width() + 64.0);
         if let Some(source_rect) = source_rect.filter(|_| !background_ready) {
@@ -791,6 +793,45 @@ impl crate::PdfCraftApp {
             self.views[i].content.select_added = Some((page, before));
             self.left = crate::LeftPanel::Tool("edit");
             self.left_open = true;
+        }
+    }
+
+    /// Whether ⌘V / Ctrl+V was let go this frame. egui-winit swallows that press (with a Paste
+    /// event only if the clipboard holds text), while a plain V press always comes through: a
+    /// release of V with no press of V since the last one is the shortcut, even when ⌘ or Ctrl
+    /// was let go first. Read every frame, dialogs or not, so a press is never missed.
+    pub(crate) fn paste_key_released(&mut self, ctx: &egui::Context) -> bool {
+        let mut released = false;
+        ctx.input(|inp| {
+            for e in &inp.events {
+                if let egui::Event::Key { key: egui::Key::V, pressed, .. } = e {
+                    released |= !*pressed && !self.v_pressed;
+                    self.v_pressed = *pressed;
+                }
+            }
+        });
+        released
+    }
+
+    /// ⌘V / Ctrl+V with a picture on the system clipboard (a screenshot, a picture copied in a
+    /// browser) places it on the current page, as Add Image does.
+    /// Organize Pages keeps ⌘V for pages, Prepare Form for fields, and text fields for text.
+    pub(crate) fn paste_image_key(&mut self, i: usize, ctx: &egui::Context, pasted: bool) {
+        let free = self.dialog.is_none() && !self.palette_open && !ctx.egui_wants_keyboard_input();
+        let Some(view) = self.views.get(i) else { return };
+        if !pasted || !free || view.organize || view.forms.focus.is_some() || self.is_preparing() {
+            return;
+        }
+        let clip = match self.clipboard_override.clone() {
+            Some(c) => Some(c),
+            #[cfg(not(target_arch = "wasm32"))]
+            None if self.system_clipboard => crate::create_ui::read_clipboard(),
+            None => None,
+        };
+        let Some(crate::create_ui::Clip::Image { width, height, rgba }) = clip else { return };
+        match crate::create_ui::png_from_rgba(width, height, &rgba) {
+            Ok(png) => self.add_image("Pasted image.png".into(), png),
+            Err(e) => self.notify_fmt("Couldn't read {name}: {e}", &[("name", tl!("Clipboard")), ("e", &e)]),
         }
     }
 }
