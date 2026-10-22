@@ -368,6 +368,8 @@ fn real_prefix_len(s: &[u8]) -> usize {
 
 #[cfg(test)]
 thread_local! {
+    /// Bytes searched for `endstream` on this thread.
+    pub(crate) static ENDSTREAM_SCAN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// Bytes handed to number conversion on this thread.
     static NUMBER_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
@@ -390,17 +392,30 @@ fn hexval(b: u8) -> Option<u8> {
 /// Parse an indirect object at `offset`: `N G obj <object> [stream…endstream] endobj`.
 /// `resolve_length` resolves an indirect `/Length`. Returns the object and its (num, gen).
 pub fn parse_indirect(data: &[u8], offset: usize, resolve_length: &dyn Fn(ObjRef) -> Option<i64>) -> Result<(ObjRef, Object), CosError> {
-    parse_indirect_in(data, None, offset, resolve_length)
+    parse_indirect_in(data, None, offset, resolve_length, None)
 }
 
 /// [`parse_indirect`] for a document's own bytes: stream data points into `data` instead of
 /// being copied out of it.
+/// `endstreams` is the document's [`EndstreamIndex`] for `data`.
 pub(crate) fn parse_indirect_shared(
     data: &Arc<Vec<u8>>,
     offset: usize,
     resolve_length: &dyn Fn(ObjRef) -> Option<i64>,
+    endstreams: &EndstreamIndex,
 ) -> Result<(ObjRef, Object), CosError> {
-    parse_indirect_in(data, Some(data), offset, resolve_length)
+    parse_indirect_in(data, Some(data), offset, resolve_length, Some(endstreams))
+}
+
+/// Where `endstream` occurs in a document's bytes, found once, the first time a stream's
+/// /Length is wrong or missing. Searching the rest of the file for each such stream instead
+/// makes many of them ending at one late `endstream` quadratic to read.
+pub(crate) type EndstreamIndex = std::sync::OnceLock<Vec<usize>>;
+
+fn endstream_offsets(data: &[u8]) -> Vec<usize> {
+    #[cfg(test)]
+    ENDSTREAM_SCAN.with(|c| c.set(c.get() + data.len()));
+    data.windows(9).enumerate().filter(|(_, w)| *w == b"endstream").map(|(i, _)| i).collect()
 }
 
 fn parse_indirect_in(
@@ -408,6 +423,7 @@ fn parse_indirect_in(
     shared: Option<&Arc<Vec<u8>>>,
     offset: usize,
     resolve_length: &dyn Fn(ObjRef) -> Option<i64>,
+    endstreams: Option<&EndstreamIndex>,
 ) -> Result<(ObjRef, Object), CosError> {
     let mut lx = Lexer::new(data, offset);
     lx.skip_ws();
@@ -467,7 +483,11 @@ fn parse_indirect_in(
         let len = match declared {
             Some(l) if valid(l) => l as usize,
             // Wrong or missing /Length: search for "endstream" (§7.3.8.1 recovery).
-            _ => find_endstream(data, start).ok_or_else(|| CosError::Syntax { offset: start, detail: "stream without endstream".into() })? - start,
+            _ => {
+                find_endstream(data, start, endstreams)
+                    .ok_or_else(|| CosError::Syntax { offset: start, detail: "stream without endstream".into() })?
+                    - start
+            }
         };
         let range = start..start + len;
         let raw = match shared {
@@ -483,9 +503,20 @@ fn parse_indirect_in(
 }
 
 /// Offset where stream data ends (before the EOL preceding "endstream").
-fn find_endstream(data: &[u8], from: usize) -> Option<usize> {
-    let hay = data.get(from..)?;
-    let at = hay.windows(9).position(|w| w == b"endstream")? + from;
+fn find_endstream(data: &[u8], from: usize, endstreams: Option<&EndstreamIndex>) -> Option<usize> {
+    let at = match endstreams {
+        Some(index) => {
+            let index = index.get_or_init(|| endstream_offsets(data));
+            index.get(index.partition_point(|&p| p < from)).copied()?
+        }
+        None => {
+            let hay = data.get(from..)?;
+            let found = hay.windows(9).position(|w| w == b"endstream");
+            #[cfg(test)]
+            ENDSTREAM_SCAN.with(|c| c.set(c.get() + found.map_or(hay.len(), |p| p + 9)));
+            found? + from
+        }
+    };
     let mut end = at;
     if end > from && data[end - 1] == b'\n' {
         end -= 1;

@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use crate::CosError;
 use crate::object::{Dict, ObjRef, Object};
-use crate::parser::{Lexer, is_whitespace, parse_indirect, parse_indirect_shared};
+use crate::parser::{EndstreamIndex, Lexer, is_whitespace, parse_indirect, parse_indirect_shared};
 
 thread_local! {
     /// The objects being loaded on this thread, innermost last (see `Document::try_get`).
@@ -405,6 +405,8 @@ impl std::fmt::Debug for ReadState {
 #[derive(Clone)]
 pub struct Document {
     data: Arc<Vec<u8>>,
+    /// Where `endstream` occurs in `data`; see [`EndstreamIndex`].
+    endstreams: Arc<EndstreamIndex>,
     source_identity: Arc<()>,
     entries: Arc<XrefIndex>,
     trailer: Dict,
@@ -536,6 +538,7 @@ impl Document {
     pub fn new_empty() -> Self {
         let mut doc = Document {
             data: Arc::new(Vec::new()),
+            endstreams: Arc::default(),
             source_identity: Arc::new(()),
             entries: Arc::new(XrefIndex::empty()),
             trailer: Dict::new(),
@@ -618,6 +621,7 @@ impl Document {
         };
         let mut doc = Document {
             data,
+            endstreams: Arc::default(),
             source_identity: Arc::new(()),
             entries: Arc::new(XrefIndex::empty()),
             trailer: Dict::new(),
@@ -982,7 +986,7 @@ impl Document {
         match self.xref_entry(num) {
             None | Some(XrefEntry::Free { .. }) => true,
             Some(XrefEntry::InFile { offset, .. }) => {
-                let at = |off: usize| matches!(parse_indirect_shared(&self.data, off, &|_| None), Ok((id, _)) if id.num == num);
+                let at = |off: usize| matches!(parse_indirect_shared(&self.data, off, &|_| None, &self.endstreams), Ok((id, _)) if id.num == num);
                 // Offsets may count from a header that does not start the file.
                 usize::try_from(offset).is_ok_and(|off| at(off) || (self.header_offset != 0 && at(off.saturating_add(self.header_offset))))
             }
@@ -1180,7 +1184,7 @@ impl Document {
                     length
                 };
                 let off = offset as usize;
-                let at = |off: usize| match parse_indirect_shared(&self.data, off, &resolve) {
+                let at = |off: usize| match parse_indirect_shared(&self.data, off, &resolve, &self.endstreams) {
                     Ok((id, o)) if id.num == num => Some(self.decrypted(id, o)),
                     _ => None,
                 };
@@ -1246,7 +1250,7 @@ impl Document {
             if p > 0 && !is_whitespace(data[p - 1]) {
                 continue;
             }
-            if let Ok((id, o)) = parse_indirect_shared(data, p, &|_| None)
+            if let Ok((id, o)) = parse_indirect_shared(data, p, &|_| None, &self.endstreams)
                 && id.num == num
             {
                 found = Some((id, o)); // keep the last (newest) definition
@@ -2055,7 +2059,7 @@ impl Document {
             if trailer.as_ref().is_some_and(|((catalog, p), _)| *catalog && *p > at) {
                 continue;
             }
-            if let Ok((_, Object::Stream(s))) = parse_indirect_shared(&data, at, &|_| None)
+            if let Ok((_, Object::Stream(s))) = parse_indirect_shared(&data, at, &|_| None, &self.endstreams)
                 && s.dict.name(b"Type") == Some(b"XRef")
                 && let Some(r) = rank(at, &s.dict)
                 && trailer.as_ref().is_none_or(|(best, _)| r > *best)
@@ -2995,6 +2999,33 @@ endobj
             assert_eq!(doc.objstms.lock().unwrap().len(), streams);
             assert!(Arc::ptr_eq(&doc.cache, &snapshot.cache), "do not detach or clear caller snapshots");
         }
+    }
+
+    #[test]
+    fn streams_without_length_share_one_endstream_search() {
+        let n = 2_000;
+        let mut file = b"%PDF-1.7\n".to_vec();
+        for k in 1..=n {
+            file.extend_from_slice(format!("{k} 0 obj\n<< >>\nstream\nxx\n").as_bytes());
+        }
+        file.extend_from_slice(b"endstream\nendobj\n");
+        file.extend_from_slice(
+            format!(
+                "{0} 0 obj\n<< /Type /Catalog /Pages {1} 0 R >>\nendobj\n{1} 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n",
+                n + 1,
+                n + 2
+            )
+            .as_bytes(),
+        );
+        file.extend_from_slice(format!("trailer\n<< /Root {} 0 R /Size {} >>\n%%EOF\n", n + 1, n + 3).as_bytes());
+        let len = file.len();
+        crate::parser::ENDSTREAM_SCAN.with(|c| c.set(0));
+        let doc = Document::open(Arc::new(file)).unwrap();
+        for k in [1, n / 2, n] {
+            assert!(matches!(doc.try_get(k).as_deref(), Ok(Object::Stream(_))), "object {k}");
+        }
+        let scanned = crate::parser::ENDSTREAM_SCAN.with(|c| c.get());
+        assert!(scanned <= 4 * len, "{scanned} bytes searched in a {len}-byte file");
     }
 
     #[test]
