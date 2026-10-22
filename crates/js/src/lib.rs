@@ -752,7 +752,11 @@ fn printd(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue>
     let mut i = 0;
     while i < b.len() {
         let c = b[i];
-        let run = b[i..].iter().take_while(|x| **x == c).count();
+        // Only date letters read as runs; a literal is copied one character at a time, so
+        // measuring its run would rescan a long literal stretch at every position.
+        let run = if b"ymdHhMst".contains(&c) { b[i..].iter().take_while(|x| **x == c).count() } else { 1 };
+        #[cfg(test)]
+        PRINTD_SCANNED.fetch_add(run as u64, std::sync::atomic::Ordering::Relaxed);
         let push_num = |out: &mut String, v: i64, n: usize| {
             if n >= 2 {
                 out.push_str(&format!("{v:02}"));
@@ -1010,6 +1014,10 @@ fn event_object(ctx: &mut Context, e: &Event) -> JsObject {
 // with a large stack (address space, committed only as it is used). Together these bound the
 // stack a script can use: brackets and prefix operators by the limits below, and every other
 // construct (a few KiB per level, several bytes of source each) by the length limit.
+
+/// Bytes `util.printd` has scanned for runs of a format character, for tests that bound its work.
+#[cfg(test)]
+pub(crate) static PRINTD_SCANNED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Longest script, in bytes.
 pub(crate) const MAX_SCRIPT_BYTES: usize = 256 * 1024;

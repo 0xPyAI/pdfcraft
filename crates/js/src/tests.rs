@@ -245,6 +245,17 @@ fn document_requests_and_console() {
 }
 
 #[test]
+fn printd_reads_a_long_literal_run_in_linear_work() {
+    crate::PRINTD_SCANNED.store(0, std::sync::atomic::Ordering::Relaxed);
+    let o = go("event.value = util.printd(new Array(20001).join('x'), new Date(2024, 0, 5)).length;", &Event::field("Calculate", "total", ""));
+    assert_eq!(o.error, None);
+    assert_eq!(o.value, "20000");
+    // Other tests format short dates at the same time; they add a few dozen bytes at most.
+    let scanned = crate::PRINTD_SCANNED.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(scanned < 40_000, "printd scanned {scanned} bytes for a 20000-byte format");
+}
+
+#[test]
 fn document_level_functions_are_available() {
     let o = run(
         "event.value = double(getField('qty').value);",
