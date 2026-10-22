@@ -396,8 +396,9 @@ pub(crate) fn delete_keys(ctx: &egui::Context, view: &mut DocView) {
     if !ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Delete) || i.consume_key(Modifiers::NONE, Key::Backspace)) {
         return;
     }
+    // The selection stays until the edit applies: `prepare` clears it when the document changes,
+    // and a refused delete (text used as a clipping path) leaves it selected.
     view.pending_edit = delete_edit(page, view.objects.selected.iter().map(|o| o.target).collect());
-    view.objects.clear();
 }
 
 /// The edit that deletes `targets` (indexes into one inventory of `page`) as one undo step.
