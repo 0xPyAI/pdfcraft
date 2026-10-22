@@ -5293,6 +5293,23 @@ fn flattening_comments_keeps_annotations_that_are_not_comments() {
     assert_eq!(left(&reopen(&doc)), without_widget, "flattening fields touches no annotation that isn't a widget");
 }
 
+/// A footnote marker (`Ts` text rise, a smaller `Tf` size) does not split the paragraph around it
+/// into separate editable zones (#3252): on `main` this read as three blocks — the text up to the
+/// marker, the marker alone, and the text after it — because the row-joining baseline tolerance
+/// was scaled by the smaller of the two runs' sizes, far tighter than a typical superscript's rise.
+#[test]
+fn a_superscript_footnote_marker_stays_in_its_paragraphs_row() {
+    let doc = text_page(
+        "BT /F1 12 Tf 72 700 Td (and A.) Tj 0 -14 Td (Edward Siecienski) Tj 4 Ts /F1 7.2 Tf (3) Tj 0 Ts /F1 12 Tf (. More words continue the paragraph right after the marker.) Tj ET",
+    );
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 4, "the marker is its own line, raised and smaller: {lines:?}");
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 1, "one paragraph, not split at the marker: {blocks:?}");
+    assert_eq!(blocks[0].rows.len(), 2, "two visual rows, the second carrying the marker");
+    assert_eq!(blocks[0].text, "and A. Edward Siecienski3. More words continue the paragraph right after the marker.", "{:?}", blocks[0]);
+}
+
 /// A page whose text is a clipping mask (`mode` Tr) with a fill painted through it.
 fn clipping_text_page(mode: i64) -> Document {
     text_page(&format!("q\nBT {mode} Tr /F1 48 Tf 40 60 Td (MASK) Tj ET\n1 0 0 rg 0 0 300 150 re f\nQ\n"))
@@ -5366,4 +5383,41 @@ fn a_clipping_copy_on_the_same_baseline_is_refused() {
     let block = text::rewrite_block(&mut doc, 0, 0, Some("EDITED"), &BlockStyle::default());
     assert!(matches!(&block, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{block:?}");
     assert_eq!(text::text_lines(&doc, 0).unwrap().len(), 2, "refused means untouched");
+}
+
+/// Two genuinely stacked rows of ordinary body text must not join into one row just because the
+/// first is narrow enough to put the second's start within the #3252 tolerance band: here the
+/// second row starts 1.4pt to the left of where the first ends (so the two overlap a little,
+/// as compressed text or a tight column can) and 5pt below its baseline — inside the widened 50%
+/// tolerance but outside the original 20% one. They stay two rows (and two paragraphs).
+#[test]
+fn stacked_rows_that_merely_overlap_do_not_join_into_one_row() {
+    let doc = text_page("BT /F1 12 Tf 72 700 Td (A compressed line of body text here) Tj 190 -5 Td (Second stacked line of body text) Tj ET");
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 2);
+    let gap = lines[1].rect[0] - lines[0].rect[2];
+    assert!((-2.4..0.0).contains(&gap), "the rows overlap a little, within the old tolerance band: {gap}");
+    let baseline_shift = lines[0].rect[3] - lines[1].rect[3];
+    assert!((2.4..6.0).contains(&baseline_shift), "between the old and new vertical tolerance: {baseline_shift}");
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 2, "two separate rows stay two paragraphs, not one: {blocks:?}");
+}
+
+/// Two equal-size rows with no horizontal overlap must not join into one row either (#3252):
+/// the wider tolerance is for a run distinctly smaller or larger than its neighbour (a
+/// super/subscript), not for two ordinary body-text rows that happen to sit close enough
+/// vertically — here a 5pt baseline shift, inside the widened 50% tolerance but outside the
+/// original 20% one, with the second row starting just past where the first ends.
+#[test]
+fn equal_size_rows_need_the_tighter_tolerance_even_without_overlap() {
+    let doc = text_page("BT /F1 12 Tf 72 700 Td (Short line one) Tj 75 -5 Td (Second line two here) Tj ET");
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].size, lines[1].size, "same size: no super/subscript here");
+    let gap = lines[1].rect[0] - lines[0].rect[2];
+    assert!(gap >= 0.0, "no horizontal overlap: {gap}");
+    let baseline_shift = lines[0].rect[3] - lines[1].rect[3];
+    assert!((2.4..6.0).contains(&baseline_shift), "between the old and new vertical tolerance: {baseline_shift}");
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 2, "two separate rows stay two paragraphs, not one: {blocks:?}");
 }
