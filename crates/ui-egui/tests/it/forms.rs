@@ -647,6 +647,7 @@ fn typing_and_saving_in_the_same_frame_saves_the_last_keystrokes() {
     let out = dir.join("saved.pdf");
     let mut h = harness();
     type_then_save_in_one_frame(&mut h, "name", "Browser", egui::Event::Text(" Form 123".into()), &out);
+    wait_for_file(&mut h, &out);
     assert_eq!(saved_value(&out, "name"), ["Browser Form 123"]);
     let _ = std::fs::remove_dir_all(&dir);
 }
