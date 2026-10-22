@@ -96,6 +96,8 @@ pub fn static_shell(data: &str) -> Vec<u8> {
     assemble(objs)
 }
 
+/// A PDF file holding `objs` as objects 1, 2, … in order, with a cross-reference table and a
+/// trailer whose root is object 1.
 fn assemble(objs: Vec<Vec<u8>>) -> Vec<u8> {
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();
@@ -112,6 +114,30 @@ fn assemble(objs: Vec<Vec<u8>>) -> Vec<u8> {
     }
     out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
     out
+}
+
+/// A hidden subform `details` a script may show, holding a named field and three unnamed
+/// objects: a caption, an old caption the form keeps hidden, and a hidden subform. Unnamed
+/// objects have no SOM name of their own, so showing `details` must leave the hidden ones hidden.
+pub fn unnamed_hidden_template() -> String {
+    r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <subform name="page1" layout="tb">
+  <subform name="details" layout="tb" presence="hidden">
+   <draw w="4in" h="0.3in"><value><text>Current caption</text></value></draw>
+   <draw w="4in" h="0.3in" presence="hidden"><value><text>Old caption</text></value></draw>
+   <subform layout="tb" presence="hidden"><draw w="4in" h="0.3in"><value><text>Old section</text></value></draw></subform>
+   <field name="note" w="4in" h="0.3in"><ui><textEdit/></ui></field>
+  </subform>
+ </subform>
+</subform>
+</template>
+</xdp:xdp>
+"##
+    .to_string()
 }
 
 /// A scripted form (JavaScript events): `qty` (initialised to 2, validated ≤ 100) × `price`

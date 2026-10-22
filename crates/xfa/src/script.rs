@@ -188,8 +188,9 @@ impl Walker<'_> {
         true
     }
 
-    /// Note the scripted events of the object at `som`: its event scripts, its calculation and
-    /// its validation (with the message a failing one shows).
+    /// Record the scripts of the object at `som` as events: each non-empty event script, then its
+    /// calculate and validate scripts (the validate one with `message`). Once [`MAX_EVENTS`] events
+    /// are recorded, nothing more is and the form is marked truncated.
     fn push_events(&mut self, som: &str, scripts: &[Script], calculate: Option<&Script>, validate: Option<&Script>, message: Option<&str>) {
         if self.events.len() >= MAX_EVENTS {
             self.truncated = true;
@@ -231,18 +232,20 @@ impl Walker<'_> {
         }
     }
 
-    /// The presence of the object at `som`: a script's override, else the template's `p`.
-    fn presence(&self, som: &str, p: Presence) -> String {
-        self.ov.presence.get(som).cloned().unwrap_or_else(|| presence_name(p).to_string())
+    /// The presence of the object named `name` at `som`: a script's, or else the template's. An
+    /// unnamed object shares its parent's SOM path, so a presence set there is not its own.
+    fn presence(&self, name: Option<&str>, som: &str, p: Presence) -> String {
+        name.and_then(|_| self.ov.presence.get(som)).cloned().unwrap_or_else(|| presence_name(p).to_string())
     }
 
-    /// The access of the object at `som`: a script's override, else the template's `a`.
+    /// The access of the object at `som`: a script's, or else the template's `a`.
     fn access(&self, som: &str, a: Access) -> String {
         self.ov.access.get(som).cloned().unwrap_or_else(|| access_name(a).to_string())
     }
 
-    /// The live node of field `f`, instance `index` under `parent_som`, valued from the data or
-    /// its template default (`radio`: the value its exclusion group chose), with its events noted.
+    /// The live node of field `f`, child `index` of `parent_som`, with its scripts recorded. In an
+    /// exclusion group (`radio` is the group's selected value) its value is its on value when picked,
+    /// else empty; elsewhere it is its data value (as saved) or its template default.
     fn field(&mut self, f: &Field, parent_som: &str, index: usize, radio: Option<&str>) -> FormNode {
         let som = child_som(parent_som, f.common.name.as_deref().or(Some("field")), index);
         let data_value = self.data.and_then(|d| d.value_at(&data_path(self.tpl, &som))).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
@@ -262,7 +265,7 @@ impl Walker<'_> {
             kind: Some(NodeKind::Field),
             value,
             numeric: f.numeric,
-            presence: self.presence(&som, f.common.presence),
+            presence: self.presence(Some("field"), &som, f.common.presence),
             access: self.access(&som, f.access),
             repeatable: false,
             occur_min: 1,
@@ -283,8 +286,9 @@ impl Walker<'_> {
         }
     }
 
-    /// The live nodes of template `nodes` under `parent_som`: as many instances of a subform as
-    /// the data or its occurrence asks for, areas, fields, exclusion groups and draws.
+    /// The live nodes of `nodes`, the children of `parent_som`, with their scripts recorded: one per
+    /// instance of a repeating subform (what the data holds, else its initial count). Nothing past
+    /// [`MAX_DEPTH`] is built, and building stops once the object budget is spent.
     fn children(&mut self, nodes: &[Node], parent_som: &str, depth: usize) -> Vec<FormNode> {
         let mut out = Vec::new();
         if depth > MAX_DEPTH {
@@ -318,7 +322,7 @@ impl Walker<'_> {
                             kind: Some(NodeKind::Subform),
                             value: String::new(),
                             numeric: false,
-                            presence: self.presence(&som, sf.common.presence),
+                            presence: self.presence(sf.common.name.as_deref(), &som, sf.common.presence),
                             access: "open".into(),
                             repeatable: sf.occur.max != Some(1),
                             occur_min: sf.occur.min,
@@ -336,7 +340,7 @@ impl Walker<'_> {
                         name: a.common.name.clone().unwrap_or_else(|| "#area".into()),
                         som: som.clone(),
                         kind: Some(NodeKind::Area),
-                        presence: self.presence(&som, a.common.presence),
+                        presence: self.presence(a.common.name.as_deref(), &som, a.common.presence),
                         access: "open".into(),
                         occur_min: 1,
                         occur_max: Some(1),
@@ -353,7 +357,7 @@ impl Walker<'_> {
                         som: som.clone(),
                         kind: Some(NodeKind::Draw),
                         value: d.value.plain().unwrap_or_default(),
-                        presence: self.presence(&som, d.common.presence),
+                        presence: self.presence(d.common.name.as_deref(), &som, d.common.presence),
                         access: "open".into(),
                         occur_min: 1,
                         occur_max: Some(1),
@@ -380,7 +384,7 @@ impl Walker<'_> {
                         som: som.clone(),
                         kind: Some(NodeKind::ExclGroup),
                         value: selected.unwrap_or_default(),
-                        presence: self.presence(&som, g.common.presence),
+                        presence: self.presence(Some("group"), &som, g.common.presence),
                         access: "open".into(),
                         occur_min: 1,
                         occur_max: Some(1),
@@ -455,6 +459,9 @@ pub fn has_scripts(tpl: &Template) -> bool {
 /// The template with `ov` applied to its objects (instance 0 of each; scripts that hide one
 /// instance of a repeating subform hide them all).
 pub fn apply_overrides(tpl: &Template, ov: &Overrides) -> Template {
+    /// Set the presence `ov` gives each of `nodes` (children of `parent_som`) and their descendants,
+    /// down to [`MAX_DEPTH`], and the access it gives a field outside an exclusion group. An unnamed
+    /// draw, area or subform shares its parent's SOM path, so it takes no override of its own.
     fn walk(nodes: &mut [Node], parent_som: &str, ov: &Overrides, depth: usize) {
         if depth > MAX_DEPTH {
             return;
@@ -467,9 +474,12 @@ pub fn apply_overrides(tpl: &Template, ov: &Overrides) -> Template {
                 Node::ExclGroup(_) => Some("group"),
                 _ => None,
             };
-            let som = child_som(parent_som, n.common().name.as_deref().or(name_default), sib);
-            let presence = ov.presence.get(&som).map(|p| Presence::parse(Some(p)));
-            let access = ov.access.get(&som).cloned();
+            let name = n.common().name.as_deref().or(name_default);
+            let som = child_som(parent_som, name, sib);
+            // An unnamed draw, area or subform has no SOM name: `som` is its parent's, and so are
+            // the overrides under it.
+            let presence = name.and_then(|_| ov.presence.get(&som)).map(|p| Presence::parse(Some(p)));
+            let access = name.and_then(|_| ov.access.get(&som)).cloned();
             match n {
                 Node::Subform(s) => {
                     if let Some(p) = presence {

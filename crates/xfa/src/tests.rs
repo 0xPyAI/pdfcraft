@@ -7,7 +7,9 @@ use crate::data::{
     DatasetsWrite, FieldData, FieldDatum, build_data, iso_to_pattern, parse_datasets, pattern_to_iso, read_values, som_to_path, write_datasets,
 };
 use crate::data::{add_data_instances, remove_data_instance, write_data_value};
-use crate::fixtures::{TINY_GIF, fields_template, scripted_template, shell, static_shell, template, template_with_data, tiny_png};
+use crate::fixtures::{
+    TINY_GIF, fields_template, scripted_template, shell, static_shell, template, template_with_data, tiny_png, unnamed_hidden_template,
+};
 use crate::layout::Item;
 use crate::layout::WidgetKind;
 use crate::model::*;
@@ -575,6 +577,9 @@ fn xfa_bytes(doc: &Document) -> Vec<u8> {
     s.decoded_within(1 << 20).unwrap()
 }
 
+/// Writing field values into the datasets keeps every data node no field binds to as written,
+/// changes the bound values in place and adds a missing one beside them. Writing the same values
+/// again changes nothing, and a field bound to structured content is reported, not flattened.
 #[test]
 fn writing_values_keeps_the_data_no_field_binds_to() {
     // Regression: the data element was rebuilt from the fields alone, dropping everything else.
@@ -615,6 +620,9 @@ fn writing_values_keeps_the_data_no_field_binds_to() {
     assert!(String::from_utf8(xfa_bytes(&doc)).unwrap().contains("<name><p>rich</p></name>"));
 }
 
+/// A UTF-16 packet in either byte order, with a byte order mark, has its values read exactly and
+/// is written back as UTF-16 with its mark. A packet in neither UTF-8 nor UTF-16 is left alone,
+/// and that is reported.
 #[test]
 fn utf16_packets_are_read_and_written_back_as_utf16() {
     let mut doc = Document::open(Arc::new(static_shell("<form1><page1><name>Zoë 日本</name><other>ünbound</other></page1></form1>"))).unwrap();
@@ -644,6 +652,9 @@ fn utf16_packets_are_read_and_written_back_as_utf16() {
     assert_eq!(xfa_bytes(&doc), latin1);
 }
 
+/// Hundreds of fields with absurd SOM indices finish within seconds, both writing the datasets and
+/// building fresh data, create at most the node budget and report what they could not write. A
+/// moderate index still works, creating the empty instances before it.
 #[test]
 fn huge_som_indices_are_capped_not_built() {
     // Regression: each index created its missing siblings one count at a time (quadratic), with
@@ -683,6 +694,9 @@ fn huge_som_indices_are_capped_not_built() {
     assert!(d.get(&som_to_path("form1[0].row[2]")).is_some(), "the instances in between exist, empty");
 }
 
+/// The live form tree carries each object's SOM path, value, presence and access, one instance of
+/// a repeating row without data, and the template's event, calculate and validate scripts (FormCalc
+/// when no content type is given). Data adds rows and values, and an override changes presence.
 #[test]
 fn the_form_tree_carries_values_presence_instances_and_the_events() {
     let xml = scripted_template();
@@ -717,6 +731,9 @@ fn the_form_tree_carries_values_presence_instances_and_the_events() {
     assert_eq!(page.children.iter().find(|c| c.name == "details").unwrap().kind, Some(NodeKind::Subform));
 }
 
+/// Presence and access overrides are kept on the AcroForm and applied to the template: `note` has
+/// no widget while `details` is hidden and gets one once an override shows it and the form is laid
+/// out again. Saving and reopening keeps the overrides and one set of fields; storing none removes the key.
 #[test]
 fn overrides_live_in_the_acroform_and_hide_objects_in_the_layout() {
     let mut doc = Document::open(Arc::new(shell(&scripted_template()))).unwrap();
@@ -752,6 +769,32 @@ fn overrides_live_in_the_acroform_and_hide_objects_in_the_layout() {
     assert!(overrides(&doc).is_empty());
 }
 
+/// Showing a hidden subform through an override leaves its unnamed hidden draw and subform hidden,
+/// in the layout and in the live form scripts see: they share the subform's SOM path, so its
+/// override is not theirs.
+#[test]
+fn showing_a_subform_leaves_its_unnamed_hidden_objects_hidden() {
+    let (tpl, _) = parse(&unnamed_hidden_template()).unwrap();
+    let mut ov = Overrides::default();
+    ov.presence.insert("form[0].page1[0].details[0]".into(), "visible".into());
+    let form = layout(&apply_overrides(&tpl, &ov), None).unwrap();
+    let shown = texts(&form.pages[0]);
+    assert!(shown.iter().any(|t| t == "Current caption"), "{shown:?}");
+    assert!(!shown.iter().any(|t| t == "Old caption" || t == "Old section"), "{shown:?}");
+    assert_eq!(form.fields, 1);
+    // Scripts see the same: the hidden draw stays hidden in the live form.
+    let root = form_tree(&tpl, None, &ov).root;
+    let details = &root.children[0].children[0];
+    assert_eq!(details.presence, "visible");
+    let presence = |text: &str| details.children.iter().find(|c| c.value == text).map(|c| c.presence.clone());
+    assert_eq!(presence("Current caption").as_deref(), Some("visible"));
+    assert_eq!(presence("Old caption").as_deref(), Some("hidden"));
+    assert_eq!(details.children.iter().find(|c| c.kind == Some(NodeKind::Subform)).map(|c| c.presence.as_str()), Some("hidden"));
+}
+
+/// Adding and removing data instances edits the datasets packet, creating it when missing: asking
+/// for no more rows than exist, or removing one that is not there, changes nothing, and removing a
+/// row moves the later ones up. The layout follows the data, and an absurd count is capped, not built.
 #[test]
 fn data_instances_are_added_and_removed_in_the_packet() {
     let mut doc = Document::open(Arc::new(shell(&scripted_template()))).unwrap();
