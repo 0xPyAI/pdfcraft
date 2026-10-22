@@ -416,6 +416,12 @@ fn uses_device_colour(doc: &Document, objs: &[(ObjRef, std::sync::Arc<Object>)])
     used
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Page `/Annots` entries read while matching annotations to their pages.
+    static ANNOT_ENTRIES_READ: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Check `doc` against `level`.
 pub fn verify(doc: &Document, level: Level) -> Vec<Issue> {
     let mut out = Vec::new();
@@ -486,17 +492,20 @@ pub fn verify(doc: &Document, level: Level) -> Vec<Issue> {
     }
     // Pages: annotations and page actions.
     let pages = pdfcraft_model::pages(doc);
-    let page_of = |r: ObjRef| {
-        pages.iter().position(|p| {
-            p.dict
-                .get(b"Annots")
-                .map(|a| doc.resolve(a))
-                .and_then(|a| a.as_array().cloned())
-                .unwrap_or_default()
-                .iter()
-                .any(|x| x.as_ref() == Some(r))
-        })
-    };
+    // Each annotation's page: the first page that lists it.
+    let mut annot_pages: std::collections::HashMap<ObjRef, usize> = std::collections::HashMap::new();
+    for (i, p) in pages.iter().enumerate() {
+        if let Some(a) = p.dict.get(b"Annots").map(|a| doc.resolve(a))
+            && let Some(a) = a.as_array()
+        {
+            #[cfg(test)]
+            ANNOT_ENTRIES_READ.with(|n| n.set(n.get() + a.len()));
+            for r in a.iter().filter_map(Object::as_ref) {
+                annot_pages.entry(r).or_insert(i);
+            }
+        }
+    }
+    let page_of = |r: ObjRef| annot_pages.get(&r).copied();
     for (i, p) in pages.iter().enumerate() {
         if p.dict.get(b"AA").is_some() {
             issue("6.5.2", "Page {} has additional actions", Some((i + 1).to_string()), Some(i), true);

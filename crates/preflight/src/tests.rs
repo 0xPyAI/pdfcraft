@@ -430,3 +430,21 @@ fn content_colour_reads_operators_one_at_a_time_and_stops_when_all_are_found() {
     assert_eq!(read, 3);
 }
 
+/// Each annotation's page is found from one pass over the pages' `/Annots`, not by searching
+/// every page's list again for each annotation.
+#[test]
+fn annotation_pages_are_found_in_one_pass() {
+    let n = 2_000;
+    let annots: Vec<String> = (0..n).map(|i| format!("{} 0 R", i + 4)).collect();
+    let page = format!("<< /Type /Page /Parent 2 0 R /Annots [{}] >>", annots.join(" "));
+    let mut objs =
+        vec!["<< /Type /Catalog /Pages 2 0 R >>".to_string(), "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] >>".into(), page];
+    objs.extend((0..n).map(|_| "<< /Type /Annot /Subtype /Link /Rect [0 0 0 0] /P 3 0 R >>".to_string()));
+    let refs: Vec<&str> = objs.iter().map(String::as_str).collect();
+    let doc = build(&refs, "");
+    ANNOT_ENTRIES_READ.with(|c| c.set(0));
+    let issues = verify(&doc, Level::A2b);
+    assert!(issues.iter().any(|i| i.clause == "6.3.2" && i.page == Some(0)), "{issues:#?}");
+    let read = ANNOT_ENTRIES_READ.with(std::cell::Cell::get);
+    assert!(read <= 2 * n, "{read} entries read for {n} annotations");
+}
