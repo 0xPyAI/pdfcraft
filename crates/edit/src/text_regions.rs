@@ -51,8 +51,11 @@ fn invisible(line: &TextLine) -> bool {
 }
 
 fn same_style(a: &TextLine, b: &TextLine) -> bool {
-    same_font(a, b.font.as_bytes(), b.face.as_deref())
-        && a.base_font == b.base_font
+    same_font(a, b.font.as_bytes(), &b.base_font, b.face.as_deref())
+        // With no `/BaseFont` (or only a subset tag) there is no name to compare: the resource or
+        // fallback face `same_font` matched is the whole identity, so keep the lines together.
+        && (same_base_font(&a.base_font, &b.base_font)
+            || (strip_subset_tag(&a.base_font).is_empty() && strip_subset_tag(&b.base_font).is_empty()))
         && a.bold == b.bold
         && a.italic == b.italic
         && a.color == b.color

@@ -898,17 +898,25 @@ fn odd_arabic_text_never_panics() {
     }
 }
 
-/// One page with Helvetica (WinAnsi) and a subset font that has only the glyphs it uses.
+/// One page with Helvetica (WinAnsi) and subsets of Arial: `/F2` and `/F3` are two subsets of the
+/// same font, as Word writes a font split across several resources, and `/F4` repeats Helvetica.
 fn text_page(content: &str) -> Document {
     let objs: Vec<String> = vec![
         "<< /Type /Catalog /Pages 2 0 R >>".into(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R /F4 8 0 R /F5 9 0 R >> >> >>".into(),
         format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
         // Subset: glyphs for a (97) and b (98) only.
         "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+Arial /FirstChar 97 /LastChar 99 /Widths [500 520 0] /Encoding /WinAnsiEncoding >>"
             .into(),
+        // Another subset of the same Arial, with a subset tag of its own.
+        "<< /Type /Font /Subtype /TrueType /BaseFont /GHIJKL+Arial /FirstChar 97 /LastChar 99 /Widths [500 520 0] /Encoding /WinAnsiEncoding >>"
+            .into(),
+        // Helvetica again, in a second resource.
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        // No `/BaseFont`: `Metrics::from_dict` leaves its base-font name empty.
+        "<< /Type /Font /Subtype /Type1 /Encoding /WinAnsiEncoding >>".into(),
     ];
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offs = Vec::new();
@@ -1746,6 +1754,94 @@ fn word_boxes_span_whole_words_when_glyphs_run_backwards() {
         let (x0, x1) = ink.iter().fold((f64::MAX, f64::MIN), |(a, b), r| (a.min(r[0]), b.max(r[2])));
         assert!(x0 >= lines[0].rect[0] - 0.01 && x1 <= lines[0].rect[2] + 0.01, "{content}: {ink:?} {:?}", lines[0].rect);
     }
+}
+
+/// PDF writers split one font into several subsets, each a font resource of its own: a word drawn
+/// through two of them is still one visual line (#3661).
+#[test]
+fn one_line_continues_across_two_resources_of_the_same_font() {
+    for (content, text) in [
+        // The issue's case: two resources for the same Helvetica.
+        ("BT /F1 12 Tf 72 700 Td (Hel) Tj /F4 12 Tf (lo) Tj ET", "Hello"),
+        // Word's case: two tagged subsets of one font, "abcab" through /F2, /F3, /F2.
+        ("BT /F2 12 Tf 72 700 Td (ab) Tj /F3 12 Tf (ca) Tj /F2 12 Tf (b) Tj ET", "abcab"),
+    ] {
+        let doc = text_page(content);
+        let lines = text::text_lines(&doc, 0).unwrap();
+        assert_eq!(lines.len(), 1, "{content}: {:?}", lines.iter().map(|l| &l.text).collect::<Vec<_>>());
+        assert_eq!(lines[0].text, text, "{content}");
+        let blocks = text::text_blocks(&doc, 0).unwrap();
+        assert_eq!(blocks.len(), 1, "{content}");
+        assert_eq!(blocks[0].text, text, "{content}");
+    }
+}
+
+/// Two genuinely different fonts still start a new line: the subset tag is all that may differ.
+#[test]
+fn different_fonts_start_a_new_line() {
+    let doc = text_page("BT /F1 12 Tf 72 700 Td (Hel) Tj /F2 12 Tf (lo) Tj ET");
+    assert_eq!(text::text_lines(&doc, 0).unwrap().len(), 2);
+}
+
+/// A font without `/BaseFont` has no name to compare. Its lines still group by resource, as they
+/// did before subset joining: an empty name must not split one paragraph into two blocks.
+#[test]
+fn lines_in_a_font_without_a_base_font_stay_one_block() {
+    let doc = text_page("BT /F5 12 Tf 72 700 Td (First) Tj 0 -15 Td (second) Tj ET");
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 2);
+    assert!(lines.iter().all(|l| l.base_font.is_empty()), "{:?}", lines.iter().map(|l| &l.base_font).collect::<Vec<_>>());
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].text, "First second");
+    let reading = text::reading_blocks(&doc, 0).unwrap();
+    assert_eq!(reading.len(), 1, "{:?}", reading.iter().map(|b| &b.text).collect::<Vec<_>>());
+    assert_eq!(reading[0].text, "First second");
+}
+
+/// Two subsets of one font can carry different encodings: here the second names `-` and `l`
+/// through `/Differences` (codes 33 and 34), so the same letters have different codes. The visual
+/// line still joins and reads in coding order (#3661).
+#[test]
+fn a_reencoded_subset_of_the_same_font_stays_one_line() {
+    let content = "BT /F1 16 Tf 72 700 Td (Two) Tj /F2 16 Tf (!\") Tj /F1 16 Tf (ine heading) Tj ET";
+    let mut doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>",
+        &stream("", content),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /ABCDEF+Helvetica-Bold >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /GHIJKL+Helvetica-Bold /Encoding << /Type /Encoding /BaseEncoding /WinAnsiEncoding /Differences [33 /hyphen /l] >> >>",
+    ]);
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 1, "{:?}", lines.iter().map(|l| &l.text).collect::<Vec<_>>());
+    assert_eq!(lines[0].text, "Two-line heading");
+    let reading = text::reading_blocks(&doc, 0).unwrap();
+    assert_eq!(reading.len(), 1);
+    assert_eq!(reading[0].text, "Two-line heading");
+    // Editing the one line replaces every run, including the re-encoded subset's.
+    text::replace_line(&mut doc, 0, 0, "Two-line heading done").unwrap();
+    let reopened = reopen(&doc);
+    let lines = text::text_lines(&reopened, 0).unwrap();
+    assert_eq!(lines.len(), 1, "{:?}", lines.iter().map(|l| &l.text).collect::<Vec<_>>());
+    assert_eq!(lines[0].text, "Two-line heading done");
+}
+
+/// `ABCDE+` is five letters, not the six-letter subset tag of §9.6.4, so it stays part of the
+/// name: `ABCDE+Helvetica-Bold` and `Helvetica-Bold` are different fonts and their runs stay apart.
+#[test]
+fn a_five_letter_prefix_is_not_a_subset_tag() {
+    let content = "BT /F1 16 Tf 72 700 Td (Two) Tj /F2 16 Tf (-l) Tj /F1 16 Tf (ine heading) Tj ET";
+    let doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>",
+        &stream("", content),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /ABCDE+Helvetica-Bold >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+    ]);
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert_eq!(lines.len(), 3, "{:?}", lines.iter().map(|l| &l.text).collect::<Vec<_>>());
 }
 
 #[test]

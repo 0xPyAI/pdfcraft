@@ -1137,7 +1137,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
             piece == si
                 && lines.last().is_some_and(|l| l.scope == s.scope && l.logical_order == s.logical_order)
                 && (bt == s.bt || lines.last().is_some_and(|l| compatible_word(l, &s)))
-                && (s.text.trim().is_empty() || lines.last().is_some_and(|l| same_font(l, &s.font, s.face.as_deref())))
+                && (s.text.trim().is_empty() || lines.last().is_some_and(|l| same_font(l, &s.font, &s.base_font, s.face.as_deref())))
                 && (s.text.trim().is_empty()
                     || lines.last().is_some_and(|l| {
                         (s.size - l.size).abs() < 0.01 && s.bold == l.bold && s.italic == l.italic && fill_color(&s.state.fill) == l.color
@@ -1232,7 +1232,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
         let bt = pen.bt;
         lines.last().is_some_and(|l| l.scope == s.scope && l.logical_order == s.logical_order)
             && (bt == s.bt || lines.last().is_some_and(|l| compatible_word(l, &s)))
-            && (s.text.trim().is_empty() || lines.last().is_some_and(|l| same_font(l, &s.font, s.face.as_deref())))
+            && (s.text.trim().is_empty() || lines.last().is_some_and(|l| same_font(l, &s.font, &s.base_font, s.face.as_deref())))
             && (s.text.trim().is_empty()
                 || lines.last().is_some_and(|l| {
                     (s.size - l.size).abs() < 0.01 && s.bold == l.bold && s.italic == l.italic && fill_color(&s.state.fill) == l.color
@@ -1468,10 +1468,27 @@ fn is_type3_fallback(font: &Dict) -> bool {
         && font.name(b"Name").is_some_and(|n| n == JAPANESE_FONT_NAME.as_bytes() || n == HEBREW_FONT_NAME.as_bytes())
 }
 
-/// Whether a run shown in `font` (a resource name, and the Japanese or Hebrew fallback face it subsets, if
-/// any) continues `line`: the same font resource, or another subset of the same face.
-fn same_font(line: &TextLine, font: &[u8], face: Option<&str>) -> bool {
-    line.font.as_bytes() == font || (line.face.is_some() && line.face.as_deref() == face)
+/// Whether a run shown in `font` (a resource name), with `/BaseFont` `base_font` and the Japanese
+/// or Hebrew fallback face it subsets, if any, continues `line`: the same font resource, another
+/// resource for the same font (a writer may split one font into several subsets, #3661), or
+/// another subset of the same face.
+fn same_font(line: &TextLine, font: &[u8], base_font: &str, face: Option<&str>) -> bool {
+    line.font.as_bytes() == font || same_base_font(&line.base_font, base_font) || (line.face.is_some() && line.face.as_deref() == face)
+}
+
+/// Whether two `/BaseFont` names name the same font: a subset's six-letter tag and `+` prefix do
+/// not change the font (ISO 32000-2 §9.6.4), so `ABCDEF+Arial` and `GHIJKL+Arial` are one font.
+/// A name that is missing, or only a tag (`ABCDEF+`), names no font and matches nothing.
+fn same_base_font(a: &str, b: &str) -> bool {
+    let (a, b) = (strip_subset_tag(a), strip_subset_tag(b));
+    !a.is_empty() && a == b
+}
+
+/// `ABCDEF+Arial` → `Arial`. A name without a subset tag is returned unchanged.
+fn strip_subset_tag(name: &str) -> &str {
+    let bytes = name.as_bytes();
+    let is_tag = bytes.get(6) == Some(&b'+') && bytes.get(..6).is_some_and(|tag| tag.iter().all(u8::is_ascii_uppercase));
+    if is_tag { name.get(7..).unwrap_or(name) } else { name }
 }
 
 fn source_family(base_font: &str) -> crate::added::Family {
@@ -2898,6 +2915,20 @@ mod tests {
         assert_eq!(block_overlapping(&blocks, [200.0, 0.0, 250.0, 10.0]), None, "a box that overlaps nothing");
         assert_eq!(block_overlapping(&[], [0.0, 0.0, 1.0, 1.0]), None);
         assert_eq!(block_overlapping(&blocks, [f64::NAN; 4]), None);
+    }
+
+    #[test]
+    fn a_subset_tag_is_the_only_difference_between_subsets_of_one_font() {
+        assert!(same_base_font("ABCDEF+Arial", "GHIJKL+Arial"));
+        assert!(same_base_font("Arial", "ABCDEF+Arial"));
+        assert!(same_base_font("Arial", "Arial"));
+        assert!(!same_base_font("ABCDEF+Arial", "GHIJKL+Helvetica"));
+        // Five letters are part of the name, not a subset tag.
+        assert!(!same_base_font("ABCDE+Helvetica-Bold", "Helvetica-Bold"));
+        // A tag with no name after it, or no name at all, names no font.
+        assert!(!same_base_font("ABCDEF+", "GHIJKL+"));
+        assert!(!same_base_font("", ""));
+        assert!(!same_base_font("Arial", ""));
     }
 
     #[test]
