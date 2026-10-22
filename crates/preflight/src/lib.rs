@@ -520,7 +520,7 @@ pub fn verify(doc: &Document, level: Level) -> Vec<Issue> {
         let own = (d.get(b"S").is_some() && is_action(d)).then_some(d);
         let direct = [b"A".as_slice(), b"OpenAction"].map(|k| d.get(k).and_then(|a| a.as_dict()));
         for a in [own].into_iter().chain(direct).flatten() {
-            if let Some(s) = chain_forbidden(a) {
+            if let Some(s) = chain_forbidden(doc, a) {
                 issue("6.5.1", "A {} action isn't allowed", Some(s), None, true);
             }
         }
@@ -659,14 +659,31 @@ fn is_action(d: &Dict) -> bool {
 const MAX_ACTION_CHAIN: usize = 1024;
 
 /// The first forbidden action type in the action `a` or in the actions written directly in its
-/// `/Next` (ISO 32000-2 12.6.2: a dictionary or an array of them). An action `/Next` refers to
-/// is an object of its own, checked and removed as one.
-fn chain_forbidden(a: &Dict) -> Option<String> {
-    let mut stack = vec![a];
+/// `/Next` (ISO 32000-2 12.6.2: a dictionary or an array of them, which may be an object of its
+/// own). An action `/Next` refers to is an object of its own, checked and removed as one.
+fn chain_forbidden(doc: &Document, a: &Dict) -> Option<String> {
     let mut read = 0;
+    let mut seen = std::collections::HashSet::new();
+    // Actions written in an indirect `/Next` array, copied out of it.
+    let mut held: Vec<Dict> = Vec::new();
+    if let Some(s) = walk_chain(doc, a, &mut read, &mut seen, &mut held) {
+        return Some(s);
+    }
+    while let Some(d) = held.pop() {
+        if let Some(s) = walk_chain(doc, &d, &mut read, &mut seen, &mut held) {
+            return Some(s);
+        }
+    }
+    None
+}
+
+/// [`chain_forbidden`] for the actions reachable from `a` through direct `/Next` entries. The
+/// actions of each indirect `/Next` array (each read once) go to `held`.
+fn walk_chain(doc: &Document, a: &Dict, read: &mut usize, seen: &mut std::collections::HashSet<ObjRef>, held: &mut Vec<Dict>) -> Option<String> {
+    let mut stack = vec![a];
     while let Some(d) = stack.pop() {
-        read += 1;
-        if read > MAX_ACTION_CHAIN {
+        *read += 1;
+        if *read > MAX_ACTION_CHAIN {
             return Some("too deeply chained".into());
         }
         if let Some(s) = d.name(b"S")
@@ -677,6 +694,12 @@ fn chain_forbidden(a: &Dict) -> Option<String> {
         match d.get(b"Next") {
             Some(Object::Dict(next)) => stack.push(next),
             Some(Object::Array(list)) => stack.extend(list.iter().filter_map(Object::as_dict)),
+            Some(Object::Ref(r)) if seen.insert(*r) => {
+                if let Object::Array(list) = &*doc.get(*r) {
+                    // More than the chain limit can't be read anyway.
+                    held.extend(list.iter().filter_map(Object::as_dict).take(MAX_ACTION_CHAIN).cloned());
+                }
+            }
             _ => {}
         }
     }
@@ -686,7 +709,7 @@ fn chain_forbidden(a: &Dict) -> Option<String> {
 /// Whether `o` is (or refers to) a forbidden action or one chaining to it, or to nothing.
 fn forbidden(doc: &Document, o: &Object) -> bool {
     match &*doc.resolve(o) {
-        Object::Dict(a) => chain_forbidden(a).is_some(),
+        Object::Dict(a) => chain_forbidden(doc, a).is_some(),
         Object::Null => true,
         _ => false,
     }
@@ -836,11 +859,11 @@ pub fn convert(doc: &mut Document, level: Level) -> Result<Report, pdfcraft_cos:
     // directly in an /A elsewhere (an outline item's, say).
     for (r, o) in objects(doc) {
         let Object::Dict(d) = &*o else { continue };
-        if d.get(b"S").is_some() && is_action(d) && chain_forbidden(d).is_some() {
+        if d.get(b"S").is_some() && is_action(d) && chain_forbidden(doc, d).is_some() {
             doc.set(r, Object::Null);
             actions += 1;
         } else if let Some(Object::Dict(a)) = d.get(b"A")
-            && chain_forbidden(a).is_some()
+            && chain_forbidden(doc, a).is_some()
         {
             let mut nd = d.clone();
             nd.remove(b"A");

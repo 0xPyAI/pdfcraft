@@ -444,6 +444,8 @@ fn forbidden_actions_chained_behind_allowed_ones_are_found_and_removed() {
         build(&[&open_action, pages, page, &link("<< /S /GoTo /D [3 0 R /Fit] >>")], ""),
         build(&["<< /Type /Catalog /Pages 2 0 R >>", pages, page, &link("5 0 R"), &goto], ""),
         build(&["<< /Type /Catalog /Pages 2 0 R >>", pages, page, &link(&format!("<< /S /GoTo /D [3 0 R /Fit] /Next {js} >>"))], ""),
+        // `/Next` refers to an array that holds the action directly.
+        build(&["<< /Type /Catalog /Pages 2 0 R >>", pages, page, &link("<< /S /GoTo /D [3 0 R /Fit] /Next 5 0 R >>"), &format!("[{js}]")], ""),
     ];
     for (i, mut doc) in cases.into_iter().enumerate() {
         let found = messages(&verify(&doc, Level::A2b)).contains(&"A JavaScript action isn't allowed");
