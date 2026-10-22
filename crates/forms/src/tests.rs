@@ -1321,6 +1321,32 @@ fn renaming_a_field_renames_it_in_the_calculations_that_read_it() {
     assert_eq!((field(&all, "sum").value.clone(), field(&all, "product").value.clone()), (vec!["12".to_string()], vec!["20".to_string()]));
 }
 
+/// A dotted name moves the field under new parent fields (#2696), and the calculations that read
+/// it follow it to its full new name, as they follow a plain rename.
+#[test]
+fn a_dotted_rename_moves_the_field_and_its_calculations_follow() {
+    use crate::af::{CalcOp, Calculate};
+    let mut doc = one_page();
+    let text = NewField::Text { multiline: false };
+    for (i, name) in ["a", "b", "sum", "script"].into_iter().enumerate() {
+        let y = 700.0 - 40.0 * i as f64;
+        add_field(&mut doc, 0, [50.0, y, 250.0, y + 20.0], &text, Some(name)).unwrap();
+    }
+    let calculate =
+        FieldProps { calculate: Some(Calculate::Simple { op: CalcOp::Sum, fields: vec!["a".into(), "b".into()] }), ..FieldProps::default() };
+    set_props(&mut doc, "sum", &calculate).unwrap();
+    set_field_script(&mut doc, "script", "calculate", Some("event.value = getField(\"a\").value;")).unwrap();
+    set_props(&mut doc, "a", &FieldProps { name: Some("Group.a".into()), ..FieldProps::default() }).unwrap();
+    let mut doc = reopen(&doc);
+    let all = fields(&doc);
+    assert!(all.iter().any(|f| f.name == "Group.a") && all.iter().all(|f| f.name != "a"));
+    assert_eq!(field(&all, "sum").actions.calculate, Calculate::Simple { op: CalcOp::Sum, fields: vec!["Group.a".into(), "b".into()] });
+    assert_eq!(field(&all, "script").actions.scripts.calculate.as_deref(), Some("event.value = getField(\"Group.a\").value;"));
+    set_value(&mut doc, "Group.a", &FieldValue::Text("10".into())).unwrap();
+    set_value(&mut doc, "b", &FieldValue::Text("2".into())).unwrap();
+    assert_eq!(field(&fields(&doc), "sum").value, ["12"]);
+}
+
 /// The rename reaches a script stored as a stream, an indirect action and the only widget's
 /// actions; it leaves a script that isn't UTF-8 as it is, and a name another field still has.
 #[test]
