@@ -494,12 +494,16 @@ impl ObjectReader {
     }
 }
 
+/// Nesting [`owned_bytes`] walks: past the parser's own nesting limit, so every parsed object
+/// is measured in full.
+const OWNED_BYTES_DEPTH: usize = 256;
+
 /// Bytes `object` holds of its own: string and stream data that is not a view into `data`
-/// (the input file), nested a few levels deep (deeper data is rare and still bounded by the
-/// reader's object count).
+/// (the input file). An object nested deeper than [`OWNED_BYTES_DEPTH`] cannot be measured
+/// and counts as too large to keep.
 fn owned_bytes(object: &Object, data: &Arc<Vec<u8>>, depth: usize) -> usize {
-    if depth > 4 {
-        return 0;
+    if depth > OWNED_BYTES_DEPTH {
+        return usize::MAX;
     }
     match object {
         Object::String(s) => s.bytes.len(),
@@ -2990,6 +2994,29 @@ endobj
             assert_eq!(doc.cache.lock().unwrap().len(), cached, "full saves must not fill the editor cache");
             assert_eq!(doc.objstms.lock().unwrap().len(), streams);
             assert!(Arc::ptr_eq(&doc.cache, &snapshot.cache), "do not detach or clear caller snapshots");
+        }
+    }
+
+    #[test]
+    fn editor_cache_counts_deeply_nested_strings() {
+        let mut nested = Object::String(crate::PdfString::literal(vec![b'x'; 1 << 20]));
+        for _ in 0..8 {
+            nested = Object::Array(vec![nested]);
+        }
+        let mut source = Document::new_empty();
+        let objects: Vec<_> = (0..48).map(|_| Object::Ref(source.add(nested.clone()))).collect();
+        source.update_dict(source.root().unwrap(), |d| d.set(b"Extension".to_vec(), Object::Array(objects))).unwrap();
+        let bytes = Arc::new(crate::write_full(&source, &crate::SaveOptions::default()).unwrap());
+        let doc = Document::open(bytes).unwrap();
+        assert_eq!(owned_bytes(&nested, &doc.data, 0), 1 << 20);
+        let root = doc.get(doc.root().unwrap());
+        for reference in root.as_dict().unwrap().get(b"Extension").unwrap().as_array().unwrap() {
+            let Object::Ref(reference) = reference else { panic!("indirect object") };
+            drop(doc.get(*reference));
+            let cache = doc.cache.lock().unwrap();
+            let owned = cache.values().fold(0usize, |n, o| n.saturating_add(owned_bytes(o, &doc.data, 0)));
+            let strings = cache.values().filter(|o| o.as_array().is_some()).count();
+            assert!(strings << 20 <= Document::EDITOR_CACHE_BYTES + (1 << 20), "{strings} MiB strings cached, {owned} bytes counted");
         }
     }
 
