@@ -50,6 +50,8 @@ pub enum ArtifactError {
     AmbiguousParent,
     #[error("couldn't update the parent tree: {0}")]
     ParentTree(String),
+    #[error("the page has more content than can be edited")]
+    TooLarge,
     #[error(transparent)]
     Cos(#[from] pdfcraft_cos::CosError),
 }
@@ -483,7 +485,23 @@ pub fn mark_tag_artifact(doc: &mut Document, obj: ObjRef) -> Result<(), Artifact
     let pages = pdfcraft_model::pages(doc);
     let page_ref = element.page.ok_or(ArtifactError::NoPage)?;
     let page = pages.iter().find(|page| page.obj == page_ref).ok_or(ArtifactError::NoPage)?;
-    let mut ops = pdfcraft_content::parse(&page_content(doc, &page.dict)).ops;
+    let mut content = Vec::new();
+    if let Some(c) = page.dict.get(b"Contents") {
+        let mut budget = DecodeBudget::page();
+        for data in budget.decode_contents(doc, c) {
+            match data {
+                Ok(data) => {
+                    content.extend_from_slice(&data);
+                    content.push(b' ');
+                }
+                // The page's /Contents is replaced with what was decoded: content past the
+                // budget would be dropped from the page.
+                Err(_) if budget.exhausted() => return Err(ArtifactError::TooLarge),
+                Err(_) => {}
+            }
+        }
+    }
+    let mut ops = pdfcraft_content::parse(&content).ops;
     let mut found = HashSet::new();
     for op in &mut ops {
         let id = (op.op == b"BDC")
