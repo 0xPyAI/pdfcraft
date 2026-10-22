@@ -369,6 +369,8 @@ pub struct ImageSelection {
     drag: Option<(Pos2, Option<Pos2>)>,
     /// Crop mode (Acrobat's crop handles): the box kept so far.
     pub crop: Option<CropMode>,
+    /// The drag is turning the picture by its rotate handle (the `drag` start is then unused).
+    turning: bool,
 }
 
 /// Cropping a page image: the handles trim instead of resizing, the part that will go is
@@ -544,7 +546,7 @@ impl ImageSelection {
     }
 }
 
-/// Once a selected corner is grabbed, text under it cannot take over the gesture. The same
+/// Once a selected corner or the rotate knob is grabbed, text under it cannot take over the gesture. The same
 /// applies after the pointer leaves the image/page while dragging.
 pub(crate) fn image_owns_pointer(ui: &egui::Ui, xf: &PageXform, page: usize, info: &DocInfo, view: &DocView) -> bool {
     let Some(selection) = view.image_selection.as_ref().filter(|s| s.page == page) else { return false };
@@ -555,7 +557,8 @@ pub(crate) fn image_owns_pointer(ui: &egui::Ui, xf: &PageXform, page: usize, inf
     let Some(rect) = image.visible_rect else { return false };
     let b = xf.user_rect(info, page, rect.map(|v| v as f32));
     let p = ui.input(|i| if i.pointer.primary_down() { i.pointer.press_origin() } else { i.pointer.hover_pos() });
-    p.is_some_and(|p| [b.left_top(), b.right_top(), b.left_bottom(), b.right_bottom()].iter().any(|c| c.distance(p) < 8.0))
+    let knob = rotate_knob(b, ui.clip_rect()).0;
+    p.is_some_and(|p| [b.left_top(), b.right_top(), b.left_bottom(), b.right_bottom(), knob].iter().any(|c| c.distance(p) < 8.0))
 }
 
 /// What a drag on a paragraph box takes hold of.
@@ -629,6 +632,25 @@ pub(crate) enum ImageAction {
     Link(usize, usize),
     /// Open Recognize Text for the picture's page.
     Recognize(usize),
+}
+
+/// Where the rotate knob sits, and the edge point its stem starts from: above the middle of the
+/// top edge, or below the bottom edge when the area on screen (`view`) has no room above.
+fn rotate_knob(b: Rect, view: Rect) -> (Pos2, Pos2) {
+    let above = b.center_top() - egui::vec2(0.0, 22.0);
+    if above.y - 6.0 >= view.top() { (above, b.center_top()) } else { (b.center_bottom() + egui::vec2(0.0, 22.0), b.center_bottom()) }
+}
+
+/// Degrees clockwise (-180..=180) that turn "straight up" from `centre` onto the pointer; `snap`
+/// rounds to steps of 15 degrees (Shift). A pointer on the centre turns nothing.
+fn turn_degrees(centre: Pos2, pointer: Pos2, snap: bool) -> f32 {
+    let v = pointer - centre;
+    if !(v.x.is_finite() && v.y.is_finite()) || v.length() < 4.0 {
+        return 0.0;
+    }
+    // Screen y points down: up is (0, -1); clockwise is atan2(x, -y).
+    let d = v.x.atan2(-v.y).to_degrees();
+    if snap { (d / 15.0).round() * 15.0 } else { d }
 }
 
 fn user_box(xf: &PageXform, info: &DocInfo, page: usize, r: Rect) -> [f64; 4] {
@@ -715,8 +737,26 @@ pub(crate) fn image_input(
         if allow_interaction && let Some(corner) = hover_pos.and_then(|p| corners.iter().position(|c| c.distance(p) < 8.0)) {
             ui.ctx().set_cursor_icon(if matches!(corner, 0 | 3) { egui::CursorIcon::ResizeNwSe } else { egui::CursorIcon::ResizeNeSw });
         }
+        // The rotate handle: a knob above the top edge, joined to it by a short stem.
+        let (knob, stem) = rotate_knob(b, ui.clip_rect());
+        if view.image_selection.as_ref().is_some_and(|s| s.drag.is_none()) {
+            painter.line_segment([stem, knob], Stroke::new(1.0, ACCENT));
+            painter.circle(knob, 5.0, Color32::WHITE, Stroke::new(1.0, ACCENT));
+            if allow_interaction && hover_pos.is_some_and(|p| p.distance(knob) < 8.0) {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            }
+        }
         let origin = ui.input(|i| i.pointer.press_origin());
         if allow_interaction
+            && resp.drag_started()
+            && let Some(o) = origin
+            && o.distance(knob) < 8.0
+        {
+            if let Some(s) = view.image_selection.as_mut() {
+                s.drag = Some((o, None));
+                s.turning = true;
+            }
+        } else if allow_interaction
             && resp.drag_started()
             && let Some(o) = origin
         {
@@ -727,6 +767,35 @@ pub(crate) fn image_input(
                     s.drag = Some((o, opposite));
                 }
             }
+        }
+        if view.image_selection.as_ref().is_some_and(|s| s.turning) {
+            let shift = ui.input(|i| i.modifiers.shift);
+            let degrees = hover_pos.map_or(0.0, |p| turn_degrees(b.center(), p, shift));
+            // The turned outline as a preview; the engine redraws the pixels on release.
+            let centre = b.center();
+            let (sin, cos) = degrees.to_radians().sin_cos();
+            let turn = |c: Pos2| {
+                let v = c - centre;
+                centre + egui::vec2(v.x * cos - v.y * sin, v.x * sin + v.y * cos)
+            };
+            let outline = [b.left_top(), b.right_top(), b.right_bottom(), b.left_bottom()].map(turn).to_vec();
+            painter.add(egui::Shape::closed_line(outline, Stroke::new(1.5, ACCENT)));
+            let galley = painter.layout_no_wrap(format!("{degrees:.0}\u{b0}"), egui::FontId::proportional(12.0), ACCENT);
+            let label = Rect::from_center_size(turn(knob) - egui::vec2(0.0, 14.0), galley.size() + egui::vec2(8.0, 4.0));
+            painter.rect(label, CornerRadius::same(3), Color32::WHITE, Stroke::new(1.0, ACCENT), egui::StrokeKind::Middle);
+            painter.galley(label.center() - galley.size() / 2.0, galley, ACCENT);
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            if resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
+                if let Some(s) = view.image_selection.as_mut() {
+                    s.drag = None;
+                    s.turning = false;
+                }
+                if degrees.abs() >= 0.05 {
+                    view.pending_edit =
+                        Some(Edit::EditPageImage { page, index: i, change: pdfcraft_engine::ImageEdit::RotateBy(f64::from(degrees)) });
+                }
+            }
+            return true;
         }
         if let Some((start, opposite)) = view.image_selection.as_ref().and_then(|s| s.drag)
             && let Some(p) = hover_pos
@@ -843,7 +912,7 @@ pub(crate) fn image_input(
         _ => egui::CursorIcon::PointingHand,
     });
     if resp.clicked() || resp.secondary_clicked() {
-        view.image_selection = Some(ImageSelection { page, index: hit, drag: None, crop: None });
+        view.image_selection = Some(ImageSelection { page, index: hit, drag: None, crop: None, turning: false });
     }
     if resp.secondary_clicked() {
         ui.ctx().data_mut(|d| d.insert_temp(menu_key, true));
@@ -1461,6 +1530,30 @@ pub(crate) fn caret_color_on(fill: Color32) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_rotate_knob_moves_below_when_there_is_no_room_above() {
+        let view = Rect::from_min_max(Pos2::new(0.0, 100.0), Pos2::new(500.0, 500.0));
+        let roomy = Rect::from_min_max(Pos2::new(100.0, 200.0), Pos2::new(200.0, 250.0));
+        assert_eq!(rotate_knob(roomy, view).0, Pos2::new(150.0, 178.0));
+        let at_top = Rect::from_min_max(Pos2::new(100.0, 100.0), Pos2::new(200.0, 150.0));
+        let (knob, stem) = rotate_knob(at_top, view);
+        assert_eq!((knob, stem), (Pos2::new(150.0, 172.0), Pos2::new(150.0, 150.0)));
+    }
+
+    #[test]
+    fn the_rotate_knob_measures_clockwise_degrees_from_straight_up() {
+        let c = Pos2::new(100.0, 100.0);
+        let at = |x: f32, y: f32| turn_degrees(c, Pos2::new(x, y), false);
+        assert!(at(100.0, 0.0).abs() < 1e-3);
+        assert!((at(200.0, 100.0) - 90.0).abs() < 1e-3, "right is a clockwise quarter");
+        assert!((at(0.0, 100.0) + 90.0).abs() < 1e-3);
+        assert!((at(100.0, 200.0).abs() - 180.0).abs() < 1e-3);
+        // Shift rounds to 15 degrees; the centre and non-finite points turn nothing.
+        assert_eq!(turn_degrees(c, Pos2::new(180.0, 50.0), true) % 15.0, 0.0);
+        assert_eq!(at(101.0, 101.0), 0.0);
+        assert_eq!(at(f32::NAN, 5.0), 0.0);
+    }
 
     /// An app with one text document open, and an editor on its first paragraph.
     fn preview_app() -> (crate::PdfCraftApp, LineEditor) {

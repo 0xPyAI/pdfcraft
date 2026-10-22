@@ -2671,6 +2671,15 @@ fn editing_page_images_through_tools() {
     assert_eq!(cropped["visible_rect"], json!([10.0, 10.0, 25.0, 30.0]));
     ok(&mut a, "image_edit", json!({ "doc": made, "page": 1, "image": 1, "action": "rotate" }));
     ok(&mut a, "image_edit", json!({ "doc": made, "page": 1, "image": 1, "action": "flip_horizontal" }));
+    // Any angle: the box grows to the turned picture's bounds, and it undoes like a quarter turn.
+    let before = ok(&mut a, "page_images", json!({ "doc": made, "page": 1 }))["images"][0]["rect"].clone();
+    let r = ok(&mut a, "image_edit", json!({ "doc": made, "page": 1, "image": 1, "action": "rotate_by", "degrees": 30.5 }));
+    assert_eq!(r["undo"], "Rotate image");
+    let turned = ok(&mut a, "page_images", json!({ "doc": made, "page": 1 }))["images"][0]["rect"].clone();
+    assert_ne!(turned, before);
+    ok(&mut a, "edit_undo", json!({ "doc": made }));
+    assert_eq!(ok(&mut a, "page_images", json!({ "doc": made, "page": 1 }))["images"][0]["rect"], before);
+    assert!(matches!(a.call("image_edit", &json!({ "doc": made, "page": 1, "image": 1, "action": "rotate_by" })), Err(ToolError::InvalidArgs(_))));
     let saved = ok(&mut a, "image_save", json!({ "doc": made, "page": 1, "image": 1, "path": "out/picture" }));
     assert_eq!(saved["format"], "png");
     assert!(std::fs::read(dir.join("out/picture.png")).unwrap().starts_with(b"\x89PNG"));

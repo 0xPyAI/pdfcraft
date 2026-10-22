@@ -2086,6 +2086,18 @@ evidence = ["crates/edit/src/tests.rs::page_images_move_turn_replace_and_delete"
 notes = "existing page images (right-click ▸ Replace Image) and added images: the new picture is drawn in the same place"
 
 [[feature]]
+id = "edit.image-rotate-free"
+title = "Rotate an existing page image by any angle"
+area = "C"
+tier = "P1"
+milestone = "M7"
+status = "partial"
+commands = ["edit.edit_text"]
+tools = ["image_edit"]
+evidence = ["crates/edit/src/tests.rs::an_image_turns_by_any_angle_about_its_centre_and_saves_the_matrix", "crates/ui-egui/tests/editing.rs::dragging_the_rotate_knob_turns_a_page_image", "crates/automation/tests/automation.rs::editing_page_images_through_tools"]
+notes = "drag the knob above a selected image (Shift: 15 degree steps) or image_edit action rotate_by with degrees; the angle is clockwise about the visible centre and is written as one extra cm (undoable). Missing: no numeric angle field, no live pixel preview while turning (an outline is drawn), the selection frame and corner handles of a turned image are its axis-aligned bounds, corner handles of an already turned image scale its axis-aligned bounds (not tested), no angle shown for an already turned image"
+
+[[feature]]
 id = "edit.image-crop"
 title = "Crop an image"
 area = "C"

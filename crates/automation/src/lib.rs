@@ -499,6 +499,11 @@ impl Automation {
                             let (u0, u1) = (info.view_to_user(r[0] as f32, r[1] as f32), info.view_to_user(r[2] as f32, r[3] as f32));
                             ImageEdit::Move([u0[0].min(u1[0]) as f64, u0[1].min(u1[1]) as f64, u0[0].max(u1[0]) as f64, u0[1].max(u1[1]) as f64])
                         }
+                        "rotate_by" => ImageEdit::RotateBy(
+                            a.get("degrees")
+                                .and_then(Value::as_f64)
+                                .ok_or_else(|| ToolError::InvalidArgs("rotate_by needs degrees: a number (clockwise)".into()))?,
+                        ),
                         "rotate" => ImageEdit::Rotate(a.opt_int("quarters")?.unwrap_or(1) as i32),
                         "crop" => {
                             let r: Vec<f64> =

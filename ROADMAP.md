@@ -171,6 +171,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 | 8 | 1.0 polish: performance, right-to-left, missing languages, keyboard-only (M14) | 55–95 |
 
 ## Progress log
+- **2026-10-13 (M7, free image rotation):** A selected page image has a rotate knob (Shift: 15 degree steps) and `image_edit` a `rotate_by` action; the angle is written as one undoable `cm`. Snapping to page edges while moving is in #1740; resize snapping is not done. Estimates unchanged.
 
 - **2026-10-20 (M6, calculation order page):** Prepare a form ▸ Calculation order, a page of its own, lists the calculated fields in the order they calculate with their formulas and values, moved with Up/Down arrows (as Acrobat's Set Field Calculation Order), Alt+↑/↓ or by dragging. A card says what is wrong with the order and holds Fix order; a loop has a card of its own that opens one of its formulas. On the page, each calculated field shows its step, and arrows show what the field in focus reads and what reads it. Estimates unchanged.
 - **2026-10-20 (M6, calculation order):** The order a form's fields calculate in (`/CO`) is read, checked, fixed and set headlessly with `form_calculation_order`: it says which fields read one calculated later (they show stale values), which read each other in a loop, and which the PDF's order leaves out; Fix order moves only what must move, in one undo step, and the form recalculates. Editing a formula no longer moves its field to the end of the order, and a field the order lists twice calculates once. Estimates unchanged.

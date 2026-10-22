@@ -2947,6 +2947,61 @@ fn editing_existing_images_on_the_page() {
 }
 
 #[test]
+fn dragging_the_rotate_knob_turns_a_page_image() {
+    let mut png = Vec::new();
+    image::RgbImage::from_pixel(80, 40, image::Rgb([200, 40, 40])).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("picture.png", None, png.clone()).expect("opens");
+        app
+    });
+    h.run_steps(4);
+    let id = h.state().views[0].id;
+    // A smaller picture in the middle of the page: the knob is over the page, not beside it.
+    let full = h.state().session.get(id).unwrap().page_images(0)[0].rect;
+    let (qw, qh) = ((full[2] - full[0]) / 4.0, (full[3] - full[1]) / 4.0);
+    let (mx, my) = ((full[0] + full[2]) / 2.0, (full[1] + full[3]) / 2.0);
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::EditPageImage {
+        page: 0,
+        index: 0,
+        change: pdfcraft_engine::ImageEdit::Move([mx - qw, my - qh, mx + qw, my + qh]),
+    });
+    h.run_steps(4);
+    let before = h.state().session.get(id).unwrap().page_images(0)[0].rect;
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let c = r.center();
+    // Select the picture.
+    h.hover_at(c);
+    h.run_steps(1);
+    h.drag_at(c);
+    h.run_steps(1);
+    h.drop_at(c);
+    h.run_steps(2);
+    assert!(h.state().views[0].image_selection.is_some(), "selected");
+    // Grab the knob above the top edge and swing it a quarter turn clockwise (to the right).
+    let knob = egui::pos2(c.x, c.y - r.height() / 4.0 - 22.0);
+    let to = egui::pos2(c.x + 100.0, c.y);
+    h.hover_at(knob);
+    h.run_steps(1);
+    h.drag_at(knob);
+    h.run_steps(1);
+    for k in 1..=4 {
+        h.hover_at(knob + (to - knob) * (k as f32 / 4.0));
+        h.run_steps(1);
+    }
+    h.drop_at(to);
+    h.run_steps(4);
+    let doc = h.state().session.get(id).unwrap();
+    assert_eq!(doc.can_undo(), Some("Rotate image"));
+    let turned = doc.page_images(0)[0].rect;
+    let (w, hh) = (before[2] - before[0], before[3] - before[1]);
+    assert!((turned[2] - turned[0] - hh).abs() < 1.5 && (turned[3] - turned[1] - w).abs() < 1.5, "{before:?} -> {turned:?}");
+}
+
+#[test]
 fn editing_existing_form_artwork_on_the_page() {
     use pdfcraft_cos::{Dict, Document, Object, SaveOptions, Stream, write_incremental};
     let mut doc = Document::open(std::sync::Arc::new(fixture(1))).unwrap();

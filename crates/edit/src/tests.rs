@@ -55,6 +55,27 @@ fn cx() -> Context {
 }
 
 #[test]
+fn an_image_turns_by_any_angle_about_its_centre_and_saves_the_matrix() {
+    // 100,100..300,200 is 200 x 100 around (200, 150).
+    let mut doc = image_page();
+    let r0 = images::page_images(&doc, 0).unwrap()[0].rect;
+    let t = images::turn_by_degrees(r0, 30.0).unwrap();
+    images::change_image(&mut doc, 0, 0, &images::ImageChange::Transform(t)).unwrap();
+    let doc = reopen(&doc);
+    let r = images::page_images(&doc, 0).unwrap()[0].rect;
+    let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+    let (w, h) = (200.0 * c + 100.0 * s, 200.0 * s + 100.0 * c);
+    assert!(close(r, [200.0 - w / 2.0, 150.0 - h / 2.0, 200.0 + w / 2.0, 150.0 + h / 2.0]), "{r:?}");
+    // 90 degrees is the quarter turn; whole turns and non-finite angles are harmless.
+    let q = images::turn_about_centre(r0, 1, false, false);
+    let d = images::turn_by_degrees(r0, 90.0).unwrap();
+    assert!(q.iter().zip(&d).all(|(a, b)| (a - b).abs() < 1e-9), "{q:?} {d:?}");
+    let full = images::turn_by_degrees(r0, 720.0).unwrap();
+    assert!(full.iter().zip([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]).all(|(a, b)| (a - b).abs() < 1e-9));
+    assert!(images::turn_by_degrees(r0, f64::NAN).is_none() && images::turn_by_degrees(r0, f64::INFINITY).is_none());
+}
+
+#[test]
 fn tokens_expand() {
     let c = cx();
     assert_eq!(expand("Page <<1>> of <<n>>", 3, 10, 0, &c), "Page 3 of 10");
