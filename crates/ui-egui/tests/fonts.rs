@@ -337,3 +337,27 @@ fn primary_ui_fonts_cover_latin_and_cyrillic_catalogs() {
         }
     }
 }
+
+/// On a machine with an installed Korean font, the installed definitions include it and Hangul has
+/// glyphs, so a Korean file name in a tab title is not boxes. macOS always ships Apple SD Gothic
+/// Neo and Windows Malgun Gothic, so there the test never skips.
+#[test]
+fn system_fallback_covers_hangul() {
+    const HANGUL: &str = "성가대 찬양곡 목록";
+    assert!(!theme::font_definitions().font_data.contains_key(theme::SYSTEM_HANGUL_FALLBACK));
+    let defs = theme::installed_font_definitions(theme::CjkPreference::Default);
+    let off = std::env::var_os("PDFCRAFT_SYSTEM_FONTS").is_some_and(|v| v == "0");
+    if !defs.font_data.contains_key(theme::SYSTEM_HANGUL_FALLBACK) && (off || cfg!(all(unix, not(target_os = "macos")))) {
+        eprintln!("skipping system_fallback_covers_hangul: no installed Korean fallback font (or PDFCRAFT_SYSTEM_FONTS=0)");
+        assert!(defs.families.values().all(|stack| !stack.iter().any(|n| n == theme::SYSTEM_HANGUL_FALLBACK)));
+        return;
+    }
+    for (family, stack) in &defs.families {
+        assert_eq!(stack.iter().filter(|n| *n == theme::SYSTEM_HANGUL_FALLBACK).count(), 1, "{family:?}: {stack:?}");
+    }
+    let mut fonts = Fonts::new(TextOptions::default(), defs);
+    for id in families() {
+        assert!(fonts.has_glyphs(&id, HANGUL), "{id:?} lacks {HANGUL}");
+    }
+    assert!(layout_widths(&mut fonts, HANGUL).iter().all(|w| w.is_finite() && *w > 0.0));
+}
