@@ -912,7 +912,8 @@ pub fn parse_date(text: &str, fmt: &str) -> Option<DateTime> {
     // A bare trailing "p" ("5:30p") only counts when it follows a digit, not a word like "Sep".
     let bare_p = lower.strip_suffix('p').is_some_and(|rest| rest.trim_end().ends_with(|c: char| c.is_ascii_digit()));
     let pm = lower.contains("pm") || bare_p;
-    let am = lower.contains("am");
+    let bare_a = lower.strip_suffix('a').is_some_and(|rest| rest.trim_end().ends_with(|c: char| c.is_ascii_digit()));
+    let am = lower.contains("am") || bare_a;
     // Tokens: runs of digits (kept as text, so a run can be split between fields typed without
     // separators) and month names.
     let mut nums: VecDeque<String> = VecDeque::new();
