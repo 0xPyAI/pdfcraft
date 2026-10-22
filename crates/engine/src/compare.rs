@@ -184,18 +184,18 @@ impl crate::Document {
     /// The pages as paragraphs and images (for Word, HTML and RTF export), including what
     /// form XObjects draw.
     pub fn export_pages(&self) -> Vec<pdfcraft_export::Page> {
-        self.export_pages_checked(true).0
+        self.export_pages_checked(true, MAX_EXPORT_IMAGE_BYTES).0
     }
 
     /// [`Self::export_pages`], and the pages whose forms were left partly unread or whose
-    /// pictures went past [`MAX_EXPORT_IMAGE_BYTES`] ([`OfficeExport::truncated_pages`]). Without
+    /// pictures went past `image_budget` bytes ([`OfficeExport::truncated_pages`]). Without
     /// `images` no picture is prepared.
-    fn export_pages_checked(&self, images: bool) -> (Vec<pdfcraft_export::Page>, Vec<usize>) {
+    pub(crate) fn export_pages_checked(&self, images: bool, image_budget: usize) -> (Vec<pdfcraft_export::Page>, Vec<usize>) {
         let Some(cos) = self.editor.as_ref().map(|e| &e.cos) else { return (Vec::new(), Vec::new()) };
         let mut truncated = Vec::new();
         // Each image object is encoded once and shared by every place that draws it.
         let mut encoded: HashMap<ObjRef, PreparedImage> = HashMap::new();
-        let mut image_bytes = MAX_EXPORT_IMAGE_BYTES;
+        let mut image_bytes = image_budget;
         let pages = self
             .info
             .pages
@@ -213,9 +213,7 @@ impl crate::Document {
                 let display_width = f64::from(if info.rotation % 180 == 0 { info.width } else { info.height });
                 let unit = if crop_width > 0.0 && crop_width.is_finite() && display_width.is_finite() { display_width / crop_width } else { 1.0 };
                 let reading = pdfcraft_edit::reading_blocks_checked(cos, i).unwrap_or_default();
-                if reading.truncated {
-                    truncated.push(i);
-                }
+                let forms_unread = reading.truncated;
                 let blocks = reading
                     .blocks
                     .into_iter()
@@ -255,10 +253,10 @@ impl crate::Document {
                         })
                     })
                     .collect();
-                // The page colour (Edit a PDF ▸ Background, a producer's page fill) for formats that keep one.
-                if over_budget {
+                if forms_unread || over_budget {
                     truncated.push(i);
                 }
+                // The page colour (Edit a PDF ▸ Background, a producer's page fill) for formats that keep one.
                 let background = pdfcraft_edit::page_background(cos, i).ok().flatten();
                 pdfcraft_export::Page { width: info.width as f64, height: info.height as f64, blocks, images, background }
             })
@@ -275,7 +273,7 @@ impl crate::Document {
     /// ([`OfficeExport::truncated_pages`]).
     pub fn export_office_checked(&self, format: OfficeFormat) -> OfficeExport {
         // RTF leaves pictures out.
-        let (pages, truncated_pages) = self.export_pages_checked(format != OfficeFormat::Rtf);
+        let (pages, truncated_pages) = self.export_pages_checked(format != OfficeFormat::Rtf, MAX_EXPORT_IMAGE_BYTES);
         let title = self.info.title.clone().unwrap_or_else(|| self.name.trim_end_matches(".pdf").to_string());
         let bytes = match format {
             OfficeFormat::Docx => pdfcraft_export::docx(&pages, &title),
