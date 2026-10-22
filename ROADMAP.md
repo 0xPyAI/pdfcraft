@@ -1,21 +1,18 @@
 # PdfCraft roadmap
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (M3, #3808: the Pages inspector has an independent 50–150% thumbnail size slider and buttons; selection and current-page following are retained, with headless ui.set coverage. Estimates unchanged.)
-> **Last reviewed:** 2026-10-16; **Last updated:** 2026-10-16; **Change:** minor (M5 #2669, item 5: reply groups and page root counts per frame; estimates unchanged)
-> **Last reviewed:** 2026-10-20 | **Last updated:** 2026-10-20 | **Change:** minor (M10, #3532 partial: vector printing retains existing appearances with absent Subtype; estimates unchanged)
-
 **Stage: alpha** · next: beta, ~25% (ready for real work 50% → 75%) and ~400–700 h away
 
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (M4: initial-view options resolve indirect boolean preferences; estimates unchanged)
-> **Last reviewed:** 2026-10-20 | **Last updated:** 2026-10-20 | **Change:** minor (M2, #3574: named form properties retain page origin and own dictionary boundaries; estimates unchanged)
-> **Last reviewed:** 2026-10-20 - **Last updated:** 2026-10-20 - **Change:** minor (M6, #3502: form detection uses the existing content-stream boundary policy; estimates unchanged)
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (M3, #3541/#3620: comment hover follows individual marked lines and original annotation paint order; estimates unchanged)
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (M2, #3601: missing spacing glyphs in non-embedded Japanese CID substitutes draw as blanks while PDF widths and Unicode stay unchanged; estimates unchanged)
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (M12 #3673: Character encoding accepts Identity-H/V with Adobe CJK collections; estimates unchanged)
-
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (M3, #3808: the Pages inspector has an independent 50–150% thumbnail size slider and buttons; selection and current-page following are retained, with headless ui.set coverage. Estimates unchanged.)
 > **Last reviewed:** 2026-10-20 | **Last updated:** 2026-10-20 | **Change:** minor (M11 #3507: image merging preserves content stream boundaries; estimates unchanged)
+> **Last reviewed:** 2026-10-20 | **Last updated:** 2026-10-20 | **Change:** minor (M10, #3532 partial: vector printing retains existing appearances with absent Subtype; estimates unchanged)
 > **Last reviewed:** 2026-10-17 · **Last updated:** 2026-10-17 · **Change:** minor (M8, gap 6 #2662: the redaction audit counts a cover over one word of a long line; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
-> **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M5, PR #1971: bounded nested FDF export excludes source page/page-tree dictionaries; refreshed against upstream 4db6ac4a; estimates unchanged)
+> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (M12 #3673: Character encoding accepts Identity-H/V with Adobe CJK collections; estimates unchanged)
+> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (M2, #3601: missing spacing glyphs in non-embedded Japanese CID substitutes draw as blanks while PDF widths and Unicode stay unchanged; estimates unchanged)
+> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (M3, #3541/#3620: comment hover follows individual marked lines and original annotation paint order; estimates unchanged)
+> **Last reviewed:** 2026-10-20 - **Last updated:** 2026-10-20 - **Change:** minor (M6, #3502: form detection uses the existing content-stream boundary policy; estimates unchanged)
+> **Last reviewed:** 2026-10-20 | **Last updated:** 2026-10-20 | **Change:** minor (M2, #3574: named form properties retain page origin and own dictionary boundaries; estimates unchanged)
+> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (M4: initial-view options resolve indirect boolean preferences; estimates unchanged)
+> **Last reviewed:** 2026-10-16; **Last updated:** 2026-10-16; **Change:** minor (M5 #2669, item 5: reply groups and page root counts per frame; estimates unchanged)
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M7: the Edit text caret is as tall as the row it is on; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M6: CSV tab-containing headers; estimates unchanged)
 > **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M3, #3149: discard render demand after page geometry changes and check the GPU texture limit before upload; estimates unchanged)
@@ -200,6 +197,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 - **2026-10-21 (M3, #3808):** Page thumbnails in the Inspector can be resized independently from the document and Organize, with a slider, buttons and `thumbnail-zoom` control option. Selection, page following and reload are covered by regressions. Estimates unchanged.
 - **2026-10-22 (M2, #3107 / PR #3438):** Inline-image parsing falls back to the existing EI heuristic when missing declared samples, headers or terminators exceed the content-window budget, instead of waiting for an impossible allocation. Exact-length parsing for available samples and ordinary large streamed images is retained. Estimates unchanged.
 - **2026-10-21 (M14, Brazilian Portuguese):** Completed the `pt-br` catalog against the current 2,674-key union, including signature validation and accessibility messages; no build or compilation run. Localization remains partial because help and unpredictable engine/OS error details are not translated.
+- **2026-10-21 (M14, #3557):** Preferences: the OK button stays below the scrolling settings instead of being the last thing in them, so it is in reach in a short window.
+
 - **2026-10-19 (M11, #2178):** Optimize checks image and soft-mask dimensions and byte counts before decoding; hostile-dimension regressions pass. Estimates unchanged.
 
 - **2026-10-20 (M11, #3507):** Image merging keeps trailing comments, split operands and graphics state across content streams. Synthetic tool tests check saved text, rendered regions and exact image rows.
@@ -211,13 +210,11 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 - **2026-10-20 (M2, #3574):** Forms without Resources use page Properties for ActualText and layer visibility. Synthetic tests cover boundaries, nested/shared forms, and save/reopen. Estimates unchanged.
 - **2026-10-20 (M2, PR #3348 review):** Tracking samples retain short repeated punctuation (up to four glyphs), keeping tracked ellipses intact and searchable while longer TOC leaders still preserve title word spaces. Synthetic regressions cover isolated and surrounded ellipses. Estimates unchanged.
 - **2026-10-20 (M2, #3601):** A missing spacing glyph in an OpenType substitute uses its ordinary-space glyph. Synthetic Japanese CID renderer tests check blank spaces, `/W` and `/DW` placement, and unchanged Unicode extraction. Font selection and embedded fonts are unchanged. Estimates unchanged.
-- **2026-10-21 (M14, #3557):** Preferences: the OK button stays below the scrolling settings instead of being the last thing in them, so it is in reach in a short window.
-
 - **2026-10-20 (M12, #3673):** Character encoding accepts Identity-H/V fonts with Adobe CJK collections and recognizes predefined non-Identity CMaps independently. Unknown CMaps and foreign registries remain refused; synthetic checker and read-only automation regressions passed after failing before the fix. Per-glyph mapping validation and embedded-font extraction remain separate. Estimates unchanged.
 - **2026-10-19 (M6, renames keep formulas):** Renaming a field renames it in every calculation that reads it, in the same undo step: `AFSimple_Calculate` field lists, simplified field notation (the comment and the JavaScript after it) and `getField` calls naming it in one string literal; the rest of each script is kept as written. A sum used to drop the renamed field, notation read it as 0 and a script kept a stale value. Field Properties says how many formulas changed and `form_set_props` lists them as `formulas_updated`. Names built at run time and other events' scripts are not rewritten. Estimates unchanged.
-- **2026-10-19 (M7, #3591):** A background added to a page that already has one is painted over the old one instead of going under it and staying hidden. Behind the content, backgrounds come first, in the order added, and then behind-content watermarks, so a watermark added after a background no longer disappears. Synthetic regressions in `crates/edit` check the order. Estimates unchanged.
 
 - **2026-10-16 (M7, #2516):** A paragraph number from `text_paragraphs` keeps naming the paragraph it listed after edits regroup the page: `text_edit`, `text_edit_layout` and `page_render`'s `hide_text_block` find it again by its text and box, and refuse one that was merged into a neighbour (the edited paragraph included) instead of rewriting the paragraph that took its number (`stale_paragraphs` lists the numbers gone). The inline editor's switch-paragraph click holds the same key. No stable identity across save and reopen yet (#2508).
+- **2026-10-19 (M7, #3591):** A background added to a page that already has one is painted over the old one instead of going under it and staying hidden. Behind the content, backgrounds come first, in the order added, and then behind-content watermarks, so a watermark added after a background no longer disappears. Synthetic regressions in `crates/edit` check the order. Estimates unchanged.
 - **2026-10-19 (M2, radial luminosity masks):** Added synthetic radial-fade coverage for the existing masked-gradient fix (#2132): centre, midpoint, antialiased clip and per-pixel shading reference, including previews, scales and tiles. Removing the existing native-gradient mask guard reproduces an opaque midpoint; restoring it passes. No new renderer behavior or estimate change.
 - **2026-10-20 (M6, #3502):** Form detection preserves comments across content streams and does not add fields over rectangles hidden by those comments. Synthetic tests cover visible controls, graphics state, and saved field inventories. Estimates unchanged.
 - **2026-10-20 (M6, #2273 / PR #2279):** Rebased the field-highlight default and Appearance preference onto main, retaining secured-form parity evidence and updating secured AcroForm/XFA toggle expectations. Build and test validation delegated to GitHub CI. Estimates unchanged.
@@ -680,7 +677,8 @@ Newest first: the date, what moved, and the new overall estimate.
 - **2026-10-13 (M7):** Edit a PDF ▸ Add content: Header and footer, Watermark and Background open an Add / Update / Remove menu (Update and Remove enabled only when the document has that mark), as Acrobat's Watermark control does. The catalogue gains `ToolItem::actions`, so any tool can list more commands (#1192).
 
 - **2026-10-18 (M8, #1350):** Published the history-preserving integration; simplified the inherited-form resource guard for Rust 1.96 Clippy. Formatting, 64 redaction tests, scoped Clippy, layering, assets and the scoped wasm check pass locally. CI remains pending; estimates unchanged.
+- **2026-10-12 (i18n):** Albanian (`sq`, Shqip) added: 2,343-entry catalog, month and weekday names, Preferences entry; not yet reviewed by a native speaker.
 
 - **2026-10-21 (M4, #3865):** A new bookmark records where the reader is: the top-left of the selected text, or the top of the window, as `/XYZ left top null` (zoom kept), instead of the page top (`Edit::AddBookmark` takes `left` and `top`; `bookmark_add` takes `top` and `left`; `PageInfo::xyz_for_view`).
+
 - **2026-10-18 (renderer, hayro patches 19/35):** A mesh shading (types 4–7) is sampled over its own triangles instead of the whole path: a BricsCAD plan with 310 one-triangle `sh` fills took 2 s per 1024 px tile at every zoom (and hit the 20 s watchdog on a busy machine); now about 70 ms, so zooming into dense topology drawings stays fluid. Estimates unchanged.
-- **2026-10-12 (i18n):** Albanian (`sq`, Shqip) added: 2,343-entry catalog, month and weekday names, Preferences entry; not yet reviewed by a native speaker.
