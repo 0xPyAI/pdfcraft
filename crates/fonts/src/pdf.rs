@@ -1143,7 +1143,8 @@ pub fn glyph_unicode(name: &str) -> Option<char> {
     chars.next().filter(|_| chars.len() == 0)
 }
 
-/// Code → Unicode for a font: its ToUnicode CMap, else (simple fonts) its encoding.
+/// Code → Unicode for a font: its ToUnicode CMap (for a composite font, also the name
+/// `/Identity-H` or `/Identity-V`, read as code = Unicode), else (simple fonts) its encoding.
 fn unicode_map(doc: &Document, font: &Dict, composite: bool) -> Unicode {
     let mut out = Unicode::default();
     if !composite {
@@ -1206,12 +1207,42 @@ fn unicode_map(doc: &Document, font: &Dict, composite: bool) -> Unicode {
             }
         }
     }
-    if let Some(Object::Stream(s)) = font.get(b"ToUnicode").map(|t| doc.resolve(t)).as_deref()
-        && let Ok(data) = s.decoded()
-    {
-        parse_to_unicode(&data, &mut out);
+    match font.get(b"ToUnicode").map(|t| doc.resolve(t)).as_deref() {
+        Some(Object::Stream(s)) => {
+            if let Ok(data) = s.decoded() {
+                parse_to_unicode(&data, &mut out);
+            }
+        }
+        // `/ToUnicode /Identity-H` is not a stream, as ISO 32000-2 §9.10.3 requires, but CAD
+        // exporters (WSCAD among them) write it for composite fonts whose two-byte codes are the
+        // UTF-16 code units. Acrobat shows them as code = Unicode, and so does the renderer's
+        // text layer; without it the text could be seen but not edited or found. The same rule
+        // (code = Unicode, no controls or lone surrogates) is in the vendored renderer,
+        // `Type0Font::char_code_to_unicode` in vendor/hayro-interpret/src/font/cid.rs: keep both alike.
+        Some(Object::Name(n)) if composite && matches!(n.as_slice(), b"Identity-H" | b"Identity-V") => {
+            parse_to_unicode(&identity_to_unicode(), &mut out);
+        }
+        _ => {}
     }
     out
+}
+
+/// A ToUnicode CMap mapping each two-byte code to the same UTF-16 code unit, leaving out the
+/// surrogates (which are not characters on their own) and the controls (C0, DEL and C1, as the
+/// renderer's text layer does). No range crosses a last-byte boundary (§9.10.3).
+fn identity_to_unicode() -> Vec<u8> {
+    let mut ranges = vec![(0x20u32, 0x7Eu32), (0xA0, 0xFF)];
+    ranges.extend((0x01u32..=0xFF).filter(|h| !(0xD8..=0xDF).contains(h)).map(|h| (h << 8, (h << 8) | 0xFF)));
+    let mut cmap = String::from("1 begincodespacerange <0000> <FFFF> endcodespacerange\n");
+    // At most 100 entries per section (§9.7.5.2 limits for CMap files).
+    for chunk in ranges.chunks(100) {
+        cmap.push_str(&format!("{} beginbfrange\n", chunk.len()));
+        for (lo, hi) in chunk {
+            cmap.push_str(&format!("<{lo:04X}> <{hi:04X}> <{lo:04X}>\n"));
+        }
+        cmap.push_str("endbfrange\n");
+    }
+    cmap.into_bytes()
 }
 
 #[cfg(test)]
@@ -1487,6 +1518,41 @@ mod tests {
         let m = Metrics::from_dict(&doc, &f);
         assert_eq!(m.encode("Me er").as_deref(), Some(&[0, 1, 0, 5, 0, 7, 0, 5, 0, 6][..]));
         assert_eq!(m.decode(&[0, 1, 0, 7, 0, 2]), "M á");
+    }
+
+    /// WSCAD writes `/ToUnicode /Identity-H` (a name, not a CMap stream) on composite fonts whose
+    /// codes are UTF-16 code units: the codes read as the same Unicode, as in Acrobat. Controls
+    /// and lone surrogates map to nothing, and a simple font's name is not a ToUnicode map.
+    #[test]
+    fn identity_to_unicode_names_read_codes_as_unicode() {
+        let doc = Document::new_empty();
+        for name in ["Identity-H", "Identity-V"] {
+            let f = font(
+                &mut Document::new_empty(),
+                vec![
+                    ("Subtype", Object::name("Type0")),
+                    ("BaseFont", Object::name("RobotoMono-Regular")),
+                    ("Encoding", Object::name("Identity-H")),
+                    ("DescendantFonts", Object::Array(vec![Object::Dict(Dict::new())])),
+                    ("ToUnicode", Object::name(name)),
+                ],
+            );
+            let m = Metrics::from_dict(&doc, &f);
+            assert_eq!(m.decode(&[0, b'Z', 0, 0xFC, 0, b'r', 0x20, 0xAC, 0x4E, 0x2D]), "Zür€中", "{name}");
+            assert_eq!(m.text_of(0x0001), None);
+            assert_eq!(m.text_of(0x007F), None, "DEL is a control");
+            assert_eq!(m.text_of(0x0085), None, "a C1 control");
+            assert_eq!(m.text_of(0x00A0).as_deref(), Some("\u{A0}"), "the range resumes after C1");
+            assert_eq!(m.text_of(0x007E).as_deref(), Some("~"));
+            assert_eq!(m.text_of(0xD800), None);
+            assert_eq!(m.text_of(0xFFFD).as_deref(), Some("\u{FFFD}"));
+        }
+        let simple = font(
+            &mut Document::new_empty(),
+            vec![("Subtype", Object::name("TrueType")), ("BaseFont", Object::name("Arial")), ("ToUnicode", Object::name("Identity-H"))],
+        );
+        let m = Metrics::from_dict(&doc, &simple);
+        assert_eq!(m.text_of(0x41).as_deref(), Some("A"), "the encoding still applies");
     }
 
     /// Chrome's subsets leave the glyphs of `/DW` width out of `/W` (#1443): "s" (CID 0x56) is

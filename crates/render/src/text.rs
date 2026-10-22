@@ -1757,6 +1757,37 @@ mod tests {
         }
     }
 
+    /// WSCAD writes `/ToUnicode /Identity-H`, a name rather than a CMap stream, on Type 0 fonts
+    /// whose two-byte codes are UTF-16 code units. The codes read as that Unicode text (as in
+    /// Acrobat), so the page's text can be selected and found; before, it had none. Controls (here a
+    /// DEL and a C1 control at the line ends) are not text.
+    #[test]
+    fn identity_to_unicode_names_give_text() {
+        use lopdf::{Document, Object, Stream, dictionary};
+        for name in ["Identity-H", "Identity-V"] {
+            let mut doc = Document::with_version("1.4");
+            let cid = doc.add_object(dictionary! {
+                "Type" => "Font", "Subtype" => "CIDFontType2", "BaseFont" => "RobotoMono-Regular",
+                "CIDSystemInfo" => dictionary! { "Registry" => Object::string_literal("Adobe"), "Ordering" => Object::string_literal("Identity"), "Supplement" => 0 },
+                "DW" => 600, "CIDToGIDMap" => "Identity"
+            });
+            let font = doc.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "RobotoMono-Regular", "Encoding" => "Identity-H", "DescendantFonts" => vec![Object::Reference(cid)], "ToUnicode" => name });
+            let operators = "BT /F1 12 Tf 1 0 0 1 20 250 Tm <004400650063006B0062006C006100740074007F> Tj 1 0 0 1 20 200 Tm <005A00FC0072006900630068002020AC0085> Tj ET";
+            let content = doc.add_object(Stream::new(dictionary! {}, operators.as_bytes().to_vec()));
+            let pages = doc.new_object_id();
+            let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages, "MediaBox" => vec![Object::Integer(0), Object::Integer(0), Object::Integer(300), Object::Integer(300)], "Resources" => dictionary! {"Font" => dictionary! {"F1" => font}}, "Contents" => content });
+            doc.objects.insert(pages, dictionary! {"Type" => "Pages", "Kids" => vec![Object::Reference(page)], "Count" => 1}.into());
+            let catalog = doc.add_object(dictionary! {"Type" => "Catalog", "Pages" => pages});
+            doc.trailer.set("Root", catalog);
+            let mut bytes = Vec::new();
+            doc.save_to(&mut bytes).unwrap();
+            let pdf = Pdf::new(std::sync::Arc::new(bytes)).unwrap();
+            let text = extract_page(&pdf, 0, &InterpreterSettings::default()).unwrap();
+            assert_eq!(text.plain_text(), "Deckblatt\nZürich €", "{name}");
+            assert_eq!(text.find("zürich"), vec![9..15], "{name}: glyphs 9 to 14");
+        }
+    }
+
     /// One page per text matrix, each showing `codes` in Helvetica whose `/ToUnicode` maps the
     /// codes in `unicode` (a `bfchar` body) to several characters.
     fn ligature_pages(unicode: &str, codes: &str, matrices: &[&str]) -> Pdf {
