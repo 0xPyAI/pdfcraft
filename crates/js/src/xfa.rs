@@ -158,7 +158,10 @@ pub const MAX_ALERTS: usize = 100;
 /// Most console lines one run may print.
 pub const MAX_CONSOLE: usize = 1_000;
 /// Longest message or console line kept, in characters.
-const MAX_LINE: usize = 4_096;
+pub(crate) const MAX_LINE: usize = 4_096;
+/// Most bytes of text one run may hand back or write: messages, console lines, URLs, names
+/// and the values it sets. Past it, more are left out and noted.
+pub(crate) const MAX_PAYLOAD: usize = 32 << 20;
 
 /// Longest value a script may put in a field (characters); longer ones are cut and noted.
 const MAX_VALUE: usize = 65_536;

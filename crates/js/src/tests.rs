@@ -244,6 +244,35 @@ fn document_requests_and_console() {
     );
 }
 
+/// Bytes of text a run handed back in its messages, console lines and requests.
+fn kept_bytes(o: &Outcome) -> usize {
+    let req = |r: &Request| match r {
+        Request::Reset(names) => names.iter().map(String::len).sum(),
+        Request::Submit(u) | Request::LaunchUrl(u) | Request::Focus(u) => u.len(),
+        _ => 0,
+    };
+    o.console.iter().chain(&o.alerts).map(String::len).sum::<usize>() + o.requests.iter().map(req).sum::<usize>()
+}
+
+#[test]
+fn console_alerts_and_requests_are_capped_in_count_and_bytes() {
+    let o = go(
+        "var s = 'x'; while (s.length < 8192) s += s; \
+         for (var i = 0; i < 1500; i++) { console.println(s); app.alert(s); } \
+         var a = []; for (var i = 0; i < 2000; i++) a.push(s); \
+         for (var i = 0; i < 5; i++) this.resetForm(a); \
+         for (var i = 0; i < 12000; i++) app.launchURL('u');",
+        &Event::field("Mouse Up", "agree", ""),
+    );
+    assert_eq!(o.error, None);
+    assert!(o.console.len() <= crate::xfa::MAX_CONSOLE + 1, "{} console lines", o.console.len());
+    assert!(o.alerts.len() <= crate::xfa::MAX_ALERTS, "{} alerts", o.alerts.len());
+    assert!(o.requests.len() <= crate::xfa::MAX_EFFECTS, "{} requests", o.requests.len());
+    assert!(o.console.iter().chain(&o.alerts).all(|m| m.chars().count() <= 4_097));
+    assert!(kept_bytes(&o) <= crate::xfa::MAX_PAYLOAD, "{} bytes kept", kept_bytes(&o));
+    assert!(o.console.last().is_some_and(|l| l.contains("left out")), "{:?}", o.console.last());
+}
+
 #[test]
 fn printd_reads_a_long_literal_run_in_linear_work() {
     crate::PRINTD_SCANNED.store(0, std::sync::atomic::Ordering::Relaxed);
