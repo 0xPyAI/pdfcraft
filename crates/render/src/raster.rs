@@ -16,6 +16,8 @@ use std::sync::mpsc::SyncSender;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::{Receiver, sync_channel};
 
+#[cfg(test)]
+mod radial_softmask_tests;
 mod work_queue;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
