@@ -523,7 +523,9 @@ pub(crate) fn editor(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, ad
     let (mut commit, mut cancel, mut done) = (false, false, false);
     let mut undrawable = None;
     let memo = &view.content.undrawable;
-    egui::Area::new(egui::Id::new(("added-text", view.id.0))).order(egui::Order::Foreground).fixed_pos(r.min).constrain(false).show(ctx, |ui| {
+    // Shown at once, like the paragraph editor: a fade-in shows the page's copy through it.
+    let area = egui::Area::new(egui::Id::new(("added-text", view.id.0))).fade_in(false);
+    area.order(egui::Order::Foreground).fixed_pos(r.min).constrain(false).show(ctx, |ui| {
         let Some(t) = view.content.draft.as_mut() else { return };
         ui.set_width(r.width() + 64.0);
         if let Some(source_rect) = source_rect.filter(|_| !background_ready) {

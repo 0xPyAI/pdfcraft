@@ -1531,9 +1531,12 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
     let mut done = None;
     let mut reveal = false;
     let mut look = None;
-    egui::Area::new(egui::Id::new("edit-text-line")).order(egui::Order::Foreground).fixed_pos(Pos2::new(ed.rect.left(), ed.rect.top())).show(
-        ctx,
-        |ui| {
+    // No fade-in: while it faded, the page's own copy of the text showed through the cover.
+    egui::Area::new(egui::Id::new("edit-text-line"))
+        .order(egui::Order::Foreground)
+        .fade_in(false)
+        .fixed_pos(Pos2::new(ed.rect.left(), ed.rect.top()))
+        .show(ctx, |ui| {
             // The editor opens at the source size. Once text changes, show the real draft
             // extent: single rows grow toward the page edge, paragraphs rewrap at their
             // source width, and the visible frame grows/shrinks vertically with their rows.
@@ -1626,8 +1629,7 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
                     done = Some(true);
                 }
             });
-        },
-    );
+        });
     if reveal {
         view.text_background.reveal();
     }
