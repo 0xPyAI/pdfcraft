@@ -666,6 +666,22 @@ mod xfa_model {
     }
 
     #[test]
+    fn urls_and_reset_lists_are_clipped_and_deduplicated() {
+        let o = go(
+            "var s = 'x'; while (s.length < 65536) s += s; for (var i = 0; i < 600; i++) xfa.host.gotoURL(s + i); \
+             var r = 'a,'; while (r.length < 262144) r += r; xfa.host.resetData(r);",
+            "form1[0].page1[0]",
+            "initialize",
+        );
+        assert_eq!(o.error, None);
+        let urls: Vec<&String> = o.effects.iter().filter_map(|e| if let XfaEffect::LaunchUrl(u) = e { Some(u) } else { None }).collect();
+        assert_eq!(urls.len(), 600);
+        assert!(urls.iter().all(|u| u.chars().count() <= 4_097));
+        let names: usize = o.effects.iter().map(|e| if let XfaEffect::ResetData(n) = e { n.len() } else { 0 }).sum();
+        assert_eq!(names, 1);
+    }
+
+    #[test]
     fn a_slow_engine_start_does_not_count_against_the_script() {
         let ms = std::time::Duration::from_millis;
         // On a busy machine the engine can take longer to start than a script may run: the
@@ -714,6 +730,40 @@ mod formcalc {
         let o = go(script, "form1[0].page1[0].total[0]", "calculate");
         assert_eq!(o.error, None, "{script}");
         o.result.unwrap_or_default()
+    }
+
+    /// Assigning one long value to many fields at once stops at the run's byte budget and is
+    /// charged per copy, and a reset list names each field once.
+    #[test]
+    fn bulk_assignments_and_reset_lists_are_bounded() {
+        let f = |i: usize| super::xfa_model::field("f", &format!("form1[0].page1[0].f[{i}]"), "", false);
+        let root = XfaNode {
+            name: "form1".into(),
+            som: "form1[0]".into(),
+            kind: Some(XfaKind::Subform),
+            children: vec![XfaNode {
+                name: "page1".into(),
+                som: "form1[0].page1[0]".into(),
+                kind: Some(XfaKind::Subform),
+                children: (0..1300).map(f).collect(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let ev = XfaEvent { activity: "initialize".into(), target: "form1[0]".into(), ..Default::default() };
+        let run = |script: &str| run_formcalc(script, &ev, &XfaDoc::default(), &root, Limits::default());
+        let o = run("var s = \"x\"\nwhile (Len(s) < 65536) do s = Concat(s, s) endwhile\npage1.f = s");
+        assert_eq!(o.error, None, "{o:?}");
+        let kept: usize = o.effects.iter().map(|e| if let XfaEffect::SetValue { value, .. } = e { value.len() } else { 0 }).sum();
+        assert!(kept <= MAX_PAYLOAD, "{kept} bytes of values kept");
+        assert!(o.notes.iter().any(|n| n.contains("left out")), "{:?}", o.notes);
+        // 1300 copies of a 1 MiB value are more work than a script may do.
+        let o = run("var s = \"x\"\nwhile (Len(s) < 1048576) do s = Concat(s, s) endwhile\npage1.f = s");
+        assert_eq!(o.error.as_deref(), Some("the script ran too long"), "{:?}", o.notes);
+        let o = run("var r = \"a,\"\nwhile (Len(r) < 262144) do r = Concat(r, r) endwhile\n$host.resetData(r)\n$host.resetData(r)");
+        assert_eq!(o.error, None, "{o:?}");
+        let names: usize = o.effects.iter().map(|e| if let XfaEffect::ResetData(n) = e { n.len() } else { 0 }).sum();
+        assert_eq!(names, 2);
     }
 
     /// FormCalc reads `formattedValue` as the field's picture shows it too, until the script

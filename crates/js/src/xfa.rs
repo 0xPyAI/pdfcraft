@@ -8,7 +8,7 @@
 //! children, then its siblings, then each ancestor's children.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use boa_engine::object::ObjectInitializer;
 use boa_engine::object::builtins::{JsArray, JsProxy};
@@ -182,6 +182,36 @@ pub(crate) fn clip_value(v: String) -> (String, bool) {
     }
 }
 
+/// The field names of a `resetData` list (comma-separated), each cut to [`MAX_LINE`] and
+/// named once, at most as many as a snapshot holds nodes.
+pub(crate) fn reset_names(list: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for name in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        if out.len() >= MAX_NODES {
+            break;
+        }
+        let name = clip(name.to_string());
+        if seen.insert(name.clone()) {
+            out.push(name);
+        }
+    }
+    out
+}
+
+/// Bytes of text `e` holds.
+fn payload(e: &XfaEffect) -> usize {
+    match e {
+        XfaEffect::SetValue { som, value: s } | XfaEffect::SetPresence { som, presence: s } | XfaEffect::SetAccess { som, access: s } => {
+            som.len().saturating_add(s.len())
+        }
+        XfaEffect::AddInstance { som } | XfaEffect::RemoveInstance { som } => som.len(),
+        XfaEffect::MessageBox(s) | XfaEffect::LaunchUrl(s) | XfaEffect::SetFocus(s) => s.len(),
+        XfaEffect::ResetData(names) => names.iter().fold(0usize, |n, s| n.saturating_add(s.len()).saturating_add(std::mem::size_of::<String>())),
+        XfaEffect::Print | XfaEffect::SaveAs | XfaEffect::Beep | XfaEffect::Recalculate | XfaEffect::Relayout => 0,
+    }
+}
+
 /// A script's completion value (what a calculate script puts in its field) cut to
 /// [`MAX_VALUE`] characters, as values a script sets are, with a note when it was.
 pub(crate) fn clip_result(out: &mut XfaOutcome) {
@@ -235,6 +265,9 @@ pub(crate) struct XHost {
     clipped_values: usize,
     dropped_alerts: usize,
     dropped_console: usize,
+    /// Bytes of text kept in effects, console lines and values written, against [`MAX_PAYLOAD`].
+    kept: usize,
+    dropped_bytes: usize,
 }
 
 impl XHost {
@@ -259,15 +292,34 @@ impl XHost {
             clipped_values: 0,
             dropped_alerts: 0,
             dropped_console: 0,
+            kept: 0,
+            dropped_bytes: 0,
+        }
+    }
+
+    /// Room for `bytes` more bytes of kept text: charged when there is, a drop counted when not.
+    fn room(&mut self, bytes: usize) -> bool {
+        match self.kept.checked_add(bytes).filter(|k| *k <= MAX_PAYLOAD) {
+            Some(k) => {
+                self.kept = k;
+                true
+            }
+            None => {
+                self.dropped_bytes = self.dropped_bytes.saturating_add(1);
+                false
+            }
         }
     }
 
     /// Record an effect: values, presence and access set again on the same object replace the
-    /// earlier one; past [`MAX_EFFECTS`] (or [`MAX_ALERTS`] message boxes) effects are counted
-    /// and dropped.
+    /// earlier one; past [`MAX_EFFECTS`] (or [`MAX_ALERTS`] message boxes, or [`MAX_PAYLOAD`]
+    /// bytes of text) effects are counted and dropped.
     pub(crate) fn push(&mut self, e: XfaEffect) {
         let e = match e {
             XfaEffect::MessageBox(m) => XfaEffect::MessageBox(clip(m)),
+            XfaEffect::LaunchUrl(u) => XfaEffect::LaunchUrl(clip(u)),
+            XfaEffect::SetFocus(s) => XfaEffect::SetFocus(clip(s)),
+            XfaEffect::ResetData(names) => XfaEffect::ResetData(names.into_iter().map(clip).collect()),
             XfaEffect::SetValue { som, value } => {
                 let (value, cut) = clip_value(value);
                 if cut {
@@ -277,6 +329,9 @@ impl XHost {
             }
             other => other,
         };
+        if !self.room(payload(&e)) {
+            return;
+        }
         let key = match &e {
             XfaEffect::SetValue { som, .. } => Some((0u8, som.clone())),
             XfaEffect::SetPresence { som, .. } => Some((1, som.clone())),
@@ -319,7 +374,7 @@ impl XHost {
     pub(crate) fn print(&mut self, line: String) {
         if self.console.len() >= MAX_CONSOLE {
             self.dropped_console += 1;
-        } else {
+        } else if self.room(line.len()) {
             self.console.push(line);
         }
     }
@@ -336,6 +391,9 @@ impl XHost {
         if self.dropped_console > 0 {
             out.push(format!("the script printed more than {MAX_CONSOLE} console lines; {} more were left out", self.dropped_console));
         }
+        if self.dropped_bytes > 0 {
+            out.push(format!("the script's changes and output passed {} MiB of text; {} more were left out", MAX_PAYLOAD >> 20, self.dropped_bytes));
+        }
         if self.clipped_values > 0 {
             out.push(format!("the script set {} value(s) longer than {MAX_VALUE} characters; they were cut", self.clipped_values));
         }
@@ -346,18 +404,25 @@ impl XHost {
     /// holds a value; writing one into a subform would put text where another viewer expects
     /// a data group). Returns whether it was.
     pub(crate) fn set_value(&mut self, i: usize, text: String) -> bool {
-        let Some(n) = self.nodes.get_mut(i) else { return false };
+        let Some(n) = self.nodes.get(i) else { return false };
         if n.gone || !matches!(n.kind, XfaKind::Field | XfaKind::ExclGroup) {
             return false;
         }
+        let som = n.som.clone();
         // Cut here, not only in the effect: later reads in the script see what is saved, and
         // the snapshot stays bounded however often a long value is written.
         let (text, cut) = clip_value(text);
-        n.value = text.clone();
-        n.formatted = None;
-        let som = n.som.clone();
         if cut {
             self.clipped_values += 1;
+        }
+        // The snapshot's copy counts as well as the effect's: past the budget the write is left
+        // out of both.
+        if !self.room(text.len()) {
+            return true;
+        }
+        if let Some(n) = self.nodes.get_mut(i) {
+            n.value = text.clone();
+            n.formatted = None;
         }
         self.push(XfaEffect::SetValue { som, value: text });
         true
@@ -1027,8 +1092,7 @@ fn message_box(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsV
 
 fn reset_data(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let list = text(&arg(args, 0), ctx)?;
-    let names: Vec<String> = list.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect();
-    effect(ctx, XfaEffect::ResetData(names))?;
+    effect(ctx, XfaEffect::ResetData(reset_names(&list)))?;
     Ok(JsValue::undefined())
 }
 
