@@ -574,6 +574,126 @@ fn scans_identity_fonts_and_long_documents() {
     assert_eq!(some.result(Rule::CharacterEncoding).unwrap().findings[0].page, Some(3));
 }
 
+fn cid_encoding_pdf(encoding: &str, system: &str, to_unicode: bool) -> Document {
+    let unicode = if to_unicode { "/ToUnicode 7 0 R" } else { "" };
+    pdf(
+        &[
+            "<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".into(),
+            stream("/P << /MCID 0 >> BDC BT /F1 12 Tf <002200230024> Tj ET EMC"),
+            format!("<< /Type /Font /Subtype /Type0 /BaseFont /SyntheticCID /Encoding {encoding} /DescendantFonts [6 0 R] {unicode} >>"),
+            format!("<< /Type /Font /Subtype /CIDFontType0 /BaseFont /SyntheticCID /CIDSystemInfo {system} >>"),
+            stream(
+                "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /SyntheticUnicode def /CMapType 2 def 1 begincodespacerange <0000> <FFFF> endcodespacerange 3 beginbfchar <0022> <0041> <0023> <0042> <0024> <0043> endbfchar endcmap CMapName currentdict /CMap defineresource pop end end",
+            ),
+        ],
+        "",
+    )
+}
+
+#[test]
+fn character_encoding_accepts_identity_cjk_collections() {
+    for encoding in ["/Identity-H", "/Identity-V"] {
+        for ordering in ["Japan1", "GB1", "CNS1", "Korea1", "KR"] {
+            let system = format!("<< /Registry (Adobe) /Ordering ({ordering}) /Supplement 0 >>");
+            let doc = cid_encoding_pdf(encoding, &system, false);
+            let report = checked(&doc, &[Rule::CharacterEncoding]);
+            let result = report.result(Rule::CharacterEncoding).unwrap();
+            assert_eq!(result.status, Status::Passed, "{encoding}, Adobe-{ordering}: {:?}", result.findings);
+            assert!(result.findings.is_empty());
+        }
+    }
+}
+
+#[test]
+fn character_encoding_accepts_predefined_cmaps_without_a_known_collection() {
+    // The predefined CMap and the descendant's character collection are alternative routes.
+    let system = "<< /Registry (Private) /Ordering (Custom) /Supplement 0 >>";
+    for name in [
+        "GB-EUC-H",
+        "GB-EUC-V",
+        "GBK2K-H",
+        "GBK2K-V",
+        "UniGB-UTF16-H",
+        "UniGB-UTF16-V",
+        "B5pc-H",
+        "B5pc-V",
+        "UniCNS-UCS2-H",
+        "UniCNS-UCS2-V",
+        "83pv-RKSJ-H",
+        "90pv-RKSJ-H",
+        "90ms-RKSJ-H",
+        "90ms-RKSJ-V",
+        "H",
+        "V",
+        "UniJIS-UCS2-HW-H",
+        "UniJIS-UCS2-HW-V",
+        "KSCpc-EUC-H",
+        "KSC-EUC-V",
+        "KSCms-UHC-HW-H",
+        "KSCms-UHC-HW-V",
+        "UniKS-UTF16-H",
+        "UniKS-UTF16-V",
+        "UniAKR-UTF8-H",
+        "UniAKR-UTF16-H",
+        "UniAKR-UTF32-H",
+    ] {
+        let doc = cid_encoding_pdf(&format!("/{name}"), system, false);
+        let report = checked(&doc, &[Rule::CharacterEncoding]);
+        assert_eq!(status(&report, Rule::CharacterEncoding), Status::Passed, "{name}");
+    }
+}
+
+#[test]
+fn character_encoding_rejects_unknown_cmaps_and_foreign_collections() {
+    for encoding in
+        ["/Identity-H", "/Identity-V", "/Custom-H", "/UniCustom-UTF16-H", "/UniJIS-UCS2-HW-extra-H", "/83pv-RKSJ-V", "/KSCpc-EUC-V", "null"]
+    {
+        for system in [
+            "<< /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>",
+            "<< /Registry (Adobe) /Ordering (Custom) /Supplement 0 >>",
+            "<< /Registry (Private) /Ordering (Japan1) /Supplement 0 >>",
+            "<< /Registry (adobe) /Ordering (Japan1) /Supplement 0 >>",
+            "<< /Ordering (Japan1) /Supplement 0 >>",
+            "<< /Registry /Adobe /Ordering /Japan1 /Supplement 0 >>",
+            "null",
+        ] {
+            let doc = cid_encoding_pdf(encoding, system, false);
+            let report = checked(&doc, &[Rule::CharacterEncoding]);
+            let result = report.result(Rule::CharacterEncoding).unwrap();
+            assert_eq!(result.status, Status::Failed, "{encoding}, {system}");
+            assert_eq!(result.findings.len(), 1);
+            assert_eq!(result.findings[0].page, Some(0));
+            assert!(result.findings[0].message.contains("SyntheticCID"));
+        }
+    }
+    let doc = cid_encoding_pdf("/Identity-H", "<< /Registry (Private) /Ordering (Custom) /Supplement 0 >>", true);
+    assert_eq!(status(&checked(&doc, &[Rule::CharacterEncoding]), Rule::CharacterEncoding), Status::Passed, "ToUnicode is still sufficient");
+}
+
+#[test]
+fn character_encoding_resolves_indirect_cid_metadata() {
+    use pdfcraft_cos::{Dict, ObjRef, PdfString};
+    let mut doc = cid_encoding_pdf("/Identity-H", "null", false);
+    let registry = doc.add(Object::String(PdfString::literal(b"Adobe".to_vec())));
+    let ordering = doc.add(Object::String(PdfString::literal(b"Japan1".to_vec())));
+    let mut system = Dict::new();
+    system.set(b"Registry".to_vec(), Object::Ref(registry));
+    system.set(b"Ordering".to_vec(), Object::Ref(ordering));
+    let system = doc.add(Object::Dict(system));
+    doc.update_dict(ObjRef::new(6, 0), |d| d.set(b"CIDSystemInfo".to_vec(), Object::Ref(system))).unwrap();
+    let descendants = doc.add(Object::Array(vec![Object::Ref(ObjRef::new(6, 0))]));
+    let encoding = doc.add(Object::Name(b"Identity-V".to_vec()));
+    doc.update_dict(ObjRef::new(5, 0), |d| {
+        d.set(b"DescendantFonts".to_vec(), Object::Ref(descendants));
+        d.set(b"Encoding".to_vec(), Object::Ref(encoding));
+    })
+    .unwrap();
+    let report = checked(&doc, &[Rule::CharacterEncoding]);
+    assert_eq!(status(&report, Rule::CharacterEncoding), Status::Passed);
+}
+
 #[test]
 fn rules_have_ids_and_the_report_lists_them() {
     assert_eq!(Rule::ALL.len(), 32);

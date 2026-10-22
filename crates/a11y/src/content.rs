@@ -386,8 +386,47 @@ fn full_name(doc: &Document, field: ObjRef) -> String {
     parts.join(".")
 }
 
-/// Whether text in this font can be mapped to Unicode (ToUnicode, a standard encoding, or a
-/// predefined CJK character collection).
+/// Predefined CJK CMaps (ISO 32000-2 §9.7.5.2, Table 116), excluding Identity-H/V.
+/// Test complete names: neither a custom CMap nor a nonexistent vertical variant is predefined.
+fn predefined_cjk_cmap(name: &[u8]) -> bool {
+    if matches!(name, b"H" | b"V" | b"83pv-RKSJ-H" | b"90pv-RKSJ-H" | b"KSCpc-EUC-H" | b"UniAKR-UTF8-H" | b"UniAKR-UTF16-H" | b"UniAKR-UTF32-H") {
+        return true;
+    }
+    let Some(base) = name.strip_suffix(b"-H").or_else(|| name.strip_suffix(b"-V")) else { return false };
+    matches!(
+        base,
+        b"GB-EUC"
+            | b"GBpc-EUC"
+            | b"GBK-EUC"
+            | b"GBKp-EUC"
+            | b"GBK2K"
+            | b"UniGB-UCS2"
+            | b"UniGB-UTF16"
+            | b"B5pc"
+            | b"HKscs-B5"
+            | b"ETen-B5"
+            | b"ETenms-B5"
+            | b"CNS-EUC"
+            | b"UniCNS-UCS2"
+            | b"UniCNS-UTF16"
+            | b"90ms-RKSJ"
+            | b"90msp-RKSJ"
+            | b"Add-RKSJ"
+            | b"EUC"
+            | b"Ext-RKSJ"
+            | b"UniJIS-UCS2"
+            | b"UniJIS-UCS2-HW"
+            | b"UniJIS-UTF16"
+            | b"KSC-EUC"
+            | b"KSCms-UHC"
+            | b"KSCms-UHC-HW"
+            | b"UniKS-UCS2"
+            | b"UniKS-UTF16"
+    )
+}
+
+/// Whether text in this font declares a Unicode mapping route (ToUnicode, a standard encoding,
+/// a predefined CJK CMap, or an Adobe CJK character collection). This does not validate every glyph.
 fn maps_to_unicode(doc: &Document, f: &Dict) -> bool {
     if f.contains(b"ToUnicode") {
         return true;
@@ -395,16 +434,22 @@ fn maps_to_unicode(doc: &Document, f: &Dict) -> bool {
     let enc = f.get(b"Encoding").map(|e| doc.resolve(e));
     match f.name(b"Subtype") {
         Some(b"Type0") => {
-            let identity = matches!(enc.as_deref(), Some(Object::Name(n)) if n.starts_with(b"Identity"));
-            let ordering = f
+            // ISO 32000-2 §9.10.2: either a predefined non-Identity CMap or the descendant's
+            // Adobe CJK collection supplies the route. Identity-H/V do not rule out the latter.
+            if matches!(enc.as_deref(), Some(Object::Name(n)) if predefined_cjk_cmap(n)) {
+                return true;
+            }
+            let system = f
                 .get(b"DescendantFonts")
                 .map(|d| doc.resolve(d))
                 .and_then(|d| d.as_array().and_then(|a| a.first().cloned()))
                 .and_then(|d| doc.resolve(&d).as_dict().cloned())
-                .and_then(|d| d.get(b"CIDSystemInfo").map(|c| doc.resolve(c)).and_then(|c| c.as_dict().cloned()))
-                .and_then(|c| c.get(b"Ordering").map(|o| doc.resolve(o)).and_then(|o| o.as_string().map(|s| s.bytes.clone())));
-            let known = matches!(ordering.as_deref(), Some(b"Japan1" | b"GB1" | b"CNS1" | b"Korea1" | b"KR"));
-            !identity && known
+                .and_then(|d| d.get(b"CIDSystemInfo").map(|c| doc.resolve(c)).and_then(|c| c.as_dict().cloned()));
+            let Some(system) = system else { return false };
+            let registry = system.get(b"Registry").map(|r| doc.resolve(r));
+            let ordering = system.get(b"Ordering").map(|o| doc.resolve(o));
+            matches!(registry.as_deref(), Some(Object::String(s)) if s.bytes == b"Adobe")
+                && matches!(ordering.as_deref(), Some(Object::String(s)) if matches!(s.bytes.as_slice(), b"Japan1" | b"GB1" | b"CNS1" | b"Korea1" | b"KR"))
         }
         Some(b"Type3") => enc.is_some(),
         _ => match enc.as_deref() {
