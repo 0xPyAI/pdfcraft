@@ -108,10 +108,10 @@ fn assert_rendered_page(data: &[u8], dpi: u32, what: &str) {
     let mut buf = vec![0; reader.output_buffer_size().unwrap()];
     let frame = reader.next_frame(&mut buf).unwrap();
     assert_eq!((frame.width, frame.height), (200 * dpi / 72, 300 * dpi / 72), "{what}");
-    // `render` writes 8-bit RGBA (`pdfcraft_engine::export::encode_png`).
-    assert_eq!((frame.color_type, frame.bit_depth), (png::ColorType::Rgba, png::BitDepth::Eight), "{what}");
-    // Opaque pixels with every colour channel below half intensity: ink, not white paper.
-    let inked = buf[..frame.buffer_size()].as_chunks::<4>().0.iter().filter(|[r, g, b, a]| [r, g, b].iter().all(|c| **c < 128) && *a > 128).count();
+    // A rendered page is opaque, so `render` writes it as 8-bit RGB (`pdfcraft_engine::export::encode_png`).
+    assert_eq!((frame.color_type, frame.bit_depth), (png::ColorType::Rgb, png::BitDepth::Eight), "{what}");
+    // Pixels with every colour channel below half intensity: ink, not white paper.
+    let inked = buf[..frame.buffer_size()].as_chunks::<3>().0.iter().filter(|px| px.iter().all(|c| *c < 128)).count();
     assert!(inked > 100, "{what}: only {inked} inked pixels, the page is blank");
 }
 
