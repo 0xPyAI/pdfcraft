@@ -4623,9 +4623,6 @@ fn xfa_date_arithmetic_reads_the_date_as_its_display_picture_shows_it() {
     assert_eq!(value(&s, "to"), ["20261022"], "{:?}", out.errors);
 }
 
-/// A scripted form end to end: initialize and calculate on open, recalculation after a change,
-/// a failing validation's message, buttons that add and remove rows and show messages, a check
-/// box that shows a subform (undoable), FormCalc, and a save and reopen that keep it all.
 #[test]
 fn filling_growable_xfa_text_reflows_and_undo_restores_the_layout() {
     let text: String = (0..150).map(|i| format!("Row{i:03} {}sample\n", "sample ".repeat(8))).collect();
@@ -4736,6 +4733,9 @@ fn an_xfa_script_that_fails_partway_keeps_what_it_changed_before_the_error() {
     s.apply(id, Edit::SetFieldValue { name: "leave".into(), value: FieldValue::Check(true) }).expect("can be checked now");
 }
 
+/// A scripted form end to end: initialize and calculate on open, recalculation after a change,
+/// a failing validation's message, buttons that add and remove rows and show messages, a check
+/// box that shows a subform (undoable), FormCalc, and a save and reopen that keep it all.
 #[test]
 fn xfa_scripts_initialize_calculate_validate_toggle_and_add_rows() {
     let bytes = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()));
