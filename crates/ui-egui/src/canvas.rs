@@ -1514,6 +1514,17 @@ impl DocView {
         self.goto = Some((self.current, 0.0));
     }
 
+    /// The display shown outside full screen: the one presenting replaced, or the current one.
+    pub fn normal_display(&self) -> SavedDisplay {
+        self.presentation.unwrap_or(SavedDisplay {
+            layout: self.layout,
+            continuous: self.continuous,
+            cover: self.cover,
+            fit: self.fit,
+            zoom: self.zoom,
+        })
+    }
+
     /// Whether the view is in full screen's one-page-at-a-time display.
     pub fn presenting(&self) -> bool {
         self.presentation.is_some()

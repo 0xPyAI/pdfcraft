@@ -1651,3 +1651,40 @@ fn a_file_opened_again_shows_its_last_view() {
     assert_eq!(app.last_views.len(), 1);
     assert_eq!((app.last_views[0].page, app.last_views[0].zoom.as_str()), (1, "fit-page"));
 }
+
+/// #1767 with full screen: the view remembered while presenting is the one full screen will go
+/// back to, and a file reopened in full screen presents one fitted page, then leaves full
+/// screen for the remembered view.
+#[test]
+fn full_screen_neither_is_remembered_nor_hides_the_last_view() {
+    use pdfcraft_ui_egui::canvas::{Fit, PageLayout};
+    let path = std::env::temp_dir().join(format!("pdfcraft-last-view-fs-{}.pdf", std::process::id())).to_string_lossy().into_owned();
+    let p = path.clone();
+    let mut h = harness(move |app| app.open_bytes("doc.pdf", Some(p), pages_fixture(3)).expect("opens"));
+    {
+        let app = h.state_mut();
+        app.set_option("zoom", "50").unwrap();
+        let view = &mut app.views[0];
+        view.set_display(PageLayout::TwoUp, false);
+        view.go_to_page(2);
+        view.enter_presentation();
+        assert!(view.presenting() && view.fit == Fit::Page);
+    }
+    h.run_steps(3);
+    let saved = h.state().persist();
+    h.state_mut().close_tab(0);
+    let remembered = h.state().last_views[0].clone();
+    assert_eq!((remembered.page, remembered.zoom.as_str()), (2, "50%"), "not full screen's fitted page");
+    let p = path.clone();
+    let mut h = harness(move |app| {
+        app.restore(&saved);
+        app.full_screen = true;
+        app.open_bytes("doc.pdf", Some(p), pages_fixture(3)).expect("opens");
+    });
+    let v = &h.state().views[0];
+    assert!(v.presenting(), "opened in full screen");
+    assert_eq!((v.fit, v.continuous, v.current), (Fit::Page, false, 2), "one fitted page, where the reader left off");
+    let view = &mut h.state_mut().views[0];
+    view.leave_presentation();
+    assert_eq!((view.fit, view.zoom, view.layout, view.continuous), (Fit::None, 0.5, PageLayout::TwoUp, false), "the remembered view");
+}

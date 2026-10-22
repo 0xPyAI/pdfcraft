@@ -1412,7 +1412,9 @@ impl PdfCraftApp {
             self.active = Some(self.views.len() - 1);
         }
         self.apply_initial_view(self.views.len() - 1, &initial);
-        // After the document's own initial view, so leaving full screen comes back to it.
+        // Where the reader left off wins over the file's own initial view (#1767).
+        self.apply_last_view(self.views.len() - 1);
+        // After both, so full screen shows one fitted page and leaving it comes back to them.
         if self.full_screen
             && let Some(view) = self.views.last_mut()
         {
@@ -1423,8 +1425,6 @@ impl PdfCraftApp {
         if activate && initial.full_screen {
             self.pending_full_screen = Some(id);
         }
-        // Where the reader left off wins over the file's own initial view (#1767).
-        self.apply_last_view(self.views.len() - 1);
         if activate
             && self.left_open
             && self.left == LeftPanel::Tool("organize")

@@ -38,17 +38,19 @@ fn absolute(path: &str) -> String {
 }
 
 impl PdfCraftApp {
-    /// How view `index` shows its document now; `None` for a document without a file.
+    /// How view `index` shows its document now; `None` for a document without a file. In full
+    /// screen, the display it will go back to, at the page reached.
     fn view_to_remember(&self, index: usize) -> Option<LastView> {
         let view = self.views.get(index)?;
         let path = self.session.get(view.id)?.path.as_deref()?;
-        let zoom = ViewDefaults { fit: view.fit, zoom: view.zoom, ..ViewDefaults::default() }.zoom_name();
+        let shown = view.normal_display();
+        let zoom = ViewDefaults { fit: shown.fit, zoom: shown.zoom, ..ViewDefaults::default() }.zoom_name();
         Some(LastView {
             path: absolute(path),
             page: view.current,
             zoom,
-            display: canvas::display_token(view.layout, view.continuous).to_string(),
-            cover: view.cover,
+            display: canvas::display_token(shown.layout, shown.continuous).to_string(),
+            cover: shown.cover,
         })
     }
 
