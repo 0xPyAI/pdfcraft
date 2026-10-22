@@ -1759,6 +1759,67 @@ fn an_imported_redaction_rect_with_a_non_number_is_not_used() {
     assert!(mark.get(b"QuadPoints").is_none(), "quads were drawn from a malformed /Rect: {mark:?}");
 }
 
+/// An FDF body with `body` as its `/FDF` dictionary contents and `objects` (numbered from 2).
+fn fdf_with(body: &str, objects: &[String]) -> Vec<u8> {
+    let mut out = format!("%FDF-1.2\n1 0 obj\n<< /FDF << {body} >> >>\nendobj\n");
+    for (i, o) in objects.iter().enumerate() {
+        out.push_str(&format!("{} 0 obj\n{o}\nendobj\n", i + 2));
+    }
+    out.push_str("trailer\n<< /Root 1 0 R >>\n%%EOF\n");
+    out.into_bytes()
+}
+
+/// A field that lists itself as a kid is read once.
+#[test]
+fn an_fdf_field_listing_itself_is_read_once() {
+    let cyclic = fdf_with("/Fields [2 0 R]", &["<< /T (a) /V (x) /Kids [2 0 R] >>".into()]);
+    assert_eq!(data_values(&cyclic).unwrap(), vec![("a".to_string(), vec!["x".to_string()])]);
+}
+
+/// A field tree whose `/Kids` repeat one subtree level after level is refused rather than
+/// expanded into millions of rows.
+#[test]
+fn fdf_field_trees_that_repeat_references_are_bounded() {
+    let levels = 19;
+    let mut objects: Vec<String> = (0..levels).map(|i| format!("<< /T (f{i}) /V (x) /Kids [{n} 0 R {n} 0 R] >>", n = i + 3)).collect();
+    objects.push("<< /T (leaf) /V (x) >>".into());
+    let shared = fdf_with("/Fields [2 0 R]", &objects);
+    let read = data_values(&shared);
+    assert!(read.is_err(), "{} rows", read.map_or(0, |v| v.len()));
+    assert!(matches!(import(&mut blank(), &shared), Err(DataError::Malformed(_))));
+}
+
+fn fdf_note(data: &str) -> String {
+    format!("<< /Subtype /Text /Rect [0 0 9 9] /NM (n) /Page 0 /PCData {data} >>")
+}
+
+/// A comment property that refers back to the comment is copied once, not nested level after
+/// level.
+#[test]
+fn an_fdf_comment_referring_to_itself_is_copied_once() {
+    let cyclic = fdf_with("/Annots [2 0 R]", &[fdf_note("2 0 R")]);
+    let mut dst = blank();
+    assert_eq!(import(&mut dst, &cyclic).unwrap().comments, 1);
+    let placed = find_by_name(&dst, "n").unwrap();
+    let data = dst.get(placed).as_dict().unwrap().get(b"PCData").cloned();
+    assert!(!matches!(data, Some(Object::Dict(_))), "{data:?}");
+}
+
+/// A comment whose properties repeat one reference level after level is refused rather than
+/// copied into millions of values.
+#[test]
+fn fdf_comment_graphs_that_repeat_references_are_bounded() {
+    let note = fdf_note;
+    let width = 6;
+    let mut objects = vec![note("3 0 R")];
+    for i in 0..8 {
+        objects.push(format!("[{}]", vec![format!("{} 0 R", i + 4); width].join(" ")));
+    }
+    objects.push("(leaf)".into());
+    let shared = fdf_with("/Annots [2 0 R]", &objects);
+    assert!(matches!(import(&mut blank(), &shared), Err(DataError::Malformed(_))));
+}
+
 /// Line-ending names are attribute values: a name holding a quote or angle bracket cannot add
 /// attributes or elements to the exported XFDF.
 #[test]
