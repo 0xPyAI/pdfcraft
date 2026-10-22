@@ -220,17 +220,29 @@ impl Automation {
             };
             threads.entry(key).or_default().push(r);
         }
+        // An annotation's review status and checkmark: the latest of each set on it.
+        let states = |c: &Annotation, v: &mut Value| {
+            let set = threads.get(&(c.page, c.index)).map(Vec::as_slice).unwrap_or(&[]);
+            v["status"] = json!(set.iter().rev().filter(|r| !r.is_mark()).find_map(|r| r.state.clone()));
+            v["marked"] = json!(set.iter().rev().find(|r| r.is_mark()).is_some_and(|r| r.state.as_deref() == Some("Marked")));
+        };
         let roots: Vec<Value> = all
             .iter()
             .filter(|c| !c.is_reply() && only.is_none_or(|p| c.page == p))
             .map(|c| {
                 let mut v = view(c);
-                let thread = threads.get(&(c.page, c.index)).map(Vec::as_slice).unwrap_or(&[]);
-                let status = thread.iter().rev().filter(|r| !r.is_mark()).find_map(|r| r.state.clone());
-                v["status"] = json!(status);
-                v["marked"] = json!(thread.iter().rev().find(|r| r.is_mark()).is_some_and(|r| r.state.as_deref() == Some("Marked")));
+                states(c, &mut v);
                 v["locked"] = json!(c.locked);
-                v["replies"] = thread.iter().filter(|r| r.state.is_none()).map(|r| view(r)).collect();
+                let thread = threads.get(&(c.page, c.index)).map(Vec::as_slice).unwrap_or(&[]);
+                v["replies"] = thread
+                    .iter()
+                    .filter(|r| r.state.is_none())
+                    .map(|r| {
+                        let mut reply = view(r);
+                        states(r, &mut reply);
+                        reply
+                    })
+                    .collect();
                 v
             })
             .collect();

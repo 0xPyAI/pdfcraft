@@ -2122,7 +2122,7 @@ trailer << /Root 1 0 R >>
 }
 
 /// A status or checkmark belongs to the annotation its `/IRT` names: one set on a reply is not
-/// its comment's, as the Comments panel shows it.
+/// its comment's, as the Comments panel shows it, and is reported on the reply.
 #[test]
 fn a_checkmark_on_a_reply_is_not_its_comments() {
     let dir = workdir("reply-checkmark");
@@ -2148,6 +2148,8 @@ trailer << /Root 1 0 R >>
     let c = &list["comments"][0];
     assert_eq!((&c["marked"], &c["status"]), (&json!(false), &Value::Null), "{c}");
     assert_eq!(c["replies"].as_array().map(Vec::len), Some(1), "the reply, not its states: {c}");
+    let reply = &c["replies"][0];
+    assert_eq!((&reply["marked"], &reply["status"]), (&json!(true), &json!("Accepted")), "{reply}");
 }
 
 #[test]
