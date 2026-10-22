@@ -290,7 +290,7 @@ impl<'a> ProgramMatch<'a> {
 
     /// Whether the resource's program is this one.
     fn written(&mut self, doc: &Document, w: &Written) -> bool {
-        w.program.as_ref().is_some_and(|r| self.is(doc, r, &*doc.get(r)))
+        w.program.as_ref().is_some_and(|r| self.is(doc, r, &doc.get(r)))
     }
 }
 
@@ -300,7 +300,7 @@ fn existing_program(doc: &Document, fonts: &Dict, programs: &mut ProgramMatch) -
     written(doc, fonts)
         .find(|w| programs.written(doc, w))
         .map(|w| w.program)
-        .or_else(|| doc.scan_objects().take(8192).find_map(|(r, o)| programs.is(doc, r, &*o).then_some(Object::Ref(r))))
+        .or_else(|| doc.scan_objects().take(8192).find_map(|(r, o)| programs.is(doc, r, &o).then_some(Object::Ref(r))))
 }
 
 /// A `PCFull` resource that [`embed_mapping`] wrote.
