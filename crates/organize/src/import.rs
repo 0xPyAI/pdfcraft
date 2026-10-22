@@ -154,8 +154,8 @@ impl<'a> Copier<'a> {
     }
 
     /// Rewrite `/P`, `/Dest` and GoTo actions on copied annotations.
-    fn fix_annotations(&self, dst: &mut Document, annot_pages: &HashMap<ObjRef, ObjRef>) -> Result<(), OrganizeError> {
-        for &a in &self.annots {
+    fn fix_annotations(&mut self, dst: &mut Document, annot_pages: &HashMap<ObjRef, ObjRef>) -> Result<(), OrganizeError> {
+        for &a in &std::mem::take(&mut self.annots) {
             let src_dict = dst.get(a).as_dict().cloned();
             let Some(d) = src_dict else { continue };
             let mut d = d;
@@ -188,10 +188,13 @@ impl<'a> Copier<'a> {
                             }
                         }
                     } else {
-                        // Other actions (URI, Launch, JavaScript…) carry no page references.
-                        let mut c = Copier::new(self.src, self.map.clone(), HashMap::new());
-                        let copied = c.copy_value(dst, &Object::Dict(ad.clone()), None)?;
-                        d.set(b"A".to_vec(), copied);
+                        // Other actions (URI, Launch, JavaScript…) carry no page references. The
+                        // copier lends its map out and takes it back with the new copies in it,
+                        // so actions sharing an object share its one copy.
+                        let mut c = Copier::new(self.src, std::mem::take(&mut self.map), HashMap::new());
+                        let copied = c.copy_value(dst, &Object::Dict(ad.clone()), None);
+                        self.map = c.map;
+                        d.set(b"A".to_vec(), copied?);
                     }
                 }
             }

@@ -3175,3 +3175,19 @@ fn renaming_many_same_named_fields_resumes_the_suffix_search() {
     assert_eq!(renames.first(), Some(&("x".to_string(), "x-1".to_string())));
     assert_eq!(renames.last(), Some(&("x".to_string(), format!("x-{}", n - 1))));
 }
+
+#[test]
+fn annotation_actions_share_the_objects_they_copy() {
+    // Fifty links whose URI actions all point at one string object.
+    let n = 50;
+    let links: Vec<String> =
+        (0..n).map(|_| format!("<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A << /S /URI /URI {} 0 R >> >>", n + 5)).collect();
+    let src = page_with_annots(&links, &["(https://example.com/shared)".into()], "");
+    let out = extract_pages(&src, &[0]).unwrap();
+    let copies = out
+        .object_numbers()
+        .into_iter()
+        .filter(|&o| out.get(ObjRef::new(o, out.generation(o))).as_string().is_some_and(|s| s.bytes == b"https://example.com/shared"))
+        .count();
+    assert_eq!(copies, 1, "the shared URI is copied once, not once per action");
+}
