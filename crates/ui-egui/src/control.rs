@@ -916,6 +916,18 @@ pub fn serve(client: ControlClient) -> std::io::Result<Endpoint> {
     serve_with(client, LIMITS)
 }
 
+/// How long the accepting thread waits after a failed accept. Accepting can keep failing, for
+/// example while the process has no file descriptors left, and retrying at once would keep a
+/// core busy until it recovers. The single-instance listener waits the same way.
+#[cfg(not(target_arch = "wasm32"))]
+const ACCEPT_RETRY: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The connections `incoming` accepts, calling `wait` after each failed accept.
+#[cfg(not(target_arch = "wasm32"))]
+fn accepted<T>(incoming: impl Iterator<Item = std::io::Result<T>>, mut wait: impl FnMut()) -> impl Iterator<Item = T> {
+    incoming.filter_map(move |stream| stream.map_err(|_| wait()).ok())
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn serve_with(client: ControlClient, limits: Limits) -> std::io::Result<Endpoint> {
     use std::io::{BufReader, Write};
@@ -926,7 +938,7 @@ fn serve_with(client: ControlClient, limits: Limits) -> std::io::Result<Endpoint
     let waiting = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let lingering = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     std::thread::Builder::new().name("pdfcraft-control".into()).spawn(move || {
-        for stream in listener.incoming().flatten() {
+        for stream in accepted(listener.incoming(), || std::thread::sleep(ACCEPT_RETRY)) {
             let _ = stream.set_write_timeout(Some(limits.write_timeout));
             // Admitted only while fewer than the limit wait to authenticate: refused on the
             // accepting thread, so a refused connection costs no thread at all.
@@ -1083,6 +1095,19 @@ fn random_token() -> std::io::Result<String> {
 
 #[cfg(test)]
 mod transport_tests {
+    /// A failed accept is followed by a wait before the next one, so a listener that keeps
+    /// failing does not spin, and the connections around the failures still come through.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_failed_accept_waits_before_the_next() {
+        let failed = || Err(std::io::Error::other("no file descriptors left"));
+        let incoming = vec![failed(), Ok(1), failed(), failed(), Ok(2)];
+        let mut waits = 0;
+        let connections: Vec<i32> = super::accepted(incoming.into_iter(), || waits += 1).collect();
+        assert_eq!(connections, [1, 2]);
+        assert_eq!(waits, 3, "one wait per failed accept");
+    }
+
     /// Before authenticating, a line that isn't JSON gets a parse error and closes the
     /// connection, as [`super::serve`] documents for any first request other than `auth`.
     #[cfg(not(target_arch = "wasm32"))]
