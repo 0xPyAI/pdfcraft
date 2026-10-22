@@ -2121,6 +2121,35 @@ trailer << /Root 1 0 R >>
     assert_eq!(replies(&mut a), [("COVER".into(), vec![]), ("SECOND".into(), vec!["ANSWER".to_string(), "LATER".to_string()])]);
 }
 
+/// A status or checkmark belongs to the annotation its `/IRT` names: one set on a reply is not
+/// its comment's, as the Comments panel shows it.
+#[test]
+fn a_checkmark_on_a_reply_is_not_its_comments() {
+    let dir = workdir("reply-checkmark");
+    // Contributor-original PDF: a comment, a reply, and a checkmark and a status on the reply.
+    std::fs::write(
+        dir.join("checked.pdf"),
+        b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [4 0 R 5 0 R 6 0 R 7 0 R] >> endobj
+4 0 obj << /Type /Annot /Subtype /Text /Rect [100 100 120 120] /T (Alpha) /Contents (COMMENT) >> endobj
+5 0 obj << /Type /Annot /Subtype /Text /Rect [100 60 120 80] /IRT 4 0 R /T (Beta) /Contents (REPLY) >> endobj
+6 0 obj << /Type /Annot /Subtype /Text /Rect [100 60 120 80] /IRT 5 0 R /T (Beta) /StateModel /Marked /State /Marked >> endobj
+7 0 obj << /Type /Annot /Subtype /Text /Rect [100 60 120 80] /IRT 5 0 R /T (Beta) /StateModel /Review /State /Accepted >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+    )
+    .unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "checked.pdf" }))["doc"].as_u64().unwrap();
+    let list = ok(&mut a, "comment_list", json!({ "doc": doc }));
+    assert_eq!(list["count"], 1, "{list}");
+    let c = &list["comments"][0];
+    assert_eq!((&c["marked"], &c["status"]), (&json!(false), &Value::Null), "{c}");
+    assert_eq!(c["replies"].as_array().map(Vec::len), Some(1), "the reply, not its states: {c}");
+}
+
 #[test]
 fn protecting_through_tools() {
     let dir = workdir("protect");

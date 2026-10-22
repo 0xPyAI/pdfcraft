@@ -207,13 +207,18 @@ impl Automation {
         };
         // Every reply under the comment its thread starts from, at any depth, in document order:
         // a reply to a reply keeps its `/IRT` on the direct parent, so following one level would
-        // drop it. Parents are found by reference, as `/NM` need not be unique.
+        // drop it. Parents are found by reference, as `/NM` need not be unique. A status or
+        // checkmark belongs to the annotation its `/IRT` names (ISO 32000-2 §12.5.6.2), as in the
+        // Comments panel: one set on a reply is not the comment's.
         let tops = pdfcraft_render::thread_tops(&all);
         let mut threads: HashMap<(usize, usize), Vec<&Annotation>> = HashMap::new();
         for r in &all {
-            if let Some(&top) = tops.get(&(r.page, r.index)) {
-                threads.entry(top).or_default().push(r);
-            }
+            let Some(&top) = tops.get(&(r.page, r.index)) else { continue };
+            let key = match r.parent {
+                Some(parent) if r.state.is_some() => parent,
+                _ => top,
+            };
+            threads.entry(key).or_default().push(r);
         }
         let roots: Vec<Value> = all
             .iter()

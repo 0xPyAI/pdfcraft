@@ -1245,6 +1245,42 @@ fn replies_that_lead_nowhere_stay_comments_and_deeper_replies_join_their_thread(
     h.get_by_label("2 replies");
 }
 
+// Contributor-original PDF: a comment, a reply, and a checkmark and a status set on the reply.
+const CHECKED_REPLY: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [4 0 R 5 0 R 6 0 R 7 0 R] >> endobj
+4 0 obj << /Type /Annot /Subtype /Text /Rect [100 100 120 120] /T (Alpha) /Contents (Unchecked comment) >> endobj
+5 0 obj << /Type /Annot /Subtype /Text /Rect [100 60 120 80] /IRT 4 0 R /T (Beta) /Contents (Checked reply) >> endobj
+6 0 obj << /Type /Annot /Subtype /Text /Rect [100 60 120 80] /IRT 5 0 R /T (Beta) /StateModel /Marked /State /Marked >> endobj
+7 0 obj << /Type /Annot /Subtype /Text /Rect [100 60 120 80] /IRT 5 0 R /T (Beta) /StateModel /Review /State /Accepted >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
+/// A checkmark or status belongs to the annotation its `/IRT` names (ISO 32000-2 §12.5.6.2): one
+/// set on a reply doesn't mark the comment, on its card or in the page's menu.
+#[test]
+fn a_checkmark_on_a_reply_does_not_mark_its_comment() {
+    let mut h = harness_with_bytes(CHECKED_REPLY.to_vec(), |app| {
+        app.set_option("panel", "comments").unwrap();
+        app.set_option("quick", "select").unwrap();
+    });
+    click_pt(&mut h, (110.0, 110.0));
+    assert_eq!(h.state().views[0].comments.selected, Some((0, 0)), "the comment is selected");
+    h.get_by_label("Checked reply");
+    h.get_by_label("Mark with checkmark"); // The card's checkmark.
+    assert_eq!(h.query_all_by_label("Accepted").count(), 0, "no status badge");
+    let p = at(&h, 110.0, 110.0);
+    h.hover_at(p);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: true, modifiers: Default::default() });
+    h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: false, modifiers: Default::default() });
+    h.run_steps(3);
+    h.get_by_label("Copy text"); // The page's menu is open.
+    assert_eq!(h.query_all_by_label("Remove checkmark").count(), 0);
+    assert_eq!(h.query_all_by_label("Mark with checkmark").count(), 2, "the card and the page's menu");
+}
+
 #[test]
 fn the_panel_reveals_edits_and_reopens_a_late_thread_without_changing_its_replies() {
     let mut h = harness_with_bytes(REVIEW_FIXTURE.to_vec(), |app| {
