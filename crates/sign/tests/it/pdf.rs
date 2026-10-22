@@ -139,6 +139,47 @@ fn signing_an_existing_field_and_counter_signing() {
     ));
 }
 
+/// A page whose /Annots is an object of its own: signing and commenting update that array in
+/// place, not the page. A second signature is a signature change for the first, as with an
+/// inline /Annots, and a comment is still a comment (refused under a form-fill certification).
+#[test]
+fn an_indirect_annots_array_is_judged_by_the_annotations_it_gains() {
+    let page = pdfcraft_cos::ObjRef { num: 3, generation: 0 };
+    let unsigned = edit_after(&fixture(), |doc| {
+        let annots = doc.add(Object::Array(vec![Object::Ref(pdfcraft_cos::ObjRef { num: 6, generation: 0 })]));
+        doc.update_dict(page, |p| p.set(b"Annots".to_vec(), Object::Ref(annots))).unwrap();
+    });
+    let annots_ref = |bytes: &[u8]| open(bytes).get(page).as_dict().and_then(|d| d.get(b"Annots").and_then(Object::as_ref));
+    let annots = annots_ref(&unsigned).unwrap();
+    let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    let trust = TrustStore { certs: vec![id.certificate.clone()] };
+    let first = pdfcraft_sign::sign(&open(&unsigned), &id, &opts()).unwrap();
+    let second = pdfcraft_sign::sign(&open(&first), &id, &SignOptions { rect: Some([20.0, 160.0, 220.0, 210.0]), ..opts() }).unwrap();
+    assert_eq!(annots_ref(&second), Some(annots), "the signer kept the page's array indirect");
+    let doc = open(&second);
+    let sigs = signatures(&doc, &second, &trust);
+    let s = sigs.iter().find(|s| s.field == "Signature1").unwrap();
+    assert_eq!(s.modification, Modification::Allowed(vec![kind::SIGNATURE]), "{:?}", s.details);
+    assert_eq!(s.status, Status::Valid);
+    // A comment appended to the indirect array.
+    let comment = |doc: &mut Document| {
+        let mut d = pdfcraft_cos::Dict::new();
+        d.set(b"Type".to_vec(), Object::name("Annot"));
+        d.set(b"Subtype".to_vec(), Object::name("Text"));
+        d.set(b"Rect".to_vec(), Object::Array(vec![Object::Int(10), Object::Int(10), Object::Int(30), Object::Int(30)]));
+        let r = doc.add(Object::Dict(d));
+        let mut a = doc.get(annots).as_array().cloned().unwrap();
+        a.push(Object::Ref(r));
+        doc.set(annots, Object::Array(a));
+    };
+    let check = |bytes: &[u8]| signatures(&open(bytes), bytes, &trust).into_iter().find(|s| s.signed).unwrap();
+    let s = check(&edit_after(&first, comment));
+    assert_eq!((s.status, s.modification), (Status::Valid, Modification::Allowed(vec![kind::COMMENTS])));
+    let certified = pdfcraft_sign::sign(&open(&unsigned), &id, &SignOptions { certify: Some(2), ..opts() }).unwrap();
+    let s = check(&edit_after(&certified, comment));
+    assert_eq!((s.status, s.modification), (Status::Invalid, Modification::Disallowed(vec![kind::COMMENTS])));
+}
+
 /// Issue #1328: a signature field whose /V is null, directly or through a reference, is unsigned:
 /// it is listed as unsigned and can be signed by name.
 #[test]

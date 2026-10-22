@@ -1265,6 +1265,11 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
     // attacker-written version carries (relabelling a signed page /Type /Sig, or dropping its
     // /Type and adding /ModDate, must not reclassify it away from page content).
     let signed_pages: HashSet<ObjRef> = pdfcraft_annot::page_refs(&old).unwrap_or_default().into_iter().collect();
+    // The signed pages' /Annots arrays that are objects of their own. Adding an annotation updates
+    // such an array in place (the page dictionary does not change), so it is judged like a
+    // page's inline /Annots: by the annotations it gained.
+    let signed_annots: HashSet<ObjRef> =
+        signed_pages.iter().filter_map(|pg| old.get(*pg).as_dict().and_then(|d| d.get(b"Annots").and_then(Object::as_ref))).collect();
     // What each signed page draws from, by the role it held when signed (#1787).
     let signed_resources = signed_page_resources(&old, &signed_pages);
     let old_info = old.trailer().get(b"Info").and_then(Object::as_ref);
@@ -1333,6 +1338,13 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
             (Some(k), _) => k,
             // The Document Security Store's own arrays and dictionaries, when they only grew.
             (_, _) if dss.contains(&num) => kind::SECURITY_STORE,
+            // A signed page's indirect /Annots array, still an array: what it gained.
+            (_, Object::Array(now)) if signed_annots.contains(&r) && before.as_deref().is_some_and(|b| b.as_array().is_some()) => {
+                let was: HashSet<ObjRef> =
+                    before.as_deref().and_then(Object::as_array).map(|a| a.iter().filter_map(Object::as_ref).collect()).unwrap_or_default();
+                let added: Vec<ObjRef> = now.iter().filter_map(Object::as_ref).filter(|r| !was.contains(r)).collect();
+                added_annots(doc, &added)
+            }
             (_, Object::Dict(d)) => {
                 let was = before.as_deref().and_then(Object::as_dict);
                 if signed_pages.contains(&r) {
