@@ -199,6 +199,17 @@ pub(crate) fn reset_names(list: &str) -> Vec<String> {
     out
 }
 
+/// The (property, SOM) an effect setting a property of an object is merged by, see
+/// [`XHost::set_at`].
+fn effect_key(e: &XfaEffect) -> Option<(u8, String)> {
+    match e {
+        XfaEffect::SetValue { som, .. } => Some((0, som.clone())),
+        XfaEffect::SetPresence { som, .. } => Some((1, som.clone())),
+        XfaEffect::SetAccess { som, .. } => Some((2, som.clone())),
+        _ => None,
+    }
+}
+
 /// Bytes of text `e` holds.
 fn payload(e: &XfaEffect) -> usize {
     match e {
@@ -321,15 +332,33 @@ impl XHost {
         }
     }
 
-    /// Room for one more effect holding `bytes` of text, charged now: a change to the snapshot
-    /// is made only when the effect that applies it will be kept, so a script never sees a change
-    /// its effects leave out. A drop is counted when there is no room.
-    fn reserve(&mut self, bytes: usize) -> bool {
-        if self.effects.len() >= MAX_EFFECTS {
+    /// Room for `e`, which holds `bytes` of text, charged now: a change to the snapshot is made
+    /// only when the effect that applies it will be kept, so a script never sees a change its
+    /// effects leave out. An effect that replaces an earlier one needs no new slot. A drop is
+    /// counted when there is no room.
+    fn reserve(&mut self, e: &XfaEffect, bytes: usize) -> bool {
+        let replaces = effect_key(e).and_then(|k| self.set_at.get(&k)).is_some_and(|&at| at >= self.barrier && at < self.effects.len());
+        if !replaces && self.effects.len() >= MAX_EFFECTS {
             self.dropped_effects += 1;
             return false;
         }
         self.room(bytes)
+    }
+
+    /// Set the presence or access of node `i` to what `e` (a [`XfaEffect::SetPresence`] or
+    /// [`XfaEffect::SetAccess`]) says, in the snapshot only when the effect is kept.
+    pub(crate) fn set_state(&mut self, i: usize, e: XfaEffect) {
+        if !self.reserve(&e, payload(&e)) {
+            return;
+        }
+        if let Some(n) = self.nodes.get_mut(i) {
+            match &e {
+                XfaEffect::SetPresence { presence, .. } => n.presence = presence.clone(),
+                XfaEffect::SetAccess { access, .. } => n.access = access.clone(),
+                _ => {}
+            }
+        }
+        self.record(e);
     }
 
     /// `e` with its text cut to the lengths an effect keeps.
@@ -352,13 +381,7 @@ impl XHost {
 
     /// Keep `e`, whose bytes are already charged, against the count limits.
     fn record(&mut self, e: XfaEffect) {
-        let key = match &e {
-            XfaEffect::SetValue { som, .. } => Some((0u8, som.clone())),
-            XfaEffect::SetPresence { som, .. } => Some((1, som.clone())),
-            XfaEffect::SetAccess { som, .. } => Some((2, som.clone())),
-            _ => None,
-        };
-        if let Some(key) = key {
+        if let Some(key) = effect_key(&e) {
             if let Some(&at) = self.set_at.get(&key)
                 && at >= self.barrier
                 && let Some(slot) = self.effects.get_mut(at)
@@ -773,7 +796,7 @@ impl XHost {
         let name = h.nodes.get(first).map(|n| n.name.clone()).unwrap_or_default();
         let parent_som = h.nodes.get(parent).map(|p| p.som.clone()).unwrap_or_default();
         let som = child_som(parent_som, &name, live.len());
-        if !h.reserve(som.len()) {
+        if !h.reserve(&XfaEffect::AddInstance { som: String::new() }, som.len()) {
             return None;
         }
         let new = clone_subtree(h, first, Some(parent), 0)?;
@@ -825,7 +848,7 @@ impl XHost {
             return;
         }
         let som = h.nodes.get(gone).map(|n| n.som.clone()).unwrap_or_default();
-        if !h.reserve(som.len()) {
+        if !h.reserve(&XfaEffect::RemoveInstance { som: String::new() }, som.len()) {
             return;
         }
         if let Some(n) = h.nodes.get_mut(gone) {
@@ -1061,20 +1084,14 @@ fn node_set(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValu
                 "hidden" | "invisible" | "inactive" | "visible" => value.clone(),
                 _ => return Ok(JsValue::from(true)),
             };
-            if let Some(n) = h.nodes.get_mut(idx) {
-                n.presence = p.clone();
-            }
-            h.push(XfaEffect::SetPresence { som, presence: p });
+            h.set_state(idx, XfaEffect::SetPresence { som, presence: p });
         }
         "access" => {
             let a = match value.as_str() {
                 "open" | "readOnly" | "protected" | "nonInteractive" => value.clone(),
                 _ => return Ok(JsValue::from(true)),
             };
-            if let Some(n) = h.nodes.get_mut(idx) {
-                n.access = a.clone();
-            }
-            h.push(XfaEffect::SetAccess { som, access: a });
+            h.set_state(idx, XfaEffect::SetAccess { som, access: a });
         }
         _ => {}
     }

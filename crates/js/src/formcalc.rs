@@ -1617,19 +1617,13 @@ impl Interp<'_> {
                     "presence" => {
                         let p = self.to_str(&v);
                         if matches!(p.as_str(), "visible" | "invisible" | "hidden" | "inactive") {
-                            if let Some(n) = self.h.nodes.get_mut(i) {
-                                n.presence = p.clone();
-                            }
-                            self.h.push(XfaEffect::SetPresence { som, presence: p });
+                            self.h.set_state(i, XfaEffect::SetPresence { som, presence: p });
                         }
                     }
                     "access" => {
                         let a = self.to_str(&v);
                         if matches!(a.as_str(), "open" | "readOnly" | "protected" | "nonInteractive") {
-                            if let Some(n) = self.h.nodes.get_mut(i) {
-                                n.access = a.clone();
-                            }
-                            self.h.push(XfaEffect::SetAccess { som, access: a });
+                            self.h.set_state(i, XfaEffect::SetAccess { som, access: a });
                         }
                     }
                     other => {

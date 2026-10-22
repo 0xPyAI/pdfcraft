@@ -702,6 +702,27 @@ mod xfa_model {
         assert_eq!(o.result.as_deref(), Some("true:2"));
     }
 
+    /// Past the effect cap, presence and access set on a new object are left out of the snapshot
+    /// as well as the effects; one set again on an object that already has its effect still lands.
+    #[test]
+    fn presence_and_access_past_the_effect_cap_are_left_out_of_the_snapshot_too() {
+        let read = "qty.presence + ':' + qty.access + ':' + price.presence";
+        let before = go(read, "form1[0].page1[0]", "click").result;
+        let o = go(
+            &format!(
+                "price.presence = 'invisible'; for (var i = 0; i < 20000; i++) xfa.host.beep(); qty.presence = 'hidden'; qty.access = 'readOnly'; price.presence = 'hidden'; {read}"
+            ),
+            "form1[0].page1[0]",
+            "click",
+        );
+        assert_eq!(o.error, None, "{o:?}");
+        assert_eq!(o.effects.len(), MAX_EFFECTS);
+        let unchanged = before.as_deref().and_then(|b| b.rsplit_once(':')).map(|(qty, _)| format!("{qty}:hidden"));
+        assert_eq!(o.result, unchanged);
+        assert!(o.effects.contains(&XfaEffect::SetPresence { som: "form1[0].page1[0].price[0]".into(), presence: "hidden".into() }));
+        assert!(!o.effects.iter().any(|e| matches!(e, XfaEffect::SetPresence { som, .. } | XfaEffect::SetAccess { som, .. } if som.contains("qty"))));
+    }
+
     #[test]
     fn urls_and_reset_lists_are_clipped_and_deduplicated() {
         let o = go(
@@ -801,6 +822,20 @@ mod formcalc {
         assert_eq!(o.error, None, "{o:?}");
         let names: usize = o.effects.iter().map(|e| if let XfaEffect::ResetData(n) = e { n.len() } else { 0 }).sum();
         assert_eq!(names, 2);
+    }
+
+    /// FormCalc presence and access past the effect cap are left out of the snapshot too.
+    #[test]
+    fn formcalc_presence_and_access_past_the_effect_cap_are_left_out_of_the_snapshot_too() {
+        let o = go(
+            "for i = 1 upto 20000 do $host.beep() endfor\nqty.presence = \"hidden\"\nqty.access = \"readOnly\"\nConcat(qty.presence, \":\", qty.access)",
+            "form1[0].page1[0]",
+            "click",
+        );
+        assert_eq!(o.error, None, "{o:?}");
+        assert_eq!(o.effects.len(), MAX_EFFECTS);
+        let before = go("Concat(qty.presence, \":\", qty.access)", "form1[0].page1[0]", "click");
+        assert_eq!(o.result, before.result);
     }
 
     /// FormCalc reads `formattedValue` as the field's picture shows it too, until the script
