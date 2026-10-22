@@ -1106,8 +1106,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["view.full_screen"]
 tools = []
-evidence = ["crates/ui-egui/tests/commands.rs::full_screen_toggles_by_shortcut_and_command_and_escape_leaves"]
-notes = ""
+evidence = ["crates/ui-egui/tests/commands.rs::full_screen_toggles_by_shortcut_and_command_and_escape_leaves", "crates/ui-egui/tests/view.rs::full_screen_shows_one_fitted_page_and_clicks_turn_it", "crates/ui-egui/tests/view.rs::full_screen_keeps_two_page_view_as_spreads"]
+notes = "Acrobat's Full Screen Mode (#1459): the page on black and nothing else, one page at a time fitted to the screen (one spread when two-page view was on, #1353), from the current page; a click, Space, Enter, \u2192 or Page Down go forward, a shift-click, Backspace, \u2190 or Page Up back, Home/End to the ends; Esc or \u2318L bring the display from before back at the page reached. Links still open on click. Missing: the cursor is not hidden, no transitions, auto-advance or loop (view.full-screen-presentation), and no full-screen preferences such as the background colour"
 
 [[feature]]
 id = "view.full-screen-presentation"
@@ -1115,11 +1115,11 @@ title = "Full-screen presentation options (auto-advance, loop, click to advance)
 area = "B"
 tier = "P2"
 milestone = "M12"
-status = "planned"
-commands = []
+status = "partial"
+commands = ["view.full_screen"]
 tools = []
-evidence = []
-notes = ""
+evidence = ["crates/ui-egui/tests/view.rs::full_screen_shows_one_fitted_page_and_clicks_turn_it"]
+notes = "Click to advance (and shift-click back) ships with view.full-screen; auto-advance every N seconds, loop after the last page, page transitions and the full-screen preferences are not done"
 
 [[feature]]
 id = "view.reflow"

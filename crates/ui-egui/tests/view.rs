@@ -2,6 +2,7 @@
 
 use egui::{Key, Modifiers, MouseWheelUnit, TouchPhase};
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use pdfcraft_ui_egui::PdfCraftApp;
 
 /// Three 300×400 pt pages. Page 1 links to page 3.
@@ -1644,4 +1645,140 @@ fn long_view_menu_fits_a_short_window() {
     h.get_all_by_label("Bookmarks").last().unwrap().click();
     h.run_steps(4);
     assert_eq!(h.state().right, Some(pdfcraft_ui_egui::RightPanel::Bookmarks));
+}
+
+fn click_with(h: &mut Harness<'static, PdfCraftApp>, pos: egui::Pos2, modifiers: Modifiers) {
+    h.hover_at(pos);
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers });
+    }
+    h.run_steps(4);
+}
+
+/// Full screen is Acrobat's Full Screen Mode (#379, #1459): one page at a time, fitted to the
+/// screen, with no tools; a click, Space, Enter or → go forward a page and a ⇧-click, Backspace
+/// or ← back; Esc brings the display from before it back, at the page reached.
+#[test]
+fn full_screen_shows_one_fitted_page_and_clicks_turn_it() {
+    use pdfcraft_ui_egui::canvas::Fit;
+    let mut h = harness(&[("layout", "continuous"), ("zoom", "50")]);
+    h.run_steps(4);
+    assert!(h.state().views[0].continuous(), "continuous before");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::L);
+    h.run_steps(6);
+    assert!(h.state().full_screen);
+    let v = &h.state().views[0];
+    assert!(!v.continuous(), "one page at a time");
+    assert_eq!(v.fit, Fit::Page, "fitted to the screen");
+    assert!(rect(&h, 0).is_some() && rect(&h, 1).is_none(), "only page 1 is on screen");
+    let r = rect(&h, 0).unwrap();
+    let vp = h.state().views[0].viewport_rect();
+    assert!(r.height() <= vp.height() + 1.0 && r.width() <= vp.width() + 1.0, "the page fits: {r:?} in {vp:?}");
+    assert!(h.query_by_label("Select (V)").is_none(), "no quick tools in full screen");
+    click_with(&mut h, r.center(), Modifiers::NONE);
+    assert_eq!(h.state().views[0].current, 1, "a click goes forward a page");
+    h.key_press(Key::ArrowRight);
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].current, 2, "→ goes forward");
+    h.key_press(Key::Backspace);
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].current, 1, "Backspace goes back");
+    let r = rect(&h, 1).expect("page 2 on screen");
+    click_with(&mut h, r.center(), Modifiers::SHIFT);
+    assert_eq!(h.state().views[0].current, 0, "a shift-click goes back");
+    h.key_press(Key::Space);
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].current, 1, "Space goes forward");
+    h.key_press(Key::Escape);
+    h.run_steps(4);
+    assert!(!h.state().full_screen, "Escape leaves full screen");
+    let v = &h.state().views[0];
+    assert!(v.continuous(), "the display from before comes back");
+    assert_eq!(v.fit, Fit::None);
+    assert!((v.zoom - 0.5).abs() < 1e-3, "zoom back to 50%: {}", v.zoom);
+    assert_eq!(v.current, 1, "at the page reached in full screen");
+    h.run_steps(2);
+    assert!(h.query_by_label("Select (V)").is_some(), "the quick tools are back");
+}
+
+/// #2070 review: full screen survives the file being reloaded (Esc still brings the display from
+/// before back), and a document opened in full screen takes its own initial view first, so Esc
+/// comes back to that and full screen stays one spread at a time.
+#[test]
+fn full_screen_survives_a_reload_and_keeps_a_new_documents_own_view() {
+    use pdfcraft_ui_egui::canvas::{Fit, PageLayout};
+    let mut h = harness(&[("layout", "continuous"), ("zoom", "50")]);
+    h.run_steps(4);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::L);
+    h.run_steps(6);
+    {
+        let app = h.state_mut();
+        let info = app.session.get(app.views[0].id).unwrap().info.clone();
+        app.views[0].document_replaced(&info);
+    }
+    h.run_steps(4);
+    assert!(h.state().views[0].presenting(), "still presenting after the reload");
+    h.key_press(Key::Escape);
+    h.run_steps(4);
+    let v = &h.state().views[0];
+    assert!(v.continuous() && v.fit == Fit::None && (v.zoom - 0.5).abs() < 1e-3, "the display from before comes back");
+
+    h.key_press_modifiers(Modifiers::COMMAND, Key::L);
+    h.run_steps(6);
+    let two_columns = String::from_utf8_lossy(PAGES).replace("/Type /Catalog /Pages 2 0 R", "/Type /Catalog /Pages 2 0 R /PageLayout /TwoColumnLeft");
+    h.state_mut().open_bytes("two.pdf", None, two_columns.into_bytes()).expect("opens");
+    h.run_steps(6);
+    let v = h.state().views.last().unwrap();
+    assert!(v.presenting() && v.layout == PageLayout::TwoUp && !v.continuous(), "one spread at a time");
+    h.key_press(Key::Escape);
+    h.run_steps(4);
+    let v = h.state().views.last().unwrap();
+    assert!(v.layout == PageLayout::TwoUp && v.continuous(), "the document's own two-column view comes back");
+}
+
+/// Two-page view stays a spread in full screen (#1353): both pages of the spread, fitted, and
+/// → turns the spread.
+#[test]
+fn full_screen_keeps_two_page_view_as_spreads() {
+    use pdfcraft_ui_egui::canvas::PageLayout;
+    let mut h = harness(&[("layout", "two-up")]);
+    h.run_steps(4);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::L);
+    h.run_steps(6);
+    let v = &h.state().views[0];
+    assert_eq!(v.layout, PageLayout::TwoUp);
+    assert!(!v.continuous(), "one spread at a time");
+    assert!(rect(&h, 0).is_some() && rect(&h, 1).is_some() && rect(&h, 2).is_none(), "the first spread only");
+    h.key_press(Key::ArrowRight);
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].current, 2, "→ turns the spread");
+    assert!(rect(&h, 2).is_some() && rect(&h, 0).is_none());
+    h.key_press(Key::Escape);
+    h.run_steps(4);
+    let v = &h.state().views[0];
+    assert!(v.continuous() && v.layout == PageLayout::TwoUp, "two-page continuous view comes back");
+}
+
+/// Review on #2070: full screen hides the tools and a click turns the page only with Select, so
+/// entering it from another tool selects Select, and leaving gives the tool back.
+#[test]
+fn full_screen_clicks_turn_pages_whatever_tool_was_on() {
+    use pdfcraft_ui_egui::QuickTool;
+    let mut h = harness(&[]);
+    h.run_steps(4);
+    h.state_mut().quick_tool = QuickTool::Hand;
+    h.key_press_modifiers(Modifiers::COMMAND, Key::L);
+    h.run_steps(6);
+    assert!(h.state().full_screen);
+    assert_eq!(h.state().quick_tool, QuickTool::Select, "Select in full screen");
+    // Entering again (a second document asking for it) keeps the tool to give back.
+    h.state_mut().apply_full_screen(true);
+    let r = rect(&h, 0).expect("page 1 on screen");
+    click_with(&mut h, r.center(), Modifiers::NONE);
+    assert_eq!(h.state().views[0].current, 1, "a click goes forward");
+    h.key_press(Key::Escape);
+    h.run_steps(4);
+    assert!(!h.state().full_screen);
+    assert_eq!(h.state().quick_tool, QuickTool::Hand, "the tool from before is back");
 }

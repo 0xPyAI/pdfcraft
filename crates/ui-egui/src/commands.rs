@@ -270,7 +270,7 @@ impl PdfCraftApp {
                 let on = !self.full_screen;
                 match self.ctx.clone() {
                     Some(ctx) => self.set_full_screen(&ctx, on),
-                    None => self.full_screen = on,
+                    None => self.apply_full_screen(on),
                 }
             }
             "view.read_mode" => self.switch_mode(if self.mode == Mode::Read { Mode::AllTools } else { Mode::Read }, false),

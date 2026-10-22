@@ -81,6 +81,17 @@ pub enum Fit {
     None,
 }
 
+/// The page display as it was before full screen, put back on leaving it
+/// ([`DocView::enter_presentation`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SavedDisplay {
+    pub layout: PageLayout,
+    pub continuous: bool,
+    pub cover: bool,
+    pub fit: Fit,
+    pub zoom: f32,
+}
+
 /// The base page display: one page across, or a two-page spread. Whether it scrolls continuously
 /// is a separate flag (`continuous`), as in Acrobat, so every combination is reachable (#752).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -414,6 +425,9 @@ pub struct DocView {
     pub flash: Option<(usize, [f32; 4], f64)>,
     /// Compare files: differences shaded on this document's pages (page, user-space box, colour).
     pub compare_marks: Vec<(usize, [f32; 4], Color32)>,
+    /// Full screen (Acrobat's Full Screen Mode): the display saved on entering it, while the view
+    /// shows one page or spread at a time, fitted to the screen. `None` outside full screen.
+    presentation: Option<SavedDisplay>,
     pages: HashMap<usize, PageTex>,
     /// Pages the renderer could not draw, with the reason (never re-requested).
     errors: HashMap<usize, String>,
@@ -456,6 +470,9 @@ pub struct DocView {
     clicks: u32,
     last_press_time: f64,
     last_press_pos: Option<Pos2>,
+    /// Full screen: a click's page turn, when it falls due (input time) and which way. It waits
+    /// out the double-click time, as the click may be the first of a double-click selecting a word.
+    present_turn: Option<(f64, bool)>,
     last_queue: Vec<RenderRequest>,
     /// Finished renders wait in the pool instead of reaching the view (tests): what the view
     /// shows before a raster arrives can be looked at however fast the renderer is.
@@ -729,6 +746,7 @@ impl DocView {
             single_edges: None,
             flash: None,
             compare_marks: Vec::new(),
+            presentation: None,
             pages: HashMap::new(),
             errors: HashMap::new(),
             waiting_since: HashMap::new(),
@@ -752,6 +770,7 @@ impl DocView {
             clicks: 0,
             last_press_time: 0.0,
             last_press_pos: None,
+            present_turn: None,
             last_queue: Vec::new(),
             hold_rasters: false,
             viewport_w: 800.0,
@@ -852,9 +871,9 @@ impl DocView {
     }
 
     /// The document was replaced by a newer version of its file (#431). The reader's place
-    /// stays: zoom, layout, rotation, page, scroll, view history and the find bar, the snapshot
-    /// marker and its pending close, and the page images on screen until their replacements
-    /// are drawn, so nothing flashes. Everything that pointed into the old version (a selected
+    /// stays: zoom, layout, rotation, page, scroll, full screen, view history and the find bar,
+    /// the snapshot marker and its pending close, and the page images on screen until their
+    /// replacements are drawn, so nothing flashes. Everything that pointed into the old version (a selected
     /// comment, a field being typed in, text being edited, a drag, page selection) starts
     /// afresh, so no stale index reaches the new one.
     pub fn document_replaced(&mut self, info: &DocInfo) {
@@ -875,6 +894,8 @@ impl DocView {
         fresh.snapshot = self.snapshot.clone();
         fresh.close_requested = self.close_requested;
         fresh.cover = self.cover;
+        // Still presenting, with the display to go back to on leaving.
+        fresh.presentation = self.presentation.take();
         fresh.back = std::mem::take(&mut self.back);
         fresh.forward = std::mem::take(&mut self.forward);
         fresh.find = self.find.take();
@@ -1284,8 +1305,7 @@ impl DocView {
         let last = self.page_count.saturating_sub(1);
         let (target, first) = match self.layout {
             PageLayout::TwoUp => {
-                // Spreads are [0, 1], [2, 3], … or, with a cover page, [0], [1, 2], [3, 4], ….
-                let first = if self.cover { c.saturating_sub((c + 1) % 2) } else { c - c % 2 };
+                let first = self.spread_first(c);
                 let target = match (forward, self.cover && c == 0) {
                     (true, true) => 1,
                     (true, false) => first.saturating_add(2),
@@ -1379,6 +1399,37 @@ impl DocView {
         self.fit = fit;
         self.goto = Some((self.current, 0.0));
         self.reset_coarse_state();
+    }
+
+    /// Full screen, as Acrobat's Full Screen Mode (#379, #1459): one page at a time (or one
+    /// spread, when two-page view was on: #1353), fitted to the screen, from the current page.
+    /// The display it replaces is kept for [`Self::leave_presentation`]. A no-op while presenting.
+    pub fn enter_presentation(&mut self) {
+        if self.presentation.is_some() {
+            return;
+        }
+        self.presentation =
+            Some(SavedDisplay { layout: self.layout, continuous: self.continuous, cover: self.cover, fit: self.fit, zoom: self.zoom });
+        self.continuous = false;
+        self.fit = Fit::Page;
+        self.selection = None;
+        self.goto = Some((self.current, 0.0));
+    }
+
+    /// Leave full screen: the display from before it comes back, at the page reached meanwhile.
+    pub fn leave_presentation(&mut self) {
+        let Some(saved) = self.presentation.take() else { return };
+        self.layout = saved.layout;
+        self.continuous = saved.continuous;
+        self.cover = saved.cover;
+        self.fit = saved.fit;
+        self.zoom = saved.zoom;
+        self.goto = Some((self.current, 0.0));
+    }
+
+    /// Whether the view is in full screen's one-page-at-a-time display.
+    pub fn presenting(&self) -> bool {
+        self.presentation.is_some()
     }
 
     /// Switch the base page display (Single or Two-page), leaving continuous scrolling as it is.
@@ -1967,14 +2018,30 @@ impl DocView {
         }
     }
 
+    /// The first page of the two-page spread page `c` is in: spreads are [0, 1], [2, 3], … or,
+    /// with a cover page, [0], [1, 2], [3, 4], ….
+    fn spread_first(&self, c: usize) -> usize {
+        if self.cover { c.saturating_sub((c + 1) % 2) } else { c - c % 2 }
+    }
+
     fn fit_zoom(&mut self, info: &DocInfo) {
         let largest = |side: fn((f32, f32)) -> f32| info.pages.iter().map(|p| side(self.display_size(p))).fold(1.0, f32::max);
         let max_w = largest(|s| s.0);
-        // A single page shown on its own fits that page. Every other display (scrolling, or a
-        // two-page spread) fits its largest page, so the zoom holds still while pages of other
-        // sizes scroll or page past.
+        // A single page shown on its own fits that page, and full screen in two-page view fits
+        // the spread it shows (review on #2070). Every other display (scrolling, or two-page
+        // view in the window) fits its largest page, so the zoom holds still while pages of
+        // other sizes scroll or page past.
         let (w, h) = if self.layout == PageLayout::Single && !self.continuous {
             info.pages.get(self.current).map_or_else(|| (max_w, largest(|s| s.1)), |p| self.display_size(p))
+        } else if self.presentation.is_some() && self.layout == PageLayout::TwoUp && !self.continuous {
+            let first = self.spread_first(self.current);
+            let last = if self.cover && first == 0 { 0 } else { first.saturating_add(1) };
+            let spread: Vec<(f32, f32)> = info.pages.iter().skip(first).take(last - first + 1).map(|p| self.display_size(p)).collect();
+            if spread.is_empty() {
+                (max_w, largest(|s| s.1))
+            } else {
+                (spread.iter().map(|s| s.0).fold(1.0, f32::max), spread.iter().map(|s| s.1).fold(1.0, f32::max))
+            }
         } else {
             (max_w, largest(|s| s.1))
         };
@@ -2326,6 +2393,16 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_s
     if key(Key::End) {
         view.go_to_page(usize::MAX);
     }
+    // Full screen: Space and Enter go forward a page and Backspace back, as in Acrobat (the
+    // arrows and Page Up / Page Down already turn pages where nothing scrolls, below).
+    if view.presentation.is_some() {
+        if key(Key::Space) || key(Key::Enter) {
+            view.step_page(true);
+        }
+        if key(Key::Backspace) {
+            view.step_page(false);
+        }
+    }
     // As in Acrobat: → / ← go to the next / previous page in every layout (#185), and so do
     // ⌘Page Down / ⌘Page Up, or plain Page Down / Page Up in single-page view.
     let command = ctx.input(|i| i.modifiers.command);
@@ -2501,6 +2578,22 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     // Exclude the previous frame's scrollbar tracks from gesture activation.
     let navigation_rect = if view.viewport_screen.is_positive() { avail.intersect(view.viewport_screen) } else { avail };
     let navigation_enabled = app.dialog.is_none() && app.close_request.is_none() && !app.palette_open && ui.is_enabled() && ui.input(|i| i.focused);
+    // Full screen: a click on the document goes forward a page and a shift-click back, as in
+    // Acrobat, unless the click did something else (a link, a word selected). Decided below,
+    // once the pages have had the click.
+    let present_click = view.presentation.is_some()
+        && navigation_enabled
+        && ui.rect_contains_pointer(navigation_rect)
+        && ui.input(|i| i.pointer.primary_clicked())
+        && app.quick_tool == QuickTool::Select;
+    // Shift as held now, or as the click's own event carried it (a synthetic click).
+    let present_back = present_click
+        && ui.input(|i| {
+            i.modifiers.shift
+                || i.events.iter().any(|e| {
+                    matches!(e, egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: false, modifiers, .. } if modifiers.shift)
+                })
+        });
     if zoom_delta.is_finite() && zoom_delta > 0.0 && zoom_delta != 1.0 && navigation_enabled && ui.rect_contains_pointer(navigation_rect) {
         let z = view.zoom * zoom_delta;
         match ui.input(|i| i.pointer.hover_pos()) {
@@ -4000,6 +4093,26 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         Some(comments::CanvasAction::CopyImageFile(p, i)) => image_action = Some(crate::edit_text_ui::ImageAction::CopyFile(p, i)),
         None => {}
     }
+    // Full screen: the click turns the page unless it did something else first. It waits out the
+    // double-click time: turning on the first click's release sent a double-click's second click,
+    // meant to select a word, to the next page (review on #2070). A selection cancels it, and so
+    // do a link followed meanwhile and leaving full screen; a double-click elsewhere still turns
+    // once.
+    let now = ui.input(|i| i.time);
+    if present_click && clicked_link.is_none() && view.selection.is_none() && view.clicks < 2 {
+        let delay = ui.ctx().options(|o| o.input_options.max_double_click_delay);
+        view.present_turn = Some((now + delay, !present_back));
+    }
+    if let Some((due, forward)) = view.present_turn {
+        if clicked_link.is_some() || view.selection.is_some() || view.presentation.is_none() {
+            view.present_turn = None;
+        } else if now >= due {
+            view.present_turn = None;
+            view.step_page(forward);
+        } else {
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64((due - now).max(0.0)));
+        }
+    }
     match clicked_link {
         Some(LinkTarget::Page(p, dest)) => view.go_to_dest(p, dest, info),
         Some(LinkTarget::Uri(u)) => app.request_document_url(&u, crate::LinkOrigin::Link),
@@ -4118,8 +4231,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if copy_selected {
         app.execute("edit.copy");
     }
-    // Read mode hides the tools (#2646).
-    if app.mode != crate::Mode::Read {
+    // Read mode hides the tools (#2646), and full screen is the page and nothing else (#1459);
+    // the quick tools come back with the window.
+    if app.mode != crate::Mode::Read && !app.full_screen {
         quick_bar(app, avail, ui);
     }
     if let Some((source, file, destination)) = remote_open {
@@ -6410,6 +6524,55 @@ trailer << /Root 1 0 R >>
             v.fit_zoom(&info);
             assert!(v.zoom > big, "{fit:?}: single-page view fits the page it shows");
         }
+    }
+
+    /// Review on #2070: full screen in two-page view fits the spread it shows, the cover page
+    /// on its own included; two-page view in the window keeps one zoom for the document.
+    #[test]
+    fn full_screen_two_page_view_fits_the_spread_it_shows() {
+        let page =
+            |width: f32, height: f32| pdfcraft_render::PageInfo { width, height, label: String::new(), crop: [0.0, 0.0, width, height], rotation: 0 };
+        // Spreads [0, 1] small, [2, 3] large; with a cover page [0], [1, 2] mixed, [3].
+        let info = DocInfo { pages: vec![page(300.0, 400.0), page(300.0, 400.0), page(600.0, 800.0), page(600.0, 800.0)], ..Default::default() };
+        let mut v = DocView::new(DocId(1), &info, ViewDefaults::default());
+        (v.layout, v.continuous, v.viewport_w, v.viewport_h) = (PageLayout::TwoUp, false, 1000.0, 800.0);
+        v.fit = Fit::Page;
+        v.fit_zoom(&info);
+        let windowed = v.zoom;
+        v.enter_presentation();
+        v.fit_zoom(&info);
+        let small = v.zoom;
+        assert!(small > windowed * 1.9, "the small spread fills the screen: {small} vs {windowed}");
+        v.current = 3;
+        v.fit_zoom(&info);
+        assert!((v.zoom - windowed).abs() < 1e-4, "the large spread fits as before");
+        v.current = 1;
+        v.fit_zoom(&info);
+        assert_eq!(v.zoom, small, "page 2 is in the first spread");
+        // With a cover page: [0] alone, then [1, 2] (the large page decides), then [3].
+        v.cover = true;
+        v.current = 0;
+        v.fit_zoom(&info);
+        assert_eq!(v.zoom, small, "the cover page alone");
+        v.current = 1;
+        v.fit_zoom(&info);
+        assert!((v.zoom - windowed).abs() < 1e-4, "page 2 shares a spread with the large page 3");
+        // Scrolling while in full screen fits the document, as scrolling does in the window.
+        (v.continuous, v.current) = (true, 0);
+        v.fit_zoom(&info);
+        assert!((v.zoom - windowed).abs() < 1e-4, "continuous full screen keeps one zoom");
+        v.continuous = false;
+        // The cover page is a spread of its own even when the next page is larger.
+        let mixed = DocInfo { pages: vec![page(300.0, 400.0), page(600.0, 800.0), page(600.0, 800.0)], ..Default::default() };
+        v.current = 0;
+        v.fit_zoom(&mixed);
+        assert_eq!(v.zoom, small, "the small cover alone, not with page 2");
+        // Leaving full screen brings the document-wide fit back.
+        v.leave_presentation();
+        (v.fit, v.current) = (Fit::Page, 0);
+        (v.layout, v.continuous) = (PageLayout::TwoUp, false);
+        v.fit_zoom(&info);
+        assert!((v.zoom - windowed).abs() < 1e-4, "in the window, one zoom for the document");
     }
 
     #[test]
