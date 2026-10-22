@@ -1,5 +1,5 @@
 //! Two `/ICCBased` profiles whose stream dictionaries are byte for byte the same (`/N 3` and one
-//! `/Length`) each draw through their own profile (vendored hayro-interpret patch 40). hayro
+//! `/Length`) each draw through their own profile (vendored hayro-interpret patch 48). hayro
 //! cached the colour space it read from a profile stream by the dictionary's bytes alone, so
 //! the second profile drew through whichever was read first.
 //!

@@ -7159,7 +7159,7 @@ endstream endobj
         assert_eq!(decodes("B"), 5, "a JPX soft mask decodes for the size it is drawn at");
     }
 
-    // ICC profiles whose stream dictionaries are the same (vendored hayro-interpret patch 40).
+    // ICC profiles whose stream dictionaries are the same (vendored hayro-interpret patch 48).
     mod icc_profile_cache;
 
     /// Render `pdf`'s first page at 72 dpi with no time limit beyond the test's own.

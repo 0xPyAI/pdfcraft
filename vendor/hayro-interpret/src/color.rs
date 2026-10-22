@@ -122,7 +122,7 @@ pub(crate) enum ColorSpaceType {
     DeviceN(DeviceN),
 }
 
-/// PdfCraft patch (40): what the colour space read from an `/ICCBased` profile stream is cached
+/// PdfCraft patch (48): what the colour space read from an `/ICCBased` profile stream is cached
 /// by. hayro keyed it by the stream dictionary's bytes alone, so two different profiles with the
 /// same `/N` and `/Length` shared whichever was read first, and colours in the second were
 /// drawn through the first.
@@ -138,7 +138,7 @@ enum IccProfileKey<'a> {
     Content { dict: u128, data: &'a [u8] },
 }
 
-/// PdfCraft patch (40): the object of the `/ICCBased` profile `stream` that `array` names, or
+/// PdfCraft patch (48): the object of the `/ICCBased` profile `stream` that `array` names, or
 /// `None` for a stream written directly in the array (its dictionary lies within the array's
 /// bytes). Such a stream has no object of its own: its dictionary reports the object that
 /// holds the array, which every other stream written there reports too.
@@ -168,7 +168,7 @@ impl ColorSpaceType {
                     let dict = icc_stream.dict();
                     let num_components = dict.get::<usize>(N)?;
 
-                    // PdfCraft patch (40): cached by what the profile is read from (see
+                    // PdfCraft patch (48): cached by what the profile is read from (see
                     // `IccProfileKey`), not by the stream dictionary's bytes alone.
                     let read = || {
                         let data = icc_stream.raw_data();

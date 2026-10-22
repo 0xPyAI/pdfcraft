@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 type CacheMap = HashMap<u128, Option<Box<dyn Any + Send + Sync>>>;
-/// The objects read from a document, by key. PdfCraft patch (40): the second field counts the
+/// The objects read from a document, by key. PdfCraft patch (48): the second field counts the
 /// ICC profiles read through it ([`Cache::icc_profile_reads`]).
 #[derive(Clone)]
 pub(crate) struct Cache(Arc<Mutex<CacheMap>>, Arc<AtomicUsize>);
@@ -23,13 +23,13 @@ impl Cache {
         Self(Arc::new(Mutex::new(HashMap::new())), Arc::default())
     }
 
-    /// PdfCraft patch (40): count one ICC profile read, the colour space of an `/ICCBased`
+    /// PdfCraft patch (48): count one ICC profile read, the colour space of an `/ICCBased`
     /// profile no entry held yet being built from it.
     pub(crate) fn count_icc_profile_read(&self) {
         self.1.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// PdfCraft patch (40): how many ICC profiles were read through this cache.
+    /// PdfCraft patch (48): how many ICC profiles were read through this cache.
     pub(crate) fn icc_profile_reads(&self) -> usize {
         self.1.load(Ordering::Relaxed)
     }

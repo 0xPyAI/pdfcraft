@@ -147,7 +147,7 @@ impl<'a> InterpreterCache<'a> {
         self.decoded_cache.decodes()
     }
 
-    /// PdfCraft patch (40): how many `/ICCBased` profiles were read through this cache, for
+    /// PdfCraft patch (48): how many `/ICCBased` profiles were read through this cache, for
     /// diagnostics and tests. A profile used again, by the same stream object or by a copy with
     /// the same dictionary and bytes, is read once.
     pub fn icc_profile_reads(&self) -> usize {
