@@ -53,10 +53,20 @@ impl DecodeBudget {
     /// `stream` decoded like [`Stream::decoded`], charged to the allowance. Fails, without
     /// decoding, once the allowance is spent.
     pub fn decode(&mut self, stream: &Stream) -> Result<Vec<u8>, CosError> {
+        self.charge(stream, Stream::decoded_within_typed)
+    }
+
+    /// `stream` decoded like [`Stream::decoded_strict`] (any corruption is an error), charged to
+    /// the allowance.
+    pub fn decode_strict(&mut self, stream: &Stream) -> Result<Vec<u8>, CosError> {
+        self.charge(stream, Stream::decoded_strict_within_typed)
+    }
+
+    fn charge(&mut self, stream: &Stream, decode: fn(&Stream, usize) -> Result<Vec<u8>, FilterError>) -> Result<Vec<u8>, CosError> {
         if self.bytes == 0 && !stream.raw.is_empty() {
             return Err(CosError::Filter(FilterError::LimitExceeded(self.limit).to_string()));
         }
-        match stream.decoded_within_typed(self.bytes) {
+        match decode(stream, self.bytes) {
             Ok(data) => {
                 self.bytes = self.bytes.saturating_sub(data.len());
                 Ok(data)
@@ -126,6 +136,10 @@ mod tests {
         // A decode past the allowance spends it, so a bomb is inflated at most once more.
         let mut budget = DecodeBudget::new((1 << 20) - 1, 1);
         assert!(budget.decode_contents(&doc, &contents).iter().all(Result::is_err));
+        assert_eq!(budget.remaining(), 0);
+        let mut budget = DecodeBudget::new((1 << 20) - 1, 1);
+        let Object::Stream(stream) = &*doc.get(bomb) else { panic!("not a stream") };
+        assert!(budget.decode_strict(stream).is_err());
         assert_eq!(budget.remaining(), 0);
 
         assert!(budget.enter_form());

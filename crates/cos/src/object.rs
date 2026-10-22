@@ -223,21 +223,24 @@ impl Stream {
         let max = max.min(MAX_DECODED);
         let chain = self.filters();
         if chain.is_empty() {
-            if self.raw.len() > max {
-                return Err(pdfcraft_filters::FilterError::LimitExceeded(max));
-            }
-            return Ok(self.raw.to_vec());
+            return self.raw_within_typed(max);
         }
         pdfcraft_filters::decode_tolerant(&chain, &self.raw, max).map(|(v, _)| v)
     }
 
     /// Decoded data, bounded by [`MAX_DECODED`]; any corruption is an error.
     pub fn decoded_strict(&self) -> Result<Vec<u8>, CosError> {
+        self.decoded_strict_within_typed(MAX_DECODED).map_err(|e| CosError::Filter(e.to_string()))
+    }
+
+    /// [`Stream::decoded_strict`] bounded by `max`, with the filter error kept typed.
+    pub(crate) fn decoded_strict_within_typed(&self, max: usize) -> Result<Vec<u8>, pdfcraft_filters::FilterError> {
+        let max = max.min(MAX_DECODED);
         let chain = self.filters();
         if chain.is_empty() {
-            return self.raw_within(MAX_DECODED);
+            return self.raw_within_typed(max);
         }
-        pdfcraft_filters::decode(&chain, &self.raw, MAX_DECODED).map_err(|e| CosError::Filter(e.to_string()))
+        pdfcraft_filters::decode(&chain, &self.raw, max)
     }
 
     /// Data after the first filter alone, bounded by `max`: the rest of the chain stays encoded.
@@ -252,11 +255,15 @@ impl Stream {
     }
 
     fn raw_within(&self, max: usize) -> Result<Vec<u8>, CosError> {
+        self.raw_within_typed(max).map_err(|e| CosError::Filter(e.to_string()))
+    }
+
+    fn raw_within_typed(&self, max: usize) -> Result<Vec<u8>, pdfcraft_filters::FilterError> {
         let max = max.min(MAX_DECODED);
         // An empty decoder chain still produces an owned output buffer: check its limit
         // before cloning, including streams whose /Crypt filter was applied on load.
         if self.raw.len() > max {
-            return Err(CosError::Filter(pdfcraft_filters::FilterError::LimitExceeded(max).to_string()));
+            return Err(pdfcraft_filters::FilterError::LimitExceeded(max));
         }
         Ok(self.raw.to_vec())
     }
