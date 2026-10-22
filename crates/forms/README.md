@@ -42,6 +42,12 @@ delete_field(&mut doc, "email")?;
   that have them. Not in a document that declares PDF/A, which forbids that flag (`declares_pdfa`).
   `undrawn_fields` lists the marked fields; the engine reports each edit that draws one, and
   flattening refuses to make that `?` permanent.
+- Displaying a form that leaves its appearances to the viewer (`/NeedAppearances`, or a text or
+  choice widget with no `/AP /N`): `with_field_appearances` returns a copy with those widgets
+  drawn from their values, as typing them would draw them; the engine shows and prints that copy
+  and saves the file as it was (#3470). `with_field_appearances_cached` keeps each widget's
+  drawing while the objects it was drawn from are the same (`FieldAppearanceCache`), so typing in
+  one field redraws that field, not the form.
 - Check boxes and radio buttons switch `/V` and each widget's `/AS`. Widgets with no appearances
   get PdfCraft's own (a drawn check mark or dot; no symbol font needed).
 - Values are validated (options, `MaxLen`, single vs multi-select, NoToggleToOff, read-only) and a

@@ -1234,6 +1234,159 @@ pub fn need_appearances(doc: &Document) -> bool {
     acroform(doc).is_some_and(|af| matches!(af.get(b"NeedAppearances").map(|o| doc.resolve(o)).as_deref(), Some(Object::Bool(true))))
 }
 
+/// A copy of `doc` in which text and choice fields are drawn from their values, for displaying
+/// the document (`None` when no widget needs it): every such widget when the form sets
+/// `/NeedAppearances` (ISO 32000-2 Table 224: the writer left the appearances to the viewer),
+/// and otherwise each widget without a normal appearance (`/AP /N`). Drawn as typing the value
+/// would draw it (#3470). `doc` is not changed: saving writes the file as it was.
+pub fn with_field_appearances(doc: &Document) -> Option<Document> {
+    with_field_appearances_cached(doc, &mut FieldAppearanceCache::default())
+}
+
+/// [`with_field_appearances`], reusing the appearances `cache` drew for widgets whose inputs are
+/// the same objects as then (see [`FieldAppearanceCache`]).
+pub fn with_field_appearances_cached(doc: &Document, cache: &mut FieldAppearanceCache) -> Option<Document> {
+    let all = need_appearances(doc);
+    let mut copy: Option<Document> = None;
+    for f in fields(doc).iter().filter(|f| matches!(f.kind, FieldKind::Text | FieldKind::Combo | FieldKind::List)) {
+        for w in &f.widgets {
+            let widget = doc.get(w.obj);
+            let drawn = widget.as_dict().and_then(|d| d.get(b"AP")).is_some_and(|ap| doc.resolve(ap).as_dict().is_some_and(|ap| ap.contains(b"N")));
+            if drawn && !all {
+                continue;
+            }
+            let inputs = appearance_inputs(doc, w);
+            let stream = match cache.get(w.obj, &inputs) {
+                Some(stream) => stream,
+                None => {
+                    let (stream, _) = appearance::field_appearance_drawn(doc, f, w, &f.value, true);
+                    cache.insert(w.obj, inputs, &stream);
+                    stream
+                }
+            };
+            let target = copy.get_or_insert_with(|| doc.clone());
+            let ap = target.add(Object::Stream(stream));
+            let mut fresh = Dict::new();
+            fresh.set(b"N".to_vec(), Object::Ref(ap));
+            let apd = merged_appearance(target, w.obj, &fresh);
+            // Fails only when the widget isn't a dictionary; that widget then keeps its own look.
+            target.update_dict(w.obj, |d| d.set(b"AP".to_vec(), Object::Dict(apd))).ok();
+        }
+    }
+    copy
+}
+
+/// The objects a widget's drawn appearance is built from, as the document holds them: the widget
+/// and the fields above it (value, `/DA`, `/Q`, flags, options, `/MK`, formatting actions), the
+/// form dictionary (`/DA`) and the fonts of its `/DR`, each with the objects its entries refer to
+/// (an indirect `/MK` or `/V`). Not the page: a field's rotation is its own `/MK /R`.
+fn appearance_inputs(doc: &Document, w: &Widget) -> Vec<std::sync::Arc<Object>> {
+    // The objects a dictionary's entries refer to. The tree links and the drawn appearance itself
+    // are not inputs, and `/Kids` and `/Fields` can be long.
+    let referred = |d: &Dict, inputs: &mut Vec<std::sync::Arc<Object>>| {
+        for (k, v) in d.iter() {
+            if !matches!(&k[..], b"Kids" | b"Fields" | b"P" | b"Parent" | b"AP")
+                && let Some(r) = v.as_ref()
+            {
+                inputs.push(doc.get(r));
+            }
+        }
+    };
+    let mut inputs = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut node = Some(w.obj);
+    // The /Parent chain; the seen-set and the cap end a cycle or an absurd depth.
+    while let Some(r) = node.filter(|r| seen.insert(*r) && seen.len() <= 64) {
+        let obj = doc.get(r);
+        if let Some(d) = obj.as_dict() {
+            node = d.reference(b"Parent");
+            referred(d, &mut inputs);
+        } else {
+            node = None;
+        }
+        inputs.push(obj);
+    }
+    let Some(root) = doc.root() else { return inputs };
+    let catalog = doc.get(root);
+    let form = match catalog.as_dict().and_then(|c| c.reference(b"AcroForm")) {
+        Some(r) => doc.get(r),
+        None => catalog,
+    };
+    if let Some(f) = form.as_dict() {
+        referred(f, &mut inputs);
+        // The fonts of /DR. An indirect /DR or /Font is listed through the entries that refer to
+        // it; a direct one is part of the object that holds it. `held` only finds them: a copy
+        // of a direct object is a new one each time, never an input.
+        let held = |o: &Object| o.as_ref().map_or_else(|| std::sync::Arc::new(o.clone()), |r| doc.get(r));
+        if let Some(dr) = f.get(b"DR").map(held)
+            && let Some(dr) = dr.as_dict()
+        {
+            referred(dr, &mut inputs);
+            if let Some(font) = dr.get(b"Font").map(held)
+                && let Some(fonts) = font.as_dict()
+            {
+                referred(fonts, &mut inputs);
+            }
+        }
+    }
+    inputs.push(form);
+    inputs
+}
+
+/// Field appearances drawn for the display copy ([`with_field_appearances_cached`]), so a refresh
+/// redraws only the widgets whose inputs changed: a form that leaves every appearance to the
+/// viewer otherwise redrew all of its fields on each keystroke in any one of them (#3470). An
+/// entry holds the input objects it was drawn from and is used only while each is still the same
+/// object (`Arc::ptr_eq`); the document replaces an object it edits, so a changed input is a
+/// miss, never a stale hit.
+#[derive(Clone, Debug, Default)]
+pub struct FieldAppearanceCache {
+    entries: std::collections::HashMap<ObjRef, (Vec<std::sync::Arc<Object>>, pdfcraft_cos::Stream)>,
+    bytes: usize,
+    hits: u64,
+    builds: u64,
+}
+
+impl FieldAppearanceCache {
+    /// Cached appearance data restarts past this instead of growing without bound.
+    const MAX_BYTES: usize = 64 << 20;
+
+    /// Forget every entry.
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    fn get(&mut self, w: ObjRef, inputs: &[std::sync::Arc<Object>]) -> Option<pdfcraft_cos::Stream> {
+        let (from, stream) = self.entries.get(&w)?;
+        if from.len() != inputs.len() || !from.iter().zip(inputs).all(|(a, b)| std::sync::Arc::ptr_eq(a, b)) {
+            return None;
+        }
+        self.hits += 1;
+        Some(stream.clone())
+    }
+
+    fn insert(&mut self, w: ObjRef, inputs: Vec<std::sync::Arc<Object>>, stream: &pdfcraft_cos::Stream) {
+        self.builds += 1;
+        if self.bytes.saturating_add(stream.raw.len()) > Self::MAX_BYTES {
+            self.clear();
+        }
+        self.bytes = self.bytes.saturating_add(stream.raw.len());
+        if let Some((_, old)) = self.entries.insert(w, (inputs, stream.clone())) {
+            self.bytes = self.bytes.saturating_sub(old.raw.len());
+        }
+    }
+
+    /// Cache hits so far (reused appearances); for tests.
+    pub fn hits(&self) -> u64 {
+        self.hits
+    }
+
+    /// Appearances drawn so far; for tests.
+    pub fn builds(&self) -> u64 {
+        self.builds
+    }
+}
+
 /// Whether the document's XMP metadata declares PDF/A conformance (`pdfaid:part`).
 pub fn declares_pdfa(doc: &Document) -> bool {
     let Some(root) = doc.root() else { return false };

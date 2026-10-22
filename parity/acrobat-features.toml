@@ -806,8 +806,8 @@ milestone = "M2"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/render/src/raster.rs::widget_appearance_states", "crates/render/src/raster.rs::highlights_without_an_appearance_are_drawn", "crates/engine/src/tests.rs::comments_without_appearances_are_drawn_but_not_saved", "crates/engine/src/tests.rs::cli_display_adds_missing_appearances_without_changing_the_source"]
-notes = "comments without /AP (FreeText, Ink, notes, stamps, shapes, markup) are drawn from their dictionaries in the page view, page_render and page images, including the CLI render command, never saved (a read-only document still gets the renderer's Highlight fallback only); Link borders without /AP and printing are not covered yet"
+evidence = ["crates/render/src/raster.rs::widget_appearance_states", "crates/render/src/raster.rs::highlights_without_an_appearance_are_drawn", "crates/engine/src/tests.rs::comments_without_appearances_are_drawn_but_not_saved", "crates/engine/src/tests.rs::cli_display_adds_missing_appearances_without_changing_the_source", "crates/engine/src/tests.rs::fields_left_to_the_viewer_are_displayed_from_their_values", "crates/forms/src/tests.rs::need_appearances_draws_every_text_and_choice_field_in_the_display_copy", "crates/forms/src/tests.rs::the_field_appearance_cache_sees_every_input"]
+notes = "comments without /AP (FreeText, Ink, notes, stamps, shapes, markup) are drawn from their dictionaries in the page view, page_render and page images, including the CLI render command, never saved; text and choice fields are drawn from their values when the form sets /NeedAppearances (every one) or a widget has no /N (#3470), also display-only and cached per widget (a field edit on a 1000-field /NeedAppearances form takes ~13 ms against ~7 ms on a form that needs none) (a read-only document still gets the renderer's Highlight fallback only); Link borders without /AP and printing are not covered yet"
 
 [[feature]]
 id = "view.render-error-isolation"

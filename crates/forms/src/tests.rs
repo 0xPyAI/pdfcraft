@@ -2673,3 +2673,171 @@ fn document_scripts_read_each_name_tree_node_once() {
     ]);
     assert_eq!(document_scripts_named(&doc), [("init".to_string(), "var ready = true;".to_string())]);
 }
+
+/// #3470: a form whose writer left the appearances to the viewer. Field A has an empty one,
+/// B none, C its own (`(old C)`), D is a combo without one, E a check box with states, F a list
+/// box without one, and G only a down appearance (`/D`, no `/N`).
+fn left_to_the_viewer(need_appearances: bool) -> Document {
+    let flag = if need_appearances { "/NeedAppearances true " } else { "" };
+    document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 13 0 R 14 0 R] >>".into(),
+        format!("<< /Fields [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 13 0 R 14 0 R] {flag}/DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>"),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (a) /V (Value A) /DA (/Helv 12 Tf 0 g) /Rect [50 700 350 720] /P 3 0 R /AP << /N 11 0 R >> >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (b) /V (Value B) /DA (/Helv 12 Tf 0 g) /Rect [50 650 350 670] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (c) /V (Value C) /DA (/Helv 12 Tf 0 g) /Rect [50 600 350 620] /P 3 0 R /AP << /N 12 0 R >> >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 131072 /T (d) /Opt [(Red) (Blue)] /V (Blue) /DA (/Helv 12 Tf 0 g) /Rect [50 550 350 570] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (e) /V /Yes /AS /Yes /Rect [400 700 415 715] /P 3 0 R /AP << /N << /Yes 11 0 R /Off 11 0 R >> >> >>".into(),
+        "<< /Length 4 >>\nstream\nq\nQ\nendstream".into(),
+        "<< /Length 18 >>\nstream\nBT (old C) Tj ET\nendstream".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Ch /T (f) /Opt [(Green) (Grey)] /V (Green) /DA (/Helv 12 Tf 0 g) /Rect [50 450 350 520] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (g) /V (Value G) /DA (/Helv 12 Tf 0 g) /Rect [50 400 350 420] /P 3 0 R /AP << /D 11 0 R >> >>".into(),
+    ])
+}
+
+/// #3470: with `/NeedAppearances`, every text and choice widget of the display copy is drawn
+/// from its value, its own appearance or not; buttons keep their states, and the document
+/// itself is untouched.
+#[test]
+fn need_appearances_draws_every_text_and_choice_field_in_the_display_copy() {
+    let doc = left_to_the_viewer(true);
+    let copy = with_field_appearances(&doc).expect("fields to draw");
+    let all = fields(&copy);
+    for (name, value) in
+        [("a", "(Value A) Tj"), ("b", "(Value B) Tj"), ("c", "(Value C) Tj"), ("d", "(Blue) Tj"), ("f", "(Green) Tj"), ("g", "(Value G) Tj")]
+    {
+        let shown = ap(&copy, &field(&all, name).widgets[0]);
+        assert!(shown.contains(value), "{name}: {shown}");
+    }
+    let e = |d: &Document| d.get(field(&fields(d), "e").widgets[0].obj).as_dict().and_then(|w| w.get(b"AP").cloned());
+    assert_eq!(e(&copy), e(&doc), "the check box keeps its states");
+    let original = fields(&doc);
+    assert_eq!(ap(&doc, &field(&original, "a").widgets[0]).trim_end(), "q\nQ", "the document keeps its own appearances");
+    assert!(doc.get(field(&original, "b").widgets[0].obj).as_dict().is_some_and(|w| !w.contains(b"AP")));
+}
+
+/// #3470: without `/NeedAppearances`, only widgets with no normal appearance are drawn; an
+/// appearance the file has, even an empty one, is the file's. A form with all of them needs no
+/// copy.
+#[test]
+fn without_need_appearances_only_missing_appearances_are_drawn() {
+    let doc = left_to_the_viewer(false);
+    let copy = with_field_appearances(&doc).expect("b, d, f and g have none");
+    let all = fields(&copy);
+    assert_eq!(ap(&copy, &field(&all, "a").widgets[0]).trim_end(), "q\nQ");
+    assert!(ap(&copy, &field(&all, "b").widgets[0]).contains("(Value B) Tj"));
+    assert_eq!(ap(&copy, &field(&all, "c").widgets[0]).trim_end(), "BT (old C) Tj ET");
+    assert!(ap(&copy, &field(&all, "d").widgets[0]).contains("(Blue) Tj"));
+    assert!(ap(&copy, &field(&all, "f").widgets[0]).contains("(Green) Tj"));
+    assert!(ap(&copy, &field(&all, "g").widgets[0]).contains("(Value G) Tj"), "a down appearance alone is no normal one");
+    assert!(with_field_appearances(&copy).is_none(), "every widget has one now");
+}
+
+/// #3470: refreshing the display copy redraws only the widgets whose inputs changed. Typing in
+/// one field of a form that leaves every appearance to the viewer otherwise redrew all of them.
+#[test]
+fn the_field_appearance_cache_redraws_only_what_changed() {
+    let mut doc = left_to_the_viewer(true);
+    let mut cache = FieldAppearanceCache::default();
+    with_field_appearances_cached(&doc, &mut cache).expect("fields to draw");
+    let drawn = cache.builds();
+    assert_eq!(drawn, 6, "a, b, c, d, f and g");
+    with_field_appearances_cached(&doc, &mut cache).expect("fields to draw");
+    assert_eq!((cache.builds(), cache.hits()), (drawn, drawn), "nothing changed, nothing redrawn");
+
+    set_value(&mut doc, "b", &FieldValue::Text("Typed".into())).unwrap();
+    let copy = with_field_appearances_cached(&doc, &mut cache).expect("fields to draw");
+    assert_eq!(cache.builds(), drawn + 1, "only b is redrawn");
+    assert!(ap(&copy, &field(&fields(&copy), "b").widgets[0]).contains("(Typed) Tj"), "and shows its new value");
+    assert!(ap(&copy, &field(&fields(&copy), "a").widgets[0]).contains("(Value A) Tj"), "a reuses its drawing");
+}
+
+/// #3470: each kind of input a field's drawing depends on invalidates its cached appearance when
+/// it changes, wherever it lives: the parent field's value, the form's `/DA`, an indirect `/MK`
+/// and a `/DR` font. Field H is a parent with one kid widget; I is a plain field.
+#[test]
+fn the_field_appearance_cache_sees_every_input() {
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R] >>".into(),
+        "<< /Fields [5 0 R 7 0 R] /NeedAppearances true /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 8 0 R >> >> >>".into(),
+        "<< /FT /Tx /T (h) /V (Kid value) /Kids [6 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /Parent 5 0 R /Rect [50 700 350 720] /P 3 0 R /MK 9 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (i) /V (Plain) /Rect [50 650 350 670] /P 3 0 R >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        "<< /BG [1 1 1] >>".into(),
+    ]);
+    let r = |n: u32| pdfcraft_cos::ObjRef::new(n, 0);
+    let mut cache = FieldAppearanceCache::default();
+    let mut redraw = |doc: &Document| {
+        let before = cache.builds();
+        let copy = with_field_appearances_cached(doc, &mut cache).expect("fields to draw");
+        (cache.builds() - before, copy)
+    };
+    assert_eq!(redraw(&doc).0, 2);
+    assert_eq!(redraw(&doc).0, 0, "unchanged");
+
+    doc.update_dict(r(5), |d| d.set(b"V".to_vec(), Object::String(PdfString::text("New value")))).unwrap();
+    let (n, copy) = redraw(&doc);
+    assert_eq!(n, 1, "the parent's value: only its kid");
+    assert!(ap(&copy, &field(&fields(&copy), "h").widgets[0]).contains("(New value) Tj"));
+
+    doc.update_dict(r(9), |d| d.set(b"BG".to_vec(), Object::Array(vec![Object::Int(1), Object::Int(0), Object::Int(0)]))).unwrap();
+    let (n, copy) = redraw(&doc);
+    assert_eq!(n, 1, "the kid's indirect /MK");
+    assert!(ap(&copy, &field(&fields(&copy), "h").widgets[0]).contains("1 0 0 rg"), "the new background");
+
+    doc.update_dict(r(4), |d| d.set(b"DA".to_vec(), Object::String(PdfString::text("/Helv 9 Tf 0 g")))).unwrap();
+    let (n, copy) = redraw(&doc);
+    assert_eq!(n, 2, "the form's /DA: both fields");
+    assert!(ap(&copy, &field(&fields(&copy), "i").widgets[0]).contains("/Helv 9 Tf"));
+
+    doc.update_dict(r(8), |d| d.set(b"BaseFont".to_vec(), Object::Name(b"Courier".to_vec()))).unwrap();
+    assert_eq!(redraw(&doc).0, 2, "a /DR font: both fields");
+}
+
+/// #3470: an indirect `/DR` and an indirect `/Font` inside it are inputs too, with a font written
+/// directly into the `/Font` dictionary, and so is the form's `/DA` when it is an indirect string.
+#[test]
+fn the_field_appearance_cache_sees_indirect_resources() {
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [5 0 R] >>".into(),
+        "<< /Fields [5 0 R] /NeedAppearances true /DA 8 0 R /DR 6 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (i) /V (Plain) /Rect [50 650 350 670] /P 3 0 R >>".into(),
+        "<< /Font 7 0 R >>".into(),
+        "<< /Helv << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> >>".into(),
+        "(/Helv 12 Tf 0 g)".into(),
+    ]);
+    let r = |n: u32| pdfcraft_cos::ObjRef::new(n, 0);
+    let mut cache = FieldAppearanceCache::default();
+    let mut redraw = |doc: &Document| {
+        let before = cache.builds();
+        with_field_appearances_cached(doc, &mut cache).expect("a field to draw");
+        cache.builds() - before
+    };
+    assert_eq!(redraw(&doc), 1);
+    assert_eq!(redraw(&doc), 0);
+    let courier = || {
+        let mut f = Dict::new();
+        f.set(b"Type".to_vec(), Object::Name(b"Font".to_vec()));
+        f.set(b"Subtype".to_vec(), Object::Name(b"Type1".to_vec()));
+        f.set(b"BaseFont".to_vec(), Object::Name(b"Courier".to_vec()));
+        Object::Dict(f)
+    };
+    doc.update_dict(r(7), |d| d.set(b"Helv".to_vec(), courier())).unwrap();
+    assert_eq!(redraw(&doc), 1, "the indirect /Font dictionary");
+    doc.update_dict(r(6), |d| {
+        let mut fonts = Dict::new();
+        fonts.set(b"Helv".to_vec(), courier());
+        d.set(b"Font".to_vec(), Object::Dict(fonts));
+    })
+    .unwrap();
+    assert_eq!(redraw(&doc), 1, "the indirect /DR");
+    doc.set(r(8), Object::String(PdfString::text("/Helv 9 Tf 0 g")));
+    assert_eq!(redraw(&doc), 1, "the form's indirect /DA");
+}
