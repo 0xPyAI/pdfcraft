@@ -42,10 +42,11 @@ const MAX_REMOTE_DESTINATION_NAME_BYTES: usize = 1024;
 /// are not listed: real comments stay far below, many small ones sharing one long string do not.
 const MAX_ANNOTATION_BYTES: usize = 64 << 20;
 
-/// Web-address text the link listing, and name and description text the attachment listing, keep
-/// together. Many links or attachments can share one long string, which each would otherwise copy.
-/// Past it, a link to a web address lists as a URI action without its address, and an attachment
-/// under its generic name without a description.
+/// Web-address text the link listing, and name, description and embedded-file key text the
+/// attachment listing, keep together. Many links or attachments can share one long string, which
+/// each would otherwise copy. Past it, a link to a web address lists as a URI action without its
+/// address, an attachment under its generic name without a description, and an embedded file whose
+/// key does not fit is not listed.
 const MAX_LINK_ATTACHMENT_TEXT_BYTES: usize = 16 << 20;
 
 /// The bytes a listed annotation keeps.
@@ -745,8 +746,9 @@ impl<'a> Inspector<'a> {
         if let Some(names) = catalog.get(b"Names").ok().and_then(|o| self.dict(o)) {
             if let Some(ef) = names.get(b"EmbeddedFiles").ok().and_then(|o| self.dict(o)) {
                 let mut seen = HashSet::new();
-                for (name, spec) in self.name_tree(ef, &mut seen, 0) {
-                    let fallback = |_: &mut usize| Some(name.clone());
+                for (name, spec) in self.name_tree(ef, &mut seen, 0, &mut text_budget) {
+                    // The key is kept a second time when it is also the name.
+                    let fallback = |budget: &mut usize| spend(name.as_bytes(), budget, |_| name.clone());
                     info.attachments.push(self.attachment(spec, AttachmentSource::Document { key: name.clone() }, &mut text_budget, fallback));
                 }
             }
@@ -955,7 +957,15 @@ impl<'a> Inspector<'a> {
         }
     }
 
-    fn name_tree(&self, node: &'a Dictionary, seen: &mut HashSet<*const Dictionary>, depth: u32) -> Vec<(String, &'a Object)> {
+    /// The entries of an embedded-files name tree. Each string key is spent from `text_budget`
+    /// (see [`MAX_LINK_ATTACHMENT_TEXT_BYTES`]), and an entry whose key does not fit is left out.
+    fn name_tree(
+        &self,
+        node: &'a Dictionary,
+        seen: &mut HashSet<*const Dictionary>,
+        depth: u32,
+        text_budget: &mut usize,
+    ) -> Vec<(String, &'a Object)> {
         let mut out = Vec::new();
         if depth > 32 || !seen.insert(node as *const _) {
             return out;
@@ -964,7 +974,10 @@ impl<'a> Inspector<'a> {
             for pair in pairs.chunks(2) {
                 if let [k, v] = pair {
                     let key = match self.resolve(k) {
-                        Object::String(bytes, _) => text_string(bytes),
+                        Object::String(bytes, _) => match spend(bytes, text_budget, text_string) {
+                            Some(key) => key,
+                            None => continue,
+                        },
                         _ => String::new(),
                     };
                     out.push((key, v));
@@ -974,7 +987,7 @@ impl<'a> Inspector<'a> {
         if let Ok(Object::Array(kids)) = node.get(b"Kids").map(|o| self.resolve(o)) {
             for k in kids {
                 if let Some(d) = self.dict(k) {
-                    out.extend(self.name_tree(d, seen, depth + 1));
+                    out.extend(self.name_tree(d, seen, depth + 1, text_budget));
                 }
             }
         }
@@ -1790,7 +1803,8 @@ pub fn attachment_data(bytes: &[u8], password: Option<&str>, att: &Attachment) -
                 let names = doc.catalog().ok().and_then(|c| c.get(b"Names").ok()).and_then(|o| insp.dict(o)).ok_or("no /Names")?;
                 let ef = names.get(b"EmbeddedFiles").ok().and_then(|o| insp.dict(o)).ok_or("no /EmbeddedFiles")?;
                 let mut seen = HashSet::new();
-                insp.name_tree(ef, &mut seen, 0).into_iter().find(|(k, _)| k == key).map(|(_, v)| v).ok_or("attachment not found")?
+                let mut budget = MAX_LINK_ATTACHMENT_TEXT_BYTES;
+                insp.name_tree(ef, &mut seen, 0, &mut budget).into_iter().find(|(k, _)| k == key).map(|(_, v)| v).ok_or("attachment not found")?
             }
             AttachmentSource::Annotation { page, index } => {
                 let (&pid, _) = insp.page_index.iter().find(|(_, i)| **i == *page).ok_or("page not found")?;
@@ -2795,6 +2809,29 @@ trailer << /Root 1 0 R >>
         assert!(info.attachments.iter().all(|a| a.name == "a.txt"));
         assert_eq!(info.links.len(), 1);
         assert!(matches!(&info.links[0].target, LinkTarget::Uri(u) if *u == uri));
+    }
+
+    /// Embedded files whose name-tree keys share one long string keep it, as key and as name, only
+    /// within `MAX_LINK_ATTACHMENT_TEXT_BYTES`.
+    #[test]
+    fn embedded_file_keys_sharing_a_long_string_keep_it_within_a_budget() {
+        let entries = "4 0 R << /Type /Filespec >> ".repeat(20);
+        let pdf = format!(
+            "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles << /Names [{entries}] >> >> >> endobj\n\
+             2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n\
+             4 0 obj ({}) endobj\n\
+             trailer << /Root 1 0 R >>\n%%EOF",
+            "x".repeat(1 << 20),
+        );
+        let doc = Document::load_mem(pdf.as_bytes()).expect("loads");
+        let mut info = DocInfo::default();
+        Inspector::new(&doc).fill(&mut info);
+        let kept: usize =
+            info.attachments.iter().map(|a| a.name.len() + if let AttachmentSource::Document { key } = &a.source { key.len() } else { 0 }).sum();
+        assert!(!info.attachments.is_empty());
+        // Past the budget an attachment still has the generic name.
+        let generic = info.attachments.len() * "attachment".len();
+        assert!(kept <= MAX_LINK_ATTACHMENT_TEXT_BYTES + generic, "{kept} bytes kept");
     }
 
     /// Links and attachments sharing one long string each keep a copy only within
