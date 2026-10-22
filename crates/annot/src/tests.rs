@@ -991,6 +991,29 @@ fn malformed_optional_interior_color_does_not_hide_shape_strokes() {
     assert!(list(&doc, 0)[0].get(b"AP").is_none(), "display generation leaves the source document unchanged");
 }
 
+/// #3175: viewers draw a note without an appearance as a fixed-size icon at the upper-left corner
+/// of its `/Rect`. The display copy must not stretch the icon over a large `/Rect` or shrink it
+/// to nothing in one with no width.
+#[test]
+fn a_note_without_an_appearance_is_shown_at_icon_size() {
+    let doc = document_of(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 600] >>",
+        b"<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R 6 0 R] >>",
+        b"<< /Type /Annot /Subtype /Text /Rect [-23 240 480 468] /C [1 0 0] /Open true >>",
+        b"<< /Type /Annot /Subtype /Text /Rect [310 380 310 392] /Name /Comment /F 4 >>",
+        b"<< /Type /Annot /Subtype /FileAttachment /Rect [100 50 300 10] >>",
+    ]);
+    let display = with_missing_appearances(&doc).expect("the notes get a display appearance");
+    let rects = |doc: &Document| -> Vec<Vec<f64>> {
+        let rect = |d: &Dict| d.get(b"Rect").and_then(|r| r.as_array()).map(|a| a.iter().filter_map(Object::as_f64).collect::<Vec<f64>>());
+        list(doc, 0).iter().map(|d| rect(d).unwrap_or_default()).collect()
+    };
+    assert_eq!(rects(&display), [vec![-23.0, 448.0, -3.0, 468.0], vec![310.0, 372.0, 330.0, 392.0], vec![100.0, 30.0, 120.0, 50.0]]);
+    let original = [vec![-23.0, 240.0, 480.0, 468.0], vec![310.0, 380.0, 310.0, 392.0], vec![100.0, 50.0, 300.0, 10.0]];
+    assert_eq!(rects(&doc), original, "the source document is unchanged");
+}
+
 #[test]
 fn every_line_ending_is_drawn() {
     let filled = [LineEnding::Square, LineEnding::Circle, LineEnding::Diamond, LineEnding::ClosedArrow, LineEnding::RClosedArrow];
