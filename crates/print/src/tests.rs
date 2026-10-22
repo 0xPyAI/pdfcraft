@@ -528,7 +528,7 @@ mod cups_options {
         )
         .unwrap();
         let started = std::time::Instant::now();
-        let options = spool::printer_options_via_within("Office", &dir, command(&dir, "HANG"), std::time::Duration::from_millis(500));
+        let options = spool::printer_options_via_within("Office", &dir, command(&dir, "HANG"), std::time::Duration::from_millis(500), "en");
         assert!(started.elapsed() < std::time::Duration::from_secs(20), "given up at the deadline, not when the command does");
         assert_eq!(options.len(), 1, "the PPD is still read");
         assert_eq!(options[0].default, "Auto", "the PPD default stands when the queue does not answer");
