@@ -5814,6 +5814,51 @@ fn measurements_calibrate_draw_save_reopen_and_export() {
 }
 
 #[test]
+fn measurement_scale_ratio_takes_the_page_side_in_a_unit() {
+    // #2752: a plan drawn at 1:50 is "1 mm = 50 mm", so a line 10 mm long on the page is 500 mm.
+    let dir = workdir("measurement-ratio");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path":"a.pdf"}))["doc"].as_u64().unwrap();
+    let mm = 72.0 / 25.4;
+    let line = json!([[20.0, 30.0], [20.0 + 10.0 * mm, 30.0]]);
+    let read = |a: &mut Automation, doc: u64| ok(a, "measure_info", json!({"doc":doc,"page":1,"points":line}))["reading"]["value"].as_f64().unwrap();
+    let set = ok(&mut a, "measure_scale", json!({"doc":doc,"page":1,"page_distance":1,"page_unit":"mm","distance":50,"unit":"mm"}));
+    assert_eq!(set["scale"]["ratio"], "1 mm = 50 mm");
+    assert!((read(&mut a, doc) - 500.0).abs() < 1e-9);
+    // The PDF keeps its factors per point: 50 mm for every 25.4 / 72 mm of page.
+    assert!((set["scale"]["x"].as_f64().unwrap() - 50.0 / mm).abs() < 1e-9);
+    ok(&mut a, "edit_undo", json!({"doc":doc}));
+    assert!((read(&mut a, doc) - 10.0 / 25.4).abs() < 1e-9, "true size in inches without a scale");
+    ok(&mut a, "edit_redo", json!({"doc":doc}));
+    assert!((read(&mut a, doc) - 500.0).abs() < 1e-9);
+    ok(&mut a, "doc_save", json!({"doc":doc,"path":"ratio.pdf"}));
+    let reopened = ok(&mut a, "doc_open", json!({"path":"ratio.pdf"}))["doc"].as_u64().unwrap();
+    assert!((read(&mut a, reopened) - 500.0).abs() < 1e-9);
+    assert_eq!(ok(&mut a, "measure_scale", json!({"doc":reopened,"page":1,"at":[20,30]}))["scale"]["ratio"], "1 mm = 50 mm");
+    // The page side defaults to the real-world unit; any page unit converts to points.
+    ok(&mut a, "measure_scale", json!({"doc":doc,"page":1,"page_distance":2,"distance":1,"unit":"cm"}));
+    assert!((read(&mut a, doc) - 0.5).abs() < 1e-9);
+    ok(&mut a, "measure_scale", json!({"doc":doc,"page":1,"page_distance":0.25,"page_unit":"in","distance":1,"unit":"ft"}));
+    assert!((read(&mut a, doc) - 10.0 / 25.4 * 4.0).abs() < 1e-9);
+    // Units per point keep meaning points.
+    ok(&mut a, "measure_scale", json!({"doc":doc,"page":1,"units_per_point":50,"unit":"mm"}));
+    assert!((read(&mut a, doc) - 500.0 * mm).abs() < 1e-9);
+    let before = ok(&mut a, "doc_list", json!({}));
+    for args in [
+        json!({"doc":doc,"page":1,"page_distance":1,"page_unit":"ft","distance":1,"unit":"ft"}),
+        json!({"doc":doc,"page":1,"page_distance":1,"distance":1,"unit":"m"}),
+        json!({"doc":doc,"page":1,"page_distance":1,"unit":"mm"}),
+        json!({"doc":doc,"page":1,"page_unit":"mm","units_per_point":1}),
+        json!({"doc":doc,"page":1,"page_distance":1,"units_per_point":1,"distance":1}),
+        json!({"doc":doc,"page":1,"page_distance":1,"points":[[0,0],[10,0]],"distance":1}),
+    ] {
+        assert!(a.call("measure_scale", &args).is_err(), "{args}");
+        assert_eq!(ok(&mut a, "doc_list", json!({})), before);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn measurements_bad_arguments_leave_document_and_history_unchanged() {
     let dir = workdir("measurement-errors");
     let mut a = auto(&dir);

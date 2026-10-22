@@ -1245,6 +1245,7 @@ fn measurement_tools_draw_live_calibrate_save_and_export() {
     ok(&mut h, &c, "ui.command", json!({"id":"measure.scale"}));
     h.run_steps(3);
     h.state_mut().views[0].measure.drawing_points = 10.0;
+    h.state_mut().views[0].measure.page_unit = Some(pdfcraft_engine::measure::PageUnit::Pt);
     h.state_mut().views[0].measure.real_distance = 1.0;
     h.state_mut().views[0].measure.unit = "m".into();
     h.get_by_label("Apply scale").click();
@@ -1291,6 +1292,49 @@ fn measurement_tools_draw_live_calibrate_save_and_export() {
     click(&mut h, &c, 130.0, 50.0);
     assert!((h.state().views[0].measure.drawing_points - 100.0).abs() < 0.01);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_1_to_50_scale_in_millimetres_measures_a_10_mm_line_as_500_mm() {
+    // #2752: a plan drawn at 1:50 is "1 mm = 50 mm". The page side of the scale was fixed in
+    // points, so this stored 1 pt = 50 mm, 72 / 25.4 = 2.835 times too big.
+    use pdfcraft_engine::measure::{self, Kind};
+    let (mut h, c) = harness_pages(1);
+    let doc = h.state().views[0].id;
+    h.state_mut().set_option("zoom", "100").unwrap();
+    ok(&mut h, &c, "ui.command", json!({"id":"measure.scale"}));
+    h.run_steps(3);
+    let m = &mut h.state_mut().views[0].measure;
+    (m.drawing_points, m.real_distance, m.unit) = (1.0, 50.0, "mm".into());
+    h.get_by_label("Apply scale").click();
+    h.run_steps(3);
+    let mm = 72.0 / 25.4;
+    let line = [[20.0, 30.0], [20.0 + 10.0 * mm, 30.0]];
+    let stored = |h: &Harness<'static, PdfCraftApp>| {
+        let scale = h.state().session.get(doc).unwrap().measurement_scale(0, line[0]).unwrap();
+        (measure::reading(Kind::Distance, &line, &scale).unwrap().value, scale.ratio)
+    };
+    let (value, ratio) = stored(&h);
+    assert!((value - 500.0).abs() < 1e-9, "a 10 mm line at 1:50 reads {value} ({ratio})");
+    assert_eq!(ratio, "1 mm = 50 mm");
+    // The scale is one undoable edit.
+    ok(&mut h, &c, "ui.command", json!({"id":"edit.undo"}));
+    h.run_steps(2);
+    assert!((stored(&h).0 - 500.0).abs() > 1.0);
+    ok(&mut h, &c, "ui.command", json!({"id":"edit.redo"}));
+    h.run_steps(2);
+    assert_eq!(stored(&h), (value, ratio));
+    // Measuring the line on the page with the Distance tool reads the same.
+    ok(&mut h, &c, "ui.command", json!({"id":"measure.distance"}));
+    for [x, y] in line {
+        let r = h.state().views[0].page_screen_rect(0).unwrap();
+        ok(&mut h, &c, "ui.click", json!({"x":r.left()+x as f32*r.width()/200.0,"y":r.top()+y as f32*r.height()/300.0}));
+        h.run_steps(2);
+    }
+    let measurements = h.state().session.get(doc).unwrap().measurements().unwrap().measurements;
+    assert_eq!(measurements.len(), 1);
+    assert!((measurements[0].reading.value - 500.0).abs() < 0.05, "{:?}", measurements[0].reading);
+    assert_eq!(measurements[0].reading.unit, "mm");
 }
 
 #[test]
