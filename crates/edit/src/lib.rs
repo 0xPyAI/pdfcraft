@@ -631,9 +631,7 @@ fn place_tagged(doc: &mut Document, page: &pdfcraft_model::Page, tag: &str, cont
             // closing it changes nothing already drawn.
             Isolation::Unknown { unclosed, marked } => (behind_marks < list.len()).then_some((behind_marks, unclosed, marked)),
             // Content left inside an optional-content sequence it cannot close could be hidden.
-            Isolation::TooDeep => {
-                return Err(EditError::Invalid("the page's marked content is nested too deeply to add anything on top of it".into()));
-            }
+            Isolation::TooDeep => return Err(too_deep_on_top()),
         }
     };
     let mark_ref = doc.add(Object::Stream(Stream::flate(tagged(tag), &content)));
@@ -661,6 +659,26 @@ fn place_tagged(doc: &mut Document, page: &pdfcraft_model::Page, tag: &str, cont
     Ok(mark_ref)
 }
 
+fn too_deep_on_top() -> EditError {
+    EditError::Invalid("the page's marked content is nested too deeply to add anything on top of it".into())
+}
+
+/// The refusal [`place_tagged`] gives for a mark on top of `page`, checked before an edit changes
+/// anything (removing old marks, adding resources) so a refused edit leaves the document as it was.
+fn check_on_top(doc: &Document, page: &pdfcraft_model::Page) -> Result<(), EditError> {
+    let obj = doc.get(page.obj);
+    let list = match obj.as_dict().and_then(|d| d.get(b"Contents")) {
+        None => return Ok(()),
+        Some(Object::Ref(r)) => doc.get(*r).as_array().cloned().unwrap_or_else(|| vec![Object::Ref(*r)]),
+        Some(Object::Array(a)) => a.clone(),
+        Some(other) => vec![other.clone()],
+    };
+    match isolation(doc, &list) {
+        Isolation::TooDeep => Err(too_deep_on_top()),
+        _ => Ok(()),
+    }
+}
+
 /// Put content tagged `tag` first inside the q/Q wrapper, so it applies to the page's original
 /// content and nothing else (a header's shrink). A page without a wrapper has no original content
 /// on it and is left alone.
@@ -680,6 +698,7 @@ fn place_inside_wrapper(doc: &mut Document, page: &pdfcraft_model::Page, tag: &s
 pub fn stamp(doc: &mut Document, page: usize, tag: &str, content: Vec<u8>) -> Result<ObjRef, EditError> {
     let all = page_list(doc);
     check(&[page], all.len())?;
+    check_on_top(doc, &all[page])?;
     add_resources(doc, &all[page], None, Some(&content))?;
     let p = page_list(doc).swap_remove(page);
     place_tagged(doc, &p, tag, content, false)
@@ -759,6 +778,9 @@ pub fn add_header_footer(doc: &mut Document, pages: &[usize], hf: &HeaderFooter,
         .iter()
         .map(|&i| hf.shrink.then(|| shrink_matrix(hf, all[i].display_size(doc), all[i].view_matrix(doc))).transpose())
         .collect::<Result<Vec<_>, _>>()?;
+    for &i in pages {
+        check_on_top(doc, &all[i])?;
+    }
     if replace {
         remove_marks(doc, pages, MarkKind::HeaderFooter)?;
     }
@@ -846,6 +868,11 @@ pub fn add_watermark(doc: &mut Document, pages: &[usize], wm: &Watermark, replac
         && wm.offset.iter().all(|o| o.is_finite()))
     {
         return Err(EditError::Invalid("invalid watermark settings".into()));
+    }
+    if !wm.behind {
+        for &i in pages {
+            check_on_top(doc, &all[i])?;
+        }
     }
     if replace {
         remove_marks(doc, pages, MarkKind::Watermark)?;

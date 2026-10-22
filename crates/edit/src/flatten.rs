@@ -257,6 +257,7 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
             .map(|(_, e)| e.clone())
             .collect();
         if !content.is_empty() {
+            crate::check_on_top(doc, &page)?;
             // The page's own resources, with the appearances as XObjects.
             let mut res = page.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
             let mut xo = res.get(b"XObject").map(|x| doc.resolve(x)).and_then(|x| x.as_dict().cloned()).unwrap_or_default();

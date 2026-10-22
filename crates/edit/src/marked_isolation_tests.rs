@@ -131,3 +131,29 @@ fn depth_budget_bounds_emitted_closures_and_overflow_is_refused_on_top() {
         place_tagged(&mut doc, &page, MarkKind::Background.tag(), b"q Q\n".to_vec(), true).unwrap();
     }
 }
+
+/// Marks refused on top of content nested past the depth budget leave the page as it was: old
+/// marks are not removed and no resources are added before the refusal.
+#[test]
+fn a_mark_refused_on_top_changes_nothing() {
+    let mut over = b"/Artifact BMC\n".repeat(ISOLATION_MAX_DEPTH);
+    over.extend_from_slice(b"/Artifact BMC\n");
+    let mut doc = fixture(&[&over]);
+    let behind = Watermark { text: "OLD".into(), behind: true, ..Watermark::default() };
+    add_watermark(&mut doc, &[0], &behind, false).unwrap();
+    let page = page_list(&doc).remove(0).obj;
+    let before = (*doc.get(page)).clone();
+    let on_top = Watermark { text: "NEW".into(), ..Watermark::default() };
+    assert!(matches!(add_watermark(&mut doc, &[0], &on_top, true), Err(EditError::Invalid(_))));
+    assert_eq!((*doc.get(page)).clone(), before, "the old watermark stays");
+    let hf = HeaderFooter {
+        text: [String::new(), "Top".into(), String::new(), String::new(), String::new(), String::new()],
+        font: added::Family::Times,
+        ..HeaderFooter::default()
+    };
+    assert!(matches!(add_header_footer(&mut doc, &[0], &hf, true, &Context::default()), Err(EditError::Invalid(_))));
+    assert_eq!((*doc.get(page)).clone(), before, "no fonts are added");
+    let mut stamped = doc.clone();
+    assert!(matches!(stamp(&mut stamped, 0, "Probe", b"/PCTimes 9 Tf\n".to_vec()), Err(EditError::Invalid(_))));
+    assert_eq!((*stamped.get(page)).clone(), before, "no fonts are added");
+}

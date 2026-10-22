@@ -1050,6 +1050,9 @@ fn write(doc: &mut Document, page: usize, c: &Content, obj: Option<ObjRef>) -> R
     }
     let taken = pres.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
     let (content, res) = draw(doc, c, view, &taken, obj.is_some())?;
+    if obj.is_none() {
+        crate::check_on_top(doc, p)?;
+    }
     for (k, v) in res.iter() {
         let mut sub = pres.get(k).map(|s| doc.resolve(s)).and_then(|s| s.as_dict().cloned()).unwrap_or_default();
         for (n2, o) in v.as_dict().into_iter().flat_map(|d| d.iter()) {
