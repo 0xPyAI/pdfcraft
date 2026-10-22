@@ -775,6 +775,33 @@ fn resources_split_between_page_and_tree_travel_together() {
 }
 
 #[test]
+fn a_scan_whose_xref_misses_the_image_combines_with_the_image() {
+    // A cheap image-to-PDF converter's table: "0 5" followed by the entries of objects 1 to 5,
+    // so the image (object 5) has none. Viewers rebuild the table and show the scan; the
+    // combined copy got a null image and came out blank (#1628).
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>".into(),
+        "<< /Length 26 >>\nstream\n100 0 0 100 0 0 cm /Im0 Do\nendstream".into(),
+        "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\nA\nendstream".into(),
+    ];
+    let good = build(&b, "/Root 1 0 R");
+    let text = String::from_utf8_lossy(&good).into_owned();
+    let at = text.rfind("\nxref\n").unwrap() + 1;
+    let entries: Vec<&str> = text[at..].lines().skip(3).take(5).collect();
+    let mut bytes = good[..at].to_vec();
+    bytes.extend_from_slice(format!("xref\n0 5\n{}\ntrailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{at}\n%%EOF\n", entries.join("\n")).as_bytes());
+    let src = open(bytes);
+    let out = full_roundtrip(&combine(&[("scan", &src)]).unwrap());
+    let res = out.dict(page_dict(&out, 0).get(b"Resources").unwrap()).unwrap();
+    let image = res.get(b"XObject").and_then(|x| out.dict(x)).and_then(|d| d.get(b"Im0").map(|v| out.resolve(v))).expect("the page lists its image");
+    let Object::Stream(image) = &*image else { panic!("the image is a stream, not {image:?}") };
+    assert_eq!(image.dict.name(b"Subtype"), Some(&b"Image"[..]));
+    assert_eq!(image.decoded().unwrap(), b"A");
+}
+
+#[test]
 fn links_are_rewired_to_copied_pages_or_dropped() {
     let a = doc_a();
     // Extract A3, A1 (reordered): A1's GoTo A3 must now point at the copy of A3 (index 0).
@@ -2857,4 +2884,28 @@ fn a_bookmark_position_that_is_not_a_number_is_refused_and_changes_nothing() {
     assert!(crate::add_bookmark_at(&mut d, &[], 9, "Nowhere", 7, Some(1.0), Some(1.0)).is_err());
     assert_eq!(crate::add_bookmark_at(&mut d, &[], 9, " ", 0, Some(1.0), Some(1.0)), Err(crate::OutlineError::EmptyTitle));
     assert_eq!(titles(&crate::bookmarks(&d)), ["Keep"]);
+}
+
+#[test]
+fn page_walk_skips_repeated_and_cyclic_kids_without_copying_attributes() {
+    let mut doc = open(fixture());
+    let (root, branch) = (ObjRef { num: 2, generation: 0 }, ObjRef { num: 3, generation: 0 });
+    let (first, second) = (ObjRef { num: 4, generation: 0 }, ObjRef { num: 5, generation: 0 });
+    // The branch node carries Resources for its pages: a cycle back to it, then both pages
+    // 128 times over.
+    let mut kids = vec![Object::Ref(branch)];
+    kids.extend([Object::Ref(first), Object::Ref(second)].into_iter().cycle().take(256));
+    doc.update_dict(branch, |d| d.set(b"Kids".to_vec(), Object::Array(kids))).unwrap();
+    let mut walk = PageWalk::new(&doc, root);
+    let (page, attrs) = walk.next().unwrap();
+    assert_eq!(page, first);
+    assert!(walk.pending.len() <= 3, "repeated kids retained {} pending entries", walk.pending.len());
+    assert!(attrs.get(b"Resources").and_then(|r| r.as_dict()).is_some_and(|r| r.contains(b"Font")), "Resources from the branch");
+    assert_eq!(attrs.get(b"Rotate").and_then(Object::as_int), Some(90), "Rotate from the root");
+    assert_eq!(walk.next().map(|(p, _)| p), Some(second));
+    let (_, last) = walk.next().unwrap();
+    let media_box = last.get(b"MediaBox").and_then(Object::as_array).map(|m| m.iter().filter_map(Object::as_int).collect::<Vec<_>>());
+    assert_eq!(media_box, Some(vec![0, 0, 500, 500]), "own MediaBox kept over the root's");
+    assert!(walk.next().is_none());
+    assert_eq!(labels(&doc), ["Page 1", "Page 2", "Page 3"]);
 }

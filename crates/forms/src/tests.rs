@@ -2965,3 +2965,19 @@ fn the_field_appearance_cache_sees_indirect_resources() {
     doc.set(r(8), Object::String(PdfString::text("/Helv 9 Tf 0 g")));
     assert_eq!(redraw(&doc), 1, "the form's indirect /DA");
 }
+
+#[test]
+fn page_walk_skips_repeated_and_cyclic_kids_without_queueing_them() {
+    let mut doc = fixture();
+    let root = ObjRef { num: 2, generation: 0 };
+    let page = ObjRef { num: 3, generation: 0 };
+    // A cycle back to the root, then the page 128 times over.
+    let mut kids = vec![Object::Ref(root)];
+    kids.extend(std::iter::repeat_n(Object::Ref(page), 128));
+    doc.update_dict(root, |d| d.set(b"Kids".to_vec(), Object::Array(kids))).unwrap();
+    let mut walk = PageWalk::new(&doc, root);
+    assert_eq!(walk.next(), Some(page));
+    assert!(walk.pending.len() <= 2, "repeated kids retained {} pending entries", walk.pending.len());
+    assert_eq!(walk.next(), None);
+    assert_eq!(page_refs(&doc), [page]);
+}

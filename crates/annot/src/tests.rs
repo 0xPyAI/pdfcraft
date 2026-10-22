@@ -1474,3 +1474,20 @@ fn lines_and_polygons_are_reshaped_by_their_points() {
     let s = add_annotation(&mut doc, &new(0, Shape::Rectangle { rect: [10.0, 10.0, 50.0, 50.0] }), &meta("s")).unwrap();
     assert!(matches!(set_points(&mut doc, 0, s, &[[0.0, 0.0], [50.0, 50.0]], &meta("")), Err(AnnotError::Invalid(_))));
 }
+
+#[test]
+fn page_walk_skips_repeated_and_cyclic_kids_without_queueing_them() {
+    let mut doc = fixture();
+    let root = ObjRef { num: 2, generation: 0 };
+    let (first, second) = (ObjRef { num: 3, generation: 0 }, ObjRef { num: 4, generation: 0 });
+    // A cycle back to the root, then both pages 128 times over.
+    let mut kids = vec![Object::Ref(root)];
+    kids.extend([Object::Ref(first), Object::Ref(second)].into_iter().cycle().take(256));
+    doc.update_dict(root, |d| d.set(b"Kids".to_vec(), Object::Array(kids))).unwrap();
+    let mut walk = PageWalk::new(&doc, root);
+    assert_eq!(walk.next(), Some(first));
+    assert!(walk.pending.len() <= 2, "repeated kids retained {} pending entries", walk.pending.len());
+    assert_eq!(walk.next(), Some(second));
+    assert_eq!(walk.next(), None);
+    assert_eq!(page_refs(&doc).unwrap(), [first, second]);
+}

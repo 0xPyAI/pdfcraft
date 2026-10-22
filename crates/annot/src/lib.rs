@@ -659,25 +659,54 @@ impl ReviewState {
 pub fn page_refs(doc: &Document) -> Result<Vec<ObjRef>, AnnotError> {
     let root = doc.root().ok_or(AnnotError::NoPageTree)?;
     let pages = doc.get(root).as_dict().and_then(|d| d.reference(b"Pages")).ok_or(AnnotError::NoPageTree)?;
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    let mut stack = vec![pages];
-    while let Some(node) = stack.pop() {
-        if !seen.insert(node) || seen.len() > 1_000_000 {
-            continue;
-        }
-        let obj = doc.get(node);
-        let Some(d) = obj.as_dict() else { continue };
-        match d.get(b"Kids").map(|k| doc.resolve(k)) {
-            Some(kids) if d.name(b"Type") != Some(b"Page") => {
-                if let Some(a) = kids.as_array() {
-                    stack.extend(a.iter().rev().filter_map(|k| k.as_ref()));
-                }
-            }
-            _ => out.push(node),
-        }
+    Ok(PageWalk::new(doc, pages).collect())
+}
+
+/// Depth-first walk over the leaf pages under `top`. It keeps one cursor per open `/Kids` array,
+/// never one entry per child, so a child listed many times or shared between nodes is skipped by
+/// the seen check without being queued first (`pdfcraft_model::pages` walks the same way).
+/// Cycles end at the seen check and at most a million nodes are visited.
+struct PageWalk<'a> {
+    doc: &'a Document,
+    seen: std::collections::HashSet<ObjRef>,
+    pending: Vec<(std::sync::Arc<Object>, usize)>,
+}
+
+impl<'a> PageWalk<'a> {
+    fn new(doc: &'a Document, top: ObjRef) -> Self {
+        let top = std::sync::Arc::new(Object::Array(vec![Object::Ref(top)]));
+        Self { doc, seen: Default::default(), pending: vec![(top, 0)] }
     }
-    Ok(out)
+}
+
+impl Iterator for PageWalk<'_> {
+    type Item = ObjRef;
+
+    fn next(&mut self) -> Option<ObjRef> {
+        while let Some((kids, next)) = self.pending.last_mut() {
+            let Some(kid) = kids.as_array().and_then(|a| a.get(*next)) else {
+                self.pending.pop();
+                continue;
+            };
+            let node = kid.as_ref();
+            *next += 1;
+            let Some(node) = node else { continue };
+            if self.seen.len() >= 1_000_000 {
+                self.pending.clear();
+                return None;
+            }
+            if !self.seen.insert(node) {
+                continue;
+            }
+            let obj = self.doc.get(node);
+            let Some(d) = obj.as_dict() else { continue };
+            match d.get(b"Kids").map(|k| self.doc.resolve(k)) {
+                Some(kids) if d.name(b"Type") != Some(b"Page") => self.pending.push((kids, 0)),
+                _ => return Some(node),
+            }
+        }
+        None
+    }
 }
 
 fn page_ref(doc: &Document, page: usize) -> Result<ObjRef, AnnotError> {
