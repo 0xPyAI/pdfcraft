@@ -16,6 +16,8 @@ use std::sync::mpsc::SyncSender;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::{Receiver, sync_channel};
 
+#[cfg(test)]
+mod radial_softmask_tests;
 mod work_queue;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -60,7 +62,8 @@ pub struct RenderConfig {
     /// View ▸ Hide all comments: markup annotations aren't drawn (fields and links still are).
     pub hide_comments: bool,
     /// Refuse a whole-page raster that would be reduced by the renderer's hard size caps.
-    /// Tiled requests remain available for pages that exceed those caps.
+    /// Tiled requests remain available for pages that exceed those caps. Both modes refuse
+    /// a raster whose rounded integer dimensions exceed the final pixel-allocation budget.
     pub reject_oversize: bool,
     /// View ▸ Reading colours: solid text and line-art paints are remapped for readability and
     /// the page clears to the setting's background. Display only; the document never changes.
@@ -365,6 +368,9 @@ fn render_page<'a>(
         };
         // Rendered straight into a buffer of whole pixels, which the GUI takes over as is.
         let (w, h) = render_size(page, &rs);
+        if u64::from(w).checked_mul(u64::from(h)).is_none_or(|pixels| pixels > MAX_PIXELS as u64) {
+            return Err(format!("page {} raster size {w}x{h} exceeds renderer pixel limit", req.page + 1));
+        }
         let mut pixels = Pixels::zeroed(w.into(), h.into()).ok_or_else(|| format!("page {} is too large to render", req.page + 1))?;
         // Previews render at low detail (tiny images are skipped); finals always draw all.
         let mut preview_settings = settings.clone();
@@ -2801,6 +2807,92 @@ trailer << /Root 1 0 R >>
         assert_eq!((tile.width, tile.height), (32, 32));
     }
 
+    fn allocation_budget_page(width: f32, height: f32, content: &str) -> Arc<Vec<u8>> {
+        Arc::new(format!("%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Contents 4 0 R >> endobj\n4 0 obj << /Length {} >> stream\n{content}\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF", content.len()).into_bytes())
+    }
+
+    #[test]
+    fn rounded_pixel_budget_rejects_before_actual_allocation() {
+        use crate::pixels::allocation_probe::{Attempts, observe};
+        for reject_oversize in [false, true] {
+            let mut renderer = PageRenderer::new(allocation_budget_page(8000.5, 7999.5, ""), RenderConfig { reject_oversize, ..Default::default() });
+            assert_eq!(renderer.page_count(), 1);
+            let (out, attempts) = observe(|| renderer.render(RenderRequest { scale: 1.0, ..Default::default() }));
+            assert_eq!(attempts, Attempts::default(), "rounded over-cap raster reached allocator; strict={reject_oversize}");
+            assert_eq!(out.error.as_deref(), Some("page 1 raster size 8001x8000 exceeds renderer pixel limit"));
+            assert_eq!((out.width, out.height), (0, 0));
+            assert!(out.rgba.is_empty());
+            assert_eq!(renderer.stats().parser_builds, 1, "normal rejection must not trigger panic recovery");
+        }
+    }
+
+    #[test]
+    fn rounded_pixel_budget_allows_exact_cap_to_reach_allocator() {
+        use crate::pixels::allocation_probe::{Attempts, observe};
+        for reject_oversize in [false, true] {
+            let mut renderer = PageRenderer::new(allocation_budget_page(8000.0, 8000.0, ""), RenderConfig { reject_oversize, ..Default::default() });
+            let (out, attempts) = observe(|| renderer.render(RenderRequest { scale: 1.0, ..Default::default() }));
+            assert_eq!(attempts, Attempts { calls: 1, first: Some((8000, 8000)) });
+            // The test probe refuses the actual allocation: this is admission evidence,
+            // not a successful giant-raster rendering or a 256MB test allocation.
+            assert_eq!(out.error.as_deref(), Some("page 1 is too large to render"));
+            assert_eq!((out.width, out.height), (0, 0));
+            assert!(out.rgba.is_empty());
+            assert_eq!(renderer.stats().parser_builds, 1);
+        }
+    }
+
+    #[test]
+    fn rounded_pixel_budget_preserves_small_pixels_and_large_page_tiles() {
+        let mut previous = None;
+        for reject_oversize in [false, true] {
+            let config = RenderConfig { reject_oversize, ..Default::default() };
+            let mut small = PageRenderer::new(allocation_budget_page(16.0, 12.0, "0 0 1 rg 4 3 8 6 re f"), config.clone());
+            let out = small.render(RenderRequest { scale: 1.0, ..Default::default() });
+            assert!(out.error.is_none(), "{:?}", out.error);
+            assert_eq!((out.width, out.height), (16, 12));
+            let expected: Vec<u8> = (0..12)
+                .flat_map(|y| {
+                    (0..16).flat_map(move |x| if (4..12).contains(&x) && (3..9).contains(&y) { [0, 0, 255, 255] } else { [255, 255, 255, 255] })
+                })
+                .collect();
+            assert_eq!(&*out.rgba, expected.as_slice());
+            if let Some(previous) = &previous {
+                assert_eq!(previous, &out.rgba);
+            }
+            previous = Some(out.rgba);
+            let mut large = PageRenderer::new(allocation_budget_page(8000.5, 7999.5, ""), config);
+            let tile = large.render(RenderRequest { scale: 1.0, tile: Some(Tile { x: 0, y: 0, w: 32, h: 32 }), ..Default::default() });
+            assert!(tile.error.is_none(), "{:?}", tile.error);
+            assert_eq!((tile.width, tile.height), (32, 32));
+            assert_eq!(&*tile.rgba, &[255; 32 * 32 * 4]);
+            assert_eq!(large.stats().parser_builds, 1);
+        }
+    }
+
+    #[test]
+    fn rounded_pixel_budget_invalid_requests_never_reach_allocator() {
+        use crate::pixels::allocation_probe::{Attempts, observe};
+        for reject_oversize in [false, true] {
+            let mut renderer = PageRenderer::new(allocation_budget_page(16.0, 12.0, ""), RenderConfig { reject_oversize, ..Default::default() });
+            let (out, attempts) = observe(|| renderer.render(RenderRequest { page: 1, scale: 1.0, ..Default::default() }));
+            assert_eq!(attempts, Attempts::default());
+            assert!(out.error.is_some());
+            assert_eq!((out.width, out.height), (0, 0));
+            assert!(out.rgba.is_empty());
+            assert_eq!(renderer.stats().parser_builds, 1);
+        }
+        let mut renderer = PageRenderer::new(allocation_budget_page(16.0, 12.0, ""), RenderConfig { reject_oversize: true, ..Default::default() });
+        for scale in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let (out, attempts) = observe(|| renderer.render(RenderRequest { scale, ..Default::default() }));
+            assert_eq!(attempts, Attempts::default());
+            assert!(out.error.as_deref().is_some_and(|error| error.contains("exceeds renderer limits")));
+            assert_eq!((out.width, out.height), (0, 0));
+            assert!(out.rgba.is_empty());
+            assert_eq!(renderer.stats().parser_builds, 1);
+        }
+    }
+
     /// Issue #102: an A4 page (595.28×841.89 pt) rendered 595×841 at 72 dpi, dropping the last
     /// partial row and column. Like pdftoppm it is now 596×842, the edge pixels partly covered.
     #[test]
@@ -3360,6 +3452,60 @@ trailer << /Root 1 0 R >>
         assert_eq!(px(off), vec![255, 255, 255, 255], "toggled-off layer must not draw");
     }
 
+    /// #2986: an optional content membership dictionary with a visibility expression (`/VE`,
+    /// ISO 32000-2 §8.11.2.2) shows its content only when the expression is true, and the
+    /// expression takes precedence over `/OCGs` and `/P`. It was ignored, so content under it
+    /// stayed visible when its layers were hidden. A malformed expression falls back to `/OCGs`.
+    #[test]
+    fn visibility_expressions_decide_what_a_membership_dictionary_shows() {
+        let render = |ocmd: &str, off: &[i32]| {
+            let pdf = format!(
+                "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R 6 0 R] /D << /Order [5 0 R 6 0 R] >> >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R /Resources << /Properties << /M1 7 0 R >> >> >> endobj
+4 0 obj << /Length 44 >> stream
+/OC /M1 BDC 1 0 0 rg 0 0 100 100 re f EMC
+endstream endobj
+5 0 obj << /Type /OCG /Name (A) >> endobj
+6 0 obj << /Type /OCG /Name (B) >> endobj
+7 0 obj {ocmd} endobj
+trailer << /Root 1 0 R >>
+%%EOF"
+            );
+            let layers = off.iter().map(|n| (*n, 0, false)).collect();
+            let mut r = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig { layers: Arc::new(layers), ..Default::default() });
+            let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 0.5, tag: 0, ..Default::default() });
+            p.rgba[..4] == [255, 0, 0, 255]
+        };
+        let and = "<< /Type /OCMD /VE [/And 5 0 R 6 0 R] >>";
+        assert!(render(and, &[]), "And: both on");
+        assert!(!render(and, &[5]), "And: one off");
+        let or = "<< /Type /OCMD /VE [/Or 5 0 R 6 0 R] >>";
+        assert!(render(or, &[5]), "Or: one on");
+        assert!(!render(or, &[5, 6]), "Or: both off");
+        let not = "<< /Type /OCMD /VE [/Not 5 0 R] >>";
+        assert!(!render(not, &[]), "Not: the group is on");
+        assert!(render(not, &[5]), "Not: the group is off");
+        let nested = "<< /Type /OCMD /VE [/And [/Not 5 0 R] 6 0 R] >>";
+        assert!(render(nested, &[5]), "nested: A off, B on");
+        assert!(!render(nested, &[]), "nested: A on");
+        // /VE wins over /OCGs and /P.
+        let both = "<< /Type /OCMD /OCGs [5 0 R] /P /AllOn /VE [/Not 5 0 R] >>";
+        assert!(render(both, &[5]), "the expression, not /P, decides");
+        // A malformed expression falls back to /OCGs and /P.
+        // So is one naming an object that isn't a listed group: a missing one, or the page
+        // (review on #2987).
+        for bad in ["[/Xor 5 0 R]", "[/Not 5 0 R 6 0 R]", "[/And]", "[5 0 R]", "[/And (5)]", "[/Or 8 0 R]", "[/Or 3 0 R]"] {
+            let ocmd = format!("<< /Type /OCMD /OCGs [5 0 R] /VE {bad} >>");
+            assert!(render(&ocmd, &[]), "{bad}: /OCGs on");
+            assert!(!render(&ocmd, &[5]), "{bad}: /OCGs off");
+        }
+        // Nesting past the limit is malformed too, and does not recurse without end.
+        let deep = format!("<< /Type /OCMD /OCGs [5 0 R] /VE {}5 0 R{} >>", "[/Not ".repeat(41), "]".repeat(41));
+        assert!(!render(&deep, &[5]), "too deep: /OCGs decides");
+    }
+
     /// From `cargo xtask fuzz`: a tiling pattern with no /Resources inherits the page's, where
     /// its own name points back at it. It painted itself until the stack overflowed (vendored
     /// hayro-interpret patch: `MAX_PAINT_NESTING`). Ordinary patterns must still paint.
@@ -3749,6 +3895,62 @@ trailer << /Root 1 0 R >>
         pdf.extend_from_slice(&jp2);
         pdf.extend_from_slice(b"\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF");
         pdf
+    }
+
+    /// Review on #3184: a palette image whose indices are 1-bit samples (`ihdr` BPC 0, `Ssiz` 0)
+    /// and whose palette holds 8-bit colours. Its colours are decoded to 8 bits; rescaling them
+    /// to the indices' 1-bit precision kept only 0 or 255 per channel. Contributor-original:
+    /// one 1×1 tile with an empty packet, so its one sample is the 1-bit midpoint (index 1).
+    #[test]
+    fn a_jp2_palette_keeps_its_colours_whatever_the_index_precision() {
+        let mut codestream = vec![0xff, 0x4f, 0xff, 0x51, 0, 41, 0, 0]; // SOC, SIZ (Lsiz 41), Rsiz.
+        for value in [1_u32, 1, 0, 0, 1, 1, 0, 0] {
+            codestream.extend_from_slice(&value.to_be_bytes());
+        }
+        codestream.extend_from_slice(&[0, 1, 0, 1, 1]); // One component: 1 bit, no subsampling.
+        codestream.extend_from_slice(&[0xff, 0x52, 0, 12, 0, 0, 0, 1, 0, 0, 4, 4, 0, 1]);
+        codestream.extend_from_slice(&[0xff, 0x5c, 0, 4, 0x40, 0x40]);
+        codestream.extend_from_slice(&[0xff, 0x90, 0, 10, 0, 0, 0, 0, 0, 15, 0, 1, 0xff, 0x93, 0]);
+        codestream.extend_from_slice(&[0xff, 0xd9]);
+        let jp2_box = |kind: &[u8], body: &[u8]| [&((8 + body.len()) as u32).to_be_bytes()[..], kind, body].concat();
+        let ihdr = [&1_u32.to_be_bytes()[..], &1_u32.to_be_bytes(), &[0, 1, 0, 7, 0, 0]].concat();
+        let colr = [&[1, 0, 0][..], &16_u32.to_be_bytes()].concat(); // sRGB
+        // pclr: two entries, three 8-bit columns: red, then (64, 128, 192).
+        let pclr = [0, 2, 3, 7, 7, 7, 255, 0, 0, 64, 128, 192];
+        // cmap: channels 0..2 come from component 0 through palette columns 0..2.
+        let cmap = [0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 2];
+        let jp2 = [
+            vec![0, 0, 0, 12, b'j', b'P', b' ', b' ', 0x0d, 0x0a, 0x87, 0x0a],
+            jp2_box(b"ftyp", b"jp2 \0\0\0\0jp2 "),
+            jp2_box(b"jp2h", &[jp2_box(b"ihdr", &ihdr), jp2_box(b"colr", &colr), jp2_box(b"pclr", &pclr), jp2_box(b"cmap", &cmap)].concat()),
+            jp2_box(b"jp2c", &codestream),
+        ]
+        .concat();
+        let content = "q 20 0 0 20 5 5 cm /Im1 Do Q";
+        // No /ColorSpace (and no /BitsPerComponent): the JP2 header gives the colours, through its
+        // palette (ISO 32000-2 §7.4.9). With an /Indexed space the image holds raw indices at
+        // their own precision, so index 1 picks the space's entry 1, not entry 255.
+        let lut = format!("FF00004080C0{}00FF00", "000000".repeat(253));
+        for colour_space in [String::new(), format!("/ColorSpace [/Indexed /DeviceRGB 255 <{lut}>] ")] {
+            let mut pdf = format!(
+                "%PDF-1.7\n\
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 40 40] /Contents 4 0 R /Resources << /XObject << /Im1 5 0 R >> >> >> endobj\n\
+4 0 obj << /Length {} >> stream\n{content}\nendstream endobj\n\
+5 0 obj << /Type /XObject /Subtype /Image /Width 1 /Height 1 {colour_space}/Filter /JPXDecode /Length {} >> stream\n",
+                content.len(),
+                jp2.len()
+            )
+            .into_bytes();
+            pdf.extend_from_slice(&jp2);
+            pdf.extend_from_slice(b"\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF");
+            let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+            let page = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(page.error.is_none(), "{:?}", page.error);
+            let px = &page.rgba[((40 - 15) * 40 + 15) * 4..][..3];
+            assert!(px.iter().zip([64u8, 128, 192]).all(|(a, b)| a.abs_diff(b) <= 2), "{colour_space:.30}: entry 1: {px:?}");
+        }
     }
 
     /// #3306: a JP2 image whose colour specification names an enumerated colour space the
@@ -4602,6 +4804,78 @@ trailer << /Root 1 0 R >>
         assert!(grey[0] == grey[1] && grey[1] == grey[2] && grey[0] < 255, "the image covers the page: {grey:?}");
     }
 
+    /// A five-point open polyline is not a rectangle. `path_as_rect` took any five-element path
+    /// whose points covered the four corners of its bounding box for that box, and a `MoveTo` with
+    /// four `LineTo` is five elements, so an open zigzag stroked with `S` was painted as its
+    /// bounding rectangle: the peak between its ends vanished and the open side came out closed.
+    #[test]
+    fn a_five_point_polyline_is_not_painted_as_its_bounding_box() {
+        // The ends and the points beside them sit on the four corners of the bounding box; the
+        // peak at (20, 20) lies between them and is on no corner.
+        let content = b"0 0 0 RG 2 w 30 30 m 30 10 l 20 20 l 10 10 l 10 30 l S".to_vec();
+        let pdf = one_page_pdf(&content, "");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+            let _ = tx.send(r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, preview: false }));
+        });
+        let page = rx.recv_timeout(std::time::Duration::from_secs(60)).expect("the polyline must render");
+        assert!(page.error.is_none(), "{:?}", page.error);
+        // Device y counts down the 40 pt page, so the two ends at y = 30 are on row 10.
+        let dark = |x: u32, y: u32| {
+            let offset = ((y * page.width + x) * 4) as usize;
+            page.rgba[offset] < 128
+        };
+        assert!((17..=23).any(|x| (17..=23).any(|y| dark(x, y))), "the peak between the ends draws");
+        assert!(!(14..=26).any(|x| dark(x, 10)), "the side the path leaves open stays open");
+    }
+
+    /// Five points all on the corners still need not trace the rectangle: three sides and a step
+    /// back along the third is such a path, and it was painted as the box -- drawing a fourth
+    /// side the path does not have (FredApps on #3327).
+    #[test]
+    fn a_path_that_visits_every_corner_out_of_order_is_not_a_rectangle() {
+        // Bottom, right, top, then back along the top. The left side is never drawn.
+        let content = b"0 0 0 RG 2 w 10 10 m 30 10 l 30 30 l 10 30 l 30 30 l S".to_vec();
+        let pdf = one_page_pdf(&content, "");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+            let _ = tx.send(r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, preview: false }));
+        });
+        let page = rx.recv_timeout(std::time::Duration::from_secs(60)).expect("the path must render");
+        assert!(page.error.is_none(), "{:?}", page.error);
+        let dark = |x: u32, y: u32| {
+            let offset = ((y * page.width + x) * 4) as usize;
+            page.rgba[offset] < 128
+        };
+        // Device y counts down the 40 pt page: the bottom side at y = 10 is row 30.
+        assert!((14..=26).any(|x| dark(x, 30)), "the sides the path does draw are drawn");
+        assert!(!(14..=26).any(|y| dark(10, y)), "the left side it never draws is not drawn");
+    }
+
+    /// A rectangle still takes the rectangle route, written either way: `m l l l` and closed, or
+    /// `m l l l l` back to its first corner.
+    #[test]
+    fn a_rectangle_is_still_painted_as_a_rectangle() {
+        for content in [&b"0 0 0 rg 10 10 m 30 10 l 30 30 l 10 30 l f"[..], &b"0 0 0 rg 10 10 m 30 10 l 30 30 l 10 30 l 10 10 l f"[..]] {
+            let pdf = one_page_pdf(content, "");
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+                let _ = tx.send(r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, preview: false }));
+            });
+            let page = rx.recv_timeout(std::time::Duration::from_secs(60)).expect("the rectangle must render");
+            assert!(page.error.is_none(), "{:?}", page.error);
+            let pixel = |x: u32, y: u32| {
+                let offset = ((y * page.width + x) * 4) as usize;
+                page.rgba[offset]
+            };
+            assert!(pixel(20, 20) < 128, "the rectangle is filled");
+            assert_eq!(pixel(5, 5), 255, "and nothing outside it is");
+        }
+    }
+
     /// A one-page PDF whose content is the stream `stream`, with the entries `dict` in its
     /// dictionary.
     fn one_page_pdf(stream: &[u8], dict: &str) -> Vec<u8> {
@@ -5345,6 +5619,126 @@ trailer << /Root 1 0 R >>
         // The triangles cover the lower left half: a pixel there is shaded.
         let p = &page.rgba[((900 * 1000 + 100) * 4)..][..4];
         assert!(p != [255, 255, 255, 255] && p[3] == 255, "the triangles are drawn: {p:?}");
+    }
+
+    /// Two triangles of a mesh that share an edge cover it together. The sampler tested each
+    /// pixel's corner, and only strictly inside a triangle, so the diagonal two triangles share
+    /// was left white wherever it ran through the samples, and so was a pixel row or column
+    /// along the mesh's own sides. Vendored hayro-interpret patch 36.
+    #[test]
+    fn mesh_triangles_sharing_an_edge_leave_no_seam() {
+        // A red square from 10 to 40 on a 50 × 50 page, cut along its diagonal; in device space
+        // the diagonal runs through pixel centres and corners alike.
+        let vertex = |flag: u8, x: u8, y: u8| [flag, x, y, 255, 0, 0];
+        let (lo, hi) = (10, 40);
+        let mut triangles = Vec::new();
+        for [a, b, c] in [[(lo, lo), (hi, lo), (hi, hi)], [(lo, lo), (hi, hi), (lo, hi)]] {
+            for (x, y) in [a, b, c] {
+                triangles.extend(vertex(0, x, y));
+            }
+        }
+        // Each triangle as its own three vertices, and the second one as a strip (flag 1).
+        let mut strip = Vec::new();
+        for (flag, (x, y)) in [(0, (lo, lo)), (0, (hi, lo)), (0, (hi, hi)), (2, (lo, hi))] {
+            strip.extend(vertex(flag, x, y));
+        }
+        for (label, data) in [("separate triangles", triangles), ("a strip", strip)] {
+            let content = b"/Sh0 sh";
+            let mut pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 50 50] /Contents 4 0 R /Resources << /Shading << /Sh0 5 0 R >> >> >> endobj\n".to_vec();
+            pdf.extend_from_slice(format!("4 0 obj << /Length {} >> stream\n", content.len()).as_bytes());
+            pdf.extend_from_slice(content);
+            pdf.extend_from_slice(format!("\nendstream endobj\n5 0 obj << /ShadingType 4 /ColorSpace /DeviceRGB /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 /Decode [0 255 0 255 0 1 0 1 0 1] /Length {} >> stream\n", data.len()).as_bytes());
+            pdf.extend_from_slice(&data);
+            pdf.extend_from_slice(b"\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n");
+            let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+            let page = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(page.error.is_none(), "{label}: {:?}", page.error);
+            assert_eq!((page.width, page.height), (50, 50));
+            let (mut white_inside, mut red_outside) = (Vec::new(), Vec::new());
+            for y in 0..50_usize {
+                for x in 0..50_usize {
+                    let p = &page.rgba[(y * 50 + x) * 4..][..4];
+                    let inside = (10..40).contains(&x) && (10..40).contains(&y);
+                    if inside && p != [255, 0, 0, 255] {
+                        white_inside.push((x, y));
+                    } else if !inside && p != [255, 255, 255, 255] {
+                        red_outside.push((x, y));
+                    }
+                }
+            }
+            assert!(white_inside.is_empty(), "{label}: unshaded pixels inside the square: {white_inside:?}");
+            assert!(red_outside.is_empty(), "{label}: shaded pixels outside the square: {red_outside:?}");
+        }
+
+        // One triangle alone, the square's upper left half: a pixel whose corner lies on its
+        // diagonal is taken by its centre, so one wholly across the diagonal (x + y ≥ 50 in
+        // device space) is not shaded, and one wholly inside is.
+        let mut data = Vec::new();
+        for (x, y) in [(lo, lo), (hi, hi), (lo, hi)] {
+            data.extend(vertex(0, x, y));
+        }
+        let content = b"/Sh0 sh";
+        let mut pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 50 50] /Contents 4 0 R /Resources << /Shading << /Sh0 5 0 R >> >> >> endobj\n".to_vec();
+        pdf.extend_from_slice(format!("4 0 obj << /Length {} >> stream\n", content.len()).as_bytes());
+        pdf.extend_from_slice(content);
+        pdf.extend_from_slice(format!("\nendstream endobj\n5 0 obj << /ShadingType 4 /ColorSpace /DeviceRGB /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 /Decode [0 255 0 255 0 1 0 1 0 1] /Length {} >> stream\n", data.len()).as_bytes());
+        pdf.extend_from_slice(&data);
+        pdf.extend_from_slice(b"\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n");
+        let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+        let page = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+        assert!(page.error.is_none(), "{:?}", page.error);
+        let (mut spilled, mut missing) = (Vec::new(), Vec::new());
+        for y in 10..40_usize {
+            for x in 10..40_usize {
+                let p = &page.rgba[(y * 50 + x) * 4..][..4];
+                if x + y >= 50 && p == [255, 0, 0, 255] {
+                    spilled.push((x, y));
+                } else if x + y + 2 <= 50 && p != [255, 0, 0, 255] {
+                    missing.push((x, y));
+                }
+            }
+        }
+        assert!(spilled.is_empty(), "shaded pixels wholly across the diagonal: {spilled:?}");
+        assert!(missing.is_empty(), "unshaded pixels wholly inside the triangle: {missing:?}");
+    }
+
+    /// A pixel whose corner is inside one triangle and whose centre is inside its neighbour
+    /// takes the colour at its corner, whichever triangle comes first (patch 36): the
+    /// centre-coverage pass only fills pixels no triangle has given a colour yet. Here the
+    /// shared diagonal lies at x + y = 50.25 in device space, so pixel (20, 30) has its corner
+    /// in the red triangle and its centre in the blue one.
+    #[test]
+    fn a_shared_edge_pixel_keeps_the_colour_at_its_corner() {
+        let vertex = |x: u8, y: u8, rgb: [u8; 3]| [0, x, y, rgb[0], rgb[1], rgb[2]];
+        let (lo, hi) = (10, 40);
+        let (red, blue) = ([255, 0, 0], [0, 0, 255]);
+        // In PDF space the red triangle is the square's upper left half, the blue one the lower
+        // right; `cm` moves both down a quarter point.
+        let red_triangle = [(lo, lo, red), (hi, hi, red), (lo, hi, red)];
+        let blue_triangle = [(lo, lo, blue), (hi, lo, blue), (hi, hi, blue)];
+        for (label, order) in [("red first", [red_triangle, blue_triangle]), ("blue first", [blue_triangle, red_triangle])] {
+            let mut data = Vec::new();
+            for triangle in order {
+                for (x, y, rgb) in triangle {
+                    data.extend(vertex(x, y, rgb));
+                }
+            }
+            let content = b"1 0 0 1 0 -0.25 cm /Sh0 sh";
+            let mut pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 50 50] /Contents 4 0 R /Resources << /Shading << /Sh0 5 0 R >> >> >> endobj\n".to_vec();
+            pdf.extend_from_slice(format!("4 0 obj << /Length {} >> stream\n", content.len()).as_bytes());
+            pdf.extend_from_slice(content);
+            pdf.extend_from_slice(format!("\nendstream endobj\n5 0 obj << /ShadingType 4 /ColorSpace /DeviceRGB /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 /Decode [0 255 0 255 0 1 0 1 0 1] /Length {} >> stream\n", data.len()).as_bytes());
+            pdf.extend_from_slice(&data);
+            pdf.extend_from_slice(b"\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n");
+            let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+            let page = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(page.error.is_none(), "{label}: {:?}", page.error);
+            let pixel = |x: usize, y: usize| page.rgba[(y * 50 + x) * 4..][..4].to_vec();
+            assert_eq!(pixel(20, 30), [255, 0, 0, 255], "{label}: the corner of pixel (20, 30) is in the red triangle");
+            // Controls: wholly inside one triangle or the other.
+            assert_eq!(pixel(15, 20), [255, 0, 0, 255], "{label}");
+            assert_eq!(pixel(35, 30), [0, 0, 255, 255], "{label}");
+        }
     }
 
     /// Review of the mesh-shading patch: every patch was cut into 722 triangles before anything
@@ -6168,6 +6562,258 @@ trailer << /Root 1 0 R >>
         assert_eq!(pixel(&on, 150, 55), &[255, 255, 255, 255], "the image's white quadrant stays white");
     }
 
+    /// #2975: a stencil mask (`/ImageMask true`) is painted in the fill colour at the fill
+    /// opacity, once: at `ca 0.5` it is as opaque as a rectangle filled at `ca 0.5` beside it
+    /// (it was a quarter as opaque, the opacity applied by both the image's group and its paint).
+    /// The same holds when the fill is a pattern, whose paint keeps the opacity in force when it
+    /// was set with `scn`: an uncoloured tiling pattern and a shading pattern.
+    #[test]
+    fn stencil_masks_are_drawn_at_the_fill_opacity_once() {
+        let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..3].to_vec();
+        let fills = [("colour", "0 0 1 rg"), ("uncoloured tiling pattern", "/CsP cs 0 0 1 /Tp scn"), ("shading pattern", "/Pattern cs /Sp scn")];
+        for (fill_name, fill) in fills {
+            for alpha in ["1", "0.5", "0.25"] {
+                let content = format!("/A gs {fill} q 100 0 0 100 20 50 cm /Msk Do Q 160 50 100 100 re f");
+                let tile = "0 0 10 10 re f";
+                let pdf = format!(
+                    "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /ExtGState << /A << /ca {alpha} >> >> /XObject << /Msk 5 0 R >> /ColorSpace << /CsP [/Pattern /DeviceRGB] >> /Pattern << /Tp 6 0 R /Sp 7 0 R >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 2 /ImageMask true /Length 2 >> stream
+\0\0
+endstream endobj
+6 0 obj << /Type /Pattern /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10 /Resources << >> /Length {} >> stream
+{tile}
+endstream endobj
+7 0 obj << /Type /Pattern /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 300 0] /Extend [true true] /Function << /FunctionType 2 /Domain [0 1] /C0 [0 0 1] /C1 [0 0 1] /N 1 >> >> >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+                    content.len(),
+                    tile.len()
+                );
+                let p = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default()).render(RenderRequest {
+                    page: 0,
+                    kind: RequestKind::Pixels,
+                    tile: None,
+                    scale: 1.0,
+                    tag: 0,
+                    ..Default::default()
+                });
+                assert!(p.error.is_none(), "{fill_name}, ca {alpha}: {:?}", p.error);
+                // Pixel rows run top down: PDF (70, 100) is in the mask, (210, 100) in the rectangle.
+                let (mask, rect) = (px(&p, 70, 100), px(&p, 210, 100));
+                assert!(rect != [255, 255, 255], "{fill_name}, ca {alpha}: the rectangle is painted");
+                assert!(mask.iter().zip(&rect).all(|(m, r)| m.abs_diff(*r) <= 1), "{fill_name}, ca {alpha}: mask {mask:?}, rectangle {rect:?}");
+            }
+        }
+    }
+
+    /// #2971: in a knockout transparency group (`/K true`) each element composites with the
+    /// group's initial backdrop, not with the elements drawn before it in the group, over the
+    /// element's shape. A blue square at 50 % opacity over a red one at 50 % shows only the blue
+    /// where they overlap; without `/K` the two blend. The same holds for an image (its shape
+    /// is its rectangle; a soft-masked image's shape is its mask, so its transparent part leaves
+    /// what is under it) and for a nested group (its shape is the union of its elements'
+    /// shapes, while its own elements still blend with each other).
+    #[test]
+    fn knockout_groups_replace_what_their_elements_cover() {
+        let render_as = |group: &str, form: &str, preview: bool| {
+            let pdf = format!(
+                "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /XObject << /Fm1 5 0 R >> /ExtGState << /G << /ca 0.5 >> >> >> >> endobj
+4 0 obj << /Length 39 >> stream
+/Fm1 Do /G gs 0 1 0 rg 10 10 30 30 re f
+endstream endobj
+5 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency {group} >> /Resources << /ExtGState << /A << /ca 0.5 >> >> /XObject << /In 6 0 R /Msk 7 0 R /Neu 8 0 R /Img 9 0 R /Sm 10 0 R /Nimg 12 0 R /Deep 13 0 R /Shg 16 0 R /Big 17 0 R >> >> /Length {} >> stream
+{form}
+endstream endobj
+6 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /A << /ca 0.5 >> >> >> /Length 34 >> stream
+/A gs 0 0 1 rg 100 50 150 120 re f
+endstream endobj
+7 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 2 /ImageMask true /Filter /ASCIIHexDecode /Length 5 >> stream
+0000>
+endstream endobj
+8 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /H << /ca 0.5 >> >> >> /Length 62 >> stream
+/H gs 0 1 0 rg 80 40 100 100 re f 0 0 1 rg 130 80 100 100 re f
+endstream endobj
+9 0 obj << /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 7 >> stream
+0000FF>
+endstream endobj
+10 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /SMask 11 0 R /Filter /ASCIIHexDecode /Length 13 >> stream
+0000FF0000FF>
+endstream endobj
+11 0 obj << /Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 5 >> stream
+00FF>
+endstream endobj
+12 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /H << /ca 0.5 >> >> /XObject << /Img 9 0 R >> >> /Length 38 >> stream
+/H gs q 160 0 0 100 60 50 cm /Img Do Q
+endstream endobj
+13 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /ExtGState << /H << /ca 0.5 >> >> /XObject << /In3 14 0 R >> >> /Length 13 >> stream
+/H gs /In3 Do
+endstream endobj
+14 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Length 28 >> stream
+0 0 1 rg 100 50 150 120 re f
+endstream endobj
+15 0 obj << /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 1 0] /Function << /FunctionType 2 /Domain [0 1] /C0 [0 0 1] /C1 [0 0 1] /N 1 >> /Extend [true true] /BBox [100 50 140 170] >> >> endobj
+16 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 200] /Group << /S /Transparency >> /Resources << /Pattern << /P 15 0 R >> >> /Length 38 >> stream
+/Pattern cs /P scn 100 50 150 120 re f
+endstream endobj
+17 0 obj << /Type /XObject /Subtype /Image /Width 20000 /Height 20000 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 7 >> stream
+0000FF>
+endstream endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+                form.len()
+            );
+            let p = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default()).render(RenderRequest {
+                page: 0,
+                kind: RequestKind::Pixels,
+                tile: None,
+                scale: 1.0,
+                tag: 0,
+                preview,
+            });
+            assert!(p.error.is_none(), "{group} {form}: {:?}", p.error);
+            p
+        };
+        let render = |group: &str, form: &str| render_as(group, form, false);
+        // Pixel rows run top down: PDF (x, y) is pixel (x, 200 - y).
+        let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((200 - y) * p.width + x) as usize * 4..][..3].to_vec();
+        let check = |p: &RenderedPage, x: u32, y: u32, want: [u8; 3], what: &str| {
+            let got = px(p, x, y);
+            assert!(got.iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 2), "{what}: {got:?}, expected {want:?}");
+        };
+        let red = "/A gs 1 0 0 rg 20 20 150 150 re f ";
+        let ko = "/I true /K true";
+
+        let squares = render(ko, &format!("{red}0 0 1 rg 100 50 150 120 re f"));
+        check(&squares, 130, 100, [128, 128, 255], "knocked out");
+        check(&squares, 50, 40, [255, 128, 128], "red alone");
+        check(&squares, 210, 100, [128, 128, 255], "blue alone");
+        check(&squares, 280, 190, [255, 255, 255], "paper");
+        // Page content after the group composites normally again: green at 50 % over the red.
+        check(&squares, 30, 30, [128, 191, 64], "after the group");
+        let plain = render("/I true", &format!("{red}0 0 1 rg 100 50 150 120 re f"));
+        check(&plain, 130, 100, [128, 64, 191], "blended without /K");
+
+        // An image at 50 % replaces the red under its rectangle.
+        let image = render(ko, &format!("{red}q 160 0 0 100 60 50 cm /Img Do Q"));
+        check(&image, 100, 100, [128, 128, 255], "image knocks out");
+        check(&image, 40, 40, [255, 128, 128], "red beside the image");
+        // A soft-masked image: its transparent left half leaves the red, its opaque half replaces it.
+        let masked = render(ko, "1 0 0 rg 20 20 150 150 re f q 160 0 0 100 60 50 cm /Sm Do Q");
+        check(&masked, 100, 100, [255, 0, 0], "under the transparent half");
+        check(&masked, 155, 100, [0, 0, 255], "under the opaque half");
+
+        // A nested group entered at 50 % (blue at 25 % in all) replaces the red under its shape.
+        let nested = render(ko, &format!("{red}/In Do"));
+        check(&nested, 130, 100, [191, 191, 255], "nested group knocks out");
+        check(&nested, 50, 40, [255, 128, 128], "red beside the nested group");
+        // A nested group at full opacity: it knocks out the red as a whole, and its own two
+        // squares at 50 % still blend with each other where they overlap.
+        let neutral = render(ko, "1 0 0 rg 20 20 150 150 re f /Neu Do");
+        check(&neutral, 100, 60, [128, 255, 128], "green over the knocked-out red");
+        check(&neutral, 150, 110, [64, 128, 191], "the nested squares blend");
+        check(&neutral, 40, 40, [255, 0, 0], "red beside the nested group");
+
+        // An image inside a nested group is drawn once (blue at 50 %), over the knocked-out red.
+        let nested_image = render(ko, "1 0 0 rg 20 20 150 150 re f /Nimg Do");
+        check(&nested_image, 100, 100, [128, 128, 255], "image in a nested group");
+        // A group inside a nested group knocks out the red as well.
+        let deep = render(ko, "1 0 0 rg 20 20 150 150 re f /Deep Do");
+        check(&deep, 130, 100, [128, 128, 255], "group in a nested group");
+        check(&deep, 40, 40, [255, 0, 0], "red beside it");
+
+        // A stencil mask must not erase the red beside it.
+        let stencil = render(ko, &format!("{red}0 0 1 rg q 150 0 0 120 100 50 cm /Msk Do Q"));
+        check(&stencil, 50, 40, [255, 128, 128], "red beside a stencil");
+        // Where the stencil paints (every sample 0), its blue is drawn (review on #2974: the check
+        // above alone passed even if the stencil drew nothing). A stencil composites as it did
+        // before rather than knocking the red out, and its exact colour also depends on #2975 (a
+        // stencil's fill opacity applied twice), so only "blue was drawn here" is pinned.
+        let under = px(&stencil, 130, 100);
+        assert!(under != [255, 128, 128] && under[2] >= 150 && under[0] < 230, "stencil drew nothing: {under:?}");
+
+        // A shading's /BBox clips it (ISO 32000-2 Table 77), so a shading fill's shape is its path
+        // inside the box: the erase pass must clear only that, or the red outside the box but
+        // inside the path stays erased (review on #2974).
+        let shaded = render(ko, &format!("{red}/Shg Do"));
+        check(&shaded, 120, 100, [128, 128, 255], "the shading inside its box");
+        check(&shaded, 155, 100, [255, 128, 128], "red outside the shading's box");
+
+        // An image that isn't decoded (here over the renderer's pixel limit) draws nothing, so it
+        // must not clear what is under its rectangle either (review on #2974).
+        let undecoded = render(ko, &format!("{red}q 160 0 0 100 60 50 cm /Big Do Q"));
+        check(&undecoded, 100, 100, [255, 128, 128], "red under an image that isn't drawn");
+        // Nor one a preview skips for covering only a few device pixels (review on #2974): the
+        // red under a 3 x 3 image stays in a preview, and a final render knocks it out.
+        let tiny = format!("{red}q 3 0 0 3 100 100 cm /Img Do Q");
+        check(&render_as(ko, &tiny, true), 101, 101, [255, 128, 128], "red under a preview's skipped image");
+        check(&render_as(ko, &tiny, false), 101, 101, [128, 128, 255], "the tiny image in a final render");
+    }
+
+    /// #2970: a page's objects composite with a transparent backdrop and the page group is then
+    /// put on the paper, so a separable blend mode only blends where something was drawn. A
+    /// green fill with `/BM /Screen` (or Lighten, Difference…) half over a red square is yellow
+    /// (or whatever the mode gives) over the red, and plain green over the empty page: blending
+    /// with the white paper made it white or magenta.
+    #[test]
+    fn blend_modes_over_an_empty_part_of_the_page_keep_their_colour() {
+        let px = |p: &RenderedPage, x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..4].to_vec();
+        for (mode, over_red) in [
+            ("Normal", Some([0, 255, 0])),
+            ("Multiply", Some([0, 0, 0])),
+            ("Screen", Some([255, 255, 0])),
+            ("Lighten", Some([255, 255, 0])),
+            ("Difference", Some([255, 255, 0])),
+            ("Exclusion", Some([255, 255, 0])),
+            ("ColorDodge", Some([255, 0, 0])),
+            ("Overlay", Some([255, 0, 0])),
+            // The non-separable modes mix hue, saturation and luminosity; over an empty part of
+            // the page they too must keep the source colour.
+            ("Hue", None),
+            ("Saturation", None),
+            ("Color", None),
+            ("Luminosity", None),
+        ] {
+            let content = "1 0 0 rg 20 20 150 150 re f /G1 gs 0 1 0 rg 100 50 150 120 re f";
+            let pdf = format!(
+                "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /ExtGState << /G1 5 0 R >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /ExtGState /BM /{mode} >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+                content.len()
+            );
+            let p = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default()).render(RenderRequest {
+                page: 0,
+                kind: RequestKind::Pixels,
+                tile: None,
+                scale: 1.0,
+                tag: 0,
+                ..Default::default()
+            });
+            assert!(p.error.is_none(), "{mode}: {:?}", p.error);
+            // Pixel rows run top down: PDF (210, 100) and (130, 100) are rows 100 from the top.
+            assert_eq!(px(&p, 210, 100), vec![0, 255, 0, 255], "{mode} over the empty page");
+            if let Some(over_red) = over_red {
+                assert_eq!(px(&p, 130, 100)[..3], over_red, "{mode} over the red square");
+            }
+            assert_eq!(px(&p, 280, 10), vec![255, 255, 255, 255], "{mode}: the paper stays white");
+        }
+    }
+
     /// Reading colours replace *document* colours, never annotation colours (issue #1548): a
     /// highlight keeps its `/C`, so on a dark background the content under it shows through the
     /// Multiply blend in the highlight's colour instead of being darkened into invisibility.
@@ -6604,6 +7250,9 @@ endstream endobj
         assert_eq!(decodes("A"), 1, "a Flate image decodes the same at every size");
         assert_eq!(decodes("B"), 5, "a JPX soft mask decodes for the size it is drawn at");
     }
+
+    // ICC profiles whose stream dictionaries are the same (vendored hayro-interpret patch 48).
+    mod icc_profile_cache;
 
     /// Render `pdf`'s first page at 72 dpi with no time limit beyond the test's own.
     fn render_first_page(pdf: Vec<u8>) -> RenderedPage {
@@ -7146,6 +7795,38 @@ trailer << /Root 1 0 R >>
         assert_eq!(px(75, 50), vec![255, 255, 255, 255], "outside the mask");
     }
 
+    /// Issue #3176: `CA` / `ca` belong to the graphics state at paint time, so a `gs` after
+    /// `SCN` / `scn` still fades a shading pattern, and a stroke takes the stroke alpha. The
+    /// pattern took the fill alpha current at `scn`/`SCN`, so both shapes came out opaque.
+    #[test]
+    fn shading_pattern_uses_the_alpha_current_at_paint_time() {
+        let content = "/Pattern CS /P0 SCN /S1 gs 10 w 0 75 m 100 75 l S /Pattern cs /P0 scn /F1 gs 0 0 100 50 re f";
+        let pdf = format!(
+            "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R
+  /Resources << /ExtGState << /S1 << /CA 0.25 >> /F1 << /ca 0.25 >> >> /Pattern << /P0 5 0 R >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] /Extend [true true]
+  /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [1 0 0] /N 1 >> >> >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+            content.len()
+        );
+        let mut r = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default());
+        let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+        assert!(p.error.is_none(), "{:?}", p.error);
+        let px = |x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..4].to_vec();
+        // Red at 25% over white is about (255, 191, 191); opaque red would be (255, 0, 0).
+        for (what, x, y) in [("the stroke under /CA 0.25", 50, 25), ("the fill under /ca 0.25", 50, 75)] {
+            let c = px(x, y);
+            assert!(c[0] >= 250 && (185..=197).contains(&c[1]) && (185..=197).contains(&c[2]), "{what}: {c:?}");
+        }
+    }
+
     /// ISO 32000-2 §8.5.4: `W` / `W*` clip with the current path once whichever path-painting
     /// operator ends it has painted it, `S`, `f` or `B` as much as `n`. The vendored interpreter
     /// applied the clip only on `n`: after `re W* S` everything later painted outside the clip,
@@ -7238,4 +7919,7 @@ trailer << /Root 1 0 R >>
             assert!(render(glyph, 3).as_chunks::<4>().0.iter().all(|p| p[..3] == [255, 255, 255]), "{glyph}: 3 Tr hides the glyph");
         }
     }
+
+    // #1201: /DefaultGray, /DefaultRGB and /DefaultCMYK (vendored hayro-interpret patch 38).
+    mod default_colour_spaces;
 }
