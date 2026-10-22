@@ -99,7 +99,9 @@ const COVER_CONTRAST: f64 = 3.0;
 pub fn audit_redactions(doc: &Document) -> Result<Vec<AuditFinding>, AuditError> {
     let mut out = Vec::new();
     for (n, page) in pdfcraft_model::pages(doc).iter().enumerate() {
-        let lines = pdfcraft_edit::text_lines(doc, n).map_err(|e| AuditError::Text(n, e.to_string()))?;
+        // The glyphs themselves: `/ActualText` is the file's own claim about them, and an empty
+        // or substitute one must not hide text a cover sits on.
+        let lines = pdfcraft_edit::glyph_text_lines(doc, page).map_err(|e| AuditError::Text(n, e.to_string()))?;
         // 1. Opaque filled rectangles over extractable text.
         for r in cover::filled_rects(doc, &page.dict)? {
             let mut covered = String::new();

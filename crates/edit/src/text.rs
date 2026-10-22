@@ -1290,7 +1290,19 @@ fn interpret(
 
 /// The lines of text on a page (0-based), in content order.
 pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError> {
-    let p = page_dict(doc, page)?;
+    text_lines_in(doc, &page_dict(doc, page)?, true)
+}
+
+/// The lines `page`'s glyphs show, in content order, without `/ActualText` replacements: what the
+/// page draws, not what its marked-content metadata says the glyphs mean. For checks that must
+/// not trust that metadata (the redaction audit). Takes the page itself, so a caller going
+/// through every page doesn't walk the page tree again for each.
+pub fn glyph_text_lines(doc: &Document, page: &pdfcraft_model::Page) -> Result<Vec<TextLine>, EditError> {
+    text_lines_in(doc, page, false)
+}
+
+/// [`text_lines`] of `p`; with `actual_text`, `/ActualText` replaces the glyphs it spans.
+fn text_lines_in(doc: &Document, p: &pdfcraft_model::Page, actual_text: bool) -> Result<Vec<TextLine>, EditError> {
     let res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
     let mut cache = HashMap::new();
     let mut lines: Vec<TextLine> = Vec::new();
@@ -1300,7 +1312,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
     let pieces = Pieces::join(&content_streams(doc, &p.dict).into_iter().map(|(_, d)| d).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
     let properties = res.get(b"Properties").and_then(|o| doc.dict(o)).unwrap_or_default();
-    let shown = interpret(doc, &ops, &res, &mut cache, &mut carry, None, Some(&properties))?;
+    let shown = interpret(doc, &ops, &res, &mut cache, &mut carry, None, actual_text.then_some(&properties))?;
     let mut last: Option<(usize, Pen)> = None; // the stream piece and where its last run ended
     for mut s in shown {
         // A single RTL glyph's ActualText (e.g. lam-alef) is an inline ligature, not a
