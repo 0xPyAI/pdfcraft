@@ -98,6 +98,99 @@ fn header_and_footer_are_drawn_in_display_space_and_wrap_the_original_content() 
 }
 
 #[test]
+fn header_and_footer_are_drawn_in_the_chosen_standard_face() {
+    // #3754: Times or Courier instead of Helvetica. The content names the face, the page's fonts
+    // gain it, and right-aligned text is placed by that face's widths (not Helvetica's).
+    let text = "Wide words";
+    for (font, resource, base) in [(added::Family::Times, "PCTimes", "Times-Roman"), (added::Family::Courier, "PCCour", "Courier")] {
+        let mut doc = fixture();
+        let hf = HeaderFooter {
+            text: [String::new(), String::new(), text.into(), String::new(), String::new(), String::new()],
+            font,
+            ..HeaderFooter::default()
+        };
+        add_header_footer(&mut doc, &[0], &hf, false, &cx()).unwrap();
+        let doc = reopen(&doc);
+        let mark = streams(&doc, 0).last().cloned().unwrap();
+        assert!(mark.contains(&format!("/{resource} 8 Tf")), "{base}: {mark}");
+        let x = 600.0 - 72.0 - font.width(text, 8.0, false, false);
+        assert!((x - (600.0 - 72.0 - pdfcraft_fonts::helvetica_width(text, 8.0))).abs() > 1.0, "{base}: the faces differ in width");
+        assert!(mark.contains(&format!("1 0 0 1 {} ", n(x))), "{base}: right-aligned by its own widths: {mark}");
+        let page = &pdfcraft_model::pages(&doc)[0];
+        let res = doc.resolve(page.dict.get(b"Resources").unwrap());
+        let fonts = doc.resolve(res.as_dict().unwrap().get(b"Font").unwrap()).as_dict().cloned().unwrap();
+        let face = doc.resolve(fonts.get(resource.as_bytes()).unwrap()).as_dict().cloned().unwrap();
+        assert_eq!(face.name(b"BaseFont"), Some(base.as_bytes()), "{base}");
+    }
+    // The default is still Helvetica, and only Helvetica is added.
+    let mut doc = fixture();
+    let hf =
+        HeaderFooter { text: [text.into(), String::new(), String::new(), String::new(), String::new(), String::new()], ..HeaderFooter::default() };
+    add_header_footer(&mut doc, &[0], &hf, false, &cx()).unwrap();
+    let mark = streams(&reopen(&doc), 0).last().cloned().unwrap();
+    assert!(mark.contains("/PCHelv 8 Tf") && !mark.contains("/PCTimes") && !mark.contains("/PCCour"), "{mark}");
+}
+
+#[test]
+fn a_header_never_takes_over_a_font_name_the_page_already_draws_with() {
+    // From review of #3756: a page that already draws a different font as /PCTimes keeps it; the
+    // header's Times goes under a free name, and an update reuses that name, not a third one.
+    let mut doc = fixture();
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    let mut fonts = Dict::new();
+    let mut theirs = Dict::new();
+    theirs.set(b"Type".to_vec(), Object::name("Font"));
+    theirs.set(b"Subtype".to_vec(), Object::name("Type1"));
+    theirs.set(b"BaseFont".to_vec(), Object::name("Helvetica-Bold"));
+    fonts.set(b"PCTimes".to_vec(), Object::Dict(theirs));
+    let mut res = Dict::new();
+    res.set(b"Font".to_vec(), Object::Dict(fonts));
+    doc.update_dict(page, |d| d.set(b"Resources".to_vec(), Object::Dict(res))).unwrap();
+    let hf = HeaderFooter {
+        text: ["Serif".into(), String::new(), String::new(), String::new(), String::new(), String::new()],
+        font: added::Family::Times,
+        ..HeaderFooter::default()
+    };
+    let base_of = |doc: &Document, name: &[u8]| {
+        let fonts = page_fonts(doc, &pdfcraft_model::pages(doc)[0]);
+        fonts.get(name).map(|f| doc.resolve(f)).and_then(|f| f.as_dict().and_then(|d| d.name(b"BaseFont")).map(<[u8]>::to_vec))
+    };
+    add_header_footer(&mut doc, &[0], &hf, false, &cx()).unwrap();
+    let doc = reopen(&doc);
+    assert_eq!(base_of(&doc, b"PCTimes").as_deref(), Some(&b"Helvetica-Bold"[..]), "the page's own font is untouched");
+    assert_eq!(base_of(&doc, b"PCTimes_1").as_deref(), Some(&b"Times-Roman"[..]));
+    let mark = streams(&doc, 0).last().cloned().unwrap();
+    assert!(mark.contains("/PCTimes_1 8 Tf"), "{mark}");
+    // Updating the header finds its own name again.
+    let mut doc = doc;
+    add_header_footer(&mut doc, &[0], &hf, true, &cx()).unwrap();
+    let doc = reopen(&doc);
+    assert!(streams(&doc, 0).last().unwrap().contains("/PCTimes_1 8 Tf"));
+    assert_eq!(base_of(&doc, b"PCTimes_2"), None, "no new name on update");
+    assert_eq!(base_of(&doc, b"PCTimes").as_deref(), Some(&b"Helvetica-Bold"[..]));
+    // The same face with more to it (here a /ToUnicode map) is the page's own too: kept whole.
+    let mut doc = fixture();
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    let map = doc.add(Object::Stream(pdfcraft_cos::Stream::flate(Dict::new(), b"/CIDInit /ProcSet findresource begin")));
+    let mut theirs = Dict::new();
+    for (k, v) in [("Type", "Font"), ("Subtype", "Type1"), ("BaseFont", "Times-Roman"), ("Encoding", "WinAnsiEncoding")] {
+        theirs.set(k.as_bytes().to_vec(), Object::name(v));
+    }
+    theirs.set(b"ToUnicode".to_vec(), Object::Ref(map));
+    let mut fonts = Dict::new();
+    fonts.set(b"PCTimes".to_vec(), Object::Dict(theirs));
+    let mut res = Dict::new();
+    res.set(b"Font".to_vec(), Object::Dict(fonts));
+    doc.update_dict(page, |d| d.set(b"Resources".to_vec(), Object::Dict(res))).unwrap();
+    add_header_footer(&mut doc, &[0], &hf, false, &cx()).unwrap();
+    let doc = reopen(&doc);
+    let fonts = page_fonts(&doc, &pdfcraft_model::pages(&doc)[0]);
+    let kept = doc.resolve(fonts.get(b"PCTimes").unwrap()).as_dict().cloned().unwrap();
+    assert!(kept.contains(b"ToUnicode"), "the page's map is kept");
+    assert!(streams(&doc, 0).last().unwrap().contains("/PCTimes_1 8 Tf"));
+}
+
+#[test]
 fn header_start_number_that_would_wrap_is_refused_without_drawing() {
     // u32::MAX is a valid start_number on its own, but there is no room for a second page
     // number after it. The old code wrapped the second page to zero; now the whole run is
