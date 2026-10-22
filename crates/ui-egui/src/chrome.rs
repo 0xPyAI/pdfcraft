@@ -654,7 +654,7 @@ pub fn right_rail(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
             // that in a short window the buttons above scroll instead of running into it (#3282).
             let view = &mut app.views[index];
             let mut page_display = None;
-            egui::Panel::bottom("rail-nav").frame(egui::Frame::NONE).show_separator_line(false).show(ui, |ui| {
+            egui::Panel::bottom("rail-nav").frame(egui::Frame::NONE).show_separator_line(false).resizable(false).show(ui, |ui| {
                 ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     let tip = crate::commands::key_tip(ui.ctx(), tl!("Zoom out ({key})"), crate::commands::ZOOM_OUT);
