@@ -592,3 +592,22 @@ fn reading_blocks_respect_stream_comments_and_split_operands() {
         assert_eq!(text, "Replacement text", "{}", String::from_utf8_lossy(s1));
     }
 }
+
+#[test]
+fn repeated_stream_references_share_one_decode_budget() {
+    use pdfcraft_cos::{Dict, Document, Object, Stream};
+    // One 1 MiB stream of spaces (a kilobyte on disk), named 300 times: by the page's /Contents,
+    // and by 300 draws of a form holding it.
+    let mut doc = Document::new_empty();
+    let spaces = doc.add(Stream::flate(Dict::new(), &vec![b' '; 1 << 20]));
+    let contents: Dict = [(b"Contents".to_vec(), Object::Array(vec![Object::Ref(spaces); 300]))].into_iter().collect();
+    assert!(crate::cover::filled_rects(&doc, &contents).is_err(), "repeated content streams");
+
+    let form_dict: Dict = [(b"Subtype".to_vec(), Object::Name(b"Form".to_vec()))].into_iter().collect();
+    let form = doc.add(Stream::flate(form_dict, &vec![b' '; 1 << 20]));
+    let draws = doc.add(Stream::from_raw(Dict::new(), "/X Do ".repeat(300).into_bytes()));
+    let xobjects: Dict = [(b"X".to_vec(), Object::Ref(form))].into_iter().collect();
+    let resources: Dict = [(b"XObject".to_vec(), Object::Dict(xobjects))].into_iter().collect();
+    let page: Dict = [(b"Contents".to_vec(), Object::Ref(draws)), (b"Resources".to_vec(), Object::Dict(resources))].into_iter().collect();
+    assert!(crate::cover::filled_rects(&doc, &page).is_err(), "repeated form draws");
+}
