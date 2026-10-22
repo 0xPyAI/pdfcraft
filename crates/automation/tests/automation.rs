@@ -5124,6 +5124,13 @@ fn digital_ids_signing_and_validation_through_tools() {
     assert!(matches!(a.call("doc_open_revision", &json!({ "doc": doc, "revision": 4 })), Err(ToolError::Failed(_))));
     assert_eq!(ok(&mut a, "sign_trust", json!({ "clear": true }))["trusted"].as_array().unwrap().len(), 0);
     assert_eq!(ok(&mut a, "sign_list", json!({ "doc": doc }))["signatures"][0]["status"], "unknown");
+    // The same certificate from a PKCS #7 bundle (.p7b), as Windows, Acrobat and CAs export one.
+    use pdfcraft_engine::sign::{cms, der, pkcs12};
+    let cert = pkcs12::open(&std::fs::read(dir.join("ada.p12")).unwrap(), "secret12").unwrap().certificate.raw;
+    let sd = der::seq(&[&der::int(1), &der::set_of(&[]), &der::seq(&[&der::oid(cms::DATA)]), &der::explicit(0, &cert), &der::set_of(&[])]);
+    std::fs::write(dir.join("ada.p7b"), der::seq(&[&der::oid(cms::SIGNED_DATA), &der::explicit(0, &sd)])).unwrap();
+    assert_eq!(ok(&mut a, "sign_trust", json!({ "paths": ["ada.p7b"] }))["trusted"].as_array().unwrap().len(), 1);
+    assert_eq!(ok(&mut a, "sign_list", json!({ "doc": doc }))["signatures"][0]["status"], "valid");
 }
 
 /// The decoded text of every visible signature appearance (Helvetica forms) in a signed file.
