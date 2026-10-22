@@ -862,6 +862,7 @@ fn restored_paper_keeps_preview_and_saved_sheet_dimensions() {
     let out = std::env::temp_dir().join(format!("pdfcraft-restored-paper-{}.pdf", std::process::id()));
     h.state_mut().print_draft.printer = None;
     h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    h.run_steps(1);
     h.get_by_label("Save as PDF").click();
     h.run_steps(3);
     assert_eq!(h.state().dialog, None);
