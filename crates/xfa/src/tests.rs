@@ -2742,3 +2742,19 @@ fn added_instances_are_queued_once_each() {
     assert!(queued <= 200_000, "{queued} instance nodes queued");
     assert!(r.warnings.iter().any(|w| w.contains("instances")), "{r:?}");
 }
+
+/// A namespace declared once and inherited by many imported elements is not copied into each
+/// past the import's byte budget.
+#[test]
+fn an_inherited_namespace_does_not_multiply_an_import() {
+    use crate::data::parse_data_file;
+    let uri = format!("urn:{}", "n".repeat(70_000));
+    let xml = format!("<form1 xmlns:p=\"{uri}\">{}</form1>", "<p:a/>".repeat(1_000));
+    fn ns_bytes(nodes: &[crate::data::ImportNode]) -> usize {
+        nodes.iter().map(|n| n.ns.as_ref().map_or(0, String::len) + ns_bytes(&n.children)).sum()
+    }
+    match parse_data_file(&xml, None) {
+        Ok(nodes) => assert!(ns_bytes(&nodes) <= crate::data::MAX_IMPORT_BYTES, "{} bytes of namespaces copied", ns_bytes(&nodes)),
+        Err(e) => assert!(matches!(e, XfaError::TooLarge(_)), "{e:?}"),
+    }
+}
