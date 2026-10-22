@@ -492,6 +492,9 @@ enum Isolation {
     /// the count of `q` left open at the end, when known. `marked` counts known unfinished
     /// marked-content sequences independently of graphics malformation, or zero when unknown.
     Unknown { unclosed: usize, marked: usize },
+    /// Marked content nests past [`ISOLATION_MAX_DEPTH`]: how many sequences a mark on top would
+    /// have to close (some may be hidden optional content) is unknown.
+    TooDeep,
 }
 
 const ISOLATION_MAX_STREAMS: usize = 100_000;
@@ -591,7 +594,10 @@ fn isolation(doc: &Document, list: &[Object]) -> Isolation {
             _ => {}
         }
     }
-    if malformed || text_open || path_open || !stack.is_empty() || !marked_known {
+    if !marked_known {
+        return Isolation::TooDeep;
+    }
+    if malformed || text_open || path_open || !stack.is_empty() {
         return Isolation::Unknown { unclosed: if malformed { 0 } else { stack.len() }, marked };
     }
     let comment_open = edges.last().is_some_and(|edge| edge.1);
@@ -608,8 +614,8 @@ fn place(doc: &mut Document, page: &pdfcraft_model::Page, kind: MarkKind, conten
 /// content before leaves set (a `cm`, a clip, text state…) must not reach the mark, including
 /// content appended after an earlier PdfCraft wrapper by another tool (#3084): the stretch of
 /// content that leaves state set is wrapped in q/Q, once. Any known unfinished marked-content
-/// sequences are closed at the end too, so hidden optional content cannot hide the new mark.
-/// Returns the new content stream.
+/// sequences are closed at the end too, so hidden optional content cannot hide the new mark; when
+/// their number is unknown, nothing is placed on top. Returns the new content stream.
 fn place_tagged(doc: &mut Document, page: &pdfcraft_model::Page, tag: &str, content: Vec<u8>, behind: bool) -> Result<ObjRef, EditError> {
     let mut list = contents(doc, page)?;
     // The behind-marks at the start: backgrounds in the order added, then watermarks.
@@ -624,6 +630,10 @@ fn place_tagged(doc: &mut Document, page: &pdfcraft_model::Page, tag: &str, cont
             // behind-marks at the start. A `q` it leaves open is closed at its end, where
             // closing it changes nothing already drawn.
             Isolation::Unknown { unclosed, marked } => (behind_marks < list.len()).then_some((behind_marks, unclosed, marked)),
+            // Content left inside an optional-content sequence it cannot close could be hidden.
+            Isolation::TooDeep => {
+                return Err(EditError::Invalid("the page's marked content is nested too deeply to add anything on top of it".into()));
+            }
         }
     };
     let mark_ref = doc.add(Object::Stream(Stream::flate(tagged(tag), &content)));
@@ -941,7 +951,7 @@ pub fn remove_marks(doc: &mut Document, pages: &[usize], kind: MarkKind) -> Resu
         if before != kept.len() {
             let wrappers = match isolation(doc, &kept) {
                 Isolation::Clean { wrappers, .. } => wrappers,
-                Isolation::Unknown { .. } => {
+                Isolation::Unknown { .. } | Isolation::TooDeep => {
                     let mut opens = Vec::new();
                     let mut pairs = Vec::new();
                     for (i, o) in kept.iter().enumerate() {

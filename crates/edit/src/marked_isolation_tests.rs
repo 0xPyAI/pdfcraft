@@ -96,7 +96,7 @@ fn recognizes_only_canonical_new_closes_and_retains_legacy_closes() {
 }
 
 #[test]
-fn depth_budget_bounds_emitted_closures_and_overflow_stays_unknown() {
+fn depth_budget_bounds_emitted_closures_and_overflow_is_refused_on_top() {
     let maximum = b"/Artifact BMC\n".repeat(ISOLATION_MAX_DEPTH);
     let mut expected = b"\nEMC".repeat(ISOLATION_MAX_DEPTH);
     expected.extend_from_slice(WRAP_CLOSE);
@@ -114,9 +114,20 @@ fn depth_budget_bounds_emitted_closures_and_overflow_stays_unknown() {
     place_tagged(&mut doc, &page, MarkKind::HeaderFooter.tag(), b"q Q\n".to_vec(), false).unwrap();
     assert_eq!(remove_marks(&mut doc, &[0], MarkKind::HeaderFooter).unwrap(), 1);
     assert_eq!(contents(&mut doc, &page).unwrap(), original, "maximum combined close can be removed without nesting wrappers");
+    // Past the budget the depth is unknown, so nothing can close the page's (possibly hidden)
+    // optional content before a mark on top: placing one there is refused, and the page is left
+    // as it was. Behind the content stays possible.
     for suffix in [b"/Artifact BMC\n".as_slice(), b"/Artifact BMC\nEMC\n", b"/Artifact BMC\nEMC\nEMC\n"] {
         let mut over = maximum.clone();
         over.extend_from_slice(suffix);
-        assert_eq!(close(&[&over]), WRAP_CLOSE, "overflow cannot resume speculative depth tracking after EMC");
+        let mut doc = fixture(&[&over]);
+        let page = page_list(&doc).remove(0);
+        let original = contents(&mut doc, &page).unwrap();
+        assert!(
+            matches!(stamp(&mut doc, 0, "Probe", b"q Q\n".to_vec()), Err(EditError::Invalid(_))),
+            "overflow cannot resume speculative depth tracking after EMC"
+        );
+        assert_eq!(contents(&mut doc, &page).unwrap(), original);
+        place_tagged(&mut doc, &page, MarkKind::Background.tag(), b"q Q\n".to_vec(), true).unwrap();
     }
 }
