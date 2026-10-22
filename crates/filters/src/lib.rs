@@ -140,28 +140,36 @@ pub(crate) type Step = Result<Vec<u8>, Failure>;
 /// [`FilterError::Unsupported`] (callers keep such data encoded), as does a chain longer than
 /// [`MAX_CHAIN`]. `max_output` bounds every intermediate buffer.
 pub fn decode(chain: &[(Filter, Params)], data: &[u8], max_output: usize) -> Result<Vec<u8>, FilterError> {
-    decode_counted(chain, data, max_output).map_err(|(e, _)| e)
+    decode_counted(chain, data, max_output).map(|(v, _)| v).map_err(|(e, _)| e)
 }
 
-/// Like [`decode`], but a failure also gives the bytes decoded before it, across the stages
-/// that ran: the work a caller charging an allowance spent finding out.
-pub fn decode_counted(chain: &[(Filter, Params)], data: &[u8], max_output: usize) -> Result<Vec<u8>, (FilterError, usize)> {
-    run(chain, data, max_output, true).map(|(v, _)| v)
+/// Like [`decode`], also giving the bytes every stage that ran decoded, on success and on
+/// failure: the work a caller charging an allowance spent. A stage's output counts even when a
+/// later stage shrinks it.
+pub fn decode_counted(chain: &[(Filter, Params)], data: &[u8], max_output: usize) -> Result<(Vec<u8>, usize), (FilterError, usize)> {
+    run(chain, data, max_output, true).map(|(v, _, spent)| (v, spent))
 }
 
 /// Like [`decode`], but on corrupt data returns what was decoded before the error and
 /// reports `partial = true` (the behaviour viewers expect). The remaining filters of the
 /// chain still run on the partial data. Limit and unsupported errors are still errors.
 pub fn decode_tolerant(chain: &[(Filter, Params)], data: &[u8], max_output: usize) -> Result<(Vec<u8>, bool), FilterError> {
-    run(chain, data, max_output, false).map_err(|(e, _)| e)
+    decode_tolerant_counted(chain, data, max_output).map(|(v, partial, _)| (v, partial)).map_err(|(e, _)| e)
+}
+
+/// [`decode_tolerant`], also giving the bytes every stage that ran decoded, as
+/// [`decode_counted`] does.
+pub fn decode_tolerant_counted(chain: &[(Filter, Params)], data: &[u8], max_output: usize) -> Result<(Vec<u8>, bool, usize), (FilterError, usize)> {
+    run(chain, data, max_output, false)
 }
 
 /// Longest filter chain decoded. Real streams use one to three filters; every stage may produce
 /// up to the output limit, so the chain length multiplies the work.
 pub const MAX_CHAIN: usize = 8;
 
-/// The decoded data and whether it is partial, or the error and the bytes decoded before it.
-fn run(chain: &[(Filter, Params)], data: &[u8], max: usize, strict: bool) -> Result<(Vec<u8>, bool), (FilterError, usize)> {
+/// The decoded data, whether it is partial and the bytes all stages decoded, or the error and
+/// the bytes decoded before it.
+fn run(chain: &[(Filter, Params)], data: &[u8], max: usize, strict: bool) -> Result<(Vec<u8>, bool, usize), (FilterError, usize)> {
     if chain.len() > MAX_CHAIN {
         return Err((FilterError::Unsupported(format!("a chain of {} filters", chain.len())), 0));
     }
@@ -184,7 +192,7 @@ fn run(chain: &[(Filter, Params)], data: &[u8], max: usize, strict: bool) -> Res
         });
         spent = spent.saturating_add(cur.len());
     }
-    Ok((cur.into_owned(), partial))
+    Ok((cur.into_owned(), partial, spent))
 }
 
 fn decode_one(filter: &Filter, params: &Params, data: &[u8], max: usize) -> Step {
