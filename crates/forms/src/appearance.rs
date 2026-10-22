@@ -542,20 +542,20 @@ pub fn field_appearance_drawn(doc: &Document, f: &Field, w: &Widget, values: &[S
             }
         }
     }
-    let mut content = c.into_bytes();
-    content.extend(
-        format!(
-            "/Tx BMC\nq\n{} {} {} {} re W n\nBT\n/{} {} Tf\n{}\n",
-            n(bw),
-            n(bw),
-            n(width - 2.0 * bw),
-            n(height - 2.0 * bw),
-            font_name,
-            n(size),
-            da.color
-        )
-        .bytes(),
-    );
+    // Acrobat regenerates only what is inside /Tx BMC when it redraws a field (e.g. on focus
+    // changes), discarding what came before it (issues #1613, #633). The background and border
+    // therefore go inside the marked-content block too, so a redraw keeps them with the text.
+    let mut content = format!(
+        "/Tx BMC\nq\n{c}{} {} {} {} re W n\nBT\n/{} {} Tf\n{}\n",
+        n(bw),
+        n(bw),
+        n(width - 2.0 * bw),
+        n(height - 2.0 * bw),
+        font_name,
+        n(size),
+        da.color
+    )
+    .into_bytes();
     content.extend(body);
     content.extend_from_slice(b"ET\nQ\nEMC\n");
     let mut fonts = Dict::new();

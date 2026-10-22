@@ -379,6 +379,44 @@ fn text_fields_get_new_appearances() {
     assert!(raw.windows(8).any(|x| x == b"(Z\xfcrich)"));
 }
 
+/// Acrobat regenerates only the `/Tx BMC` block when it redraws a text field, so background and
+/// border must live inside it rather than immediately before it (#1613).
+fn marked_content_borders_field(appearance: &str, label: &str) {
+    let start = appearance.find("/Tx BMC").expect("no /Tx BMC");
+    let marked = appearance[start..].split_once("EMC").expect("no matching EMC").0;
+    assert!(marked.contains("1 1 0.9 rg"), "background inside /Tx BMC: {appearance} {label}");
+    assert!(marked.contains("0 0 0 RG\n1 w\n0.5 0.5 199 19 re S"), "border inside /Tx BMC: {appearance} {label}");
+}
+
+#[test]
+fn text_and_date_fields_keep_background_and_border_inside_marked_content() {
+    let mut doc = one_page();
+    add_field(&mut doc, 0, [50.0, 700.0, 250.0, 720.0], &NewField::Text { multiline: false }, Some("name")).unwrap();
+    add_field(&mut doc, 0, [50.0, 660.0, 250.0, 680.0], &NewField::Date, Some("due")).unwrap();
+    let props = || FieldProps {
+        look: Some(Look {
+            border: Some([0.0; 3]),
+            fill: Some([1.0, 1.0, 0.9]),
+            width: 1.0,
+            style: BorderStyle::Solid,
+            text: [0.0, 0.0, 0.0],
+            font: FieldFont::Helvetica,
+        }),
+        ..FieldProps::default()
+    };
+    set_props(&mut doc, "name", &props()).unwrap();
+    set_props(&mut doc, "due", &props()).unwrap();
+    set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
+    set_value(&mut doc, "due", &FieldValue::Text("10/14/2026".into())).unwrap();
+    let name_ap = ap(&doc, &field(&fields(&doc), "name").widgets[0]);
+    let due_ap = ap(&doc, &field(&fields(&doc), "due").widgets[0]);
+    marked_content_borders_field(&name_ap, "text field");
+    marked_content_borders_field(&due_ap, "date field");
+    assert!(name_ap.contains("(Ada) Tj"), "{name_ap}");
+    assert!(due_ap.contains("(10/14/2026) Tj"), "{due_ap}");
+    assert!(!need_appearances(&doc), "drawable ASCII fields do not ask other viewers to redraw");
+}
+
 #[test]
 fn existing_field_font_encoding_keeps_italian_punctuation_visible() {
     // ReportLab-style Helvetica: an indirect encoding dictionary with PDFDoc-like Differences.
