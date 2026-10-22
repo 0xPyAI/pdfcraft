@@ -184,7 +184,7 @@ pub(crate) fn draw_form_xobject<'a, 'b>(
         });
         interpret(
             TypedIter::new(x_object.decoded.as_ref()),
-            &Resources::from_parent(x_object.resources.clone(), resources.clone()),
+            &Resources::for_form(x_object.resources.clone(), resources.clone()),
             context,
             device,
         );
