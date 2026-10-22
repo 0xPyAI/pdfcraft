@@ -7293,7 +7293,7 @@ fn a_page_truncated_for_forms_and_pictures_is_listed_once() {
         "<< /Type /Catalog /Pages 2 0 R >>".into(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] >>".into(),
         String::new(),
-        "<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 4 >>\nstream\n\0\x40\u{80}\u{ff}\nendstream".into(),
+        "<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 4 >>\nstream\n\0\x20\x40\x7f\nendstream".into(),
         "<< /Length 34 >>\nstream\nq 10 0 0 10 0 0 cm /Im Do Q /D1 Do\nendstream".into(),
     ];
     // Forms D1..D{depth}, objects 6 onwards, each drawing the next.
@@ -7323,6 +7323,8 @@ fn a_page_truncated_for_forms_and_pictures_is_listed_once() {
     let id = s.open("both.pdf", None, Arc::new(bytes), None).unwrap();
     let doc = s.get(id).unwrap();
     assert_eq!(doc.export_pages_checked(false, 0).1, [0], "the forms alone truncate the page");
+    let (exported, _) = doc.export_pages_checked(true, 1 << 20);
+    assert_eq!(exported[0].images.len(), 1, "the picture exports within a sufficient budget");
     let (pages, truncated) = doc.export_pages_checked(true, 0);
     assert!(pages[0].images.is_empty(), "the picture is past the budget");
     assert_eq!(truncated, [0]);
