@@ -584,6 +584,13 @@ impl TextDevice {
     }
 }
 
+/// Whether `PDFCRAFT_TEXT_DEBUG` is set. `draw_glyph` runs once per glyph and `getenv` scans the
+/// whole environment under a lock, so read it once.
+fn text_debug() -> bool {
+    static DEBUG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *DEBUG.get_or_init(|| std::env::var_os("PDFCRAFT_TEXT_DEBUG").is_some())
+}
+
 impl<'a> Device<'a> for TextDevice {
     fn set_soft_mask(&mut self, _: Option<SoftMask<'a>>) {}
     fn set_blend_mode(&mut self, _: BlendMode) {}
@@ -602,7 +609,7 @@ impl<'a> Device<'a> for TextDevice {
             Some(hayro::hayro_interpret::hayro_cmap::BfString::String(s)) => s,
             None if replaced => String::new(),
             None => {
-                if std::env::var_os("PDFCRAFT_TEXT_DEBUG").is_some() {
+                if text_debug() {
                     eprintln!(
                         "NOUNICODE {} {:?}",
                         if matches!(glyph, Glyph::Type3(_)) { "t3" } else { "ol" },
@@ -618,7 +625,7 @@ impl<'a> Device<'a> for TextDevice {
         // Glyph space → view space. Glyph space uses 1000 units per em for outline glyphs; the em
         // box spans descender (−200) to ascender (800), the advance gives the width.
         let t = transform * glyph_transform;
-        if std::env::var_os("PDFCRAFT_TEXT_DEBUG").is_some() {
+        if text_debug() {
             let kind = if matches!(glyph, Glyph::Type3(_)) { "t3" } else { "ol" };
             eprintln!("{kind} {text:?} transform={:?} glyph_transform={:?}", transform.as_coeffs(), glyph_transform.as_coeffs());
         }
