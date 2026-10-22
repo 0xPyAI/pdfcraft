@@ -1222,3 +1222,22 @@ fn tiff_pages_are_decoded_within_a_total_budget() {
     let mut doc = Document::new_empty();
     assert!(image_xobject(&mut doc, "t.tif", &tif).is_ok(), "the unreadable last page is never decoded");
 }
+
+/// A one-pixel GIF on a `w`×`h` logical screen: the decoder paints it on a canvas that size.
+fn gif_on_screen(w: u16, h: u16) -> Vec<u8> {
+    let mut gif = b"GIF89a".to_vec();
+    gif.extend_from_slice(&w.to_le_bytes());
+    gif.extend_from_slice(&h.to_le_bytes());
+    gif.extend_from_slice(&[0x80, 0, 0, 0xFF, 0xFF, 0xFF, 0, 0, 0]);
+    gif.extend_from_slice(&[0x2C, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x44, 1, 0, 0x3B]);
+    gif
+}
+
+/// The decoder's own limit lets a 74-byte GIF ask for a canvas of hundreds of MB, which the
+/// conversion then copies; a screen past [`MAX_GIF_PIXELS`] is refused before decoding.
+#[test]
+fn a_tiny_gif_on_a_huge_screen_is_refused() {
+    assert!(matches!(from_images(&[("big.gif".into(), gif_on_screen(4200, 4100))]), Err(CreateError::Image(..))));
+    let doc = reopen(&from_images(&[("small.gif".into(), gif_on_screen(40, 30))]).unwrap());
+    assert_eq!(media(&pages(&doc)[0]), [0.0, 0.0, 40.0, 30.0]);
+}

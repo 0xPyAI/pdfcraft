@@ -393,10 +393,21 @@ fn rgba_image(rgba: &[u8], (w, h): (u32, u32), dpi: (f64, f64)) -> Embedded {
 /// BMP and GIF (the first frame), through the `image` decoders. Their resolution is not read:
 /// 72 dpi, as for images without one.
 fn decoded(name: &str, bytes: &[u8], format: image::ImageFormat) -> Result<Embedded, CreateError> {
+    // A GIF's first frame is painted on a canvas the size of its logical screen, however small
+    // the frame: a few bytes can ask for hundreds of MB.
+    if format == image::ImageFormat::Gif
+        && let Some(&[w0, w1, h0, h1]) = bytes.get(6..10)
+        && u64::from(u16::from_le_bytes([w0, w1])) * u64::from(u16::from_le_bytes([h0, h1])) > MAX_GIF_PIXELS
+    {
+        return Err(CreateError::Image(name.into(), "the GIF's screen is larger than 4096×4096 pixels".into()));
+    }
     let img = image::load_from_memory_with_format(bytes, format).map_err(|e| CreateError::Image(name.into(), e.to_string()))?;
-    let rgba = img.to_rgba8();
+    let rgba = img.into_rgba8();
     Ok(rgba_image(rgba.as_raw(), rgba.dimensions(), (72.0, 72.0)))
 }
+
+/// Largest GIF logical screen, in pixels (4096×4096).
+const MAX_GIF_PIXELS: u64 = 1 << 24;
 
 /// Most decoded bytes one TIFF page or PNG may take: room for the 768 MiB CMYK poster in #665,
 /// twice over.
