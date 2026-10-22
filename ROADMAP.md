@@ -2,6 +2,7 @@
 
 **Stage: alpha** · next: beta, ~25% (ready for real work 50% → 75%) and ~400–700 h away
 
+> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (M3, #3541/#3620: comment hover follows individual marked lines and original annotation paint order; estimates unchanged)
 > **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (M5, PR #1971: bounded nested FDF export excludes source page/page-tree dictionaries; refreshed against upstream 4db6ac4a; estimates unchanged)
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M7: the Edit text caret is as tall as the row it is on; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (M6: CSV tab-containing headers; estimates unchanged)
@@ -176,6 +177,9 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 - **2026-10-20 (M6, calculation order):** The order a form's fields calculate in (`/CO`) is read, checked, fixed and set headlessly with `form_calculation_order`: it says which fields read one calculated later (they show stale values), which read each other in a loop, and which the PDF's order leaves out; Fix order moves only what must move, in one undo step, and the form recalculates. Editing a formula no longer moves its field to the end of the order, and a field the order lists twice calculates once. Estimates unchanged.
 - **2026-10-19 (M6, renames keep formulas):** Renaming a field renames it in every calculation that reads it, in the same undo step: `AFSimple_Calculate` field lists, simplified field notation (the comment and the JavaScript after it) and `getField` calls naming it in one string literal; the rest of each script is kept as written. A sum used to drop the renamed field, notation read it as 0 and a script kept a stale value. Field Properties says how many formulas changed and `form_set_props` lists them as `formulas_updated`. Names built at run time and other events' scripts are not rewritten. Estimates unchanged.
 - **2026-10-20 (M5, reshape lines):** A line or arrow could only be moved after it was drawn; its length and angle stayed. A selected line, connected lines, polygon or cloud now has a handle on each end or corner: dragging one reshapes it (Shift holds it to 45°), as one undo step, with the new shape drawn while dragging. `pdfcraft_annot::set_points`, `Edit::ReshapeAnnotation`, `comment_edit points`; comment lists carry the points. Estimates unchanged.
+- **2026-10-20 (M3, #3620):** Overlapping comment hover uses the original annotation index independently of spatial inspection order. A synthetic UI regression covers different annotation upper edges. Estimates unchanged.
+
+- **2026-10-20 (M3, #3541/#3620):** Comment hover follows the individual marked lines instead of the enclosing multiline rectangle, and overlapping comments follow paint order. Synthetic UI regressions cover all four text-markup kinds, page/view rotations, neighboring highlights, legacy rectangle fallback and unchanged PDF bytes. Estimates unchanged.
 
 - **2026-10-19 (M14, #3373):** The main menu and its long submenus scroll in short windows, keeping their commands reachable. Estimates unchanged.
 

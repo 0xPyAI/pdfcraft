@@ -3528,16 +3528,22 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 // freehand, where it would cover the next stroke (#429).
                 let freehand = matches!(tool, QuickTool::Comment(comments::CommentTool::Ink | comments::CommentTool::Eraser));
                 let gesturing = view.comments.gesture.is_some() || freehand;
-                for a in info.annotations.iter().filter(|a| a.page == i && !gesturing) {
-                    let sr = xf.user_rect(info, i, a.rect);
-                    let hidden = prefs.hide_empty_highlight_hover && a.subtype == "Highlight" && a.contents.as_deref().is_none_or(str::is_empty);
-                    if sr.contains(p)
-                        && hover_text.is_none()
-                        && !hidden
-                        && let Some(text) = annotation_hover_text(a)
-                    {
-                        hover_text = Some((p, text));
-                    }
+                // Inspection sorts annotations spatially, but the renderer paints in /Annots
+                // order. Keep the shared list intact and choose the last eligible raw index.
+                if hover_text.is_none()
+                    && !gesturing
+                    && let Some((_, text)) = info
+                        .annotations
+                        .iter()
+                        .filter(|a| a.page == i)
+                        .filter(|a| {
+                            !(prefs.hide_empty_highlight_hover && a.subtype == "Highlight" && a.contents.as_deref().is_none_or(str::is_empty))
+                        })
+                        .filter(|a| pcx.screen_rects(a).any(|r| r.contains(p)))
+                        .filter_map(|a| annotation_hover_text(a).map(|text| (a.index, text)))
+                        .max_by_key(|(index, _)| *index)
+                {
+                    hover_text = Some((p, text));
                 }
             }
             for (mp, mr, mc) in &view.compare_marks {

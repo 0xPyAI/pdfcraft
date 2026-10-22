@@ -623,21 +623,19 @@ impl PageCx<'_> {
     }
 
     /// Where a comment is on screen: one rectangle, or one per marked line for text markup.
-    fn screen_rects(&self, a: &Annotation) -> Vec<Rect> {
-        if is_markup(&a.subtype) && !a.quads.is_empty() {
-            a.quads
-                .iter()
-                .map(|q| {
-                    let xs = [q[0], q[2], q[4], q[6]];
-                    let ys = [q[1], q[3], q[5], q[7]];
-                    let (x0, x1) = (xs.iter().copied().fold(f32::MAX, f32::min), xs.iter().copied().fold(f32::MIN, f32::max));
-                    let (y0, y1) = (ys.iter().copied().fold(f32::MAX, f32::min), ys.iter().copied().fold(f32::MIN, f32::max));
-                    self.xf.user_rect(self.info, self.page, [x0, y0, x1, y1])
-                })
-                .collect()
-        } else {
-            vec![self.screen_rect(a)]
-        }
+    pub(crate) fn screen_rects<'b>(&'b self, a: &'b Annotation) -> impl Iterator<Item = Rect> + 'b {
+        let quads = if is_markup(&a.subtype) { a.quads.as_slice() } else { &[] };
+        let fallback = quads.is_empty().then(|| self.screen_rect(a));
+        quads
+            .iter()
+            .map(|q| {
+                let xs = [q[0], q[2], q[4], q[6]];
+                let ys = [q[1], q[3], q[5], q[7]];
+                let (x0, x1) = (xs.iter().copied().fold(f32::MAX, f32::min), xs.iter().copied().fold(f32::MIN, f32::max));
+                let (y0, y1) = (ys.iter().copied().fold(f32::MAX, f32::min), ys.iter().copied().fold(f32::MIN, f32::max));
+                self.xf.user_rect(self.info, self.page, [x0, y0, x1, y1])
+            })
+            .chain(fallback)
     }
 
     /// A redaction mark's areas: one per marked quad, or its rectangle.
@@ -659,7 +657,7 @@ impl PageCx<'_> {
 
     /// The topmost comment under `p`.
     fn hit(&self, p: Pos2) -> Option<&Annotation> {
-        self.comments().filter(|a| self.screen_rects(a).iter().any(|r| r.expand(3.0).contains(p))).last()
+        self.comments().filter(|a| self.screen_rects(a).any(|r| r.expand(3.0).contains(p))).last()
     }
 
     pub(crate) fn get(&self, index: usize) -> Option<&Annotation> {

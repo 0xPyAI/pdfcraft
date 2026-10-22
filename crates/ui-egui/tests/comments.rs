@@ -1602,6 +1602,162 @@ fn preference_hides_author_only_highlight_hover_previews() {
     assert!(h.query_by_label("Ada").is_none(), "author-only hover must be suppressed");
 }
 
+/// Contributor-original synthetic markup, with the first highlight ending on the next line.
+fn markup_hover_fixture(subtype: &str, rotation: u16, extra: &str, refs: &str) -> Vec<u8> {
+    let content = "BT /F1 14 Tf 20 150 Td (Before the marked words) Tj 0 -40 Td (Marked words then other words) Tj ET\n";
+    String::from_utf8_lossy(TEXT_FIXTURE)
+        .replace("/Contents 5 0 R /Resources", &format!("/Contents 5 0 R /Rotate {rotation} /Annots [8 0 R {refs}] /Resources"))
+        .replace("/Length 55", &format!("/Length {}", content.len()))
+        .replace("BT /F1 14 Tf 20 150 Td (The quick brown fox) Tj ET\n", content)
+        .replace(
+            "trailer",
+            &format!(
+                "8 0 obj << /Type /Annot /Subtype /{subtype} /Rect [20 105 250 165] \
+                 /QuadPoints [120 165 250 165 120 145 250 145 20 125 100 125 20 105 100 105] \
+                 /C [1 1 0] /T (Ada) /Contents (First multiline comment) >> endobj\n{extra}\ntrailer"
+            ),
+        )
+        .into_bytes()
+}
+
+fn markup_hover_harness(pdf: Vec<u8>, view_rotation: u16) -> Harness<'static, PdfCraftApp> {
+    // Give the fixture a complete xref so byte comparisons do not measure repair-on-save.
+    let doc = pdfcraft_cos::Document::open(std::sync::Arc::new(pdf)).expect("synthetic fixture parses");
+    let pdf = pdfcraft_cos::write_full(&doc, &Default::default()).expect("writes complete fixture");
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("markup.pdf", None, pdf).expect("opens synthetic markup");
+        app.set_option("left", "closed").unwrap();
+        app.set_option("panel", "none").unwrap();
+        app.views[0].rotation = view_rotation;
+        app
+    });
+    h.run_steps(4);
+    settle(&mut h);
+    h
+}
+
+/// Includes the document's crop/rotation and the independent Rotate View transform.
+fn hover_markup_at(h: &mut Harness<'static, PdfCraftApp>, x: f32, y: f32) {
+    let p = {
+        let app = h.state();
+        let v = &app.views[0];
+        let info = &app.session.get(v.id).unwrap().info;
+        let page = &info.pages[0];
+        let xf = pdfcraft_ui_egui::canvas::PageXform {
+            rect: v.page_screen_rect(0).expect("page on screen"),
+            rot: v.rotation,
+            pw: page.width,
+            ph: page.height,
+        };
+        xf.user_rect(info, 0, [x, y, x, y]).center()
+    };
+    h.hover_at(p);
+    h.run_steps(3);
+}
+
+#[test]
+fn multiline_markup_hover_stays_on_marked_lines() {
+    // #3541: /Rect encloses both lines, including text before/after the selection and the gap.
+    for subtype in ["Highlight", "Underline", "StrikeOut", "Squiggly"] {
+        for (page_rotation, view_rotation) in [(0, 0), (90, 0), (180, 0), (270, 0), (0, 90), (0, 180), (0, 270), (90, 270)] {
+            let pdf = markup_hover_fixture(subtype, page_rotation, "", "");
+            let mut h = markup_hover_harness(pdf, view_rotation);
+            let original = h.state().session.get(h.state().views[0].id).unwrap().saved_bytes();
+            for (x, y, marked) in
+                [(160.0, 155.0, true), (60.0, 115.0, true), (60.0, 155.0, false), (180.0, 115.0, false), (60.0, 135.0, false), (60.0, 75.0, false)]
+            {
+                hover_markup_at(&mut h, x, y);
+                assert_eq!(
+                    h.query_by_label_contains("First multiline comment").is_some(),
+                    marked,
+                    "{subtype}, page/view rotation {page_rotation}/{view_rotation}, user point ({x}, {y})"
+                );
+            }
+            let app = h.state();
+            let id = app.views[0].id;
+            let doc = app.session.get(id).unwrap();
+            assert!(!doc.dirty, "hovering never edits the document");
+            assert_eq!(doc.can_undo(), None);
+            assert_eq!(app.session.save_bytes(id).unwrap().as_slice(), original.as_slice());
+        }
+    }
+}
+
+#[test]
+fn neighboring_markup_hover_changes_to_its_own_comment() {
+    // #3620: the second highlight is in the first one's /Rect, but outside its marked lines.
+    let other = "9 0 obj << /Type /Annot /Subtype /Highlight /Rect [160 105 240 125] \
+                 /QuadPoints [160 125 240 125 160 105 240 105] /Contents (Neighbor comment) >> endobj";
+    let mut h = markup_hover_harness(markup_hover_fixture("Highlight", 0, other, "9 0 R"), 0);
+    for (x, y, first) in [(160.0, 155.0, true), (180.0, 115.0, false), (60.0, 115.0, true)] {
+        hover_markup_at(&mut h, x, y);
+        assert_eq!(h.query_by_label_contains("First multiline comment").is_some(), first);
+        assert_eq!(h.query_by_label_contains("Neighbor comment").is_some(), !first);
+    }
+}
+
+#[test]
+fn overlapping_markup_hover_shows_the_topmost_comment() {
+    // A later annotation can also cover a genuinely marked part of the older highlight.
+    let other = "9 0 obj << /Type /Annot /Subtype /Highlight /Rect [150 145 200 165] \
+                 /QuadPoints [150 165 200 165 150 145 200 145] /Contents (Topmost comment) >> endobj";
+    let mut h = markup_hover_harness(markup_hover_fixture("Highlight", 0, other, "9 0 R"), 0);
+    hover_markup_at(&mut h, 170.0, 155.0);
+    h.get_by_label_contains("Topmost comment");
+    assert!(h.query_by_label_contains("First multiline comment").is_none());
+    hover_markup_at(&mut h, 230.0, 155.0);
+    h.get_by_label_contains("First multiline comment");
+    assert!(h.query_by_label_contains("Topmost comment").is_none());
+}
+
+#[test]
+fn overlapping_markup_hover_uses_annotation_index_with_different_top_edges() {
+    // Inspection sorts by position, while /Annots determines paint order. The later
+    // highlight wins the overlap whether its upper edge is above or below the first's.
+    for top in [175, 160] {
+        let other = format!(
+            "9 0 obj << /Type /Annot /Subtype /Highlight /Rect [150 145 200 {top}] \
+             /QuadPoints [150 {top} 200 {top} 150 145 200 145] /Contents (Topmost comment) >> endobj"
+        );
+        let mut h = markup_hover_harness(markup_hover_fixture("Highlight", 0, &other, "9 0 R"), 0);
+        hover_markup_at(&mut h, 170.0, 155.0);
+        h.get_by_label_contains("Topmost comment");
+        assert!(h.query_by_label_contains("First multiline comment").is_none(), "later annotation with top {top} owns the overlap");
+        hover_markup_at(&mut h, 230.0, 155.0);
+        h.get_by_label_contains("First multiline comment");
+        assert!(h.query_by_label_contains("Topmost comment").is_none());
+    }
+}
+
+#[test]
+fn markup_hover_skips_popup_containers() {
+    // /Popup holds the parent's comment window; it is not a second comment in paint order.
+    let popup = "9 0 obj << /Type /Annot /Subtype /Popup /Parent 8 0 R /Rect [150 145 200 165] >> endobj";
+    let mut h = markup_hover_harness(markup_hover_fixture("Highlight", 0, popup, "9 0 R"), 0);
+    hover_markup_at(&mut h, 170.0, 155.0);
+    h.get_by_label_contains("First multiline comment");
+    assert!(h.query_by_label("Popup").is_none());
+}
+
+#[test]
+fn markup_hover_without_quads_keeps_the_rectangle_fallback() {
+    for quads in ["", "/QuadPoints [20 105 250 165]"] {
+        let pdf = markup_hover_fixture("Highlight", 0, "", "");
+        let pdf = String::from_utf8(pdf)
+            .unwrap()
+            .replace("/QuadPoints [120 165 250 165 120 145 250 145 20 125 100 125 20 105 100 105]", quads)
+            .into_bytes();
+        let mut h = markup_hover_harness(pdf, 0);
+        assert!(comments(&h)[0].quads.is_empty());
+        hover_markup_at(&mut h, 180.0, 115.0);
+        h.get_by_label_contains("First multiline comment");
+        hover_markup_at(&mut h, 270.0, 115.0);
+        assert!(h.query_by_label_contains("First multiline comment").is_none());
+    }
+}
+
 #[test]
 fn the_squiggly_tool_marks_selected_text() {
     let mut h = harness(|_| {});
