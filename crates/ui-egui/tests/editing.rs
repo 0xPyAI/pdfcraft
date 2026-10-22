@@ -2956,6 +2956,46 @@ fn an_applied_paragraph_keeps_its_edited_look_until_the_page_is_redrawn() {
     assert_eq!(s.session.get(s.views[0].id).unwrap().text_blocks(0).iter().map(|b| b.text.clone()).collect::<Vec<_>>(), ["T", "Bottom"]);
 }
 
+/// A paragraph whose edit fails (here a letter no font can draw) stays open with what was typed,
+/// as a form field does; the editor used to close with the error and the typing was lost.
+#[test]
+fn a_paragraph_whose_edit_fails_stays_open_with_its_typing() {
+    let bytes = source_font_fixture_with_text("BT /F1 24 Tf 20 220 Td (Top) Tj ET BT /F2 24 Tf 20 120 Td (Bottom) Tj ET");
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("boxes.pdf", None, bytes).expect("opens");
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = r.width() / 300.0;
+    let top = egui::pos2(r.left() + 30.0 * k, r.top() + (300.0 - 228.0) * k);
+    click_at(&mut h, top);
+    assert_eq!(h.state().views[0].line_editor.as_ref().map(|e| e.text.as_str()), Some("Top"));
+    // U+049B (Kazakh and Uzbek Cyrillic): neither the page's font nor a fallback face draws it.
+    h.state_mut().views[0].line_editor.as_mut().unwrap().text = "Top қ".into();
+    h.run_steps(1);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run_steps(3);
+    let s = h.state();
+    assert!(s.toast.as_ref().is_some_and(|(m, _)| m.starts_with("Edit text failed")), "the failure is said: {:?}", s.toast);
+    assert_eq!(s.session.get(s.views[0].id).unwrap().can_undo(), None, "nothing was applied");
+    let ed = s.views[0].line_editor.as_ref().expect("the paragraph is still open");
+    assert_eq!((ed.block, ed.text.as_str()), (0, "Top қ"), "with what was typed");
+    // Taking the letter out applies it.
+    h.state_mut().views[0].line_editor.as_mut().unwrap().text = "Top edited".into();
+    h.run_steps(1);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run_steps(3);
+    let s = h.state();
+    assert!(s.views[0].line_editor.is_none());
+    let doc = s.session.get(s.views[0].id).unwrap();
+    assert_eq!(doc.text_blocks(0).iter().map(|b| b.text.clone()).collect::<Vec<_>>(), ["Top edited", "Bottom"]);
+}
+
 #[test]
 fn editing_existing_text_in_place() {
     let mut h = harness(1, |_| {});
