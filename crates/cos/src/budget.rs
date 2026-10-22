@@ -22,6 +22,8 @@ pub const MAX_PAGE_FORMS: usize = 50_000;
 /// remaining allowance spends all of it, so a bomb referenced many times is inflated once.
 #[derive(Debug)]
 pub struct DecodeBudget {
+    /// The whole allowance, for errors.
+    limit: usize,
     bytes: usize,
     forms: usize,
     seen: HashSet<ObjRef>,
@@ -30,7 +32,7 @@ pub struct DecodeBudget {
 impl DecodeBudget {
     /// An allowance of `bytes` decoded bytes and `forms` form entries.
     pub fn new(bytes: usize, forms: usize) -> Self {
-        Self { bytes, forms, seen: HashSet::new() }
+        Self { limit: bytes, bytes, forms, seen: HashSet::new() }
     }
 
     /// The allowance for one page: [`MAX_PAGE_DECODED`] bytes and [`MAX_PAGE_FORMS`] forms.
@@ -52,19 +54,18 @@ impl DecodeBudget {
     /// decoding, once the allowance is spent.
     pub fn decode(&mut self, stream: &Stream) -> Result<Vec<u8>, CosError> {
         if self.bytes == 0 && !stream.raw.is_empty() {
-            return Err(CosError::Filter(FilterError::LimitExceeded(0).to_string()));
+            return Err(CosError::Filter(FilterError::LimitExceeded(self.limit).to_string()));
         }
         match stream.decoded_within_typed(self.bytes) {
             Ok(data) => {
                 self.bytes = self.bytes.saturating_sub(data.len());
                 Ok(data)
             }
-            Err(e) => {
-                if matches!(e, FilterError::LimitExceeded(_)) {
-                    self.bytes = 0;
-                }
-                Err(CosError::Filter(e.to_string()))
+            Err(FilterError::LimitExceeded(_)) => {
+                self.bytes = 0;
+                Err(CosError::Filter(FilterError::LimitExceeded(self.limit).to_string()))
             }
+            Err(e) => Err(CosError::Filter(e.to_string())),
         }
     }
 
