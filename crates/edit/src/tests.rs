@@ -6430,3 +6430,21 @@ fn reading_images_stops_at_the_page_record_limit() {
         assert!(images.len() <= crate::images::MAX_PAGE_IMAGES, "{} images", images.len());
     }
 }
+
+#[test]
+fn reading_spends_one_decode_budget_on_content_and_forms() {
+    // 130 MiB of content and a 130 MiB form (a kilobyte each on disk): each fits a page's budget,
+    // together they don't, so reading leaves the form out and says so.
+    let doc = page_with(|doc| {
+        let mut body = b"%".to_vec();
+        body.resize(130 << 20, b'x');
+        let form: Dict = [(b"Subtype".to_vec(), Object::Name(b"Form".to_vec()))].into_iter().collect();
+        let form = doc.add(Stream::flate(form, &body));
+        let mut content = b"/X Do\n%".to_vec();
+        content.resize(130 << 20, b'x');
+        let content = doc.add(Stream::flate(Dict::new(), &content));
+        let xobjects: Dict = [(b"X".to_vec(), Object::Ref(form))].into_iter().collect();
+        (Object::Ref(content), [(b"XObject".to_vec(), Object::Dict(xobjects))].into_iter().collect())
+    });
+    assert!(crate::text::reading_blocks_checked(&doc, 0).unwrap().truncated);
+}

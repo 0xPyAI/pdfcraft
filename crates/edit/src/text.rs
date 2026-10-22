@@ -621,6 +621,12 @@ struct Ts {
 /// decode), within one page's [`DecodeBudget`]. An error when the content runs past it: reading
 /// or rewriting a page from part of its content would lose the rest.
 pub(crate) fn content_streams(doc: &Document, page: &Dict) -> Result<Vec<(Object, Vec<u8>)>, EditError> {
+    content_streams_within(doc, page, &mut DecodeBudget::page())
+}
+
+/// [`content_streams`], decoded against `budget`, which a walk of the page's forms then goes on
+/// spending.
+pub(crate) fn content_streams_within(doc: &Document, page: &Dict, budget: &mut DecodeBudget) -> Result<Vec<(Object, Vec<u8>)>, EditError> {
     let list: Vec<Object> = match page.get(b"Contents") {
         None => Vec::new(),
         Some(c) => match &*doc.resolve(c) {
@@ -628,7 +634,6 @@ pub(crate) fn content_streams(doc: &Document, page: &Dict) -> Result<Vec<(Object
             _ => vec![c.clone()],
         },
     };
-    let mut budget = DecodeBudget::page();
     let mut out = Vec::with_capacity(list.len());
     for o in list {
         let data = match &*doc.resolve(&o) {
@@ -1500,24 +1505,25 @@ pub const MAX_FORM_DEPTH: usize = 50;
 pub const MAX_FORM_VISITS: usize = 50_000;
 
 /// One page's walk through the form XObjects it draws: how many it entered (the page's
-/// [`MAX_FORM_VISITS`]), the bytes their content may decode to in all, and whether a limit left
-/// a form unread.
+/// [`MAX_FORM_VISITS`]), the bytes the page's content and forms may still decode to, and whether
+/// a limit left a form unread.
 pub(crate) struct FormBudget {
     visits: usize,
     decode: DecodeBudget,
-    /// A form was left unread because it nests deeper than [`MAX_FORM_DEPTH`] or comes past
-    /// [`MAX_FORM_VISITS`]: what it draws is missing from the walk.
+    /// A form was left unread because it nests deeper than [`MAX_FORM_DEPTH`], comes past
+    /// [`MAX_FORM_VISITS`] or past the decode budget: what it draws is missing from the walk.
     pub(crate) truncated: bool,
+}
+
+impl FormBudget {
+    /// The walk of a page's forms, spending what `decode` has left after the page's content.
+    pub(crate) fn new(decode: DecodeBudget) -> Self {
+        Self { visits: 0, decode, truncated: false }
+    }
 }
 
 /// A form XObject a page draws: its object, content, resources and its matrix composed with the
 /// CTM at the `Do`.
-impl Default for FormBudget {
-    fn default() -> Self {
-        Self { visits: 0, decode: DecodeBudget::page(), truncated: false }
-    }
-}
-
 pub(crate) struct FormCall {
     pub(crate) obj: Option<pdfcraft_cos::ObjRef>,
     pub(crate) data: Vec<u8>,
@@ -1632,8 +1638,9 @@ fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), E
     }
     let p = page_dict(doc, page)?;
     let res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
-    let streams = content_streams(doc, &p.dict)?;
-    let mut w = Walk { doc, lines: Vec::new(), next_stream: streams.len(), path: Vec::new(), budget: FormBudget::default() };
+    let mut decode = DecodeBudget::page();
+    let streams = content_streams_within(doc, &p.dict, &mut decode)?;
+    let mut w = Walk { doc, lines: Vec::new(), next_stream: streams.len(), path: Vec::new(), budget: FormBudget::new(decode) };
     let mut carry = Carry::new();
     // Read the page's streams as the one stream they are, in one pass, as rendering and editing
     // do: a comment, an operator's operands or a marked-content sequence (its /ActualText too)
@@ -2506,10 +2513,10 @@ pub fn reading_blocks(doc: &Document, page: usize) -> Result<Vec<TextBlock>, Edi
 pub struct ReadingBlocks {
     /// The paragraphs, as [`reading_blocks`] returns them.
     pub blocks: Vec<TextBlock>,
-    /// The page draws forms nested deeper than [`MAX_FORM_DEPTH`], or more of them than
-    /// [`MAX_FORM_VISITS`]. Reading leaves those out to stay bounded on hostile files, so their
-    /// text is missing from `blocks`; [`crate::reading_images`] walks the same forms and misses
-    /// their images too.
+    /// The page draws forms nested deeper than [`MAX_FORM_DEPTH`], more of them than
+    /// [`MAX_FORM_VISITS`], or more content and forms than one page's decode budget. Reading
+    /// leaves those out to stay bounded on hostile files, so their text is missing from
+    /// `blocks`; [`crate::reading_images`] walks the same forms and misses their images too.
     pub truncated: bool,
 }
 

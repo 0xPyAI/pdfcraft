@@ -377,8 +377,9 @@ pub fn reading_images(doc: &Document, page: usize) -> Result<Vec<PageImage>, Edi
     let res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
     let mut out = Vec::new();
     let mut st = ImageState::new(Matrix::IDENTITY, p.crop(doc), Vec::new());
-    let mut forms = Forms { path: Vec::new(), budget: crate::text::FormBudget::default() };
-    let pieces = joined(&content_streams(doc, &p.dict)?);
+    let mut decode = pdfcraft_cos::DecodeBudget::page();
+    let pieces = joined(&crate::text::content_streams_within(doc, &p.dict, &mut decode)?);
+    let mut forms = Forms { path: Vec::new(), budget: crate::text::FormBudget::new(decode) };
     walk(doc, &pieces.parse().ops, &res, &mut st, &|op| pieces.piece_of(op.span.start), &mut forms, &mut out)?;
     Ok(out)
 }
