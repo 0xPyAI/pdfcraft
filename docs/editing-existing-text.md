@@ -49,7 +49,9 @@ format that selection. Automation supports up to 1024 disjoint UTF-8 byte ranges
 same properties; invalid or overlapping ranges fail atomically. Untouched source formatting
 survives. OpenType shaping uses the selected/source face's substitution and positioning
 rules, preserves marks and ligatures, and applies Unicode bidi ordering for a single face.
-Logical text remains available after save/reopen through ToUnicode and ActualText.
+Each shaped run is one text object: its glyphs are shown in one `TJ` array whose adjustments
+place each glyph where shaping put it, and a mark set above or below its letter is raised
+with the text rise. Logical text remains available after save/reopen through ToUnicode and ActualText.
 Added Arabic text records ActualText per shaped line for copying and searching in typing order.
 ActualText already supplies typing order, so the editor preserves it without applying
 a second bidi reversal; adjacent visual glyph runs still recover their own reading order.
