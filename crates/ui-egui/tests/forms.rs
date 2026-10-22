@@ -1,6 +1,7 @@
 //! Filling in a form in the real shell (egui_kittest): typing, Tab, check boxes, radios, choices.
 
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use pdfcraft_ui_egui::PdfCraftApp;
 
 fn harness() -> Harness<'static, PdfCraftApp> {
@@ -48,6 +49,62 @@ fn click_at(h: &mut Harness<'static, PdfCraftApp>, p: egui::Pos2) {
     h.run_steps(3);
 }
 
+/// Rest the pointer on the centre of a field's widget long enough for a tooltip.
+fn rest_on_field(h: &mut Harness<'static, PdfCraftApp>, name: &str) {
+    let p = {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let f = doc.form.iter().find(|f| f.name == name).unwrap();
+        pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen").center()
+    };
+    h.hover_at(p);
+    for _ in 0..40 {
+        h.step();
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+}
+
+/// #3854: resting on a field shows its tooltip (`/TU`); a field without one shows none.
+#[test]
+fn hovering_a_field_shows_its_tooltip() {
+    let mut h = harness();
+    assert!(h.query_by_label("Your name").is_none(), "no tooltip before the hover");
+    rest_on_field(&mut h, "name");
+    assert!(h.query_by_label("Your name").is_some(), "the name field's /TU shows on hover");
+    rest_on_field(&mut h, "city");
+    assert!(h.query_by_label("Your name").is_none(), "another field doesn't keep the tooltip");
+    // Nor shows one of its own: none has been shown since the pointer left `name` (well past the
+    // tooltip delay), so this isn't only the old label going away.
+    assert!(egui::Tooltip::seconds_since_last_tooltip(&h.ctx) > 0.3, "a field without /TU shows no tooltip");
+}
+
+/// Give the `city` field these properties, as the Properties dialog would.
+fn set_city(h: &mut Harness<'static, PdfCraftApp>, props: pdfcraft_engine::FieldProps) {
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldProps { name: "city".into(), props: Box::new(props) });
+    h.run_steps(3);
+}
+
+/// A read-only field still shows its tooltip: it can't be filled, but it can be identified.
+#[test]
+fn a_read_only_fields_tooltip_shows_on_hover() {
+    let mut h = harness();
+    set_city(&mut h, pdfcraft_engine::FieldProps { tooltip: Some("Where you live".into()), read_only: Some(true), ..Default::default() });
+    rest_on_field(&mut h, "city");
+    assert!(h.query_by_label("Where you live").is_some());
+}
+
+/// A `/TU` of only spaces shows no tooltip (no empty box under the pointer).
+#[test]
+fn a_blank_tooltip_shows_nothing() {
+    let mut h = harness();
+    set_city(&mut h, pdfcraft_engine::FieldProps { tooltip: Some("   ".into()), ..Default::default() });
+    let s = h.state();
+    let doc = s.session.get(s.views[0].id).unwrap();
+    assert_eq!(doc.form.iter().find(|f| f.name == "city").unwrap().tooltip.as_deref(), Some("   "), "the blank /TU is in the file");
+    rest_on_field(&mut h, "city");
+    assert!(egui::Tooltip::seconds_since_last_tooltip(&h.ctx).is_infinite(), "no tooltip was shown");
+}
+
 #[test]
 fn typing_into_a_text_field_and_tabbing_on() {
     let mut h = harness();
@@ -58,12 +115,8 @@ fn typing_into_a_text_field_and_tabbing_on() {
     h.key_press(egui::Key::Tab);
     h.run_steps(4);
     assert_eq!(value(&h, "name"), ["Ada Lovelace"]);
-    assert_eq!(
-        h.state().views[0].forms.focus.as_ref().map(|f| f.name.as_str()),
-        Some("country"),
-        "Tab moves to the next field that takes typing or a choice"
-    );
-    // The country list is open; Escape closes it. Escape also abandons a draft.
+    assert_eq!(h.state().views[0].forms.focus.as_ref().map(|f| f.name.as_str()), Some("agree"), "Tab moves to the next field");
+    // Escape leaves the check box. It also abandons a draft.
     h.key_press(egui::Key::Escape);
     h.run_steps(2);
     click_field(&mut h, "city", 0);
@@ -100,6 +153,144 @@ fn check_boxes_radios_and_choices() {
     assert_eq!(value(&h, "country"), ["fr"]);
 }
 
+fn focused(h: &Harness<'static, PdfCraftApp>) -> Option<(String, usize)> {
+    h.state().views[0].forms.focus.as_ref().map(|f| (f.name.clone(), f.widget))
+}
+
+/// A text field, a check box, another text field and a pair of radio buttons, one under the
+/// other, then two empty pages.
+fn check_box_harness() -> Harness<'static, PdfCraftApp> {
+    let bytes = pdf_from_objects(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R 6 0 R 10 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 7 0 R >> >> >> >>",
+        "<< /Type /Pages /Kids [3 0 R 9 0 R 13 0 R] /Count 3 /MediaBox [0 0 300 400] >>",
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R 6 0 R 11 0 R 12 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (first) /Rect [20 350 280 372] /P 3 0 R /F 4 >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /V /Off /AS /Off /Rect [20 310 36 326] /P 3 0 R /F 4 /AP << /N << /Yes 8 0 R /Off 8 0 R >> >> >>",
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (last) /Rect [20 270 280 292] /P 3 0 R /F 4 >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        "<< /Type /XObject /Subtype /Form /BBox [0 0 16 16] /Length 0 >>\nstream\n\nendstream",
+        "<< /Type /Page /Parent 2 0 R >>",
+        "<< /FT /Btn /T (pick) /Ff 32768 /V /Off /Kids [11 0 R 12 0 R] >>",
+        "<< /Type /Annot /Subtype /Widget /Parent 10 0 R /AS /Off /Rect [20 230 36 246] /P 3 0 R /F 4 /AP << /N << /A 8 0 R /Off 8 0 R >> >> >>",
+        "<< /Type /Annot /Subtype /Widget /Parent 10 0 R /AS /Off /Rect [60 230 76 246] /P 3 0 R /F 4 /AP << /N << /B 8 0 R /Off 8 0 R >> >> >>",
+        "<< /Type /Page /Parent 2 0 R >>",
+    ]);
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("agree.pdf", None, bytes).unwrap();
+        app.set_option("left", "closed").unwrap();
+        app.set_option("zoom", "150").unwrap();
+        app
+    });
+    h.run_steps(6);
+    h
+}
+
+#[test]
+fn tab_and_space_fill_in_a_check_box_between_text_fields() {
+    // Issue #2223: Tab went from `first` straight to `last`, and Space could not tick `agree`.
+    let mut h = check_box_harness();
+    click_field(&mut h, "first", 0);
+    h.event(egui::Event::Text("Ada".into()));
+    h.run_steps(1);
+    h.key_press(egui::Key::Tab);
+    h.run_steps(3);
+    assert_eq!(value(&h, "first"), ["Ada"]);
+    assert_eq!(focused(&h), Some(("agree".into(), 0)), "Tab stops on the check box");
+    assert!(h.ctx.egui_wants_keyboard_input(), "the check box has the keyboard, not the page");
+    h.key_press(egui::Key::Space);
+    h.run_steps(3);
+    assert_eq!(value(&h, "agree"), ["Yes"], "Space ticks it");
+    assert_eq!(focused(&h), Some(("agree".into(), 0)), "and it keeps the focus");
+    h.key_press(egui::Key::Space);
+    h.run_steps(3);
+    assert!(value(&h, "agree").is_empty(), "Space again clears it");
+    h.key_press(egui::Key::Tab);
+    h.run_steps(3);
+    assert_eq!(focused(&h), Some(("last".into(), 0)));
+    h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+    h.run_steps(3);
+    assert_eq!(focused(&h), Some(("agree".into(), 0)), "Shift+Tab comes back to it");
+}
+
+#[test]
+fn clicking_a_check_box_while_typing_keeps_the_text_and_focuses_the_box() {
+    // Issue #2223: the click ticked the box but left no field focused, so Tab started over.
+    let mut h = check_box_harness();
+    click_field(&mut h, "first", 0);
+    h.event(egui::Event::Text("Ada".into()));
+    h.run_steps(1);
+    click_field(&mut h, "agree", 0);
+    assert_eq!(value(&h, "agree"), ["Yes"]);
+    assert_eq!(value(&h, "first"), ["Ada"], "the text typed before the click is kept");
+    assert_eq!(focused(&h), Some(("agree".into(), 0)), "the click focuses the check box");
+    h.key_press(egui::Key::Tab);
+    h.run_steps(3);
+    assert_eq!(focused(&h), Some(("last".into(), 0)), "so Tab goes on from there");
+}
+
+#[test]
+fn page_keys_still_work_with_a_check_box_or_radio_button_focused() {
+    // The widget that takes Space for a focused box must not swallow the page keys.
+    let mut h = check_box_harness();
+    click_field(&mut h, "agree", 0);
+    assert_eq!(focused(&h), Some(("agree".into(), 0)));
+    h.key_press(egui::Key::End);
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].current, 2, "End goes to the last page");
+    assert!(h.state().views[0].page_screen_rect(0).is_none(), "where the check box is out of view");
+    // Scrolled away, the box lets go: back on its page, Space no longer toggles it.
+    h.key_press(egui::Key::Home);
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].current, 0);
+    assert_eq!(focused(&h), None, "the box let go of the focus");
+    h.key_press(egui::Key::Space);
+    h.run_steps(3);
+    assert_eq!(value(&h, "agree"), ["Yes"]);
+    // A radio button keeps the arrows for its group, so → selects B instead of turning the page.
+    click_field(&mut h, "pick", 0);
+    h.key_press(egui::Key::ArrowRight);
+    h.run_steps(3);
+    assert_eq!(value(&h, "pick"), ["B"]);
+    assert_eq!(h.state().views[0].current, 0, "the arrow stayed in the group");
+    // Once scrolled away, an arrow scrolls again instead of changing the choice.
+    h.key_press(egui::Key::End);
+    h.run_steps(4);
+    h.key_press(egui::Key::Home);
+    h.run_steps(4);
+    h.key_press(egui::Key::ArrowUp);
+    h.run_steps(3);
+    assert_eq!((focused(&h), value(&h, "pick")), (None, vec!["B".to_string()]));
+}
+
+#[test]
+fn radio_buttons_take_tab_space_and_arrows() {
+    let mut h = harness();
+    click_field(&mut h, "agree", 0);
+    h.key_press(egui::Key::Tab);
+    h.run_steps(3);
+    assert_eq!(focused(&h), Some(("size".into(), 0)));
+    h.key_press(egui::Key::Space);
+    h.run_steps(3);
+    assert_eq!(value(&h, "size"), ["S"], "Space selects the focused button");
+    h.key_press(egui::Key::Space);
+    h.run_steps(3);
+    assert_eq!(value(&h, "size"), ["S"], "and doesn't turn it off again");
+    h.key_press(egui::Key::ArrowRight);
+    h.run_steps(3);
+    assert_eq!(focused(&h), Some(("size".into(), 1)), "an arrow moves within the group");
+    assert_eq!(value(&h, "size"), ["L"], "and selects the button it lands on");
+    h.key_press(egui::Key::ArrowLeft);
+    h.run_steps(3);
+    assert_eq!((focused(&h), value(&h, "size")), (Some(("size".into(), 0)), vec!["S".to_string()]));
+    h.key_press(egui::Key::Tab);
+    h.run_steps(3);
+    h.key_press(egui::Key::Tab);
+    h.run_steps(3);
+    assert_eq!(focused(&h), Some(("country".into(), 0)), "past the group's second button");
+}
+
 #[test]
 fn tabbing_into_a_filled_field_selects_it_so_typing_replaces() {
     let mut h = harness();
@@ -112,10 +303,17 @@ fn tabbing_into_a_filled_field_selects_it_so_typing_replaces() {
     h.key_press(egui::Key::Enter);
     h.run_steps(3);
     assert_eq!(value(&h, "city"), ["Paris"]);
-    // name → (Tab) country → (Tab) city, whose text is selected on entry.
+    // name → (Tab) agree → (Tab) size, both buttons → (Tab) country → (Tab) city, whose text is
+    // selected on entry.
     click_field(&mut h, "name", 0);
     h.key_press(egui::Key::Tab);
     h.run_steps(3);
+    assert_eq!(focused(&h), Some(("agree".into(), 0)));
+    for _ in 0..3 {
+        h.key_press(egui::Key::Tab);
+        h.run_steps(3);
+    }
+    assert_eq!(focused(&h), Some(("country".into(), 0)));
     h.key_press(egui::Key::Tab);
     h.run_steps(4);
     assert_eq!(h.state().views[0].forms.focus.as_ref().map(|f| f.name.as_str()), Some("city"));

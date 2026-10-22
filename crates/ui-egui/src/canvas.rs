@@ -185,14 +185,14 @@ pub struct ViewDefaults {
     /// The zoom with [`Fit::None`] (1.0 = 100%).
     pub zoom: f32,
     /// Highlight existing fields: a preference in Acrobat, so it carries over to the next
-    /// document and the next session.
+    /// document and the next session. On for new settings; a stored choice wins.
     pub highlight_fields: bool,
 }
 
 impl Default for ViewDefaults {
     fn default() -> Self {
         // Single page, scrolling continuously at fit width: the earlier "continuous" default.
-        Self { layout: PageLayout::Single, continuous: true, fit: Fit::Width, zoom: 1.0, highlight_fields: false }
+        Self { layout: PageLayout::Single, continuous: true, fit: Fit::Width, zoom: 1.0, highlight_fields: true }
     }
 }
 
@@ -2398,9 +2398,13 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_s
             view.find_step(true);
         }
     }
-    if ctx.egui_wants_keyboard_input() {
+    // A focused check box or radio button holds egui's keyboard focus only for Space, and a
+    // radio button for the arrows that move within its group: the other page keys still work.
+    let form_box = view.forms.keys.filter(|(id, _)| ctx.memory(|m| m.focused()) == Some(*id));
+    if ctx.egui_wants_keyboard_input() && form_box.is_none() {
         return;
     }
+    let arrows = !form_box.is_some_and(|(_, radio)| radio);
     // Rotation first: egui matches ⌘+ loosely with respect to Shift.
     if pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Plus))
         || pressed(KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Equals))
@@ -2447,7 +2451,7 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context, speed: crate::scroll_s
     if pressed(cmd(Key::CloseBracket)) {
         view.view_history(true);
     }
-    let key = |k| ctx.input(|i| i.key_pressed(k));
+    let key = |k| (arrows || !matches!(k, Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown)) && ctx.input(|i| i.key_pressed(k));
     // An open menu takes Escape first and closes; the selection stays for the next one (#3535).
     if key(Key::Escape) && !egui::Popup::is_any_open(ctx) {
         if view.camera.is_some() || view.camera_done.is_some() {
@@ -2539,6 +2543,8 @@ fn page_scroll<R>(
     ui.scope_builder(egui::UiBuilder::new().id(id), |ui| scroll.show_viewport(ui, draw)).inner
 }
 
+/// Draws the document tab at `index`: its notice bars, then its pages (or the Organize grid) in a
+/// scroll area with this frame's zoom, scrolling, tool input, overlays and render requests.
 pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     // Keyboard scrolling applies to this frame's page view only, never later.
@@ -3671,12 +3677,14 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             }
 
             // Form-field highlight (Acrobat's "Highlight existing fields"); required fields get a
-            // red border. Radio buttons are round, and so is theirs (as in Acrobat).
+            // red border. Radio buttons are round, and so is theirs (as in Acrobat). Only what can
+            // be filled is marked: a read-only widget (its field's, or a radio button's own) is
+            // left as it is drawn.
             if view.highlight_fields {
                 for f in form.iter() {
                     let required = f.has(pdfcraft_engine::field_flags::REQUIRED);
                     let round = f.kind == pdfcraft_engine::FormFieldKind::Radio;
-                    for w in f.widgets.iter().filter(|w| w.page == Some(i) && !w.hidden) {
+                    for w in f.widgets.iter().filter(|w| w.page == Some(i) && !w.hidden && !w.read_only) {
                         let r = w.rect;
                         let sr = xf.user_rect(info, i, [r[0] as f32, r[1] as f32, r[2] as f32, r[3] as f32]);
                         let tint = Color32::from_rgba_unmultiplied(0x6E, 0x8E, 0xF5, 48);
@@ -5019,12 +5027,29 @@ fn quick_bar(app: &mut PdfCraftApp, area: Rect, ui: &mut egui::Ui) {
                         });
                     if matches!(current_fill, Some(crate::fill_sign::FillTool::Text | crate::fill_sign::FillTool::Date)) {
                         ui.label(tl!("Font size:"));
-                        ui.add(
+                        let size = ui.add(
                             egui::DragValue::new(&mut app.fill_text_size)
                                 .range(crate::fill_sign::MIN_TEXT_SIZE..=crate::fill_sign::MAX_TEXT_SIZE)
                                 .speed(0.25)
                                 .suffix(" pt"),
                         );
+                        // #1274: the size also applies to the Fill & Sign text that is selected,
+                        // once per change (a typed value, or the end of a drag), so a drag adds
+                        // one undo step and not one per frame.
+                        if ((size.changed() && !size.dragged()) || size.drag_stopped())
+                            && let Some((index, id)) = app.active_ids()
+                            && let Some((page, annotation)) = app.views.get(index).and_then(|view| view.comments.selected)
+                            && app.session.get(id).is_some_and(|doc| {
+                                doc.allows_annotation()
+                                    && doc
+                                        .info
+                                        .annotations
+                                        .iter()
+                                        .any(|a| a.page == page && a.index == annotation && a.fill_sign && a.subtype == "FreeText" && !a.locked)
+                            })
+                        {
+                            app.apply_edit(Edit::FontSizeAnnotation { page, index: annotation, size: app.fill_text_size });
+                        }
                     }
                     if let QuickTool::Comment(tool) = app.quick_tool {
                         let (r, _) = ui.allocate_exact_size(vec2(32.0, 9.0), Sense::hover());

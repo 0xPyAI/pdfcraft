@@ -5360,6 +5360,65 @@ fn detecting_form_fields_through_tools() {
 }
 
 #[test]
+fn detecting_form_fields_preserves_content_piece_comments() {
+    for visible in [false, true] {
+        let first = format!("BT /F1 18 Tf 40 250 Td (FIRST) Tj ET % trailing comment{}", if visible { "\n" } else { "" });
+        let last = b"40 120 300 30 re S\nBT /F1 18 Tf 40 50 Td (LAST) Tj ET\n";
+        let mut source = pdfcraft_cos::Document::open(std::sync::Arc::new(fixture(1))).unwrap();
+        let page = pdfcraft_model::pages(&source)[0].obj;
+        let contents = [first.as_bytes(), last]
+            .iter()
+            .map(|bytes| pdfcraft_cos::Object::Ref(source.add(pdfcraft_cos::Object::Stream(pdfcraft_cos::Stream::flate(Default::default(), bytes)))))
+            .collect();
+        source
+            .update_dict(page, |d| {
+                d.set(b"Contents".to_vec(), pdfcraft_cos::Object::Array(contents));
+                d.set(b"MediaBox".to_vec(), pdfcraft_cos::Object::Array(vec![0.into(), 0.into(), 400.into(), 300.into()]));
+            })
+            .unwrap();
+        let dir = workdir(if visible { "detect-visible-piece" } else { "detect-hidden-piece" });
+        std::fs::write(dir.join("pieces.pdf"), pdfcraft_cos::write_full(&source, &Default::default()).unwrap()).unwrap();
+        let mut a = auto(&dir);
+        let doc = ok(&mut a, "doc_open", json!({"path": "pieces.pdf"}))["doc"].as_u64().unwrap();
+        let candidates = if visible { json!([{"page": 1, "kind": "text", "name": "Text1", "rect": [41.0, 121.0, 339.0, 149.0]}]) } else { json!([]) };
+        let inventory = if visible {
+            json!([{"name": "Text1", "type": "text", "value": null, "page": 1, "rect": [41.0, 151.0, 339.0, 179.0], "rotation": 0, "read_only": false, "required": false, "multiline": false}])
+        } else {
+            json!([])
+        };
+        let check_text = |a: &mut Automation, doc| {
+            let text = page_text(a, doc).join(" ");
+            assert_eq!(text.split_whitespace().collect::<Vec<_>>(), ["FIRST", "LAST"]);
+        };
+        let check_render = |a: &mut Automation, doc| {
+            let (width, height, pixels) = a.render_pixels(doc, 1, 1.0).unwrap();
+            assert_eq!((width, height), (400, 300));
+            let region: Vec<_> = (145..185).flat_map(|y| (35..345).map(move |x| (y * 400 + x) * 4)).collect();
+            if visible {
+                assert!(region.iter().any(|&i| pixels[i..i + 3].iter().all(|&v| v < 128)), "the visible box has ink");
+            } else {
+                assert!(region.iter().all(|&i| pixels[i..i + 3] == [255, 255, 255]), "the hidden box region stays white");
+            }
+        };
+        check_text(&mut a, doc);
+        check_render(&mut a, doc);
+        assert_eq!(ok(&mut a, "form_fields", json!({"doc": doc}))["fields"], json!([]));
+        assert_eq!(ok(&mut a, "form_detect_fields", json!({"doc": doc, "add": false}))["fields"], candidates);
+        assert_eq!(ok(&mut a, "form_fields", json!({"doc": doc}))["fields"], json!([]));
+        assert_eq!(ok(&mut a, "form_detect_fields", json!({"doc": doc}))["fields"], candidates);
+        assert_eq!(ok(&mut a, "form_fields", json!({"doc": doc}))["fields"], inventory);
+        assert_eq!(ok(&mut a, "form_detect_fields", json!({"doc": doc}))["fields"], json!([]));
+        ok(&mut a, "doc_save", json!({"doc": doc, "path": "saved.pdf"}));
+        let mut reopened = auto(&dir);
+        let again = ok(&mut reopened, "doc_open", json!({"path": "saved.pdf"}))["doc"].as_u64().unwrap();
+        assert_eq!(ok(&mut reopened, "form_fields", json!({"doc": again}))["fields"], inventory);
+        check_text(&mut reopened, again);
+        check_render(&mut reopened, again);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[test]
 fn detecting_comb_boxes_through_tools() {
     let mut body = String::from("BT /F1 10 Tf 40 105 Td (Postcode) Tj ET\n");
     for i in 0..5 {

@@ -349,7 +349,12 @@ impl Session {
                 pdfcraft_forms::detect::Kind::CheckBox => (pdfcraft_forms::NewField::CheckBox, None),
                 pdfcraft_forms::detect::Kind::Comb { cells } => (pdfcraft_forms::NewField::Text { multiline: false }, Some(cells)),
             };
-            let mut props = FieldProps::default();
+            // The page already draws the line or box the field sits on, so the field gets no
+            // border or fill of its own: an opaque fill would hide the printed form (#294, #2831).
+            let mut props = FieldProps {
+                appearance: Some(pdfcraft_forms::LookPatch { border: Some(None), fill: Some(None), ..Default::default() }),
+                ..Default::default()
+            };
             if turn != 0 {
                 // A turned field keeps its place: the rectangle is already the one on the page.
                 props.rotation = Some((0, turn));
@@ -360,9 +365,7 @@ impl Session {
                 props.flags = vec![(pdfcraft_forms::flags::COMB, true)];
             }
             edits.push(Edit::AddField { page, rect: c.rect, kind, name: Some(c.name.clone()) });
-            if turn != 0 || comb.is_some() {
-                edits.push(Edit::SetFieldProps { name: c.name, props: Box::new(props) });
-            }
+            edits.push(Edit::SetFieldProps { name: c.name, props: Box::new(props) });
         }
         self.apply(id, Edit::Batch { label: "Detect form fields".into(), edits })?;
         Ok(names)

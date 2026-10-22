@@ -3816,6 +3816,28 @@ fn detecting_fields_on_a_printed_form() {
     assert!(s.detect_fields(id, &[]).is_empty(), "nothing left to detect");
 }
 
+/// #294, #2831: a detected field sits on a line or box the page already draws, so it gets no border
+/// and no fill that would cover the printed form. A field drawn by hand keeps the defaults.
+#[test]
+fn detected_fields_have_no_border_or_fill() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("paper.pdf", None, Arc::new(paper_form()), None).unwrap();
+    let added = s.auto_detect_fields(id, &[]).unwrap();
+    let d = s.get(id).unwrap();
+    let kinds: Vec<pdfcraft_forms::FieldKind> = d.form.iter().map(|f| f.kind).collect();
+    assert!(kinds.contains(&pdfcraft_forms::FieldKind::Text) && kinds.contains(&pdfcraft_forms::FieldKind::CheckBox), "{kinds:?}");
+    for name in &added {
+        let look = d.field_look(name).unwrap();
+        assert_eq!((look.border, look.fill), (None, None), "{name}");
+    }
+    assert_eq!(d.can_undo(), Some("Detect form fields"), "still one step");
+
+    s.apply(id, Edit::AddField { page: 0, rect: [200.0, 10.0, 300.0, 30.0], kind: NewField::Text { multiline: false }, name: Some("drawn".into()) })
+        .unwrap();
+    let look = s.get(id).unwrap().field_look("drawn").unwrap();
+    assert!(look.border.is_some() && look.fill.is_some(), "{look:?}");
+}
+
 /// A printed form, 420 × 300 pt: a title, a label with a rule to write on, a box with a small
 /// label in its corner, an empty box with its label above, and two check boxes.
 fn paper_form() -> Vec<u8> {
@@ -6381,4 +6403,69 @@ fn a_bookmark_added_at_a_point_goes_there_through_undo_and_save() {
     let outline = &again.get(id2).unwrap().info.outline;
     assert_eq!(outline[2].view, DestView::Xyz { left: Some(72.0), top: Some(300.0), zoom: None });
     assert_eq!(outline[1].view, DestView::Xyz { left: None, top: Some(500.5), zoom: None });
+}
+
+/// #3470: a filled form whose writer left the appearances to the viewer (`/NeedAppearances`):
+/// field A has an empty appearance, B none. The page as displayed (and printed) shows both
+/// values, and a comment without an appearance beside them still gets its own; the file itself
+/// is not changed, so saving writes it as it was.
+#[test]
+fn fields_left_to_the_viewer_are_displayed_from_their_values() {
+    let pdf = |need: bool| {
+        let flag = if need { "/NeedAppearances true " } else { "" };
+        format!(
+            "%PDF-1.7\n\
+             1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >> endobj\n\
+             2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+             3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 400 200] /Annots [6 0 R 7 0 R 10 0 R] >> endobj\n\
+             10 0 obj << /Type /Annot /Subtype /Square /Rect [360 20 390 50] /C [1 0 0] /BS << /W 4 >> >> endobj\n\
+             5 0 obj << /Fields [6 0 R 7 0 R] {flag}/DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 8 0 R >> >> >> endobj\n\
+             6 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (a) /V (MMMMMMMM) /DA (/Helv 12 Tf 0 g) /Rect [50 120 350 140] /F 4 /P 3 0 R /AP << /N 9 0 R >> >> endobj\n\
+             7 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (b) /V (MMMMMMMM) /DA (/Helv 12 Tf 0 g) /Rect [50 60 350 80] /F 4 /P 3 0 R >> endobj\n\
+             8 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> endobj\n\
+             9 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 300 20] /Length 4 >> stream\nq\nQ\nendstream endobj\n\
+             trailer << /Root 1 0 R >>\n%%EOF"
+        )
+        .into_bytes()
+    };
+    let red = |s: &Session, id: DocId| {
+        let doc = s.get(id).unwrap();
+        let mut r = pdfcraft_render::PageRenderer::new(doc.display.clone(), doc.config.clone());
+        let page = r.render(pdfcraft_render::RenderRequest { page: 0, scale: 1.0, ..Default::default() });
+        page.rgba.as_chunks::<4>().0.iter().filter(|p| p[0] > 200 && p[1] < 80 && p[2] < 80).count()
+    };
+    // Dark pixels inside a field's box (user-space rectangle, page drawn at scale 1).
+    let ink = |s: &Session, id: DocId, y0: u32, y1: u32| {
+        let doc = s.get(id).unwrap();
+        let mut r = pdfcraft_render::PageRenderer::new(doc.display.clone(), doc.config.clone());
+        let page = r.render(pdfcraft_render::RenderRequest { page: 0, scale: 1.0, ..Default::default() });
+        let (px, _) = page.rgba.as_chunks::<4>();
+        (200 - y1..200 - y0)
+            .flat_map(|y| (55..345).map(move |x| (x, y)))
+            .filter(|&(x, y)| px.get((y * page.width + x) as usize).is_some_and(|p| p[0] < 128))
+            .count()
+    };
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, Arc::new(pdf(true)), None).unwrap();
+    let (a, b) = (ink(&s, id, 122, 138), ink(&s, id, 62, 78));
+    assert!(a > 100 && b > 100, "both values are shown: a {a}, b {b}");
+    assert!(red(&s, id) > 100, "the comment is drawn too");
+    // The file is saved as it was: B still has no appearance, A its empty one.
+    let saved = pdfcraft_cos::Document::open(s.save_bytes(id).unwrap()).unwrap();
+    let fields = pdfcraft_forms::fields(&saved);
+    let widget = |name: &str| saved.get(fields.iter().find(|f| f.name == name).unwrap().widgets[0].obj);
+    assert!(widget("b").as_dict().is_some_and(|d| !d.contains(b"AP")), "B has no appearance");
+    let n = widget("a").as_dict().and_then(|d| d.get(b"AP").and_then(|ap| saved.resolve(ap).as_dict().and_then(|ap| ap.reference(b"N")))).unwrap();
+    let pdfcraft_cos::Object::Stream(n) = &*saved.get(n) else { panic!("A's appearance is a stream") };
+    assert_eq!(n.decoded().unwrap().trim_ascii_end(), b"q\nQ", "A keeps its empty appearance");
+    // Typing in one field redraws that field only, not the whole form, on each keystroke.
+    let builds = |s: &Session| s.get(id).unwrap().editor.as_ref().unwrap().field_appearances.builds();
+    let before = builds(&s);
+    s.apply(id, Edit::SetFieldValue { name: "a".into(), value: pdfcraft_forms::FieldValue::Text("Typed".into()) }).unwrap();
+    assert_eq!(builds(&s), before + 1);
+
+    // Without the flag, the empty appearance is the file's own, and only B is drawn.
+    let id = s.open("form.pdf", None, Arc::new(pdf(false)), None).unwrap();
+    let (a, b) = (ink(&s, id, 122, 138), ink(&s, id, 62, 78));
+    assert!(a == 0 && b > 100, "a {a}, b {b}");
 }

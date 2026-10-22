@@ -1111,6 +1111,8 @@ fn highlight_fields_tints_the_field_area() {
     let _gpu = gpu();
     let mut h = form_harness();
     h.state_mut().set_option("panel", "none").unwrap();
+    // Highlighting is on by default; start from plain fields.
+    h.state_mut().set_option("fields", "off").unwrap();
     for _ in 0..100 {
         h.run_steps(2);
         if !h.state().render_pending() {
@@ -1133,6 +1135,100 @@ fn highlight_fields_tints_the_field_area() {
     h.get_by_label("Hide field highlights");
     let after = pixel(&mut h);
     assert_ne!(before, after, "the field area is tinted when highlighting is on");
+}
+
+/// A text field that can be filled and one that is read-only (`/Ff` 1).
+const LOCKED: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R] >> endobj
+4 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (open) /Rect [50 300 250 330] /P 3 0 R >> endobj
+5 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (locked) /Ff 1 /Rect [50 200 250 230] /P 3 0 R >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
+/// Highlight fields marks the fields that can be filled: a read-only one (a form's locked
+/// box, or one its scripts have not opened yet) is left as it is drawn, as in Acrobat.
+#[test]
+fn highlight_fields_leaves_read_only_fields_alone() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("locked.pdf", None, LOCKED.to_vec()).expect("opens");
+        app.set_option("left", "closed").unwrap();
+        app.set_option("panel", "none").unwrap();
+        app.set_option("fields", "on").unwrap();
+        app
+    });
+    h.run_steps(6);
+    let tint = egui::Color32::from_rgba_unmultiplied(0x6E, 0x8E, 0xF5, 48);
+    let tinted = h.output().shapes.iter().filter(|c| matches!(&c.shape, egui::Shape::Rect(r) if r.fill == tint)).count();
+    assert_eq!(tinted, 1, "only the field that can be filled is tinted");
+}
+
+/// A radio group whose second button is locked on its own widget (`/Ff` 1 there), as the
+/// layout of an XFA exclusion group with one read-only button writes it.
+const LOCKED_RADIO: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /Annots [5 0 R 6 0 R] >> endobj
+4 0 obj << /FT /Btn /Ff 49152 /T (choice) /V /Off /Kids [5 0 R 6 0 R] >> endobj
+5 0 obj << /Type /Annot /Subtype /Widget /Parent 4 0 R /Rect [50 300 90 340] /AS /Off /AP << /N << /one << >> /Off << >> >> >> /P 3 0 R >> endobj
+6 0 obj << /Type /Annot /Subtype /Widget /Parent 4 0 R /Ff 1 /Rect [150 300 190 340] /AS /Off /AP << /N << /two << >> /Off << >> >> >> /P 3 0 R >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
+/// A read-only button of a radio group is left untinted while the group's other button, which
+/// can be chosen, is tinted.
+#[test]
+fn highlight_fields_leaves_a_groups_read_only_button_alone() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("radio.pdf", None, LOCKED_RADIO.to_vec()).expect("opens");
+        app.set_option("left", "closed").unwrap();
+        app.set_option("panel", "none").unwrap();
+        app.set_option("fields", "on").unwrap();
+        app
+    });
+    h.run_steps(6);
+    let tint = egui::Color32::from_rgba_unmultiplied(0x6E, 0x8E, 0xF5, 48);
+    let tinted = h.output().shapes.iter().filter(|c| matches!(&c.shape, egui::Shape::Circle(r) if r.fill == tint)).count();
+    assert_eq!(tinted, 1, "only the button that can be chosen is tinted");
+}
+
+/// A radio group's read-only button can't be chosen by a click, while the group's other button
+/// can.
+#[test]
+fn a_groups_read_only_button_is_not_chosen_by_a_click() {
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(|_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("radio.pdf", None, LOCKED_RADIO.to_vec()).expect("opens");
+        app.set_option("left", "closed").unwrap();
+        app.set_option("panel", "none").unwrap();
+        app
+    });
+    h.run_steps(6);
+    let r = rect(&h, 0).expect("page 1");
+    // The buttons' centers on the 300×400 pt page (y up).
+    let at = |x: f32, y: f32| egui::pos2(r.min.x + r.width() * (x / 300.0), r.min.y + r.height() * (1.0 - y / 400.0));
+    let click = |h: &mut Harness<'static, PdfCraftApp>, pos: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(pos));
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        h.run_steps(4);
+    };
+    let value = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().form.iter().find(|f| f.name == "choice").map(|f| f.value.clone()).unwrap_or_default()
+    };
+    click(&mut h, at(70.0, 320.0));
+    assert_eq!(value(&h), ["one"], "the button that can be chosen is");
+    click(&mut h, at(170.0, 320.0));
+    assert_eq!(value(&h), ["one"], "the read-only button leaves the choice as it was");
 }
 
 /// A required radio group (`/Ff` 32768 radio + 2 required) with two 40 pt round buttons.
@@ -1188,27 +1284,47 @@ fn required_radio_buttons_get_a_round_red_border() {
     assert!(!stroke(at(50.3, 339.7)), "the widget's corner, outside the circle, is not: {:?}", at(50.3, 339.7));
 }
 
-/// Acrobat's Highlight existing fields is a preference, not a per-document choice: turned on
-/// once, the next document (and the next session) opens with fields highlighted.
+/// Acrobat's Highlight existing fields is a preference, not a per-document choice: turned off
+/// once, the next document (and the next session) opens with fields plain. New settings start
+/// with it on.
 #[test]
-fn field_highlighting_is_remembered() {
+fn field_highlighting_is_on_by_default_and_remembered() {
     use egui_kittest::kittest::Queryable;
     let mut h = form_harness();
     h.state_mut().set_option("panel", "none").unwrap();
     h.run_steps(4);
-    assert!(!h.state().views[0].highlight_fields, "off by default");
-    h.get_by_label("Highlight fields").click();
+    assert!(h.state().views[0].highlight_fields, "on by default");
+    h.get_by_label("Hide field highlights").click();
     h.run_steps(4);
-    assert!(h.state().views[0].highlight_fields);
+    assert!(!h.state().views[0].highlight_fields);
     h.state_mut().open_bytes("radios.pdf", None, RADIOS.to_vec()).expect("opens");
     h.run_steps(4);
-    assert!(h.state().views[1].highlight_fields, "the next document opens highlighted");
+    assert!(!h.state().views[1].highlight_fields, "the next document opens plain");
     let saved = h.state().persist();
     let mut next = PdfCraftApp::new();
     next.set_option("language", "en").unwrap();
     next.restore(&saved);
     next.open_bytes("form.pdf", None, FORM.to_vec()).expect("opens");
-    assert!(next.views[0].highlight_fields, "and so does the next session");
+    assert!(!next.views[0].highlight_fields, "and so does the next session");
+}
+
+/// Settings saved before the default changed keep their stored choice; a missing or malformed
+/// value falls back to the default instead of failing.
+#[test]
+fn stored_field_highlight_choice_wins_over_the_default() {
+    for (stored, expected) in [
+        (r#"{"highlight_fields": false}"#, false),
+        (r#"{"highlight_fields": true}"#, true),
+        (r#"{}"#, true),
+        (r#"{"highlight_fields": "no"}"#, true),
+        (r#"{"highlight_fields": null}"#, true),
+    ] {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.restore(stored);
+        app.open_bytes("form.pdf", None, FORM.to_vec()).expect("opens");
+        assert_eq!(app.views[0].highlight_fields, expected, "{stored}");
+    }
 }
 
 #[test]
