@@ -279,7 +279,7 @@ impl Default for Settings {
 }
 
 /// Common paper sizes (points, portrait).
-pub const PAPERS: [(&str, (f64, f64)); 20] = [
+pub const PAPERS: [(&str, (f64, f64)); 21] = [
     ("US Letter", (612.0, 792.0)),
     ("US Legal", (612.0, 1008.0)),
     ("Tabloid", (792.0, 1224.0)),
@@ -300,13 +300,15 @@ pub const PAPERS: [(&str, (f64, f64)); 20] = [
     ("A1", (1683.78, 2383.94)),
     ("A0", (2383.94, 3370.39)),
     ("4 x 6 in label (101.6 x 152.4 mm)", (288.0, 432.0)),
+    ("US #10 Envelope (4.125 x 9.5 in)", (297.0, 684.0)),
 ];
 
 /// `PAPERS` index of the 4 × 6 in shipping label.
 pub const LABEL_PAPER: usize = 19;
 
 /// The CUPS media name for `PAPERS[index]`, so the spooler feeds the sheet the PDF was laid out
-/// on rather than the queue's default (PPD keywords; `w288h432` is the usual 4×6 label).
+/// on rather than the queue's default (PPD keywords; `w288h432` is the usual 4×6 label, `Env10`
+/// the US #10 envelope).
 pub fn cups_media(index: usize) -> Option<&'static str> {
     match PAPERS.get(index)?.0 {
         "US Letter" => Some("Letter"),
@@ -315,6 +317,7 @@ pub fn cups_media(index: usize) -> Option<&'static str> {
         "A3" => Some("A3"),
         "A4" => Some("A4"),
         "A5" => Some("A5"),
+        "US #10 Envelope (4.125 x 9.5 in)" => Some("Env10"),
         _ if index == LABEL_PAPER => Some("w288h432"),
         _ => None,
     }

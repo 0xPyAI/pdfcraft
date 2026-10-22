@@ -646,6 +646,17 @@ fn paper_matching_accepts_rounded_metric_sizes_but_not_custom_or_invalid_sizes()
 }
 
 #[test]
+fn us_number_10_envelope_is_offered_and_fed_by_name() {
+    // 4.125 × 9.5 in (#2734).
+    let index = matching_paper((684.0, 297.0)).unwrap();
+    assert_eq!(PAPERS[index].0, "US #10 Envelope (4.125 x 9.5 in)");
+    assert_eq!(PAPERS[index].1, (297.0, 684.0));
+    assert_eq!(cups_media(index), Some("Env10"));
+    let s = Settings { pages: vec![0], paper: PAPERS[index].1, layout: Layout::Size(SizeMode::Actual), ..Settings::default() };
+    assert_eq!(layout(&[(297.0, 684.0)], &s).unwrap()[0].size, (297.0, 684.0));
+}
+
+#[test]
 fn label_is_cut_turned_upright_and_fitted_without_distortion() {
     let label = LABEL_PAPER;
     assert_eq!(PAPERS[label].0, "4 x 6 in label (101.6 x 152.4 mm)");
