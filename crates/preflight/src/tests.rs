@@ -417,3 +417,16 @@ fn oversized_xmp_is_refused_while_decoding() {
     assert_eq!(stream.decoded().unwrap().len(), xmp::MAX_XMP_BYTES + 1, "fixture must actually decompress");
     assert!(metadata(&doc).is_none(), "compressed metadata must be limited during decoding");
 }
+
+/// Content is read one operator at a time and no further than it needs: once gray, RGB and CMYK
+/// are all set, the rest of the stream is not read.
+#[test]
+fn content_colour_reads_operators_one_at_a_time_and_stops_when_all_are_found() {
+    let mut data = b"0 g 0 0 0 rg 0 0 0 0 k\n".to_vec();
+    data.extend(b"n\n".repeat(100_000));
+    let mut used = DeviceColour::default();
+    let read = content_colour(&data, &mut used);
+    assert!(used.gray && used.rgb && used.cmyk);
+    assert_eq!(read, 3);
+}
+

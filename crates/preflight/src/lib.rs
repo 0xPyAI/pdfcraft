@@ -339,8 +339,17 @@ fn is_content(d: &Dict) -> bool {
 /// The device colour a content stream sets. It is read operator by operator, so the bytes of a
 /// string, a comment or an inline image are never taken for an operator, and an operator right
 /// before a delimiter (`1 k/GS0 gs`) is still found.
-fn content_colour(data: &[u8], used: &mut DeviceColour) {
-    for op in pdfcraft_content::parse(data).ops {
+///
+/// Operators are read one at a time and dropped, so a stream of millions of tiny operators never
+/// becomes millions of parsed ones in memory, and reading stops once all three spaces are set.
+/// Returns how many operators it read.
+fn content_colour(data: &[u8], used: &mut DeviceColour) -> usize {
+    let mut read = 0;
+    for op in pdfcraft_content::ops(data) {
+        if used.gray && used.rgb && used.cmyk {
+            break;
+        }
+        read += 1;
         match op.op.as_slice() {
             b"g" | b"G" => used.gray = true,
             b"rg" | b"RG" => used.rgb = true,
@@ -366,6 +375,7 @@ fn content_colour(data: &[u8], used: &mut DeviceColour) {
             _ => {}
         }
     }
+    read
 }
 
 /// Whether any content or object uses a device colour space.
@@ -400,7 +410,7 @@ fn uses_device_colour(doc: &Document, objs: &[(ObjRef, std::sync::Arc<Object>)])
             && (referenced.contains(r) || is_content(&s.dict))
             && let Ok(data) = s.decoded()
         {
-            content_colour(&data, &mut used);
+            let _ = content_colour(&data, &mut used);
         }
     }
     used
