@@ -1685,6 +1685,18 @@ fn page_change_kind(doc: &Document, old: &Document, d: &Dict, before: Option<&Di
     }
 }
 
+/// Whether the catalog `d` keeps every developer extension the signed catalog `b` declared, each
+/// with the same value: it may only declare more.
+fn extensions_kept(doc: &Document, old: &Document, d: &Dict, b: &Dict) -> bool {
+    let now = d.get(b"Extensions").map(|e| doc.resolve(e)).and_then(|e| e.as_dict().cloned());
+    let was = b.get(b"Extensions").map(|e| old.resolve(e)).and_then(|e| e.as_dict().cloned());
+    match (was, now) {
+        (None, _) => true,
+        (Some(was), Some(now)) => was.iter().all(|(k, v)| now.get(k) == Some(v)),
+        (Some(_), None) => false,
+    }
+}
+
 fn change_kind(doc: &Document, old: &Document, d: &Dict, before: Option<&Dict>) -> &'static str {
     let ty = d.name(b"Type");
     // A later revision cannot make an existing object a signature by relabelling it: a signature
@@ -1694,9 +1706,13 @@ fn change_kind(doc: &Document, old: &Document, d: &Dict, before: Option<&Dict>) 
         // Only a new signature value or policy: rewriting a signed one is not a signature (#1788).
         Some(b"Sig" | b"DocTimeStamp" | b"SigRef" | b"TransformParams") if before.is_none() => return kind::SIGNATURE,
         Some(b"Catalog") => {
-            let keys: &[&[u8]] = &[b"AcroForm", b"DSS", b"Perms", b"Metadata", b"NeedsRendering"];
+            let keys: &[&[u8]] = &[b"AcroForm", b"DSS", b"Perms", b"Metadata", b"NeedsRendering", b"Extensions"];
             return match before {
                 Some(b) if without(d, keys) != without(b, keys) => kind::STRUCTURE,
+                // Developer extensions (ISO 32000-2 §7.12) only declare what the file uses. A
+                // writer adding a /DSS also declares the ESIC extension it belongs to, so a
+                // declaration may be added, but none that was signed may change or go.
+                Some(b) if !extensions_kept(doc, old, d, b) => kind::STRUCTURE,
                 Some(b) => {
                     if d.get(b"AcroForm") != b.get(b"AcroForm") {
                         // Compare the forms themselves, inline or not.
