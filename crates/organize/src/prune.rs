@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use pdfcraft_cos::{Dict, Document, ObjRef, Object};
+use pdfcraft_cos::{CosError, DecodeBudget, Dict, Document, ObjRef, Object};
 
 use crate::OrganizeError;
 
@@ -231,23 +231,16 @@ impl Pruner<'_> {
     }
 }
 
-/// The page's content, concatenated (`/Contents` may be one stream or an array). `None` when a
-/// stream can't be decoded: the page may draw names that can't be seen.
-fn content_bytes(doc: &Document, contents: &Object) -> Option<Vec<u8>> {
-    match &*doc.resolve(contents) {
-        Object::Stream(s) => s.decoded().ok(),
-        Object::Array(a) => {
-            let mut out = Vec::new();
-            for c in a {
-                if let Object::Stream(s) = &*doc.resolve(c) {
-                    out.extend(s.decoded().ok()?);
-                    out.push(b'\n');
-                }
-            }
-            Some(out)
-        }
-        _ => Some(Vec::new()),
+/// The page's content, concatenated (`/Contents` may be one stream or an array), decoded
+/// against one page's [`DecodeBudget`]. An error when a stream can't be decoded or the budget
+/// runs out: the page may draw names that can't be seen.
+pub(crate) fn content_bytes(doc: &Document, contents: &Object) -> Result<Vec<u8>, CosError> {
+    let mut out = Vec::new();
+    for data in DecodeBudget::page().decode_contents(doc, contents) {
+        out.extend(data?);
+        out.push(b'\n');
     }
+    Ok(out)
 }
 
 /// The resources of a page (as `walk` reports them) with their owner.
@@ -330,9 +323,9 @@ pub(crate) fn prune_unused_xobjects(doc: &mut Document) -> Result<usize, Organiz
         let Some(pd) = pruner.doc.get(*page).as_dict().cloned() else { continue };
         let Some(contents) = pd.get(b"Contents").cloned() else { continue };
         match content_bytes(pruner.doc, &contents) {
-            Some(data) if data.is_empty() => {}
-            Some(data) => pruner.content(&data, &res_dict, owner, 0),
-            None => {
+            Ok(data) if data.is_empty() => {}
+            Ok(data) => pruner.content(&data, &res_dict, owner, 0),
+            Err(_) => {
                 pruner.protect_type3_resources(&res_dict, owner);
                 pruner.distrust(&res_dict, owner);
             }

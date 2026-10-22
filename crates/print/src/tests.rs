@@ -877,3 +877,42 @@ fn driver_options_take_the_ppds_own_names_in_the_ui_language() {
 }
 
 mod appearances;
+
+#[test]
+fn repeated_content_references_share_one_decode_budget() {
+    let mut doc = Document::new_empty();
+    let stream = doc.add(Stream::flate(Dict::new(), &vec![b' '; 1 << 20]));
+    let page: Dict = [(b"Contents".to_vec(), Object::Array(vec![Object::Ref(stream); 300]))].into_iter().collect();
+    let data = decoded_contents(&doc, &page, &mut DecodeBudget::page());
+    assert!(data.is_none_or(|d| d.len() <= pdfcraft_cos::MAX_PAGE_DECODED + 300));
+}
+
+/// 20 draws of a form that draws the next form 20 times, four levels down: 168,420 form
+/// entries from a few hundred bytes.
+fn form_fanout(doc: &mut Document) -> Dict {
+    let draws = "/X Do ".repeat(20);
+    let mut form = |content: &str, inner: Option<ObjRef>| {
+        let mut d: Dict = [(b"Subtype".to_vec(), Object::Name(b"Form".to_vec()))].into_iter().collect();
+        if let Some(inner) = inner {
+            let xobjects: Dict = [(b"X".to_vec(), Object::Ref(inner))].into_iter().collect();
+            let res: Dict = [(b"XObject".to_vec(), Object::Dict(xobjects))].into_iter().collect();
+            d.set(b"Resources".to_vec(), Object::Dict(res));
+        }
+        doc.add(Stream::from_raw(d, content.as_bytes().to_vec()))
+    };
+    let mut inner = form("BT 0 1 -1 0 0 0 Tm (a) Tj ET", None);
+    for _ in 0..3 {
+        inner = form(&draws, Some(inner));
+    }
+    let xobjects: Dict = [(b"X".to_vec(), Object::Ref(inner))].into_iter().collect();
+    [(b"XObject".to_vec(), Object::Dict(xobjects))].into_iter().collect()
+}
+
+#[test]
+fn text_direction_stops_at_the_form_budget() {
+    let mut doc = Document::new_empty();
+    let res = form_fanout(&mut doc);
+    let mut score = 0;
+    text_direction(&doc, "/X Do ".repeat(20).as_bytes(), &res, Matrix::IDENTITY, 0, &mut score, &mut DecodeBudget::page());
+    assert!(score > 0 && score <= pdfcraft_cos::MAX_PAGE_FORMS as i64, "score {score}");
+}
