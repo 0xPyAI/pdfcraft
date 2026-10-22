@@ -1267,7 +1267,7 @@ fn repeated_content_references_share_one_decode_budget() {
 /// not removed with that content still pointing at it.
 #[test]
 fn marking_decorative_refuses_content_past_the_decode_budget() {
-    use pdfcraft_cos::{Dict, Object, ObjRef, Stream};
+    use pdfcraft_cos::{Dict, ObjRef, Object, Stream};
     let mut doc = figures_doc();
     let filler = doc.add(Stream::flate(Dict::new(), &vec![b' '; 1 << 20]));
     let last = doc.add(Stream::from_raw(Dict::new(), b"/Figure << /MCID 0 >> BDC 0 0 5 5 re f EMC".to_vec()));
@@ -1283,12 +1283,13 @@ fn marking_decorative_refuses_content_past_the_decode_budget() {
 /// can't be called image-only, nor its content all tagged.
 #[test]
 fn content_past_the_decode_budget_needs_a_manual_check() {
-    use pdfcraft_cos::{Dict, Object, ObjRef, Stream};
+    use pdfcraft_cos::{Dict, ObjRef, Object, Stream};
     let mut doc = pdf(
         &[
             "<< /Type /Catalog /Pages 2 0 R >>".into(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /XObject << /Im 5 0 R >> /Font << /F1 6 0 R >> >> >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /XObject << /Im 5 0 R >> /Font << /F1 6 0 R >> >> >>"
+                .into(),
             stream("/Artifact BMC q 200 0 0 200 0 0 cm /Im Do Q EMC"),
             "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n\u{0}\nendstream"
                 .into(),
