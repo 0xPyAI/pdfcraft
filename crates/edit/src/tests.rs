@@ -5342,10 +5342,12 @@ fn a_shaped_run_is_one_text_object_with_each_glyph_where_shaping_put_it() {
 #[test]
 fn a_subset_program_is_not_trusted_for_new_characters_and_the_error_names_the_character() {
     let mut doc = embedded_program_page("BT /F1 12 Tf 72 700 Td (Stable text) Tj ET", "ABCDEF+Inter-Regular");
-    // The subset's own program is not trusted for a character: the bundled Inter face draws it
-    // through a generated font instead (the subset may map a code whose outline was dropped).
+    // The subset's own program is not trusted for a character: a fallback face draws it through a
+    // generated font instead (the subset may map a code whose outline was dropped). The Japanese
+    // sans face leads the fallbacks when built with craft-fonts; the bundled Inter face otherwise.
     let edit = text::rewrite_block(&mut doc, 0, 0, Some("Stable tőxt"), &text::BlockStyle::default()).unwrap();
-    assert_eq!(edit.substituted.as_deref(), Some("Inter Type3"));
+    let face = pdfcraft_fonts::document_japanese_font_for_style(false, false).map_or("Inter", |f| f.family);
+    assert_eq!(edit.substituted, Some(format!("{face} Type3")));
     assert_eq!(text::text_blocks(&reopen(&doc), 0).unwrap()[0].editor_text, "Stable tőxt");
     // A character no fallback face has is refused, named, and left as it was.
     let mut doc = embedded_program_page("BT /F1 12 Tf 72 700 Td (Stable text) Tj ET", "ABCDEF+Inter-Regular");
