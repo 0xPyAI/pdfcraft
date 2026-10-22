@@ -887,7 +887,14 @@ struct Carry {
     marked: Vec<Option<usize>>,
     /// For each open marked-content sequence, its optional content group when it is `/OC`.
     layers: Vec<Option<Vec<u8>>>,
+    /// Bytes of glyph text the rest of the page may still produce (see [`MAX_PAGE_TEXT`]).
+    text_left: usize,
 }
+
+/// The most glyph text one page's extraction produces, in bytes. A ToUnicode destination is
+/// copied for every glyph showing its code, so a small page can otherwise expand into gigabytes;
+/// real pages hold far less (a whole novel is about 1 MB).
+const MAX_PAGE_TEXT: usize = 16 << 20;
 
 impl Carry {
     fn new() -> Self {
@@ -907,7 +914,7 @@ impl Carry {
             vertical: None,
             unreadable: None,
         };
-        Carry { ts, stack: Vec::new(), marked: Vec::new(), layers: Vec::new() }
+        Carry { ts, stack: Vec::new(), marked: Vec::new(), layers: Vec::new(), text_left: MAX_PAGE_TEXT }
     }
 }
 
@@ -1119,7 +1126,13 @@ fn interpret(
                                 let blank =
                                     m.is_space(code, len) || shown.as_deref().is_some_and(|t| !t.is_empty() && t.chars().all(char::is_whitespace));
                                 match shown {
-                                    Some(t) => text.push_str(&t),
+                                    Some(t) => {
+                                        carry.text_left = carry
+                                            .text_left
+                                            .checked_sub(t.len())
+                                            .ok_or_else(|| EditError::Invalid("the page's text is too large to read".into()))?;
+                                        text.push_str(&t);
+                                    }
                                     None => decodable = false,
                                 }
                                 let spacing = ts.char_spacing + if m.is_space(code, len) { ts.word_spacing } else { 0.0 };
@@ -1578,7 +1591,7 @@ fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), E
         let mut forms = invoked.into_iter().peekable();
         for s in shown {
             while let Some((_, name, ts)) = forms.next_if(|f| f.0 < s.op) {
-                enter(w, resources, &name, ts)?;
+                enter(w, resources, &name, ts, &mut carry.text_left)?;
                 // Text after a form starts a new line.
                 last = None;
             }
@@ -1590,21 +1603,23 @@ fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), E
             add_shown(&mut w.lines, &mut last, s, si);
         }
         for (_, name, ts) in forms {
-            enter(w, resources, &name, ts)?;
+            enter(w, resources, &name, ts, &mut carry.text_left)?;
         }
         Ok(())
     }
-    fn enter(w: &mut Walk, resources: &Dict, name: &[u8], ts: Ts) -> Result<(), EditError> {
+    /// `text_left`: the page's text budget, shared with the forms the page draws.
+    fn enter(w: &mut Walk, resources: &Dict, name: &[u8], ts: Ts, text_left: &mut usize) -> Result<(), EditError> {
         let Some(form) = form_call(w.doc, resources, name, ts.ctm, &w.path, &mut w.budget) else { return Ok(()) };
         let ops = parse(&form.data).ops;
         // The form starts with the graphics state at its `Do`, its own matrix applied.
-        let mut carry = Carry { ts: Ts { ctm: form.ctm, ..ts }, stack: Vec::new(), marked: Vec::new(), layers: Vec::new() };
+        let mut carry = Carry { ts: Ts { ctm: form.ctm, ..ts }, stack: Vec::new(), marked: Vec::new(), layers: Vec::new(), text_left: *text_left };
         let stream = w.next_stream;
         w.next_stream = w.next_stream.saturating_add(1);
         if let Some(r) = form.obj {
             w.path.push(r);
         }
         walk(w, &ops, &form.resources, &mut carry, &|_| stream)?;
+        *text_left = carry.text_left;
         if form.obj.is_some() {
             w.path.pop();
         }

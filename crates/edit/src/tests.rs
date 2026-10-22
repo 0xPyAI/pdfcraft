@@ -6402,3 +6402,25 @@ fn flattening_prunes_a_field_tree_with_repeated_kids_once_per_node() {
     let left = doc.resolve(af.as_dict().unwrap().get(b"Fields").unwrap()).as_array().unwrap().len();
     assert_eq!(left, 2, "the chain to the hidden widget and the self-listing node stay");
 }
+
+/// A ToUnicode destination is repeated for every glyph that shows its code: a page whose text
+/// would run past the extraction budget is refused, not built in memory.
+#[test]
+fn page_text_past_the_budget_is_refused() {
+    let cmap = stream("", &format!("1 beginbfchar <41> <{}> endbfchar", "0041".repeat(256)));
+    let page = |shown: &str| {
+        let content = stream("", &format!("BT /F1 12 Tf 10 10 Td ({shown}) Tj ET"));
+        build(&[
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+            &content,
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >>",
+            &cmap,
+        ])
+    };
+    let doc = page(&"A".repeat(100_000));
+    assert!(matches!(text_lines(&doc, 0), Err(EditError::Invalid(_))), "25 MB of text from a 100 kB page");
+    let doc = page("AA");
+    assert_eq!(text_lines(&doc, 0).unwrap()[0].text.len(), 512, "a page within the budget still reads");
+}
