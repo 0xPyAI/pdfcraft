@@ -614,6 +614,27 @@ pub fn trn(lang: Lang, n: u64, one: &str, other: &str) -> String {
     fmt(text, &[("n", &n.to_string())])
 }
 
+/// `name` lowercased with the Latin accents that occur in language names folded away, so a
+/// byte-wise sort reads alphabetically. Other scripts are left as they are.
+fn name_sort_key(name: &str) -> String {
+    name.chars()
+        .flat_map(char::to_lowercase)
+        .map(|c| match c {
+            'à'..='å' | 'ā' | 'ă' | 'ą' => 'a',
+            'ç' | 'ć' | 'č' => 'c',
+            'è'..='ë' | 'ē' | 'ě' | 'ę' | 'ế' | 'ệ' => 'e',
+            'ì'..='ï' | 'ī' => 'i',
+            'ñ' | 'ń' | 'ň' => 'n',
+            'ò'..='ö' | 'ø' | 'ő' => 'o',
+            'ś' | 'š' => 's',
+            'ù'..='ü' | 'ū' | 'ů' | 'ű' => 'u',
+            'ý' | 'ÿ' => 'y',
+            'ź' | 'ż' | 'ž' => 'z',
+            c => c,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::catalog::{Entry, parse_entries, placeholders};
@@ -3640,27 +3661,6 @@ mod tests {
         let dates: Vec<(&str, &str)> = pdfcraft_engine::dates::DATE_LANGUAGES.iter().map(|l| (l.code, l.name)).collect();
         assert_eq!(dates, interface);
     }
-}
-
-/// `name` lowercased with the Latin accents that occur in language names folded away, so a
-/// byte-wise sort reads alphabetically. Other scripts are left as they are.
-fn name_sort_key(name: &str) -> String {
-    name.chars()
-        .flat_map(char::to_lowercase)
-        .map(|c| match c {
-            'à'..='å' | 'ā' | 'ă' | 'ą' => 'a',
-            'ç' | 'ć' | 'č' => 'c',
-            'è'..='ë' | 'ē' | 'ě' | 'ę' | 'ế' | 'ệ' => 'e',
-            'ì'..='ï' | 'ī' => 'i',
-            'ñ' | 'ń' | 'ň' => 'n',
-            'ò'..='ö' | 'ø' | 'ő' => 'o',
-            'ś' | 'š' => 's',
-            'ù'..='ü' | 'ū' | 'ů' | 'ű' => 'u',
-            'ý' | 'ÿ' => 'y',
-            'ź' | 'ż' | 'ž' => 'z',
-            c => c,
-        })
-        .collect()
 }
 
 #[cfg(test)]
