@@ -1214,6 +1214,7 @@
 	Off	Desactivado
 	Flip on long edge	Voltear por el borde largo
 	Flip on short edge	Voltear por el borde corto
+	Printer default	Predeterminado de la impresora
 	Paper:	Papel:
 	Pages to Print	Páginas que imprimir
 	More options:	Más opciones:
@@ -1656,6 +1657,7 @@
 	Looking for printers…	Buscando impresoras…
 	Sending sheet {s} of {n} to {printer}…	Enviando la hoja {s} de {n} a {printer}…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	No se encontró ninguna impresora. Compruebe que la impresora está instalada y que la cola de impresión está en marcha, y vuelva a abrir Imprimir.
+	Reading the printer's settings…	Leyendo la configuración de la impresora…
 	Sending to {printer}…	Enviando a {printer}…
 	Choose a folder for the searchable files	Elige una carpeta para los archivos con búsqueda
 	Files are combined in this order. Leave Pages empty to take every page.	Los archivos se combinan en este orden. Deja Páginas vacío para incluir todas las páginas.
@@ -1809,6 +1811,7 @@ action wizard	Start	Iniciar
 	This document has no restrictions to lift	Este documento no tiene restricciones que quitar
 	The document's security settings don't allow this change	La configuración de seguridad del documento no permite este cambio
 	The document's security settings don't allow copying text and images	La configuración de seguridad del documento no permite copiar texto ni imágenes
+	The document's security settings don't allow printing	La configuración de seguridad del documento no permite imprimir
 	Open a document first	Abre primero un documento
 	Security will be removed when you save	La seguridad se quitará al guardar
 	Click text or an image to edit it	Haz clic en un texto o una imagen para editarlo

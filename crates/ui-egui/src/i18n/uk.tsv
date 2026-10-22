@@ -1217,6 +1217,7 @@
 	Off	Вимкнено
 	Flip on long edge	Перевертати за довгим краєм
 	Flip on short edge	Перевертати за коротким краєм
+	Printer default	За замовчуванням принтера
 	Paper:	Папір:
 	Pages to Print	Сторінки для друку
 	More options:	Додаткові параметри:
@@ -1650,6 +1651,7 @@
 	Looking for printers…	Пошук принтерів…
 	Sending sheet {s} of {n} to {printer}…	Надсилання аркуша {s} із {n} на {printer}…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Принтери не знайдено. Перевірте, що принтер установлено, а диспетчер друку працює, і знову відкрийте «Друк».
+	Reading the printer's settings…	Читання налаштувань принтера…
 	Sending to {printer}…	Надсилання на {printer}…
 	Choose a folder for the searchable files	Виберіть теку для файлів із пошуком
 	Files are combined from top to bottom. Leave Pages empty to take every page.	Файли об’єднуються згори донизу. Залиште «Сторінки» порожнім, щоб узяти всі сторінки.
@@ -1794,6 +1796,7 @@
 	This document has no restrictions to lift	Цей документ не має обмежень, які можна зняти
 	The document's security settings don't allow this change	Налаштування захисту документа не дозволяють цю зміну
 	The document's security settings don't allow copying text and images	Налаштування захисту документа не дозволяють копіювати текст і зображення
+	The document's security settings don't allow printing	Налаштування захисту документа не дозволяють друк
 	Open a document first	Спочатку відкрийте документ
 	Security will be removed when you save	Захист буде знято під час збереження
 	Click text or an image to edit it	Клацніть текст або зображення для редагування

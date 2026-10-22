@@ -1203,6 +1203,7 @@
 	Off	Wyłączony
 	Flip on long edge	Odwracaj wzdłuż długiej krawędzi
 	Flip on short edge	Odwracaj wzdłuż krótkiej krawędzi
+	Printer default	Domyślne drukarki
 	Paper:	Papier:
 	Pages to Print	Strony do wydrukowania
 	More options:	Więcej opcji:
@@ -1645,6 +1646,7 @@
 	Looking for printers…	Wyszukiwanie drukarek…
 	Sending sheet {s} of {n} to {printer}…	Wysyłanie arkusza {s} z {n} do {printer}…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Nie znaleziono drukarek. Sprawdź, czy drukarka jest zainstalowana, a bufor wydruku działa, i ponownie otwórz Drukuj.
+	Reading the printer's settings…	Odczytywanie ustawień drukarki…
 	Sending to {printer}…	Wysyłanie do {printer}…
 	Choose a folder for the searchable files	Wybierz folder dla plików z możliwością wyszukiwania
 	Files are combined from top to bottom. Leave Pages empty to take every page.	Pliki są łączone od góry do dołu. Pozostaw pole Strony puste, aby uwzględnić wszystkie strony.
@@ -1790,6 +1792,7 @@
 	Couldn't unlock {name}: {e}	Nie udało się odblokować pliku {name}: {e}
 	This document has no restrictions to lift	Ten dokument nie ma ograniczeń do zniesienia
 	The document's security settings don't allow this change	Ustawienia zabezpieczeń dokumentu nie zezwalają na tę zmianę
+	The document's security settings don't allow printing	Ustawienia zabezpieczeń dokumentu nie zezwalają na drukowanie
 	Open a document first	Najpierw otwórz dokument
 	Security will be removed when you save	Zabezpieczenia zostaną usunięte przy zapisie
 	Click text or an image to edit it	Kliknij tekst lub obraz, aby go edytować

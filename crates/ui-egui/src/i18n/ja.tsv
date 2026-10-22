@@ -1220,6 +1220,7 @@
 	Off	オフ
 	Flip on long edge	長辺とじ
 	Flip on short edge	短辺とじ
+	Printer default	プリンターの既定
 	Paper:	用紙:
 	Pages to Print	印刷するページ
 	More options:	詳細オプション:
@@ -1662,6 +1663,7 @@
 	Looking for printers…	プリンターを検索しています…
 	Sending sheet {s} of {n} to {printer}…	{printer} に用紙 {s} / {n} を送信しています…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	プリンターが見つかりません。プリンターがインストールされ、印刷スプーラーが動作していることを確認してから、もう一度［印刷］を開いてください。
+	Reading the printer's settings…	プリンターの設定を読み込んでいます…
 	Sending to {printer}…	{printer} に送信しています…
 	Choose a folder for the searchable files	検索可能なファイルの保存先フォルダーを選択
 	Files are combined from top to bottom. Leave Pages empty to take every page.	ファイルは上から順に結合されます。すべてのページを使用する場合は「ページ」を空欄にしてください。
@@ -1808,6 +1810,7 @@
 	This document has no restrictions to lift	この文書には解除する制限がありません
 	The document's security settings don't allow this change	文書のセキュリティ設定により、この変更は許可されていません
 	The document's security settings don't allow copying text and images	文書のセキュリティ設定により、テキストと画像のコピーは許可されていません
+	The document's security settings don't allow printing	文書のセキュリティ設定により、印刷は許可されていません
 	Open a document first	先に文書を開いてください
 	Security will be removed when you save	セキュリティは保存時に解除されます
 	Click text or an image to edit it	テキストまたは画像をクリックして編集

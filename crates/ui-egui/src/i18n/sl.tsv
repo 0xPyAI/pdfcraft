@@ -839,6 +839,7 @@
 	Flip image	Prezrcali sliko
 	Flip on long edge	Obrni po dolgem robu
 	Flip on short edge	Obrni po kratkem robu
+	Printer default	Privzeto tiskalnika
 	Flip vertical	Prezrcali navpično
 	Folders	Mape
 	Font Size:	Velikost pisave:
@@ -2267,6 +2268,7 @@ key	Space	Preslednica
 	Looking for printers…	Iskanje tiskalnikov…
 	Sending sheet {s} of {n} to {printer}…	Pošiljanje lista {s} od {n} na {printer}…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Ni najdenih tiskalnikov. Preverite, ali je tiskalnik nameščen in ali tiskalna vrsta deluje, nato znova odprite Natisni.
+	Reading the printer's settings…	Branje nastavitev tiskalnika…
 	Sending to {printer}…	Pošiljanje na {printer}…
 	Float panel	Odtrgaj razdelek
 	Inspector	Inšpektor
@@ -2301,6 +2303,7 @@ key	Space	Preslednica
 	Couldn't unlock {name}: {e}	Dokumenta {name} ni bilo mogoče odkleniti: {e}
 	This document has no restrictions to lift	Ta dokument nima omejitev, ki bi jih bilo treba odpraviti
 	The document's security settings don't allow copying text and images	Varnostne nastavitve dokumenta ne dovolijo kopiranja besedila in slik
+	The document's security settings don't allow printing	Varnostne nastavitve dokumenta ne dovolijo tiskanja
 	Add the files to combine	Dodajte datoteke za združevanje
 	Leave out files that can't be read?	Izpustim datoteke, ki jih ni mogoče prebrati?
 	These files can't be read, so they won't be in the combined PDF:	Teh datotek ni mogoče prebrati, zato ne bodo v združenem PDF-ju:

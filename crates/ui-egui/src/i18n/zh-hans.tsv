@@ -906,6 +906,7 @@
 	Off	关
 	Flip on long edge	沿长边翻转
 	Flip on short edge	沿短边翻转
+	Printer default	打印机默认
 	Paper:	纸张：
 	Pages to Print	要打印的页面
 	More options:	更多选项：
@@ -1620,6 +1621,7 @@
 	Looking for printers…	正在查找打印机…
 	Sending sheet {s} of {n} to {printer}…	正在将第 {s} 张（共 {n} 张）发送到{printer}…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	未找到打印机。请检查打印机是否已安装、打印后台处理程序是否在运行，然后重新打开“打印”。
+	Reading the printer's settings…	正在读取打印机设置…
 	Sending to {printer}…	正在发送到{printer}…
 	Choose a folder for the searchable files	选择可搜索文件的文件夹
 	Files are combined from top to bottom. Leave Pages empty to take every page.	文件按从上到下的顺序合并。页码留空表示取全部页面。
@@ -1766,6 +1768,7 @@
 	This document has no restrictions to lift	此文档没有可解除的限制
 	The document's security settings don't allow this change	文档安全设置不允许此更改
 	The document's security settings don't allow copying text and images	文档安全设置不允许复制文本和图像
+	The document's security settings don't allow printing	文档安全设置不允许打印
 	Open a document first	请先打开文档
 	Security will be removed when you save	保存时将删除安全性设置
 	Click text or an image to edit it	单击文本或图像进行编辑

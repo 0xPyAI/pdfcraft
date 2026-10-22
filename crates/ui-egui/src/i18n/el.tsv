@@ -766,6 +766,7 @@
 	Two-sided:	Εκτύπωση διπλής όψης:
 	Flip on long edge	Αναστροφή στη μεγάλη πλευρά
 	Flip on short edge	Αναστροφή στη μικρή πλευρά
+	Printer default	Προεπιλογή εκτυπωτή
 	Paper:	Χαρτί:
 	Pages to Print	Σελίδες προς εκτύπωση
 	More options:	Περισσότερες επιλογές:
@@ -2288,6 +2289,7 @@ comment menu	Edit	Επεξεργασία
 	Looking for printers…	Αναζήτηση εκτυπωτών…
 	Sending sheet {s} of {n} to {printer}…	Αποστολή φύλλου {s} από {n} στον {printer}…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Δεν βρέθηκαν εκτυπωτές. Ελέγξτε ότι ο εκτυπωτής είναι εγκατεστημένος και ότι η ουρά εκτύπωσης εκτελείται και, στη συνέχεια, ανοίξτε ξανά την Εκτύπωση.
+	Reading the printer's settings…	Ανάγνωση των ρυθμίσεων του εκτυπωτή…
 	Sending to {printer}…	Αποστολή στον {printer}…
 	Enter permissions password…	Εισαγωγή κωδικού δικαιωμάτων…
 	Permissions password	Κωδικός δικαιωμάτων
@@ -2296,6 +2298,7 @@ comment menu	Edit	Επεξεργασία
 	Couldn't unlock {name}: {e}	Δεν ήταν δυνατό το ξεκλείδωμα του {name}: {e}
 	This document has no restrictions to lift	Αυτό το έγγραφο δεν έχει περιορισμούς προς άρση
 	The document's security settings don't allow copying text and images	Οι ρυθμίσεις ασφαλείας του εγγράφου δεν επιτρέπουν την αντιγραφή κειμένου και εικόνων
+	The document's security settings don't allow printing	Οι ρυθμίσεις ασφαλείας του εγγράφου δεν επιτρέπουν την εκτύπωση
 	Add the files to combine	Προσθέστε τα αρχεία προς συνδυασμό
 	Leave out files that can't be read?	Να παραλειφθούν τα αρχεία που δεν διαβάζονται;
 	These files can't be read, so they won't be in the combined PDF:	Αυτά τα αρχεία δεν διαβάζονται, οπότε δεν θα συμπεριληφθούν στο συνδυασμένο PDF:

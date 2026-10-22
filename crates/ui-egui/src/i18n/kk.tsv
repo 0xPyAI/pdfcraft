@@ -1164,6 +1164,7 @@
 	Off	Өшірулі
 	Flip on long edge	Ұзын жиек бойынша аудару
 	Flip on short edge	Қысқа жиек бойынша аудару
+	Printer default	Принтер әдепкісі
 	Paper:	Қағаз:
 	Pages to Print	Басып шығарылатын беттер
 	More options:	Қосымша параметрлер:
@@ -2278,6 +2279,7 @@ key	Space	Бос орын
 	Looking for printers…	Принтерлер ізделуде…
 	Sending sheet {s} of {n} to {printer}…	{n} парақтың {s}-парағы {printer} құрылғысына жіберілуде…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Принтерлер табылмады. Принтердің орнатылғанын және басып шығару кезегі қызметінің жұмыс істеп тұрғанын тексеріп, «Басып шығару» терезесін қайта ашыңыз.
+	Reading the printer's settings…	Принтер параметрлері оқылуда…
 	Sending to {printer}…	{printer} құрылғысына жіберілуде…
 	Enter permissions password…	Рұқсаттар құпиясөзін енгізу…
 	Permissions password	Рұқсаттар құпиясөзі
@@ -2286,6 +2288,7 @@ key	Space	Бос орын
 	Couldn't unlock {name}: {e}	{name} құлпын ашу мүмкін болмады: {e}
 	This document has no restrictions to lift	Бұл құжатта алып тасталатын шектеулер жоқ
 	The document's security settings don't allow copying text and images	Құжаттың қауіпсіздік параметрлері мәтін мен суреттерді көшіруге рұқсат бермейді
+	The document's security settings don't allow printing	Құжаттың қауіпсіздік параметрлері басып шығаруға рұқсат бермейді
 	Add the files to combine	Біріктірілетін файлдарды қосыңыз
 	Leave out files that can't be read?	Оқылмайтын файлдарды қалдырып кету керек пе?
 	These files can't be read, so they won't be in the combined PDF:	Бұл файлдар оқылмайды, сондықтан біріктірілген PDF-ке кірмейді:

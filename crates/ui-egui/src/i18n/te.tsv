@@ -1190,6 +1190,7 @@ comment menu	Edit	సవరించు
 	Off	ఆఫ్
 	Flip on long edge	పొడవైన అంచున తిరగేయి
 	Flip on short edge	పొట్టి అంచున తిరగేయి
+	Printer default	ప్రింటర్ డిఫాల్ట్
 	Paper:	కాగితం:
 	Pages to Print	ముద్రించాల్సిన పేజీలు
 	More options:	మరిన్ని ఎంపికలు:
@@ -1632,6 +1633,7 @@ action wizard	Start	ప్రారంభించు
 	Looking for printers…	ప్రింటర్ల కోసం వెతుకుతోంది…
 	Sending sheet {s} of {n} to {printer}…	{printer}కు {n}లో {s}వ షీట్ పంపుతోంది…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	ప్రింటర్లు ఏవీ కనుగొనబడలేదు. ప్రింటర్ ఇన్‌స్టాల్ అయిందో, ప్రింట్ స్పూలర్ నడుస్తోందో తనిఖీ చేసి, ముద్రణను మళ్లీ తెరవండి.
+	Reading the printer's settings…	ప్రింటర్ సెట్టింగ్‌లను చదువుతోంది…
 	Sending to {printer}…	{printer}కు పంపుతోంది…
 	Choose a folder for the searchable files	వెతకగలిగే ఫైల్‌ల కోసం ఒక ఫోల్డర్‌ను ఎంచుకోండి
 	Files are combined in this order. Leave Pages empty to take every page.	ఫైల్‌లు ఈ క్రమంలో కలపబడతాయి. అన్ని పేజీలను తీసుకోవడానికి పేజీలు ఫీల్డ్‌ను ఖాళీగా వదలండి.
@@ -1716,6 +1718,7 @@ action wizard	Start	ప్రారంభించు
 	This document has no restrictions to lift	ఈ పత్రంలో తొలగించాల్సిన పరిమితులు లేవు
 	The document's security settings don't allow this change	పత్రం భద్రతా సెట్టింగ్‌లు ఈ మార్పును అనుమతించవు
 	The document's security settings don't allow copying text and images	పత్రం భద్రతా సెట్టింగ్‌లు టెక్స్ట్, చిత్రాలను కాపీ చేయడాన్ని అనుమతించవు
+	The document's security settings don't allow printing	పత్రం భద్రతా సెట్టింగ్‌లు ముద్రించడాన్ని అనుమతించవు
 	Open a document first	ముందుగా ఒక పత్రాన్ని తెరవండి
 	Security will be removed when you save	మీరు సేవ్ చేసినప్పుడు భద్రత తీసివేయబడుతుంది
 	Click text or an image to edit it	సవరించడానికి టెక్స్ట్ లేదా చిత్రంపై క్లిక్ చేయండి

@@ -26,8 +26,10 @@ const TEXT_TAG: u64 = 1 << 62;
 /// A page rendered for the organize grid at the size it is drawn there.
 const GRID_TAG: u64 = 1 << 61;
 /// Preview rasters tagged with this bit are converted to luminance on receipt, matching the
-/// monochrome print requested by Print ▸ Print in grayscale.
-const GRAYSCALE_TAG: u64 = 1 << 60;
+/// monochrome print requested by Print ▸ Print in grayscale. It is a bit of its own: the
+/// renderer's print bit ([`PRINT_TAG`]) is carried by every print preview, so sharing it would
+/// turn colour previews into monochrome ones too.
+const GRAYSCALE_TAG: u64 = 1 << 59;
 /// The tag of a raster that is out of date (shown until its replacement arrives).
 const STALE_TAG: u64 = u64::MAX;
 /// Pages whose raster would exceed this many device pixels on a side are drawn in tiles.
@@ -6145,6 +6147,25 @@ trailer << /Root 1 0 R >>
             assert_eq!(view.receive_result(&ctx, solid_result(request, 32, 64)), 32 * 64 * 4);
             assert_eq!(texture(&view)[0].1, [32, 64], "valid results still make progress");
         }
+    }
+
+    /// A print preview carries the renderer's print bit; the bit that asks for luminance is
+    /// its own, so a colour preview is not converted to monochrome and the two modes are told
+    /// apart by their tags.
+    #[test]
+    fn print_preview_tag_distinguishes_grayscale_from_colour() {
+        let mut v = view(1, PageLayout::Single, true);
+        v.set_print_grayscale(false);
+        v.queue_print_previews(&[(0, 1.0)]);
+        let colour = v.frame_queue.last().expect("a print preview was queued").tag;
+        assert_ne!(colour & PRINT_TAG, 0, "a print preview carries the renderer's print bit");
+        assert_eq!(colour & GRAYSCALE_TAG, 0, "a colour print preview must not ask for luminance");
+
+        v.set_print_grayscale(true);
+        v.queue_print_previews(&[(0, 1.0)]);
+        let gray = v.frame_queue.last().expect("a grayscale print preview was queued").tag;
+        assert_ne!(gray & GRAYSCALE_TAG, 0, "a grayscale print preview asks for luminance");
+        assert_ne!(gray, colour, "the two print preview modes must not share a tag");
     }
 
     #[test]

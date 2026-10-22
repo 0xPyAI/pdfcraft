@@ -592,6 +592,7 @@
 	Flip horizontal	Apversti horizontaliai
 	Flip on long edge	Apversti per ilgąją kraštinę
 	Flip on short edge	Apversti per trumpąją kraštinę
+	Printer default	Pagal spausdintuvą
 	Flip vertical	Apversti vertikaliai
 	Folders	Aplankai
 	Font Size:	Šrifto dydis:
@@ -742,6 +743,7 @@
 	Looking for PDFs…	Ieškoma PDF failų…
 	Looking for printers…	Ieškoma spausdintuvų…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Spausdintuvų nerasta. Patikrinkite, ar spausdintuvas įdiegtas ir ar veikia spausdinimo eilė, tada vėl atverkite Spausdinti.
+	Reading the printer's settings…	Skaitomi spausdintuvo nustatymai…
 	Low Resolution (150 dpi)	Maža raiška (150 dpi)
 	Low resolution	Maža raiška
 	Magnification	Didinimas
@@ -1178,6 +1180,7 @@
 	The document now conforms to {level}; save it to keep the changes	Dokumentas dabar atitinka {level}; įrašykite jį, kad išsaugotumėte pakeitimus
 	The document opens without a password; this password is needed to change the restrictions. It's applied when you save.	Dokumentą galima atverti be slaptažodžio; šis slaptažodis reikalingas apribojimams keisti. Jis pritaikomas įrašant dokumentą.
 	The document's security settings don't allow copying text and images	Dokumento saugos nuostatos neleidžia kopijuoti teksto ir paveikslėlių
+	The document's security settings don't allow printing	Dokumento saugos nuostatos neleidžia spausdinti
 	The document's security settings don't allow this change	Dokumento saugos nuostatos neleidžia atlikti šio pakeitimo
 	The existing action will be preserved.	Esamas veiksmas bus išsaugotas.
 	The fonts PdfCraft writes with can't draw “{c}” ({code}), so it shows as ? in every PDF viewer. The text is saved.	„PdfCraft“ naudojami šriftai negali atvaizduoti simbolio „{c}“ ({code}), todėl visose PDF žiūryklėse jis rodomas kaip ?. Tekstas įrašytas.

@@ -1200,6 +1200,7 @@
 	Off	Désactivé
 	Flip on long edge	Retourner sur le bord long
 	Flip on short edge	Retourner sur le bord court
+	Printer default	Par défaut de l'imprimante
 	Paper:	Papier :
 	Pages to Print	Pages à imprimer
 	More options:	Plus d'options :
@@ -1641,6 +1642,7 @@
 	Looking for printers…	Recherche des imprimantes…
 	Sending sheet {s} of {n} to {printer}…	Envoi de la feuille {s} sur {n} à {printer}…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Aucune imprimante trouvée. Vérifiez que l’imprimante est installée et que le spouleur d’impression fonctionne, puis rouvrez Imprimer.
+	Reading the printer's settings…	Lecture des réglages de l’imprimante…
 	Sending to {printer}…	Envoi à {printer}…
 	Choose a folder for the searchable files	Choisissez un dossier pour les fichiers recherchables
 	Files are combined in this order. Leave Pages empty to take every page.	Les fichiers sont combinés dans cet ordre. Laissez Pages vide pour prendre toutes les pages.
@@ -1727,6 +1729,7 @@
 	This document has no restrictions to lift	Ce document n'a aucune restriction à lever
 	The document's security settings don't allow this change	Les paramètres de protection du document n'autorisent pas cette modification
 	The document's security settings don't allow copying text and images	Les paramètres de protection du document n'autorisent pas la copie de texte et d'images
+	The document's security settings don't allow printing	Les paramètres de protection du document n'autorisent pas l'impression
 	Open a document first	Ouvrez d'abord un document
 	Security will be removed when you save	La protection sera retirée à l'enregistrement
 	Click text or an image to edit it	Cliquez sur un texte ou une image pour le modifier

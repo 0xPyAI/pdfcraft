@@ -1205,6 +1205,7 @@
 	Off	Aus
 	Flip on long edge	An langer Kante wenden
 	Flip on short edge	An kurzer Kante wenden
+	Printer default	Druckerstandard
 	Paper:	Papier:
 	Pages to Print	Zu druckende Seiten
 	More options:	Weitere Optionen:
@@ -1646,6 +1647,7 @@
 	Looking for printers…	Drucker werden gesucht…
 	Sending sheet {s} of {n} to {printer}…	Blatt {s} von {n} wird an {printer} gesendet…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Es wurden keine Drucker gefunden. Prüfen Sie, ob der Drucker installiert ist und die Druckwarteschlange läuft, und öffnen Sie dann „Drucken“ erneut.
+	Reading the printer's settings…	Druckereinstellungen werden gelesen …
 	Sending to {printer}…	Wird an {printer} gesendet…
 	Choose a folder for the searchable files	Wähle einen Ordner für die durchsuchbaren Dateien
 	Files are combined in this order. Leave Pages empty to take every page.	Die Dateien werden in dieser Reihenfolge kombiniert. Lass „Seiten“ leer, um alle Seiten zu übernehmen.
@@ -1732,6 +1734,7 @@
 	This document has no restrictions to lift	Dieses Dokument hat keine Einschränkungen, die aufgehoben werden können
 	The document's security settings don't allow this change	Die Sicherheitseinstellungen des Dokuments erlauben diese Änderung nicht
 	The document's security settings don't allow copying text and images	Die Sicherheitseinstellungen des Dokuments erlauben kein Kopieren von Text und Bildern
+	The document's security settings don't allow printing	Die Sicherheitseinstellungen des Dokuments erlauben kein Drucken
 	Open a document first	Öffne zuerst ein Dokument
 	Security will be removed when you save	Die Sicherheit wird beim Speichern entfernt
 	Click text or an image to edit it	Klicke auf Text oder ein Bild, um es zu bearbeiten

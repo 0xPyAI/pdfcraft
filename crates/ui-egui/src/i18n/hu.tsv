@@ -1190,6 +1190,7 @@
 	Off	Ki
 	Flip on long edge	Hosszú él mentén
 	Flip on short edge	Rövid él mentén
+	Printer default	Nyomtató alapértéke
 	Paper:	Papír:
 	Pages to Print	Nyomtatandó oldalak
 	More options:	További beállítások:
@@ -1631,6 +1632,7 @@
 	Looking for printers…	Nyomtatók keresése…
 	Sending sheet {s} of {n} to {printer}…	{s}. lap / {n} küldése ide: {printer}…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Nem található nyomtató. Ellenőrizze, hogy a nyomtató telepítve van-e, és fut-e a nyomtatási sorkezelő, majd nyissa meg újra a Nyomtatást.
+	Reading the printer's settings…	A nyomtató beállításainak beolvasása…
 	Sending to {printer}…	Küldés ide: {printer}…
 	Choose a folder for the searchable files	Válassz mappát a kereshető fájloknak
 	Files are combined in this order. Leave Pages empty to take every page.	A fájlok ebben a sorrendben egyesülnek. Hagyd üresen az Oldalak mezőt, ha minden oldalt kéred.
@@ -1717,6 +1719,7 @@
 	This document has no restrictions to lift	Ebben a dokumentumban nincs feloldható korlátozás
 	The document's security settings don't allow this change	A dokumentum biztonsági beállításai nem engedik ezt a módosítást
 	The document's security settings don't allow copying text and images	A dokumentum biztonsági beállításai nem engedik a szöveg és a képek másolását
+	The document's security settings don't allow printing	A dokumentum biztonsági beállításai nem engedik a nyomtatást
 	Open a document first	Előbb nyiss meg egy dokumentumot
 	Security will be removed when you save	A védelem mentéskor megszűnik
 	Click text or an image to edit it	Kattints a szövegre vagy egy képre a szerkesztéshez

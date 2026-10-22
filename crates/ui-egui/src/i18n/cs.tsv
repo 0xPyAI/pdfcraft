@@ -1288,6 +1288,7 @@ key	Space	Mezerník
 	Off	Vypnuto
 	Flip on long edge	Převrátit podle delší strany
 	Flip on short edge	Převrátit podle kratší strany
+	Printer default	Podle tiskárny
 	Paper:	Papír:
 	Pages to Print	Stránky k tisku
 	More options:	Další možnosti:
@@ -1844,6 +1845,7 @@ key	Space	Mezerník
 	Only the document's owner can change its security (open it with the permissions password)	Zabezpečení může změnit jen vlastník dokumentu (otevřete ho heslem oprávnění)
 	The document's security settings don't allow this change	Nastavení zabezpečení dokumentu tuto změnu nedovoluje
 	The document's security settings don't allow copying text and images	Nastavení zabezpečení dokumentu nedovoluje kopírovat text a obrázky
+	The document's security settings don't allow printing	Nastavení zabezpečení dokumentu nedovoluje tisk
 	Open a document first	Nejdřív otevřete dokument
 	Security will be removed when you save	Zabezpečení se odebere při uložení
 	Click text or an image to edit it	Kliknutím na text nebo obrázek ho upravíte
@@ -2305,6 +2307,7 @@ certificate	Subject	Subjekt
 	Looking for printers…	Hledání tiskáren…
 	Sending sheet {s} of {n} to {printer}…	Odesílání listu {s} z {n} na {printer}…
 	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	Nebyly nalezeny žádné tiskárny. Zkontrolujte, že je tiskárna nainstalovaná a zařazování tisku běží, a pak znovu otevřete Tisk.
+	Reading the printer's settings…	Načítání nastavení tiskárny…
 	Sending to {printer}…	Odesílání na {printer}…
 	Fill colour	Barva výplně
 	Fill colour: none	Barva výplně: žádná
