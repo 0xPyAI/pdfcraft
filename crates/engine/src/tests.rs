@@ -1303,6 +1303,32 @@ fn owner_password_of_older_revisions_opens_the_viewer_too() {
     }
 }
 
+/// Render paths outside a session (the CLI's `info`, `text`, `render`) get the password the
+/// renderer takes: the recovered user password for an R2–R4 owner password, else as given.
+#[test]
+fn render_password_for_recovers_the_user_password_of_older_revisions() {
+    for alg in [pdfcraft_cos::Algorithm::Rc4_40, pdfcraft_cos::Algorithm::Rc4_128, pdfcraft_cos::Algorithm::Aes128, pdfcraft_cos::Algorithm::Aes256] {
+        let mut doc = pdfcraft_cos::Document::open(Arc::new(fixture(1))).unwrap();
+        doc.set_encryption(&pdfcraft_cos::NewEncryption {
+            algorithm: alg,
+            user_password: "u",
+            owner_password: "o",
+            permissions: 0,
+            encrypt_metadata: true,
+            seed: [1; 32],
+        })
+        .unwrap();
+        let bytes = Arc::new(pdfcraft_cos::write_full(&doc, &Default::default()).unwrap());
+        let owner = crate::render_password_for(bytes.clone(), Some("o"));
+        let expected = if alg == pdfcraft_cos::Algorithm::Aes256 { "o" } else { "u" };
+        assert_eq!(owner.as_deref(), Some(expected), "{alg:?}");
+        assert!(pdfcraft_render::inspect(bytes.clone(), owner.as_deref()).is_ok(), "{alg:?}: the renderer opens it");
+        assert_eq!(crate::render_password_for(bytes.clone(), Some("u")).as_deref(), Some("u"), "{alg:?}");
+        assert_eq!(crate::render_password_for(bytes.clone(), Some("wrong")).as_deref(), Some("wrong"), "{alg:?}");
+        assert_eq!(crate::render_password_for(bytes, None), None, "{alg:?}");
+    }
+}
+
 #[test]
 fn autosave_snapshots_only_changed_documents() {
     let (mut s, id) = session_with(2);
