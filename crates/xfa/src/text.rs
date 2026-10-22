@@ -162,6 +162,13 @@ struct Word {
     width: f64,
 }
 
+/// The width of `w` without the spaces it ends with: what it takes at the end of a line, where
+/// a space is never drawn.
+fn ink_width(w: &Word) -> f64 {
+    let ink = w.text.trim_end_matches(' ');
+    if ink.len() == w.text.len() { w.width } else { w.face.width(ink) }
+}
+
 /// Break the runs of a paragraph into words (spaces stay attached to the word before them).
 fn words(runs: &[Run], base: &Face, embed: &dyn Fn(&str) -> String) -> Vec<Word> {
     let mut out = Vec::new();
@@ -215,12 +222,17 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
         let mut first_in_para = true;
         let indent = |first: bool| if first { para.text_indent.max(0.0) } else { 0.0 };
         for w in ws {
-            let fits = line.width + w.width <= avail - indent(line.first) || line.words.is_empty() && w.width <= avail - indent(line.first);
+            // A word fits when what it draws does: the spaces after it would end the line. Spaces
+            // alone draw nothing, so they always stay on the line (keeping their width, so a word
+            // after them still starts past them).
+            let ink = ink_width(&w);
+            let blank = w.text.trim_end_matches(' ').is_empty();
+            let fits = blank || line.width + ink <= avail - indent(line.first) || line.words.is_empty() && ink <= avail - indent(line.first);
             if !fits && !line.words.is_empty() {
                 let done = std::mem::replace(&mut line, Line { words: Vec::new(), width: 0.0, size: base.size, first: false });
                 lines.push((done, p.h_align));
             }
-            if w.width > avail - indent(line.first) && line.words.is_empty() {
+            if ink > avail - indent(line.first) && line.words.is_empty() {
                 // A word longer than a line: break it by character.
                 let mut piece = String::new();
                 for ch in w.text.chars() {
@@ -266,8 +278,16 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
     let mut y = start_y + para.space_above;
     for ((line, align), lh) in lines.into_iter().zip(heights) {
         let indent = if line.first { para.text_indent.max(0.0) } else { 0.0 };
-        // Trailing spaces don't count for alignment.
-        let trailing = line.words.last().map_or(0.0, |w| if w.text.ends_with(' ') { w.face.width(" ") } else { 0.0 });
+        // Trailing spaces don't count for alignment: those of the last word with ink, and any
+        // words of spaces alone after it.
+        let mut trailing = 0.0;
+        for w in line.words.iter().rev() {
+            let ink = ink_width(w);
+            trailing += w.width - ink;
+            if !w.text.trim_end_matches(' ').is_empty() {
+                break;
+            }
+        }
         let used = (line.width - trailing).max(0.0);
         let mut x = rect.x + para.margin_left + indent;
         x += match align.unwrap_or(para.h_align) {

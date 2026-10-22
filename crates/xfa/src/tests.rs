@@ -2604,3 +2604,56 @@ fn a_tiff_picture_is_turned_by_its_orientation_tag() {
     assert_eq!((d.width, d.height), (1, 2), "decoded size");
     assert_eq!(d.samples, vec![255, 0, 0, 0, 0, 255]);
 }
+
+/// A draw `w` points wide holding `text` in Arial 10 pt, aligned `h_align`.
+fn one_draw(text: &str, w: f64, h_align: &str) -> String {
+    format!(
+        r##"<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <draw name="label" w="{w}pt" h="0.5in"><value><text>{text}</text></value><font typeface="Arial" size="10pt"/><para hAlign="{h_align}"/></draw>
+</subform>
+</template></xdp:xdp>"##
+    )
+}
+
+/// The text spans of the only page, with their baselines.
+fn draw_spans(xdp: &str) -> Vec<text::Span> {
+    layout_xml(xdp).unwrap().pages[0].items.iter().filter_map(|i| if let Item::Text(s) = i { Some(s.clone()) } else { None }).collect()
+}
+
+/// A label that fits its box but is written with trailing spaces stays on one line and measures
+/// as tall as without them; text wider than the box still wraps.
+#[test]
+fn a_space_at_the_end_of_a_line_does_not_count_when_fitting_it() {
+    // The box is just wide enough for "a. DATE"; the label is written "a. DATE " (as forms
+    // often are). The trailing space is never drawn, so the label stays on one line.
+    let w = pdfcraft_fonts::helvetica_width("a. DATE", 10.0) + 0.01;
+    let spans = draw_spans(&one_draw("a. DATE ", w, "left"));
+    let baselines: std::collections::BTreeSet<i64> = spans.iter().map(|s| (s.baseline * 100.0).round() as i64).collect();
+    assert_eq!(baselines.len(), 1, "{spans:?}");
+    // Several spaces after it don't count either.
+    let spans = draw_spans(&one_draw("a. DATE   ", w, "left"));
+    let baselines: std::collections::BTreeSet<i64> = spans.iter().map(|s| (s.baseline * 100.0).round() as i64).collect();
+    assert_eq!(baselines.len(), 1, "{spans:?}");
+    // Nor do they add a blank line: the text measures as tall as without them.
+    let face = text::Face::of(&Font { typeface: "Arial".into(), size: 10.0, ..Font::default() });
+    let height = |t: &str| text::measure_height(&text::plain(t), w, &Para::default(), &face, &|_| String::new());
+    assert_eq!(height("a. DATE   "), height("a. DATE"));
+    // Text that is wider than the box still wraps.
+    let spans = draw_spans(&one_draw("a. DATES ", w, "left"));
+    let baselines: std::collections::BTreeSet<i64> = spans.iter().map(|s| (s.baseline * 100.0).round() as i64).collect();
+    assert_eq!(baselines.len(), 2, "{spans:?}");
+}
+
+/// Centered and right-aligned text is placed by its drawn width, whatever spaces follow it.
+#[test]
+fn trailing_spaces_do_not_shift_centered_or_right_aligned_text() {
+    let w = 200.0;
+    let ink = pdfcraft_fonts::helvetica_width("TITLE", 10.0);
+    let left_edge = |align: &str, text: &str| draw_spans(&one_draw(text, w, align)).first().map(|s| s.x).unwrap();
+    // The draw's left edge is the content area's (0.5in); centered and right-aligned text is
+    // placed by its drawn width, whatever spaces follow it.
+    assert!((left_edge("center", "TITLE   ") - (36.0 + (w - ink) / 2.0)).abs() < 1e-6);
+    assert!((left_edge("right", "TITLE   ") - (36.0 + w - ink)).abs() < 1e-6);
+}
