@@ -259,7 +259,7 @@ impl<'a> Walker<'a> {
         let resolved = self.doc.resolve(entry);
         let Object::Stream(stream) = &*resolved else { return Ok(()) };
         let dict = &stream.dict;
-        if dict.name(b"Subtype") != Some(b"Form") {
+        if crate::subtype(self.doc, dict)?.as_deref() != Some(b"Form") {
             return Ok(());
         }
         let matrix = dict

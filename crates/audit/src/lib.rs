@@ -229,7 +229,7 @@ fn annots(doc: &Document, page: &Dict) -> Result<Vec<AnnotationCover>, AuditErro
             continue;
         }
         let rect = [v[0].min(v[2]), v[1].min(v[3]), v[0].max(v[2]), v[1].max(v[3])];
-        match dict.name(b"Subtype") {
+        match subtype(doc, &dict)?.as_deref() {
             Some(b"Redact") => out.push(AnnotationCover::Redact(rect)),
             Some(b"Square") => {
                 let flags = dict.get(b"F").and_then(|f| doc.resolve(f).as_int()).unwrap_or(0);
@@ -247,6 +247,16 @@ fn annots(doc: &Document, page: &Dict) -> Result<Vec<AnnotationCover>, AuditErro
         }
     }
     Ok(out)
+}
+
+/// The `/Subtype` name of `dict`, following an indirect reference. A reference that cannot be
+/// loaded fails the audit: the subtype decides whether the object is checked at all.
+fn subtype(doc: &Document, dict: &Dict) -> Result<Option<Vec<u8>>, AuditError> {
+    let name = match dict.get(b"Subtype") {
+        Some(pdfcraft_cos::Object::Ref(r)) => doc.try_get(r.num)?.as_name().map(<[u8]>::to_vec),
+        other => other.and_then(pdfcraft_cos::Object::as_name).map(<[u8]>::to_vec),
+    };
+    Ok(name)
 }
 
 fn annotation_color(doc: &Document, dict: &Dict, key: &[u8]) -> Option<[f64; 3]> {

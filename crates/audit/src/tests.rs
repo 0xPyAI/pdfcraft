@@ -602,3 +602,32 @@ fn rectangle_filled_after_restore_is_a_cover() {
     assert_eq!(findings.len(), 1, "{findings:?}");
     assert!(findings[0].covered_text.contains("SECRET"), "{findings:?}");
 }
+
+/// A `/Subtype` may be an indirect reference to the name, like any other value: a `/Redact`
+/// annotation and a covering form XObject named that way are still checked.
+#[test]
+fn indirect_subtype_is_resolved() {
+    let mut b = Builder::new();
+    b.add("<< /Type /Catalog /Pages 2 0 R >>");
+    b.add("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    b.add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>");
+    b.add_stream(b"BT /F1 24 Tf 100 700 Td (DO NOT SHARE) Tj ET\n");
+    b.add(FONT);
+    b.add("<< /Type /Annot /Subtype 7 0 R /Rect [95 685 305 725] >>");
+    b.add("/Redact");
+    let findings = audit_redactions(&open(b.build())).expect("audit must run");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].kind, FindingKind::UnappliedMark);
+
+    let mut b = Builder::new();
+    b.add("<< /Type /Catalog /Pages 2 0 R >>");
+    b.add("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    b.add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 6 0 R >> /XObject << /X 5 0 R >> >> >>");
+    b.add_stream(b"BT /F1 24 Tf 100 700 Td (SECRET) Tj ET\n/X Do\n");
+    b.add_stream_with(b"0 g\n100 688 220 32 re f\n", "/Type /XObject /Subtype 7 0 R /BBox [0 0 612 792]");
+    b.add(FONT);
+    b.add("/Form");
+    let findings = audit_redactions(&open(b.build())).expect("audit must run");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].kind, FindingKind::CoveredText);
+}
