@@ -3221,3 +3221,28 @@ fn name_trees_with_shared_kids_are_walked_once_per_node() {
     let tree = out.resolve(names.get(b"EmbeddedFiles").unwrap()).as_dict().cloned().unwrap();
     assert_eq!(tree.get(b"Names").and_then(|n| n.as_array()).map(Vec::len), Some(2), "one attachment, listed once");
 }
+
+#[test]
+fn a_form_drawing_itself_repeatedly_is_analysed_once() {
+    let form = "/F Do /F Do /F Do /F Do";
+    let b: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 400] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /XObject << /F 5 0 R /Unused 6 0 R >> >> >>".into(),
+        "<< /Length 5 >>\nstream\n/F Do\nendstream".into(),
+        format!(
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 10 10] /Resources << /XObject << /F 5 0 R >> >> /Length {} >>\nstream\n{form}\nendstream",
+            form.len()
+        ),
+        "<< /Type /XObject /Subtype /Form /BBox [0 0 10 10] /Length 0 >>\nstream\n\nendstream".into(),
+    ];
+    let src = open(build(&b, "/Root 1 0 R"));
+    take_work();
+    let out = extract_pages(&src, &[0]).unwrap();
+    let work = take_work();
+    assert!(work <= 4, "{work} form analyses");
+    let page = out.get(pages(&out).unwrap()[0].obj).as_dict().cloned().unwrap();
+    let res = out.resolve(page.get(b"Resources").unwrap()).as_dict().cloned().unwrap();
+    let x = out.resolve(res.get(b"XObject").unwrap()).as_dict().cloned().unwrap();
+    assert!(x.contains(b"F") && !x.contains(b"Unused"), "pruning still keeps what is drawn and drops the rest");
+}

@@ -29,7 +29,7 @@ enum XKey {
 }
 
 /// Who owns the resources currently being walked, for the key drawn names are recorded under.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Owner {
     /// An indirect resources object (a page's, or a form XObject's own).
     Resources(ObjRef),
@@ -50,6 +50,9 @@ struct Pruner<'a> {
     glyph_seen: HashSet<ObjRef>,
     /// An indirect font's explicit resources have one owner regardless of which page uses it.
     glyph_fonts: HashSet<ObjRef>,
+    /// Forms already analysed, with the owner of the resources they drew against: drawing one
+    /// again records nothing new, and re-reading it on every `Do` is exponential in the nesting.
+    forms_seen: HashSet<(ObjRef, Owner)>,
 }
 
 impl Pruner<'_> {
@@ -211,6 +214,11 @@ impl Pruner<'_> {
                 // A form without its own resources draws against the ones it was invoked with.
                 None => (resources.clone(), owner),
             };
+            if !self.forms_seen.insert((r, inner_owner)) {
+                continue;
+            }
+            #[cfg(test)]
+            crate::work(1);
             match s.decoded() {
                 Ok(data) => self.content(&data, &inner, inner_owner, depth + 1),
                 // What the form draws is unknown: keep everything it could reach.
@@ -314,6 +322,7 @@ pub(crate) fn prune_unused_xobjects(doc: &mut Document) -> Result<usize, Organiz
         glyph_work_left: MAX_GLYPH_RESOURCE_WORK,
         glyph_seen: HashSet::new(),
         glyph_fonts: HashSet::new(),
+        forms_seen: HashSet::new(),
     };
     for (page, attrs) in &pages {
         let Some(res) = attrs.get(b"Resources") else { continue };
