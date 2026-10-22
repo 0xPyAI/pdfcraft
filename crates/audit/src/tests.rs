@@ -631,3 +631,16 @@ fn indirect_subtype_is_resolved() {
     assert_eq!(findings.len(), 1, "{findings:?}");
     assert_eq!(findings[0].kind, FindingKind::CoveredText);
 }
+
+/// Text drawn after a cover on the same baseline joins the covered text in one line. The cover
+/// still hides the words painted before it.
+#[test]
+fn later_text_on_the_line_does_not_clear_an_earlier_cover() {
+    let content = b"0 g\nBT /F1 24 Tf 100 700 Td (SECRET) Tj ET\n98 688 94 32 re f\nBT /F1 24 Tf 200 700 Td (tail) Tj ET\n";
+    let doc = open(one_page(content, ""));
+    let lines = pdfcraft_edit::text_lines(&doc, 0).expect("text");
+    assert_eq!(lines.len(), 1, "the runs join one line: {:?}", lines.iter().map(|l| &l.text).collect::<Vec<_>>());
+    let findings = audit_redactions(&doc).expect("audit must run");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert!(findings[0].covered_text.contains("SECRET"), "{findings:?}");
+}

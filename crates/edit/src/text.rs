@@ -528,12 +528,13 @@ impl TextLine {
         self.origin.baseline
     }
 
-    /// Paint position of the line's last text-showing operator: `(content-stream index,
-    /// operator index in the page's joined stream)`. Lines paint in order of this tuple.
+    /// Paint position of the line's first operator: `(content-stream index, operator index in
+    /// the page's joined stream)`. A line joins runs painted at different times, so anything
+    /// painted after this position may lie on top of part of it.
     /// (Lines from `text_lines` never come from form XObjects, so `stream` is always a
     /// page content-stream index and `ops` are indices into the joined operator list.)
-    pub fn paint_pos(&self) -> (usize, usize) {
-        (self.stream, self.ops.iter().max().copied().unwrap_or(0))
+    pub fn first_paint_pos(&self) -> (usize, usize) {
+        (self.stream, self.ops.iter().min().copied().unwrap_or(0))
     }
 
     fn rotation(&self) -> f64 {

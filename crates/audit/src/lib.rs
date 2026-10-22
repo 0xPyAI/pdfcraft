@@ -143,11 +143,13 @@ pub fn audit_redactions(doc: &Document) -> Result<Vec<AuditFinding>, AuditError>
 }
 
 /// A filled rectangle is a faux-redaction cover for a text line iff it was painted strictly
-/// after the line, overlaps it substantially, and is dark enough against the line's color to
-/// make the text unreadable. Light covers (table shading, highlights) over dark text fail the
-/// contrast check and are not flagged.
+/// after the start of the line, overlaps it substantially, and is dark enough against the line's
+/// color to make the text unreadable. Light covers (table shading, highlights) over dark text fail
+/// the contrast check and are not flagged. A line can join runs painted before and after the
+/// cover; the later ones are drawn on it in the same low-contrast color, so they are unreadable
+/// too.
 fn is_cover(rect: &cover::FilledRect, line: &TextLine) -> bool {
-    rect.pos > line.paint_pos() && covers(&rect.rect, line) && contrast(line.color, rect.rgb) < COVER_CONTRAST
+    rect.pos > line.first_paint_pos() && covers(&rect.rect, line) && contrast(line.color, rect.rgb) < COVER_CONTRAST
 }
 
 /// Does `cover` hide a substantial part of what `line` draws? Three ways, any is enough:
