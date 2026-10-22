@@ -6366,3 +6366,39 @@ fn added_text_is_wrapped_once_per_write() {
     let calls = added::WRAP_CALLS.with(std::cell::Cell::get);
     assert!(calls <= 4, "the text was wrapped {calls} times for 40 lines");
 }
+
+/// A field tree whose every node lists its child twice is pruned in work linear in its nodes, not
+/// in its paths, and a node listing itself is visited once.
+#[test]
+fn flattening_prunes_a_field_tree_with_repeated_kids_once_per_node() {
+    let levels = 16;
+    let page = stream("", " ");
+    // 5: the flattened widget; 6…: the chain; then the hidden widget at its end, on the page.
+    let leaf = 6 + levels;
+    let fields = format!("<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R 6 0 R {} 0 R] >> >>", leaf + 2);
+    let annots = format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 4 0 R /Annots [5 0 R {leaf} 0 R] >>");
+    let mut objs: Vec<String> = vec![
+        fields,
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+        annots,
+        page,
+        format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T (shown) /Rect [10 10 150 40] /F 4 /AP << /N {} 0 R >> >>", leaf + 1),
+    ];
+    for i in 0..levels {
+        let next = 7 + i;
+        objs.push(format!("<< /T (n{i}) /Kids [{next} 0 R {next} 0 R] >>"));
+    }
+    objs.push("<< /Type /Annot /Subtype /Widget /FT /Tx /T (hidden) /Rect [10 90 150 120] /F 2 >>".into());
+    objs.push("<< /Type /XObject /Subtype /Form /BBox [0 0 140 30] /Length 0 >>\nstream\n\nendstream".into());
+    objs.push(format!("<< /T (loop) /Kids [{} 0 R] >>", leaf + 2));
+    let objs: Vec<&str> = objs.iter().map(String::as_str).collect();
+    let mut doc = build(&objs);
+    flatten::KEEP_CALLS.with(|c| c.set(0));
+    assert_eq!(flatten(&mut doc, &[0], false, true).unwrap(), 1);
+    let calls = flatten::KEEP_CALLS.with(std::cell::Cell::get);
+    assert!(calls <= 2 * (levels + 4), "{calls} field-tree visits");
+    let root = doc.root().unwrap();
+    let af = doc.resolve(doc.get(root).as_dict().unwrap().get(b"AcroForm").unwrap());
+    let left = doc.resolve(af.as_dict().unwrap().get(b"Fields").unwrap()).as_array().unwrap().len();
+    assert_eq!(left, 2, "the chain to the hidden widget and the self-listing node stay");
+}
