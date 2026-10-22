@@ -19,8 +19,8 @@ mod std14;
 mod std14_metrics;
 pub use craft::{
     CRAFT_FONTS, CraftFont, SHIPPORI_MINCHO, document_arabic_font, document_hebrew_font, document_japanese_font, document_japanese_font_for_style,
-    document_japanese_fonts_for_style, document_thai_font, ui_arabic_fonts, ui_chinese_fonts, ui_cjk_fonts, ui_hebrew_fonts, ui_japanese_fonts,
-    ui_telugu_fonts, ui_thai_fonts,
+    document_japanese_fonts_for_style, document_latin_fonts, document_thai_font, ui_arabic_fonts, ui_chinese_fonts, ui_cjk_fonts, ui_hebrew_fonts,
+    ui_japanese_fonts, ui_telugu_fonts, ui_thai_fonts,
 };
 pub use script::{
     GlyphError, GlyphOutline, INTER_REGULAR, MAX_SIGNATURE_CHARS, ScriptOutline, japanese_glyph, japanese_glyph_from, script_missing, script_outline,
@@ -69,7 +69,7 @@ fn is_wide(c: char) -> bool {
     )
 }
 
-/// Greedy line breaking within `width` points (paragraphs split on newlines; words longer
+/// Greedy line breaking within `width` points (paragraphs split on line breaks, where CRLF counts as one; words longer
 /// than a line are broken by character).
 pub fn wrap(text: &str, size: f64, width: f64) -> Vec<String> {
     wrap_with(text, size, width, helvetica_width)
@@ -78,7 +78,8 @@ pub fn wrap(text: &str, size: f64, width: f64) -> Vec<String> {
 /// [`wrap`], measuring with `measure` (for example [`cjk_width`]).
 pub fn wrap_with(text: &str, size: f64, width: f64, measure: impl Fn(&str, f64) -> f64) -> Vec<String> {
     let mut lines = Vec::new();
-    for para in text.split(['\n', '\r']) {
+    // A CRLF pair is one break, a lone CR or LF is one break each.
+    for para in text.replace("\r\n", "\n").split(['\n', '\r']) {
         let mut line = String::new();
         // No word is on the line yet; an empty word (a leading space) still starts it.
         let mut fresh = true;
@@ -275,6 +276,15 @@ mod tests {
         let broken = wrap("  abcdefghijklmnopqrstuvwxyz", 11.0, 40.0);
         assert!(broken.len() > 1 && broken.iter().all(|l| !l.trim().is_empty()), "{broken:?}");
         assert_eq!(broken, wrap(" abcdefghijklmnopqrstuvwxyz", 11.0, 40.0));
+    }
+
+    #[test]
+    fn crlf_is_one_line_break() {
+        assert_eq!(wrap("a\r\nb", 12.0, 100.0), ["a", "b"]);
+        assert_eq!(wrap("a\rb", 12.0, 100.0), ["a", "b"]);
+        assert_eq!(wrap("a\nb", 12.0, 100.0), ["a", "b"]);
+        assert_eq!(wrap("a\r\n\r\nb", 12.0, 100.0), ["a", "", "b"]);
+        assert_eq!(wrap("a\n\rb", 12.0, 100.0), ["a", "", "b"]);
     }
 
     #[test]

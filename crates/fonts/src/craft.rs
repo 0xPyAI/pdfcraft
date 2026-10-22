@@ -138,6 +138,24 @@ pub fn document_japanese_fonts_for_style(serif: bool, bold: bool) -> Vec<&'stati
     document_faces(CRAFT_FONTS, serif, bold)
 }
 
+/// The scripts the bundled Inter faces are for.
+static LATIN_SCRIPTS: &[&str] = &["Latn", "Cyrl", "Grek"];
+
+/// The bundled Latin document faces (`assets/fonts`, OFL): every build has them, unlike
+/// craft-fonts. The Japanese faces carry only part of the Cyrillic (`привет` yes, Uzbek `қизил`
+/// and Kazakh `әже` no), so letters like қ, ғ, ҳ, ә, ө, ү, ұ and һ have no face at all without
+/// these.
+static INTER_REGULAR_FACE: CraftFont =
+    CraftFont { family: "Inter", style: "Regular", scripts: LATIN_SCRIPTS, bytes: include_bytes!("../../../assets/fonts/Inter-Regular.ttf") };
+static INTER_SEMIBOLD_FACE: CraftFont =
+    CraftFont { family: "Inter", style: "SemiBold", scripts: LATIN_SCRIPTS, bytes: include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf") };
+
+/// The face for Latin, Greek and Cyrillic text written into PDFs: the bundled Inter Regular, or
+/// SemiBold for bold text. Present in every build, crafted ones included.
+pub fn document_latin_fonts(bold: bool) -> Vec<&'static CraftFont> {
+    vec![if bold { &INTER_SEMIBOLD_FACE } else { &INTER_REGULAR_FACE }]
+}
+
 fn document_face(faces: &[CraftFont], serif: bool, bold: bool) -> Option<&CraftFont> {
     document_faces(faces, serif, bold).into_iter().next()
 }
@@ -294,6 +312,20 @@ mod tests {
         assert!(hebrew_face(&faces[..1], false).is_none());
         assert_eq!(ui_hebrew_fonts().len(), CRAFT_FONTS.iter().filter(|f| f.covers("Hebr")).count());
         assert_eq!(document_hebrew_font(false).is_some(), CRAFT_FONTS.iter().any(|f| f.covers("Hebr")));
+    }
+
+    /// The bundled Inter faces carry the Latin, Greek and Cyrillic letters the craft-fonts faces
+    /// lack: Uzbek қ ғ ҳ, Kazakh ә ө ү ұ һ, Ukrainian ї є ґ, Greek. This one runs with or without
+    /// CRAFT_FONTS_DIR (#2593).
+    #[test]
+    fn latin_faces_carry_the_letters_the_japanese_faces_lack() {
+        for face in document_latin_fonts(false).into_iter().chain(document_latin_fonts(true)) {
+            for ch in ['қ', 'ғ', 'ҳ', 'ә', 'ө', 'ү', 'ұ', 'һ', 'ї', 'є', 'ґ', 'ё', 'α', 'β', 'γ', '≥', '≈'] {
+                assert!(crate::japanese_glyph_from(face, ch).is_ok(), "{} has no {ch}", face.name());
+            }
+        }
+        assert_eq!(document_latin_fonts(false)[0].style, "Regular");
+        assert_eq!(document_latin_fonts(true)[0].style, "SemiBold");
     }
 
     #[test]

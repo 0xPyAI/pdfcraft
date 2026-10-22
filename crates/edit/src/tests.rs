@@ -1354,6 +1354,44 @@ fn cyrillic_in_a_serif_line_falls_back_to_a_face_that_has_it() {
     }
 }
 
+/// #2593: the craft-fonts faces are Japanese, and part of the Cyrillic (Uzbek қ ғ ҳ, Kazakh ә ө ү
+/// ұ һ) is in none of them. The bundled Inter face has it, so the replacement is written instead of
+/// being refused, and a build without craft-fonts can do it too.
+#[test]
+fn uzbek_and_kazakh_cyrillic_use_the_bundled_latin_face() {
+    for replacement in ["The quick brown fox jumps over the lazy dog қизил", "әже", "ўзбекча ғўза"] {
+        for paragraph in [false, true] {
+            let mut doc = text_page("BT /F2 12 Tf 72 700 Td (ab) Tj ET");
+            let edit =
+                if paragraph { text::replace_block(&mut doc, 0, 0, replacement) } else { text::replace_line(&mut doc, 0, 0, replacement) }.unwrap();
+            assert_eq!(edit.substituted.as_deref(), Some("Inter Type3"), "{replacement}: {edit:?}");
+            let content = String::from_utf8_lossy(&page_content_bytes(&doc, 0)).into_owned();
+            assert!(content.contains("/PCLat"), "{replacement}: {content}");
+            let lines = text::text_lines(&reopen(&doc), 0).unwrap();
+            assert_eq!(lines[0].text, replacement);
+            assert_eq!(lines[0].base_font, "Inter-Regular", "the generated font reports the face it drew");
+        }
+    }
+}
+
+/// The Japanese faces keep first refusal for the Cyrillic they do carry, so Russian text keeps the
+/// face it was drawn with before the bundled Latin face was added.
+#[test]
+fn cyrillic_the_japanese_faces_carry_keeps_them() {
+    if without_craft_fonts("cyrillic_the_japanese_faces_carry_keeps_them") {
+        return;
+    }
+    let face = pdfcraft_fonts::document_japanese_font_for_style(false, false).unwrap();
+    if pdfcraft_fonts::japanese_glyph_from(face, 'ф').is_err() {
+        eprintln!("skipping: the Japanese fallback face has no Cyrillic");
+        return;
+    }
+    let mut doc = text_page("BT /F2 12 Tf 72 700 Td (ab) Tj ET");
+    let edit = text::replace_line(&mut doc, 0, 0, "Привет, world").unwrap();
+    let expected = format!("{} Type3", face.family);
+    assert_eq!(edit.substituted.as_deref(), Some(expected.as_str()));
+}
+
 #[test]
 fn japanese_paragraph_uses_unicode_type3_fallback() {
     if without_craft_fonts("japanese_paragraph_uses_unicode_type3_fallback") {
@@ -1376,6 +1414,87 @@ fn covered_japanese_chars(n: usize) -> String {
         .filter(|ch| faces.iter().all(|face| pdfcraft_fonts::japanese_glyph_from(face, *ch).is_ok()))
         .take(n)
         .collect()
+}
+
+#[test]
+fn fallback_fonts_nothing_shows_any_more_leave_with_a_rewrite() {
+    // `PCJp1` is selected by the page, `PCJp2` only by a form that uses the page's resources, `PCJp`
+    // by nothing; `PCJpOther` is a Type 3 font of the file's own that only shares the prefix.
+    let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Some text) Tj ET BT /PCJp1 12 Tf ET q /Fm0 Do Q");
+    let generated = |doc: &mut Document, name: &str| {
+        doc.add(Object::Dict(Dict::from_iter([
+            (b"Type".to_vec(), Object::name("Font")),
+            (b"Subtype".to_vec(), Object::name("Type3")),
+            (b"Name".to_vec(), Object::name(name)),
+        ])))
+    };
+    let (unused, page_shown, form_shown, own) =
+        (generated(&mut doc, "PCJapanese"), generated(&mut doc, "PCJapanese"), generated(&mut doc, "PCJapanese"), generated(&mut doc, "Other"));
+    let form = doc.add(Object::Stream(Stream::from_raw(
+        Dict::from_iter([(b"Subtype".to_vec(), Object::name("Form")), (b"BBox".to_vec(), Object::Array(vec![Object::Int(0); 4]))]),
+        b"BT /PCJp2 12 Tf ET".to_vec(),
+    )));
+    let p = pdfcraft_model::pages(&doc)[0].obj;
+    let mut fonts = Dict::from_iter([(b"F1".to_vec(), Object::Ref(pdfcraft_cos::ObjRef::new(5, 0)))]);
+    for (name, font) in [("PCJp", unused), ("PCJp1", page_shown), ("PCJp2", form_shown), ("PCJpOther", own)] {
+        fonts.set(name.as_bytes().to_vec(), Object::Ref(font));
+    }
+    let resources = Dict::from_iter([
+        (b"Font".to_vec(), Object::Dict(fonts)),
+        (b"XObject".to_vec(), Object::Dict(Dict::from_iter([(b"Fm0".to_vec(), Object::Ref(form))]))),
+    ]);
+    doc.update_dict(p, |d| d.set(b"Resources".to_vec(), Object::Dict(resources.clone()))).unwrap();
+    let names = |doc: &Document| {
+        let page = pdfcraft_model::pages(doc).remove(0);
+        let res = doc.resolve(page.dict.get(b"Resources").unwrap()).as_dict().unwrap().clone();
+        let mut names: Vec<String> =
+            doc.resolve(res.get(b"Font").unwrap()).as_dict().unwrap().iter().map(|(n, _)| String::from_utf8_lossy(n).into_owned()).collect();
+        names.sort();
+        names
+    };
+    // A rewrite that doesn't reach the fallback fonts still drops the one nothing shows.
+    text::rewrite_block(&mut doc, 0, 0, Some("Other text"), &text::BlockStyle::default()).unwrap();
+    assert_eq!(names(&reopen(&doc)), ["F1", "PCJp1", "PCJp2", "PCJpOther"]);
+
+    // A form using the page's resources whose content can't be read might show any of them: they
+    // all stay.
+    let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Some text) Tj ET q /Fm0 Do Q");
+    let unused = generated(&mut doc, "PCJapanese");
+    let broken = doc.add(Object::Stream(Stream::from_raw(
+        Dict::from_iter([
+            (b"Subtype".to_vec(), Object::name("Form")),
+            (b"BBox".to_vec(), Object::Array(vec![Object::Int(0); 4])),
+            (b"Filter".to_vec(), Object::name("FlateDecode")),
+        ]),
+        b"not deflate data".to_vec(),
+    )));
+    let p = pdfcraft_model::pages(&doc)[0].obj;
+    let fonts = Dict::from_iter([(b"F1".to_vec(), Object::Ref(pdfcraft_cos::ObjRef::new(5, 0))), (b"PCJp".to_vec(), Object::Ref(unused))]);
+    let resources = Dict::from_iter([
+        (b"Font".to_vec(), Object::Dict(fonts)),
+        (b"XObject".to_vec(), Object::Dict(Dict::from_iter([(b"Fm0".to_vec(), Object::Ref(broken))]))),
+    ]);
+    doc.update_dict(p, |d| d.set(b"Resources".to_vec(), Object::Dict(resources))).unwrap();
+    text::rewrite_block(&mut doc, 0, 0, Some("Other text"), &text::BlockStyle::default()).unwrap();
+    assert_eq!(names(&doc), ["F1", "PCJp"]);
+}
+
+#[test]
+fn rewriting_japanese_twice_keeps_only_the_fallback_fonts_it_shows() {
+    let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Hello) Tj ET");
+    if text::rewrite_block(&mut doc, 0, 0, Some("日本語の文章"), &text::BlockStyle::default()).is_err() {
+        assert!(pdfcraft_fonts::document_japanese_font().is_none());
+        eprintln!("built without a craft-fonts Japanese face: the Type 3 path is checked with CRAFT_FONTS_DIR");
+        return;
+    }
+    let first: Vec<_> = fallback_fonts(&doc).into_iter().map(|(_, f)| f).collect();
+    text::rewrite_block(&mut doc, 0, 0, Some("別の文章です"), &text::BlockStyle::default()).unwrap();
+    let doc = reopen(&doc);
+    let after = fallback_fonts(&doc);
+    assert!(!after.is_empty());
+    assert!(after.iter().all(|(_, f)| !first.contains(f)), "the first rewrite's fonts are gone");
+    let content = String::from_utf8_lossy(&page_content_bytes(&doc, 0)).into_owned();
+    assert!(after.iter().all(|(name, _)| content.contains(&format!("/{} ", String::from_utf8_lossy(name)))), "{content}");
 }
 
 /// The page's Type 3 fallback fonts (`PCJp`, `PCJp1`, ...) by resource name.
@@ -5128,15 +5247,17 @@ fn a_shaped_run_is_one_text_object_with_each_glyph_where_shaping_put_it() {
 #[test]
 fn a_subset_program_is_not_trusted_for_new_characters_and_the_error_names_the_character() {
     let mut doc = embedded_program_page("BT /F1 12 Tf 72 700 Td (Stable text) Tj ET", "ABCDEF+Inter-Regular");
+    // The subset's own program is not trusted for a character: the bundled Inter face draws it
+    // through a generated font instead (the subset may map a code whose outline was dropped).
+    let edit = text::rewrite_block(&mut doc, 0, 0, Some("Stable tőxt"), &text::BlockStyle::default()).unwrap();
+    assert_eq!(edit.substituted.as_deref(), Some("Inter Type3"));
+    assert_eq!(text::text_blocks(&reopen(&doc), 0).unwrap()[0].editor_text, "Stable tőxt");
+    // A character no fallback face has is refused, named, and left as it was.
+    let mut doc = embedded_program_page("BT /F1 12 Tf 72 700 Td (Stable text) Tj ET", "ABCDEF+Inter-Regular");
     let before = page_content_bytes(&doc, 0);
-    let result = text::rewrite_block(&mut doc, 0, 0, Some("Stable tőxt"), &text::BlockStyle::default());
-    if pdfcraft_fonts::document_japanese_font().is_some() {
-        eprintln!("built with craft-fonts: the fallback font draws the new character");
-        assert!(result.is_ok(), "{result:?}");
-        return;
-    }
+    let result = text::rewrite_block(&mut doc, 0, 0, Some("Stable กtext"), &text::BlockStyle::default());
     let Err(EditError::Invalid(msg)) = result else { panic!("expected a clear error, got {result:?}") };
-    assert!(msg.contains("ő (U+0151)") && msg.contains("Load font") && !msg.contains("Japanese"), "{msg}");
+    assert!(msg.contains("ก (U+0E01)") && msg.contains("Load font") && !msg.contains("Japanese"), "{msg}");
     assert_eq!(page_content_bytes(&doc, 0), before);
 }
 

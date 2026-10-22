@@ -4972,6 +4972,71 @@ trailer << /Root 1 0 R >>
         assert_eq!((last.width, last.height), (50, 100), "the last page is read from its own offset");
     }
 
+    /// #2946: ScanSoft PDF Create! writes the `post` table version of every font it embeds with
+    /// its 16-bit halves swapped (`00 00 00 03` for 3.0). Such a font must still be used, drawing
+    /// exactly as with a correct version; a version that is neither (9.0) is still refused and
+    /// drawn with a substitute, as before.
+    #[test]
+    fn a_font_whose_post_version_has_swapped_halves_is_still_used() {
+        let font = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
+        // The `post` table's offset, from the table directory.
+        let tables = usize::from(u16::from_be_bytes([font[4], font[5]]));
+        let post = (0..tables)
+            .map(|i| &font[12 + 16 * i..28 + 16 * i])
+            .find(|e| &e[..4] == b"post")
+            .map(|e| u32::from_be_bytes([e[8], e[9], e[10], e[11]]) as usize)
+            .expect("the test font has a post table");
+        let render_with = |version: [u8; 4], encoding: &str| -> Vec<u8> {
+            let mut program = font.to_vec();
+            program[post..post + 4].copy_from_slice(&version);
+            let content = b"BT /F1 28 Tf 10 40 Td (Hamburg 0123) Tj ET";
+            let widths = vec!["600"; 95].join(" ");
+            let objects: Vec<Vec<u8>> = vec![
+                b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+                b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+                b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 80] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_vec(),
+                [format!("<< /Length {} >>\nstream\n", content.len()).into_bytes(), content.to_vec(), b"\nendstream".to_vec()].concat(),
+                format!("<< /Type /Font /Subtype /TrueType /BaseFont /JetBrainsMono-Regular /FirstChar 32 /LastChar 126 /Widths [{widths}] /FontDescriptor 6 0 R /Encoding {encoding} >>").into_bytes(),
+                b"<< /Type /FontDescriptor /FontName /JetBrainsMono-Regular /Flags 32 /FontBBox [-1000 -300 1000 1000] /ItalicAngle 0 /Ascent 1020 /Descent -300 /CapHeight 730 /StemV 80 /FontFile2 7 0 R >>".to_vec(),
+                [format!("<< /Length {} >>\nstream\n", program.len()).into_bytes(), program, b"\nendstream".to_vec()].concat(),
+            ];
+            let mut pdf = b"%PDF-1.7\n".to_vec();
+            let mut offsets = Vec::new();
+            for (i, o) in objects.iter().enumerate() {
+                offsets.push(pdf.len());
+                pdf.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+                pdf.extend_from_slice(o);
+                pdf.extend_from_slice(b"\nendobj\n");
+            }
+            let xref = pdf.len();
+            pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+            for o in offsets {
+                pdf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+            }
+            pdf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+            let page = PageRenderer::new(Arc::new(pdf), RenderConfig::default()).render(RenderRequest {
+                page: 0,
+                kind: RequestKind::Pixels,
+                tile: None,
+                scale: 2.0,
+                tag: 0,
+                preview: false,
+            });
+            assert!(page.error.is_none(), "{:?}", page.error);
+            page.rgba.to_vec()
+        };
+        let render = |version: [u8; 4]| render_with(version, "/WinAnsiEncoding");
+        let correct = render([0, 3, 0, 0]);
+        assert_eq!(render([0, 0, 0, 3]), correct, "3.0 with swapped halves draws with the embedded font");
+        assert_eq!(render([0, 0, 0, 2]), render([0, 2, 0, 0]), "2.0 with swapped halves too");
+        assert_ne!(render([0, 9, 0, 0]), correct, "an unknown version is still refused");
+        // A /Differences name only the font's own post table knows (W's alternate, `W.cv07`)
+        // is found through a swapped 2.0 table too (review on #2949).
+        let alternate = |version: [u8; 4]| render_with(version, "<< /BaseEncoding /WinAnsiEncoding /Differences [72 /W.cv07] >>");
+        assert_ne!(alternate([0, 2, 0, 0]), render([0, 2, 0, 0]), "the alternate W draws instead of H");
+        assert_eq!(alternate([0, 0, 0, 2]), alternate([0, 2, 0, 0]), "and also with swapped halves");
+    }
+
     /// A page whose content expands far beyond its compressed stream stops at the expansion budget,
     /// which is 64 times the compressed size and at least `MAX_DECODED_STREAM`, and the page says so.
     #[test]
@@ -6246,6 +6311,82 @@ trailer << /Root 1 0 R >>
         }
     }
 
+    /// Comma-below letters in non-embedded standard fonts (vendored hayro-interpret patch to
+    /// `StandardKind`). The stand-ins have neither these letters nor a `commaaccent` to build
+    /// them from, so Romanian ș Ș (a form laid out from its XFA template names `/scommaaccent`)
+    /// and Latvian ķ ļ ņ ŗ Ģ drew nothing, and ț Ț drew a cedilla. Each is now its letter with a
+    /// comma under it, apart from the letter and inside the descender, whichever name the font
+    /// gives it: the glyph list calls the Latvian letters `/Kcedilla`…, and `uni` names say only
+    /// the code point.
+    #[test]
+    fn comma_below_letters_in_standard_fonts_draw_a_comma_under_the_letter() {
+        let pairs = [
+            ("s", "uni0219"),
+            ("t", "uni021B"),
+            ("T", "uni021A"),
+            ("K", "uni0136"),
+            ("k", "kcedilla"),
+            ("G", "uni0122"),
+            ("G", "Gcedilla"),
+            ("R", "uni0156"),
+            ("s", "scommaaccent"),
+            ("S", "Scommaaccent"),
+            ("t", "tcommaaccent"),
+            ("T", "Tcommaaccent"),
+            ("k", "kcommaaccent"),
+            ("K", "Kcommaaccent"),
+            ("l", "lcommaaccent"),
+            ("L", "Lcommaaccent"),
+            ("n", "ncommaaccent"),
+            ("N", "Ncommaaccent"),
+            ("r", "rcommaaccent"),
+            ("R", "Rcommaaccent"),
+            ("G", "Gcommaaccent"),
+        ];
+        let letters: Vec<&str> = pairs.iter().flat_map(|(base, accented)| [*base, *accented]).collect();
+        let (size, baseline) = (40u32, 60u32);
+        for font in ["Helvetica", "Times-Roman", "Courier", "Helvetica-BoldOblique"] {
+            let mut content = String::new();
+            for i in 0..letters.len() {
+                content.push_str(&format!("BT /F1 {size} Tf {} {} Td <{:02X}> Tj ET\n", 10 + 40 * i, 80 - baseline, 1 + i));
+            }
+            let differences = letters.iter().map(|n| format!("/{n}")).collect::<Vec<_>>().join(" ");
+            let pdf = format!(
+                "%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 {} 80] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}endstream endobj
+5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /{font}
+  /Encoding << /Type /Encoding /BaseEncoding /WinAnsiEncoding /Differences [1 {differences}] >> >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+                20 + 40 * letters.len(),
+                content.len()
+            );
+            let mut r = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default());
+            let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+            assert!(p.error.is_none(), "{font}: {:?}", p.error);
+            // The rows (y down) of the i-th letter that have dark pixels.
+            let ink_rows = |i: u32| -> Vec<u32> {
+                (0..p.height).filter(|y| ((8 + 40 * i)..(48 + 40 * i).min(p.width)).any(|x| p.rgba[((y * p.width + x) * 4) as usize] < 128)).collect()
+            };
+            for (pair, (_, name)) in pairs.iter().enumerate() {
+                let (base, accented) = (ink_rows(2 * pair as u32), ink_rows(2 * pair as u32 + 1));
+                let (Some(&base_bottom), Some(&bottom)) = (base.last(), accented.last()) else {
+                    panic!("{font} {name}: draws nothing ({} rows of its base letter)", base.len());
+                };
+                assert!(bottom > base_bottom + 2, "{font} {name}: a mark hangs below the letter ({bottom} vs {base_bottom})");
+                assert!(
+                    (base_bottom + 1..bottom).any(|y| !accented.contains(&y)),
+                    "{font} {name}: the mark is apart from the letter, a comma and not a cedilla"
+                );
+                assert!(bottom < baseline + size * 3 / 10, "{font} {name}: the comma stays within the descender ({bottom})");
+            }
+        }
+    }
+
     // Contributor-original classic-xref vector fixtures; no embedded or external assets.
     fn raw_crop_unit_pdf(unit: f64, rotation: i32, crop: [f64; 4], marker: Option<[f64; 4]>) -> Vec<u8> {
         let bounds = crop.map(|n| n.to_string()).join(" ");
@@ -7484,6 +7625,61 @@ trailer << /Root 1 0 R >>
             }
             // 日本 at 40 pt covers a few hundred dark pixels; a blank or missing-glyph run doesn't.
             assert!(inked > 300, "{base_font}: 日本 is drawn ({inked} dark pixels)");
+        }
+    }
+
+    // #3601: UniJIS-UCS2-HW-H maps code 0x0020 to CID 231 / U+2002. The PDF's
+    // explicit 500-unit width must win over the substitute's ordinary-space width.
+    fn japanese_spacing_pdf(content: &str, widths: &str) -> Vec<u8> {
+        format!(
+            "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 180 60] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /Font /Subtype /Type0 /BaseFont /MS-Mincho /Encoding /UniJIS-UCS2-HW-H /DescendantFonts [6 0 R] >> endobj
+6 0 obj << /Type /Font /Subtype /CIDFontType2 /BaseFont /MS-Mincho /CIDSystemInfo << /Registry (Adobe) /Ordering (Japan1) /Supplement 4 >>
+  /FontDescriptor 7 0 R /DW 1000 {widths} >> endobj
+7 0 obj << /Type /FontDescriptor /FontName /MS-Mincho /Flags 6 /FontBBox [0 -141 1000 859] /ItalicAngle 0 /Ascent 859 /Descent -141 /CapHeight 700 /StemV 80 >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+            content.len()
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn japanese_substitute_missing_spaces_draw_no_ink() {
+        if pdfcraft_fonts::document_japanese_font().is_none() {
+            eprintln!("built without craft-fonts (CRAFT_FONTS_DIR unset): no Japanese face to check");
+            return;
+        }
+        let out = render_first_page(japanese_spacing_pdf("BT /F1 20 Tf 10 30 Td <002000200020> Tj ET", "/W [231 [500]]"));
+        assert!(out.rgba.as_chunks::<4>().0.iter().all(|pixel| *pixel == [255; 4]), "spacing glyphs must leave the page white");
+    }
+
+    #[test]
+    fn japanese_substitute_spaces_keep_pdf_widths_and_unicode() {
+        if pdfcraft_fonts::document_japanese_font().is_none() {
+            eprintln!("built without craft-fonts (CRAFT_FONTS_DIR unset): no Japanese face to check");
+            return;
+        }
+        for (widths, second_x) in [("/W [231 [500]]", 50), ("", 70)] {
+            let pdf = japanese_spacing_pdf("BT /F1 20 Tf 10 30 Td <65E500200020672C> Tj ET", widths);
+            let out = render_first_page(pdf.clone());
+            // 日 advances 20 pt; each space advances 10 pt (/W) or 20 pt (/DW).
+            // A second independent text matrix pins 本 at the expected original PDF position.
+            let reference = format!("BT /F1 20 Tf 1 0 0 1 10 30 Tm <65E5> Tj 1 0 0 1 {second_x} 30 Tm <672C> Tj ET");
+            let expected = render_first_page(japanese_spacing_pdf(&reference, widths));
+            assert!(expected.rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[0] < 128), "the Japanese control must draw ink");
+            assert!(out.rgba.as_ref() == expected.rgba.as_ref(), "spaces must be blank without changing {widths:?} advances");
+            let mut renderer = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
+            let text = renderer.render(RenderRequest { page: 0, kind: RequestKind::Text, ..Default::default() });
+            assert!(text.error.is_none(), "{:?}", text.error);
+            let glyphs: String = text.text.unwrap().glyphs.iter().map(|glyph| glyph.text.as_str()).collect();
+            assert_eq!(glyphs, "日\u{2002}\u{2002}本", "glyph substitution must not rewrite Unicode");
         }
     }
 
