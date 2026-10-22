@@ -173,7 +173,6 @@ impl Automation {
         let only = a.opt_int("page")?.map(|p| (p.max(1) - 1) as usize);
         let all = self.comments(a)?;
         let view = |c: &Annotation| -> Value {
-            let p = &doc.info.pages[c.page.min(doc.info.pages.len().saturating_sub(1))];
             json!({
                 "id": c.name,
                 "page": c.page + 1,
@@ -182,7 +181,8 @@ impl Automation {
                 "author": c.author,
                 "contents": c.contents,
                 "modified": c.modified,
-                "rect": rect_to_view(p, c.rect),
+                // Unchanged on a page the viewer could not read (#2660), as `doc_info` reports it.
+                "rect": crate::view_rect(&doc.info, c.page, c.rect),
                 "color": c.color.map(hex),
             })
         };
