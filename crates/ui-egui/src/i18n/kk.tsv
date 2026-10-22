@@ -1305,6 +1305,8 @@
 	This document has no layers.	Бұл құжатта қабаттар жоқ.
 	This document has no attachments.	Бұл құжатта тіркемелер жоқ.
 	Hide layer	Қабатты жасыру
+	Layer options	Қабат параметрлері
+	Reset to Initial Visibility	Бастапқы көрінуді қалпына келтіру
 	Show layer	Қабатты көрсету
 	Set layer visibility	Қабаттың көрінісін орнату
 	on page {label}	{label} бетінде
@@ -2310,6 +2312,7 @@ key	Space	Бос орын
 	Printer paper and scaling may differ. Check driver settings.	Принтер қағазы мен масштабы өзгеше болуы мүмкін. Драйвер параметрлерін тексеріңіз.
 	Drawing scale changes. Use Actual size for full-scale plans.	Сызба масштабы өзгереді. Толық масштабты жоспарлар үшін Нақты өлшемді пайдаланыңыз.
 	Reload documents when their files change on disk	Дискідегі файлдары өзгергенде құжаттарды қайта жүктеу
+	Always use my default zoom and page layout	Әрқашан әдепкі масштаб пен бет орналасуын пайдалану
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Бұл файл дискіде өзгертілді. «Қайта жүктеу» жаңа нұсқаны көрсетіп, сақталмаған өзгерістеріңізді тастайды; «Сақтау» оны осы нұсқамен алмастырады.
 	Reload	Қайта жүктеу
 	Couldn't reload {name}: {e}	{name} қайта жүктеу мүмкін болмады: {e}
@@ -2479,3 +2482,6 @@ animation effects	Off	Өшірулі
 	Paragraph spacing	Абзац аралығы
 	Less	Азырақ
 	Other options	Басқа параметрлер
+	Thumbnail size	Нобай өлшемі
+	Smaller thumbnails	Кішірек нобайлар
+	Larger thumbnails	Үлкенірек нобайлар

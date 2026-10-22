@@ -59,6 +59,44 @@ fn compare_two_versions() {
     assert_eq!(h.state().session.get(h.state().active_ids().unwrap().1).unwrap().name, "Compare Report.pdf");
 }
 
+/// Two versions compared side by side (old `v1.pdf` left, new `v2.pdf` right).
+fn side_by_side() -> Harness<'static, PdfCraftApp> {
+    let s = Session::new();
+    let v1 = s.create_from_text("t", "Delivery within five days. Returns accepted.").unwrap().to_vec();
+    let v2 = s.create_from_text("t", "Delivery within three days. Returns accepted for a week.").unwrap().to_vec();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("v1.pdf", None, v1.clone()).unwrap();
+        app.open_bytes("v2.pdf", None, v2.clone()).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("doc.compare"));
+    h.run_steps(2);
+    h.get_by_label("Compare").click();
+    h.run_steps(3);
+    assert!(h.state().compare.as_ref().unwrap().side_by_side);
+    h
+}
+
+/// #3915: a half that closes its own tab while it draws (its snapshot bar's Close sets
+/// `close_requested`) must not leave the frame indexing the closed tab. Either half.
+#[test]
+fn closing_either_half_of_a_side_by_side_comparison_keeps_the_app_running() {
+    for (half, name) in [(1, "v2.pdf"), (0, "v1.pdf")] {
+        let mut h = side_by_side();
+        let c = h.state().compare.as_ref().unwrap();
+        let id = if half == 1 { c.new } else { c.old };
+        let i = h.state().views.iter().position(|v| v.id == id).unwrap();
+        h.state_mut().views[i].close_requested = true;
+        h.run_steps(3);
+        let s = h.state();
+        assert_eq!(s.views.len(), 1, "the {name} tab closed");
+        assert!(s.views.iter().all(|v| v.id != id));
+    }
+}
+
 /// Writes a screenshot of the Compare panel when PDFCRAFT_SHOT is set (for review).
 #[test]
 fn compare_panel_screenshot() {

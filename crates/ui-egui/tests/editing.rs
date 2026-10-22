@@ -8,7 +8,7 @@ use egui::{Key, Modifiers};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use pdfcraft_render::{PageRenderer, RenderRequest, RequestKind};
-use pdfcraft_ui_egui::{CloseRequest, Dialog, PdfCraftApp};
+use pdfcraft_ui_egui::{CloseRequest, Dialog, OpenOutcome, PdfCraftApp};
 
 /// An `n`-page document with a proper xref table; page `i` shows "Page i+1".
 fn fixture(n: usize) -> Vec<u8> {
@@ -632,6 +632,90 @@ fn the_save_prompt_answers_to_the_keyboard() {
     let _ = std::fs::remove_file(out);
 }
 
+/// An organize harness with a dirty document and the "Save changes?" prompt open.
+fn dirty_prompt() -> Harness<'static, PdfCraftApp> {
+    let mut h = organize(2);
+    h.get_by_label("Rotate clockwise").click();
+    h.run_steps(3);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::W);
+    h.run_steps(3);
+    h.get_by_label_contains("Save changes to “doc.pdf”");
+    h
+}
+
+/// The prompt has Save chosen on arrival; `keys` then move the choice and Enter or Space presses it.
+fn press_after(keys: &[(Modifiers, Key)], activate: Key) -> Harness<'static, PdfCraftApp> {
+    let mut h = dirty_prompt();
+    for (m, k) in keys {
+        h.key_press_modifiers(*m, *k);
+        h.run_steps(2);
+    }
+    h.key_press(activate);
+    h.run_steps(3);
+    h
+}
+
+#[test]
+fn the_save_prompt_moves_between_buttons_with_the_keyboard() {
+    let none = Modifiers::NONE;
+    // Left from Save is Cancel: Enter or Space presses it, so nothing closes and nothing saves.
+    for activate in [Key::Enter, Key::Space] {
+        let h = press_after(&[(none, Key::ArrowLeft)], activate);
+        assert_eq!(h.state().views.len(), 1, "{activate:?} on Cancel keeps the document");
+        assert!(h.state().close_request.is_none());
+        assert!(dirty(&h), "{activate:?} on Cancel doesn't save");
+    }
+    // Two left is Don't save, which closes without saving; Shift+Tab walks the same way.
+    for keys in [
+        vec![(none, Key::ArrowLeft), (none, Key::ArrowLeft)],
+        vec![(Modifiers::SHIFT, Key::Tab), (Modifiers::SHIFT, Key::Tab)],
+        vec![(none, Key::ArrowLeft), (none, Key::ArrowLeft), (none, Key::ArrowLeft)],
+        vec![(none, Key::Tab)],
+    ] {
+        let h = press_after(&keys, Key::Enter);
+        assert!(h.state().views.is_empty(), "{keys:?} reaches Don't save, which closes the tab");
+    }
+    // Tab from Save wraps to Don't save; arrows stop at the right end, so Save stays chosen.
+    let out = temp_path("arrows-stop.pdf");
+    let mut h = dirty_prompt();
+    h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    h.key_press(Key::ArrowRight);
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert!(h.state().views.is_empty(), "Right from Save stays on Save, which saves");
+    assert!(out.exists());
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
+fn the_save_prompt_escape_still_cancels_whatever_is_chosen() {
+    let h = press_after(&[(Modifiers::NONE, Key::ArrowLeft), (Modifiers::NONE, Key::ArrowLeft)], Key::Escape);
+    assert_eq!(h.state().views.len(), 1, "Escape cancels even with Don't save chosen");
+    assert!(dirty(&h));
+}
+
+#[test]
+fn the_save_prompt_starts_on_save_every_time_it_opens() {
+    // Move to Don't save, cancel with Escape, and ask again: the choice is back on Save.
+    let out = temp_path("reopened.pdf");
+    let mut h = dirty_prompt();
+    h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    h.key_press(Key::ArrowLeft);
+    h.key_press(Key::ArrowLeft);
+    h.run_steps(2);
+    h.key_press(Key::Escape);
+    h.run_steps(3);
+    assert_eq!(h.state().views.len(), 1);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::W);
+    h.run_steps(3);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert!(h.state().views.is_empty(), "Enter saved and closed");
+    assert!(out.exists(), "the second prompt opened on Save");
+    let _ = std::fs::remove_file(out);
+}
+
 #[test]
 fn keys_leave_the_document_under_a_dialog_alone() {
     // Issue #870: ⌘W with Preferences open closed the file underneath it, and in the page grid
@@ -750,7 +834,11 @@ fn the_last_session_reopens_its_files_pages_and_active_tab() {
     let dir = TempPdfs::new("reopen");
     let files = [dir.file("a.pdf", 1), dir.file("b.pdf", 5), dir.file("c.pdf", 2)];
     let opened = files.clone();
-    let mut h = session_harness(move |app| opened.iter().for_each(|f| app.open_path(f)));
+    let mut h = session_harness(move |app| {
+        opened.iter().for_each(|f| {
+            app.open_path(f);
+        })
+    });
     h.state_mut().views[1].go_to_page(3);
     h.state_mut().active = Some(1);
     h.run_steps(4);
@@ -772,7 +860,11 @@ fn quitting_with_unsaved_changes_still_remembers_every_file() {
     let dir = TempPdfs::new("quit");
     let files = [dir.file("a.pdf", 1), dir.file("b.pdf", 1)];
     let opened = files.clone();
-    let mut h = session_harness(move |app| opened.iter().for_each(|f| app.open_path(f)));
+    let mut h = session_harness(move |app| {
+        opened.iter().for_each(|f| {
+            app.open_path(f);
+        })
+    });
     for tab in 0..2 {
         h.state_mut().active = Some(tab);
         h.state_mut().views[tab].select_pages(&[0]);
@@ -816,6 +908,95 @@ fn the_last_session_is_off_by_default_and_skips_missing_and_duplicate_files() {
     later.restore(&settings);
     later.reopen_last_files(&[a]);
     assert!(later.views.is_empty(), "neither opens from the session");
+}
+
+#[test]
+fn opening_the_same_path_again_focuses_its_tab() {
+    let pdfs = TempPdfs::new("dedup-open");
+    let a = pdfs.file("a.pdf", 1);
+    let b = pdfs.file("b.pdf", 1);
+    // Inline opens: this pins the synchronous open contract (open vs focus). A live app
+    // schedules the background worker instead and answers `Pending` until it completes.
+    let mut h = session_harness(|app| app.run_inline = true);
+    assert_eq!(h.state_mut().open_path(&a), OpenOutcome::Opened);
+    assert_eq!(h.state_mut().open_path(&b), OpenOutcome::Opened);
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 2, "two different files open two tabs");
+    assert_eq!(h.state_mut().open_path(&a), OpenOutcome::Focused, "opening an open file focuses, it doesn't reopen");
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 2, "opening an open file again adds no tab");
+    assert_eq!(h.state().active, Some(0), "the existing tab comes to the front");
+    assert_eq!(open_paths(h.state()), vec![a, b], "the tab order is untouched");
+}
+
+#[test]
+fn opening_a_missing_file_fails_and_tells_the_user() {
+    let mut app = PdfCraftApp::new();
+    app.set_option("language", "en").unwrap();
+    let missing = std::env::temp_dir().join(format!("pdfcraft-no-such-file-{}.pdf", std::process::id()));
+    assert_eq!(app.open_path(&missing.to_string_lossy()), OpenOutcome::Failed);
+    assert!(app.views.is_empty());
+    assert!(app.toast.is_some(), "the failure is still reported to the user");
+}
+
+#[test]
+fn opening_the_same_file_with_a_dot_component_focuses_its_tab() {
+    let pdfs = TempPdfs::new("dedup-dot");
+    let a = pdfs.file("a.pdf", 1);
+    let dotted = format!("{}/./a.pdf", pdfs.0.display());
+    let mut h = session_harness(|app| app.run_inline = true);
+    h.state_mut().open_path(&a);
+    h.state_mut().open_path(&dotted);
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 1, "another spelling of the same file matches");
+    assert_eq!(h.state().active, Some(0));
+}
+
+#[test]
+fn opening_a_file_whose_copy_vanished_from_disk_focuses_its_tab() {
+    let pdfs = TempPdfs::new("dedup-vanished");
+    let a = pdfs.file("a.pdf", 1);
+    let mut h = session_harness(|_| {});
+    h.state_mut().open_path(&a);
+    // A live window opens through the background worker; the tab has to exist before the file
+    // is deleted, or the worker itself fails to read what this test is about to remove.
+    support::wait_until(&mut h, "the vanished file's tab", |app| app.views.len() == 1);
+    std::fs::remove_file(&a).unwrap();
+    h.state_mut().open_path(&a);
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 1, "no second tab");
+    assert_eq!(h.state().active, Some(0), "the open tab is focused");
+    assert!(h.state().toast.is_none(), "no read error: the file is never read again");
+}
+
+#[test]
+fn opening_an_encrypted_document_twice_keeps_one_prompt_and_one_tab() {
+    let pdfs = TempPdfs::new("dedup-encrypted");
+    let secret = pdfs.0.join("secret.pdf");
+    std::fs::write(&secret, protected("pw", "owner", -1)).unwrap();
+    let s = secret.to_string_lossy().into_owned();
+    let mut h = session_harness(|app| app.run_inline = true);
+    h.state_mut().open_path(&s);
+    h.state_mut().open_path(&s);
+    h.run_steps(2);
+    assert!(h.state().views.is_empty(), "still locked");
+    let field = h.get_by_role(Role::PasswordInput);
+    field.focus();
+    field.type_text("pw");
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(4);
+    assert_eq!(h.state().views.len(), 1, "unlocking opens one tab, not two");
+}
+
+#[test]
+fn opening_documents_without_a_path_still_open_twice() {
+    let bytes = fixture(1);
+    let mut h = session_harness(|_| {});
+    h.state_mut().open_bytes("copy.pdf", None, bytes.clone()).unwrap();
+    h.state_mut().open_bytes("copy.pdf", None, bytes).unwrap();
+    h.run_steps(2);
+    assert_eq!(h.state().views.len(), 2, "bytes have no path to compare (attachments, conversions)");
 }
 
 #[test]
@@ -2016,7 +2197,14 @@ fn split_at_bookmarks_with_equal_titles_keeps_every_part() {
     let mut h = organize(3);
     h.state_mut().export_dir_override = Some(dir.to_string_lossy().into_owned());
     for (index, title) in [(0, "Same"), (1, "Same"), (2, "same")] {
-        h.state_mut().apply_edit(pdfcraft_engine::Edit::AddBookmark { parent: vec![], index, title: title.into(), page: index });
+        h.state_mut().apply_edit(pdfcraft_engine::Edit::AddBookmark {
+            parent: vec![],
+            index,
+            title: title.into(),
+            page: index,
+            left: None,
+            top: None,
+        });
     }
     h.state_mut().split_draft.mode = pdfcraft_ui_egui::SplitMode::Bookmarks;
     h.state_mut().run_command("page.split");
@@ -4283,6 +4471,28 @@ fn dragging_pages_panel_thumbnails_reorders_pages() {
 }
 
 #[test]
+fn resized_pages_panel_thumbnails_reorder_multiple_pages_and_undo() {
+    let mut h = harness(4, |app| {
+        app.right = Some(pdfcraft_ui_egui::RightPanel::Pages);
+        app.set_option("thumbnail-zoom", "50").unwrap();
+    });
+    let before = page_texts(h.state());
+    h.state_mut().views[0].select_pages(&[1, 2]);
+    h.run_steps(2);
+    let from = panel_thumb_rect(&h, "Page 2").center();
+    let to = panel_thumb_rect(&h, "Page 1").center_top() + egui::vec2(0.0, 4.0);
+    drag(&mut h, from, to);
+    h.run_steps(4);
+    assert_eq!(page_texts(h.state()), vec![before[1].clone(), before[2].clone(), before[0].clone(), before[3].clone()]);
+    assert_eq!(h.state().views[0].target_pages(), vec![0, 1]);
+    assert_eq!(h.state().views[0].thumbnail_zoom(), 0.5);
+    assert!(h.state_mut().execute("edit.undo"));
+    h.run_steps(4);
+    assert_eq!(page_texts(h.state()), before);
+    assert_eq!(h.state().views[0].thumbnail_zoom(), 0.5);
+}
+
+#[test]
 fn a_thumbnail_drag_that_ends_off_the_panel_or_outlives_the_pages_is_dropped() {
     let mut h = harness(4, |app| app.right = Some(pdfcraft_ui_egui::RightPanel::Pages));
     let before = page_texts(h.state());
@@ -5661,4 +5871,101 @@ fn shown_on_its_page_only(h: &mut Harness<'static, PdfCraftApp>, plain: &image::
             assert!(r > 240 && g > 240 && b > 240, "{what}: page 2 at {x}, +{dy}: {r},{g},{b}");
         }
     }
+}
+
+/// Where a mode bar tab is, by its label.
+fn mode_tab(h: &Harness<'static, PdfCraftApp>, label: &str) -> egui::Rect {
+    h.get_all_by_role_and_label(Role::Button, label).map(|n| n.rect()).find(|r| r.bottom() < 120.0).expect("a mode tab")
+}
+
+/// The cursor over each mode bar tab that page 1's text lies under, once that text is scrolled
+/// up under the bar. With the All tools panel closed it lies under Read, Edit, Convert and E-Sign.
+fn mode_tab_cursors(h: &mut Harness<'static, PdfCraftApp>, text: egui::Rect) -> [(&'static str, egui::CursorIcon); 4] {
+    h.state_mut().views[0].goto = Some((0, 0.5));
+    h.run_steps(4);
+    let offset = h.state().views[0].page_screen_rect(0).expect("on screen").top();
+    ["Read", "Edit", "Convert", "E-Sign"].map(|label| {
+        let at = mode_tab(h, label).center();
+        assert!(text.translate(egui::vec2(0.0, offset)).contains(at), "the text lies under {label}");
+        h.hover_at(at);
+        h.run_steps(2);
+        (label, h.output().platform_output.cursor_icon)
+    })
+}
+
+const HAND_ON_EVERY_TAB: [(&str, egui::CursorIcon); 4] = [
+    ("Read", egui::CursorIcon::PointingHand),
+    ("Edit", egui::CursorIcon::PointingHand),
+    ("Convert", egui::CursorIcon::PointingHand),
+    ("E-Sign", egui::CursorIcon::PointingHand),
+];
+
+/// Page 1's text block on screen, relative to the page's top edge, in the window as it is now.
+fn page_text(h: &Harness<'static, PdfCraftApp>) -> egui::Rect {
+    let id = h.state().views[0].id;
+    let block = h.state().session.get(id).unwrap().text_blocks(0)[0].clone();
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = r.width() / 200.0;
+    let at = |x: f64, y: f64| egui::pos2(r.left() + x as f32 * k, (300.0 - y as f32) * k);
+    egui::Rect::from_two_pos(at(block.rect[0], block.rect[1]), at(block.rect[2], block.rect[3]))
+}
+
+/// Text scrolled up under the mode bar leaves its tabs the hand (#2755). The Select tool's
+/// text layer showed its I-beam there, over chrome that hides the page.
+#[test]
+fn mode_tabs_keep_the_hand_over_page_text_scrolled_under_them() {
+    let mut h = harness(2, |app| app.set_option("left", "closed").unwrap());
+    let text = page_text(&h);
+    // Where the page shows, its text takes the I-beam, once the page's text has arrived.
+    h.state_mut().views[0].goto = Some((0, 0.3));
+    h.run_steps(4);
+    let top = h.state().views[0].page_screen_rect(0).expect("on screen").top();
+    let mut cursor = egui::CursorIcon::Default;
+    for _ in 0..50 {
+        h.hover_at(text.center() + egui::vec2(0.0, top));
+        h.run_steps(2);
+        cursor = h.output().platform_output.cursor_icon;
+        if cursor == egui::CursorIcon::Text {
+            break;
+        }
+    }
+    assert_eq!(cursor, egui::CursorIcon::Text);
+    assert_eq!(mode_tab_cursors(&mut h, text), HAND_ON_EVERY_TAB);
+}
+
+/// Edit text, then the All tools panel closed, as reported (#2755): a paragraph scrolled up
+/// under the mode bar gave its tabs the four-way arrow, or the I-beam once a paragraph was open.
+/// The open paragraph's editor also covered the tabs and took their clicks.
+#[test]
+fn mode_tabs_keep_the_hand_over_a_paragraph_scrolled_under_them() {
+    let mut h = harness(2, |_| {});
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.state_mut().set_option("left", "closed").unwrap();
+    h.run_steps(4);
+    let text = page_text(&h);
+    assert_eq!(mode_tab_cursors(&mut h, text), HAND_ON_EVERY_TAB, "a closed paragraph under the tabs");
+    // Open it, where it shows.
+    h.state_mut().views[0].goto = Some((0, 0.3));
+    h.run_steps(4);
+    let top = h.state().views[0].page_screen_rect(0).expect("on screen").top();
+    click_at(&mut h, text.center() + egui::vec2(0.0, top));
+    assert!(h.state().views[0].line_editor.is_some());
+    assert_eq!(mode_tab_cursors(&mut h, text), HAND_ON_EVERY_TAB, "the open paragraph under the tabs");
+    // Nor does the editor's frame, with the paragraph's top edge just under a tab (the frame
+    // reaches 2 to 6 points outside it).
+    let convert = mode_tab(&h, "Convert").center();
+    h.state_mut().views[0].goto = Some((0, 0.0));
+    h.run_steps(4);
+    let page = h.state().views[0].page_screen_rect(0).expect("on screen");
+    h.state_mut().views[0].goto = Some((0, (page.top() - (convert.y + 4.0 - text.top())) / page.height()));
+    h.run_steps(4);
+    let page = h.state().views[0].page_screen_rect(0).expect("on screen");
+    assert!((page.top() + text.top() - convert.y - 4.0).abs() < 1.0, "Convert lies on the paragraph's frame");
+    h.hover_at(convert);
+    h.run_steps(2);
+    assert_eq!(h.output().platform_output.cursor_icon, egui::CursorIcon::PointingHand, "the open paragraph's frame under a tab");
+    h.state_mut().views[0].goto = Some((0, 0.5));
+    h.run_steps(4);
+    click_at(&mut h, convert);
+    assert_eq!(h.state().mode, pdfcraft_ui_egui::Mode::Convert, "the tab takes the click, not the paragraph's editor");
 }

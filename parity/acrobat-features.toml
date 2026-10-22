@@ -34,8 +34,8 @@ milestone = "M1"
 status = "shipped"
 commands = ["file.open"]
 tools = ["doc_open"]
-evidence = ["crates/automation/tests/automation.rs::open_inspect_render_and_find", "crates/ui-egui/tests/ui.rs::opening_a_pdf_shows_comments_and_bookmarks", "crates/ui-egui/tests/ui.rs::files_and_quit_from_the_operating_system", "crates/ui-egui/src/open_worker_tests.rs::a_chosen_tool_runs_on_its_file_only_after_native_preparation_commits"]
-notes = "File ▸ Open, the command line (Linux and Windows file associations), the Windows MSI's \"Edit with PdfCraft\" entry on PDF files' File Explorer right-click menu (#682; several selected PDFs open as tabs of one window), and on macOS Finder, Open With and the Dock (Apple events; the bundle declares PDF as a document type). Not yet: a first-level Windows 11 menu entry (needs package identity) or Combine from the file manager (#585)"
+evidence = ["crates/automation/tests/automation.rs::open_inspect_render_and_find", "crates/ui-egui/tests/ui.rs::opening_a_pdf_shows_comments_and_bookmarks", "crates/ui-egui/tests/ui.rs::files_and_quit_from_the_operating_system", "crates/ui-egui/src/open_worker_tests.rs::a_chosen_tool_runs_on_its_file_only_after_native_preparation_commits", "crates/ui-egui/tests/editing.rs::opening_the_same_path_again_focuses_its_tab", "crates/ui-egui/tests/editing.rs::opening_a_file_whose_copy_vanished_from_disk_focuses_its_tab"]
+notes = "File ▸ Open, the command line (Linux and Windows file associations), the Windows MSI's \"Edit with PdfCraft\" entry on PDF files' File Explorer right-click menu (#682; several selected PDFs open as tabs of one window), and on macOS Finder, Open With and the Dock (Apple events; the bundle declares PDF as a document type); an already-open file focuses its tab instead of opening a second copy (#1620). Not yet: a first-level Windows 11 menu entry (needs package identity) or Combine from the file manager (#585)"
 
 [[feature]]
 id = "core.repair-broken-files"
@@ -586,8 +586,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["file.close"]
 tools = ["doc_close"]
-evidence = ["crates/ui-egui/tests/editing.rs::closing_a_dirty_tab_asks_and_cancel_keeps_it", "crates/ui-egui/tests/editing.rs::closing_a_dirty_tab_can_save_first", "crates/ui-egui/tests/editing.rs::quitting_with_unsaved_changes_asks_for_each_document", "crates/ui-egui/tests/editing.rs::save_prompt_stays_inside_the_screen_for_a_long_filename"]
-notes = ""
+evidence = ["crates/ui-egui/tests/editing.rs::closing_a_dirty_tab_asks_and_cancel_keeps_it", "crates/ui-egui/tests/editing.rs::closing_a_dirty_tab_can_save_first", "crates/ui-egui/tests/editing.rs::quitting_with_unsaved_changes_asks_for_each_document", "crates/ui-egui/tests/editing.rs::save_prompt_stays_inside_the_screen_for_a_long_filename", "crates/ui-egui/tests/editing.rs::the_save_prompt_moves_between_buttons_with_the_keyboard", "crates/ui-egui/tests/editing.rs::the_save_prompt_escape_still_cancels_whatever_is_chosen", "crates/ui-egui/tests/editing.rs::the_save_prompt_starts_on_save_every_time_it_opens"]
+notes = "Save is chosen when the prompt opens, so Enter saves. Left/Right (and Up/Down) and Tab/Shift+Tab move the choice between Don't save, Cancel and Save, shown with a focus ring; Enter or Space press the chosen button; Escape cancels. Alt+D, Alt+N and Ctrl/Cmd+D still answer Don't save. Not yet: the same keys on the other confirmations (Revert, reload, overwrite)."
 
 [[feature]]
 id = "core.dirty-indicator"
@@ -670,8 +670,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/ui.rs::dropping_a_pdf_on_the_window_opens_it"]
-notes = "desktop: the dropped file opens in a tab (by path, or its bytes); web: read asynchronously"
+evidence = ["crates/ui-egui/tests/ui.rs::dropping_a_pdf_on_the_window_opens_it", "crates/ui-egui/tests/ui.rs::dropping_an_open_pdf_again_focuses_its_tab"]
+notes = "desktop: the dropped file opens in a tab (by path, or its bytes); web: read asynchronously; a drop with a filesystem path matching an open document focuses that tab (#1620); pathless bytes have nothing to match and open another tab"
 
 [[feature]]
 id = "core.recent-files"
@@ -683,7 +683,7 @@ status = "shipped"
 commands = ["file.open_recent", "file.clear_recent"]
 tools = []
 evidence = ["crates/ui-egui/tests/ui.rs::persistence_round_trips_and_tolerates_garbage", "crates/ui-egui/tests/commands.rs::the_open_recent_menu_lists_files_and_opens_one", "crates/ui-egui/tests/commands.rs::the_open_recent_menu_is_disabled_while_the_list_is_empty", "crates/ui-egui/tests/commands.rs::clear_recent_files_at_the_foot_of_open_recent_empties_the_list", "crates/ui-egui/tests/commands.rs::clear_recent_files_runs_from_the_palette_and_is_saved", "crates/ui-egui/tests/ui.rs::home_removes_one_recent_file_or_clears_them_all"]
-notes = "never reads other apps' lists; File ▸ Open Recent lists them (#290), an already-open file focuses its tab instead of reopening it; Clear Recent Files at the foot of Open Recent, on Home and in the palette, and a remove button on each Home row (#430); missing: the row's remove button shows on pointer hover only (keyboard users clear the whole list)"
+notes = "never reads other apps' lists; File ▸ Open Recent lists them (#290), an already-open file focuses its tab instead of reopening it, from any open path (#1620); Clear Recent Files at the foot of Open Recent, on Home and in the palette, and a remove button on each Home row (#430); missing: the row's remove button shows on pointer hover only (keyboard users clear the whole list)"
 
 [[feature]]
 id = "core.reopen-last-session"
@@ -1106,8 +1106,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["view.full_screen"]
 tools = []
-evidence = ["crates/ui-egui/tests/commands.rs::full_screen_toggles_by_shortcut_and_command_and_escape_leaves"]
-notes = ""
+evidence = ["crates/ui-egui/tests/commands.rs::full_screen_toggles_by_shortcut_and_command_and_escape_leaves", "crates/ui-egui/tests/view.rs::full_screen_shows_one_fitted_page_and_clicks_turn_it", "crates/ui-egui/tests/view.rs::full_screen_keeps_two_page_view_as_spreads"]
+notes = "Acrobat's Full Screen Mode (#1459): the page on black and nothing else, one page at a time fitted to the screen (one spread when two-page view was on, #1353), from the current page; a click, Space, Enter, \u2192 or Page Down go forward, a shift-click, Backspace, \u2190 or Page Up back, Home/End to the ends; Esc or \u2318L bring the display from before back at the page reached. Links still open on click. Missing: the cursor is not hidden, no transitions, auto-advance or loop (view.full-screen-presentation), and no full-screen preferences such as the background colour"
 
 [[feature]]
 id = "view.full-screen-presentation"
@@ -1115,11 +1115,11 @@ title = "Full-screen presentation options (auto-advance, loop, click to advance)
 area = "B"
 tier = "P2"
 milestone = "M12"
-status = "planned"
-commands = []
+status = "partial"
+commands = ["view.full_screen"]
 tools = []
-evidence = []
-notes = ""
+evidence = ["crates/ui-egui/tests/view.rs::full_screen_shows_one_fitted_page_and_clicks_turn_it"]
+notes = "Click to advance (and shift-click back) ships with view.full-screen; auto-advance every N seconds, loop after the last page, page transitions and the full-screen preferences are not done"
 
 [[feature]]
 id = "view.reflow"
@@ -1155,7 +1155,7 @@ status = "shipped"
 commands = []
 tools = []
 evidence = ["crates/ui-egui/tests/viewer.rs::layouts_fit_height_labels_and_system_theme"]
-notes = "the page box takes labels (iv, A-1) before numbers"
+notes = "the page box shows the current page's label and takes labels (iv, A-1) before numbers; where the label is not the page number the rail shows the physical position under it (3/180, dropped to the page count when it does not fit). Not yet: a preference to show physical numbers only, and labels in the organize bar's Page n of m"
 
 [[feature]]
 id = "view.view-history"
@@ -1262,8 +1262,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/ui.rs::theme_and_view_options_apply", "crates/ui-egui/tests/viewer.rs::going_to_a_far_page_scrolls_its_thumbnail_into_view", "crates/ui-egui/tests/viewer.rs::going_to_a_page_in_view_leaves_the_pages_panel_still", "crates/ui-egui/tests/viewer.rs::a_page_change_while_thumbnails_are_dragged_does_not_scroll_the_pages_panel"]
-notes = "The panel follows the current page (#2781): a page whose thumbnail is out of sight scrolls it into view, as little as it takes; a thumbnail already in view, or clicked, leaves the panel still, and a page change while the user scrolls the panel or drags thumbnails does not move it."
+evidence = ["crates/ui-egui/tests/editing.rs::resized_pages_panel_thumbnails_reorder_multiple_pages_and_undo", "crates/ui-egui/tests/viewer.rs::pages_panel_thumbnail_zoom_is_bounded_independent_and_survives_reload", "crates/ui-egui/tests/viewer.rs::pages_panel_thumbnail_size_controls_show_more_pages_and_keep_the_selection", "crates/ui-egui/tests/viewer.rs::pages_panel_thumbnail_zoom_keeps_a_far_current_page_visible", "crates/ui-egui/tests/control.rs::thumbnail_size_is_settable_and_inspectable_through_the_control_channel", "crates/ui-egui/tests/ui.rs::theme_and_view_options_apply", "crates/ui-egui/tests/viewer.rs::going_to_a_far_page_scrolls_its_thumbnail_into_view", "crates/ui-egui/tests/viewer.rs::going_to_a_page_in_view_leaves_the_pages_panel_still", "crates/ui-egui/tests/viewer.rs::a_page_change_while_thumbnails_are_dragged_does_not_scroll_the_pages_panel"]
+notes = "Thumbnail size: 50–150% with a slider and buttons above the scroll area (#3808), independent of document and Organize zoom. Accessible through ui.set thumbnail-zoom and ui.state active.thumbnail_zoom; retained on file reload, not persisted between sessions. The panel follows the current page (#2781): a page whose thumbnail is out of sight scrolls it into view, as little as it takes; a thumbnail already in view, or clicked, leaves the panel still, and a page change while the user scrolls the panel or drags thumbnails does not move it."
 
 [[feature]]
 id = "view.thumbnail-context-ops"
@@ -1331,11 +1331,11 @@ title = "Reset layers to initial visibility; list for all or current pages"
 area = "B"
 tier = "P2"
 milestone = "M12"
-status = "planned"
+status = "partial"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["doc_info"]
+evidence = ["crates/engine/src/tests.rs::reset_layers_returns_to_the_files_visibility", "crates/render/src/inspect.rs::initial_layer_visibility_is_the_default_configuration"]
+notes = "Layers panel ▸ Layer options ▸ Reset to Initial Visibility shows each layer as the default configuration (/OCProperties /D) has it; doc_info reports it as `initial`. Not yet: listing the layers of all pages or the current page only."
 
 [[feature]]
 id = "view.destinations-panel"
@@ -2897,7 +2897,7 @@ status = "shipped"
 commands = ["page.organize"]
 tools = []
 evidence = ["crates/ui-egui/tests/editing.rs::page_grid_zooms_with_its_buttons_keys_and_pinch", "crates/ui-egui/tests/editing.rs::a_zoomed_page_grid_still_inserts_and_moves_at_the_right_gap", "crates/ui-egui/tests/editing.rs::zoomed_pages_in_view_are_rendered_at_the_size_drawn", "crates/ui-egui/tests/editing.rs::page_grid_size_is_remembered_for_every_document_and_restart"]
-notes = "Organize page grid: 50–300% with toolbar buttons (and a percentage that resets to 100%), trackpad pinch or Ctrl/⌘ + wheel about the page under the pointer, and ⌘+ / ⌘− / ⌘0; pages drawn larger than their thumbnails are rendered at the size drawn while they are in view (the thumbnail stands in until then, and after an edit), so text stays sharp however long the document is. As in Acrobat, the size last chosen is one for every document and kept in the settings across restarts (also set by --grid-zoom). Missing: a slider as in Acrobat; the Pages side panel has no size control."
+notes = "Organize page grid: 50–300% with toolbar buttons (and a percentage that resets to 100%), trackpad pinch or Ctrl/⌘ + wheel about the page under the pointer, and ⌘+ / ⌘− / ⌘0; pages drawn larger than their thumbnails are rendered at the size drawn while they are in view (the thumbnail stands in until then, and after an edit), so text stays sharp however long the document is. As in Acrobat, the size last chosen is one for every document and kept in the settings across restarts (also set by --grid-zoom). Missing in Organize: a slider as in Acrobat. The Pages inspector has its own 50–150% slider and buttons (#3808)."
 
 [[feature]]
 id = "organize.split-every-n"
@@ -3256,8 +3256,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["bookmark.add"]
 tools = ["bookmark_add"]
-evidence = ["crates/ui-egui/tests/bookmarks.rs::new_rename_reorder_indent_delete_and_undo", "crates/organize/src/tests.rs::bookmarks_add_rename_move_delete", "crates/engine/src/tests.rs::bookmark_edits_show_in_the_viewer_undo_and_save", "crates/automation/tests/automation.rs::bookmarks_through_tools"]
-notes = ""
+evidence = ["crates/ui-egui/tests/bookmarks.rs::new_rename_reorder_indent_delete_and_undo", "crates/organize/src/tests.rs::bookmarks_add_rename_move_delete", "crates/engine/src/tests.rs::bookmark_edits_show_in_the_viewer_undo_and_save", "crates/automation/tests/automation.rs::bookmarks_through_tools", "crates/ui-egui/tests/bookmark_position.rs::a_new_bookmark_goes_to_the_top_of_the_window_not_the_top_of_the_page", "crates/ui-egui/tests/bookmark_position.rs::a_bookmark_made_with_text_selected_goes_to_the_selections_corner", "crates/ui-egui/tests/bookmark_position.rs::a_bookmark_made_on_a_turned_page_pins_the_axis_the_window_scrolls_along", "crates/ui-egui/tests/bookmark_position.rs::a_bookmark_made_in_a_turned_view_pins_the_axis_that_is_vertical_on_screen", "crates/ui-egui/tests/bookmark_position.rs::a_bookmark_made_with_text_selected_in_a_turned_view_goes_to_the_corner_shown_top_left", "crates/ui-egui/tests/bookmark_position.rs::a_bookmark_in_a_spread_of_unequal_pages_goes_to_the_page_crossing_the_top_of_the_window", "crates/organize/src/tests.rs::a_bookmark_can_go_to_a_point_on_its_page_and_survives_save", "crates/engine/src/tests.rs::a_bookmark_added_at_a_point_goes_there_through_undo_and_save", "crates/automation/tests/automation.rs::a_bookmark_added_at_a_position_reports_the_same_position_back_on_any_page_rotation"]
+notes = "A new bookmark goes to where the reader is (#3865): the top-left of the selected text, or with nothing selected the top of the window on the page showing there, as /XYZ left top null (the reader's zoom is kept, and the horizontal position too when only the top is pinned). The window's vertical is what is pinned: on a page turned a quarter (or a view turned with View ▸ Rotate View) that is a user x, and the selection's corner is the one shown at the top-left. In a two-up spread the page crossing the window's top edge is the one used. bookmark_add takes top and left in points from the top-left of the displayed page, the same as bookmark_list reports. Missing: Set to current page (and Set Destination) still go to the page top, the zoom is not recorded, and a bookmark made while a page is only partly laid out (before the first frame) goes to the page top."
 
 [[feature]]
 id = "organize.bookmark-rename"
@@ -3484,8 +3484,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["file.properties"]
 tools = ["doc_initial_view"]
-evidence = ["crates/ui-egui/tests/ui.rs::a_document_asking_for_full_screen_is_asked_about_first", "crates/organize/src/tests.rs::initial_view_round_trips_and_keeps_scripts", "crates/ui-egui/tests/viewer.rs::initial_view_is_edited_and_honoured_on_open", "crates/automation/tests/automation.rs::initial_view_through_tools"]
-notes = "navigation panel, layout, magnification, page, window and interface options; honoured on open; script open actions kept. Open in Full Screen mode (/PageMode /FullScreen) asks first (Full Screen / Not now), as Acrobat does, instead of taking the screen. Missing: Acrobat's Full Screen preference to turn that alert off and its \"remember my choice for this document\" (misc.prefs-full-screen)"
+evidence = ["crates/organize/src/view.rs::initial_view_resolves_indirect_boolean_preferences", "crates/ui-egui/tests/ui.rs::a_document_asking_for_full_screen_is_asked_about_first", "crates/organize/src/tests.rs::initial_view_round_trips_and_keeps_scripts", "crates/ui-egui/tests/viewer.rs::initial_view_is_edited_and_honoured_on_open", "crates/automation/tests/automation.rs::initial_view_through_tools"]
+notes = "navigation panel, layout, magnification, page, window and interface options; honoured on open; script open actions kept. Open in Full Screen mode (/PageMode /FullScreen) asks first (Full Screen / Not now), as Acrobat does, instead of taking the screen. Window and interface options also read indirect boolean ViewerPreferences values. Missing: Acrobat's Full Screen preference to turn that alert off and its \"remember my choice for this document\" (misc.prefs-full-screen)"
 
 [[feature]]
 id = "organize.custom-properties"
@@ -9828,8 +9828,8 @@ milestone = "M14"
 status = "partial"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/view.rs::default_page_display_is_used_for_new_documents", "crates/ui-egui/tests/view.rs::default_zoom_is_used_for_new_documents", "crates/ui-egui/tests/view.rs::preferences_set_the_default_zoom"]
-notes = "Preferences ▸ Documents and view: Default page display and Default zoom (Fit to width, Zoom to page level or a percentage) for every new tab; a PDF that asks for a layout or zoom gets it. Missing: Acrobat's resolution, rendering and page-content options"
+evidence = ["crates/ui-egui/tests/view.rs::default_page_display_is_used_for_new_documents", "crates/ui-egui/tests/view.rs::default_zoom_is_used_for_new_documents", "crates/ui-egui/tests/view.rs::preferences_set_the_default_zoom", "crates/ui-egui/tests/view.rs::always_use_my_default_zoom_and_page_layout_ignores_what_the_pdf_asks_for"]
+notes = "Preferences ▸ Documents and view: Default page display and Default zoom (Fit to width, Zoom to page level or a percentage) for every new tab; a PDF that asks for a layout or zoom gets it, unless Always use my default zoom and page layout is on. Missing: Acrobat's resolution, rendering and page-content options"
 
 [[feature]]
 id = "misc.prefs-documents"

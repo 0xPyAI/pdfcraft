@@ -1357,6 +1357,8 @@
 	This document has no layers.	Este documento no tiene capas.
 	This document has no attachments.	Este documento no tiene archivos adjuntos.
 	Hide layer	Ocultar capa
+	Layer options	Opciones de capas
+	Reset to Initial Visibility	Restablecer visibilidad inicial
 	Show layer	Mostrar capa
 	Set layer visibility	Definir visibilidad de capas
 	on page {label}	en la página {label}
@@ -2185,6 +2187,7 @@ action wizard	Start	Iniciar
 	Home / End	Inicio / Fin
 	H / Space (hold)	H / Espacio (mantener)
 	Reload documents when their files change on disk	Recargar los documentos cuando sus archivos cambien en el disco
+	Always use my default zoom and page layout	Usar siempre mi zoom y presentación de página predeterminados
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Este archivo cambió en el disco. Recargar muestra la versión nueva y descarta los cambios sin guardar; Guardar la reemplaza por esta versión.
 	Reload	Recargar
 	Couldn't reload {name}: {e}	No se pudo recargar {name}: {e}
@@ -2621,3 +2624,6 @@ animation effects	Off	Desactivados
 # Historical snapshot notice bar (View signed version / View revision).
 	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	Estás viendo la versión firmada de «{from}» (revisión {rev}). Es una instantánea: los cambios aquí no afectarán al original.
 	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.	Estás viendo la revisión {rev} de «{from}». Es una instantánea: los cambios aquí no afectarán al original.
+	Thumbnail size	Tamaño de las miniaturas
+	Smaller thumbnails	Miniaturas más pequeñas
+	Larger thumbnails	Miniaturas más grandes

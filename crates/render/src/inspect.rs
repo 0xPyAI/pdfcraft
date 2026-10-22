@@ -219,6 +219,18 @@ impl PageInfo {
         [a * self.width, b * self.height]
     }
 
+    /// A point as displayed (points from the page's top-left, y down, before any view rotation)
+    /// → the `/XYZ` position `[left, top]` in user space that puts it at the window's top-left.
+    /// Only a coordinate that is given is pinned: a bookmark made at the top of the window
+    /// leaves the horizontal position alone. On a page turned a quarter, the displayed `y` decides
+    /// the user `left` and the displayed `x` the user `top` (the inverse of [`Self::dest_fraction`]).
+    /// A value that is not finite counts as not given.
+    pub fn xyz_for_view(&self, x: Option<f32>, y: Option<f32>) -> [Option<f32>; 2] {
+        let (x, y) = (x.filter(|v| v.is_finite()), y.filter(|v| v.is_finite()));
+        let [ux, uy] = self.view_to_user(x.unwrap_or(0.0), y.unwrap_or(0.0));
+        if self.rotation.is_multiple_of(180) { [x.map(|_| ux), y.map(|_| uy)] } else { [y.map(|_| ux), x.map(|_| uy)] }
+    }
+
     /// A destination's user-space point (each coordinate possibly unspecified) → the same point
     /// as a fraction of the displayed page `[x, y]` (0..1 from its top-left corner, y down),
     /// after `/Rotate` and a further clockwise `view_rotation` (0, 90, 180 or 270). On a page
@@ -425,6 +437,8 @@ pub struct Layer {
     pub id: (u32, u16),
     pub name: String,
     pub visible: bool,
+    /// Shown as the file opens: the default configuration (`/OCProperties /D`).
+    pub initial: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1428,7 +1442,7 @@ impl<'a> Inspector<'a> {
                 _ => !base_off,
             };
             let Some(id) = id else { continue };
-            out.push(Layer { id, name: self.text(d, b"Name").unwrap_or_else(|| "Layer".into()), visible });
+            out.push(Layer { id, name: self.text(d, b"Name").unwrap_or_else(|| "Layer".into()), visible, initial: visible });
         }
     }
 
@@ -2358,6 +2372,24 @@ trailer << /Root 1 0 R /Info 4 0 R >>
         assert_eq!(info.layer_groups, [vec![(5, 0), (6, 0)], vec![(6, 0), (7, 0)]]);
     }
 
+    #[test]
+    fn initial_layer_visibility_is_the_default_configuration() {
+        // BaseState OFF: Red is listed ON; Green is listed both ON and OFF, and OFF wins; Blue
+        // isn't listed, so it takes the base state.
+        let pdf = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R 6 0 R 7 0 R] /D << /BaseState /OFF /ON [5 0 R 6 0 R] /OFF [6 0 R] >> >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj
+5 0 obj << /Type /OCG /Name (Red) >> endobj
+6 0 obj << /Type /OCG /Name (Green) >> endobj
+7 0 obj << /Type /OCG /Name (Blue) >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+        let info = inspect(Arc::new(pdf.to_vec()), None).expect("opens");
+        let layers: Vec<_> = info.layers.iter().map(|l| (l.name.as_str(), l.initial)).collect();
+        assert_eq!(layers, [("Red", true), ("Green", false), ("Blue", false)]);
+    }
+
     const ORPHAN_FIELDS: &[u8] = b"%PDF-1.7
 1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
@@ -2776,6 +2808,41 @@ trailer << /Root 1 0 R >>
         // A degenerate crop box never divides by zero.
         let flat = PageInfo { crop: [0.0, 0.0, 0.0, 0.0], rotation: 0, ..p };
         assert!(flat.dest_fraction(Some(5.0), Some(-5.0), 0).iter().all(|f| f.is_some_and(|f| (0.0..=1.0).contains(&f))));
+    }
+
+    #[test]
+    fn a_displayed_point_becomes_the_xyz_position_that_goes_back_to_it() {
+        // Every rotation, on a crop box away from the origin: pinning a displayed point and
+        // reading the destination back lands on the same fraction of the displayed page.
+        for rotation in [0u16, 90, 180, 270] {
+            let (width, height) = if rotation.is_multiple_of(180) { (300.0, 400.0) } else { (400.0, 300.0) };
+            let p = PageInfo { width, height, label: "1".into(), crop: [100.0, 50.0, 400.0, 450.0], rotation };
+            let (x, y) = (0.25 * width, 0.75 * height);
+            let near = |got: [Option<f32>; 2], want: [Option<f32>; 2]| {
+                for (g, w) in got.iter().zip(want) {
+                    match (g, w) {
+                        (Some(g), Some(w)) => assert!((g - w).abs() < 1e-4, "{rotation}: {got:?} vs {want:?}"),
+                        (None, None) => {}
+                        _ => panic!("{rotation}: {got:?} vs {want:?}"),
+                    }
+                }
+            };
+            let [l, t] = p.xyz_for_view(Some(x), Some(y));
+            assert!(l.is_some() && t.is_some(), "{rotation}: a point pins both");
+            near(p.dest_fraction(l, t, 0), [Some(0.25), Some(0.75)]);
+            // Only a height: the horizontal position is left alone, whichever user axis that is.
+            let [l, t] = p.xyz_for_view(None, Some(y));
+            assert_eq!((l.is_some(), t.is_some()), if rotation.is_multiple_of(180) { (false, true) } else { (true, false) }, "{rotation}");
+            near(p.dest_fraction(l, t, 0), [None, Some(0.75)]);
+            let [l, t] = p.xyz_for_view(Some(x), None);
+            near(p.dest_fraction(l, t, 0), [Some(0.25), None]);
+            assert_eq!(p.xyz_for_view(None, None), [None, None]);
+            assert_eq!(p.xyz_for_view(Some(f32::NAN), Some(f32::INFINITY)), [None, None], "not finite is not given");
+        }
+        // The top of an upright page is the crop box's top edge.
+        let p = PageInfo { width: 300.0, height: 400.0, label: "1".into(), crop: [100.0, 50.0, 400.0, 450.0], rotation: 0 };
+        assert_eq!(p.xyz_for_view(None, Some(0.0)), [None, Some(450.0)]);
+        assert_eq!(p.xyz_for_view(None, Some(100.0)), [None, Some(350.0)]);
     }
 
     #[test]

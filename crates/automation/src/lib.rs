@@ -96,6 +96,9 @@ const WATERMARK_MAX_OFFSET: f64 = 20_000.0;
 /// Bookmarks in one page of the bookmark list, by default and at most.
 const BOOKMARK_PAGE: usize = 100;
 const MAX_BOOKMARK_PAGE: usize = 1000;
+/// How far from the page's corner a bookmark's position may be given, in points (a PDF page is at
+/// most 14 400 across).
+const MAX_BOOKMARK_POSITION: f64 = 1_000_000.0;
 
 /// `text_find` extracts this many pages first, doubling each batch up to [`FIND_MAX_BATCH`], so a
 /// match near the start returns without touching the rest of a long document (#971).
@@ -353,7 +356,13 @@ impl Automation {
                 let parent = a.opt_path("parent")?.unwrap_or_default();
                 let index = a.opt_int("position")?.map_or(usize::MAX, |p| (p.max(1) - 1) as usize);
                 let title = a.str("title")?.to_string();
-                self.apply(&a, Edit::AddBookmark { parent, index, title, page })?
+                let (left, top) = (a.bookmark_coordinate("left")?, a.bookmark_coordinate("top")?);
+                let [left, top] = match self.doc(&a)?.info.pages.get(page) {
+                    Some(p) => p.xyz_for_view(left, top),
+                    None => [None, None],
+                };
+                let (left, top) = (left.map(f64::from), top.map(f64::from));
+                self.apply(&a, Edit::AddBookmark { parent, index, title, page, left, top })?
             }
             "bookmark_rename" => {
                 let (path, title) = (a.path("path")?, a.str("title")?.to_string());
@@ -2388,6 +2397,15 @@ impl Args<'_> {
         let Some(v) = self.opt_ints(key)? else { return Ok(None) };
         v.iter().map(|i| if *i >= 1 { Ok(*i as usize - 1) } else { Err(Self::wrong(key, "1-based positions")) }).collect::<Result<Vec<_>>>().map(Some)
     }
+    /// A bookmark's `left` or `top`: points on the displayed page, `None` when left out, an error
+    /// when it is not a number or lies absurdly far off the page.
+    fn bookmark_coordinate(&self, key: &str) -> Result<Option<f32>> {
+        match self.opt_num(key)? {
+            None => Ok(None),
+            Some(v) if v.is_finite() && v.abs() <= MAX_BOOKMARK_POSITION => Ok(Some(v as f32)),
+            Some(_) => Err(ToolError::InvalidArgs(format!("{key} must be between -{MAX_BOOKMARK_POSITION} and {MAX_BOOKMARK_POSITION} points"))),
+        }
+    }
     fn strs(&self, key: &str) -> Result<Vec<&str>> {
         let v = self.get(key).ok_or_else(|| Self::missing(key))?;
         let arr = v.as_array().ok_or_else(|| Self::wrong(key, "an array of strings"))?;
@@ -2573,7 +2591,7 @@ fn info(d: &Document) -> Value {
                 pdfcraft_render::LinkTarget::Other(o) => json!({ "other": o }),
             },
         })).collect::<Vec<_>>(),
-        "layers": i.layers.iter().map(|l| json!({ "name": l.name, "visible": l.visible })).collect::<Vec<_>>(),
+        "layers": i.layers.iter().map(|l| json!({ "name": l.name, "visible": l.visible, "initial": l.initial })).collect::<Vec<_>>(),
         // Full-screen presentation settings a page carries (ISO 32000-2 §12.4.4): only pages with
         // a `/Trans` or `/Dur` appear; `style` is null for a display time alone.
         "transitions": i.transitions.iter().map(|t| json!({

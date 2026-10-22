@@ -1348,6 +1348,8 @@
 	This document has no layers.	Ten dokument nie zawiera warstw.
 	This document has no attachments.	Ten dokument nie zawiera załączników.
 	Hide layer	Ukryj warstwę
+	Layer options	Opcje warstw
+	Reset to Initial Visibility	Przywróć początkową widoczność
 	Show layer	Pokaż warstwę
 	Set layer visibility	Ustaw widoczność warstwy
 	on page {label}	na stronie {label}
@@ -2291,6 +2293,7 @@ key	Space	Spacja
 	These objects could not be moved. Select them again and try a smaller move.	Nie udało się przenieść tych obiektów. Zaznacz je ponownie i spróbuj mniejszego przesunięcia.
 	This page contains objects that cannot be selected together.	Ta strona zawiera obiekty, których nie można zaznaczyć razem.
 	Reload documents when their files change on disk	Wczytuj ponownie dokumenty, gdy ich pliki zmienią się na dysku
+	Always use my default zoom and page layout	Zawsze używaj mojego domyślnego powiększenia i układu stron
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Ten plik zmienił się na dysku. Wczytaj ponownie pokazuje nową wersję i odrzuca niezapisane zmiany; Zapisz zastępuje ją tą wersją.
 	Reload	Wczytaj ponownie
 	Couldn't reload {name}: {e}	Nie można ponownie wczytać {name}: {e}
@@ -2457,3 +2460,6 @@ animation effects	Off	Wyłączone
 	Paragraph spacing	Odstęp między akapitami
 	Less	Mniej
 	Other options	Inne opcje
+	Thumbnail size	Rozmiar miniatur
+	Smaller thumbnails	Mniejsze miniatury
+	Larger thumbnails	Większe miniatury

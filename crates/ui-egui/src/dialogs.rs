@@ -1457,21 +1457,74 @@ fn draft_changes(app: &PdfCraftApp) -> Option<Vec<Edit>> {
     Some(edits)
 }
 
-/// The "Save changes?" prompt's keys (issue #8), read before anything else can take them: Enter
-/// saves (the default button) and Escape cancels; Don't save takes ⌘D / Ctrl+D, the macOS
-/// convention, or Alt+D / Alt+N, the mnemonics Windows and Linux desktops use for it.
-pub(crate) fn save_prompt_key(ctx: &egui::Context) -> Option<Option<bool>> {
+/// The buttons of the "Save changes?" prompt, in the order they sit on screen, left to right.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PromptButton {
+    DontSave,
+    Cancel,
+    #[default]
+    Save,
+}
+
+impl PromptButton {
+    const ORDER: [PromptButton; 3] = [PromptButton::DontSave, PromptButton::Cancel, PromptButton::Save];
+
+    fn position(self) -> usize {
+        Self::ORDER.iter().position(|b| *b == self).unwrap_or(2)
+    }
+
+    /// The button `by` places to the right (negative: left). Arrow keys stop at the ends.
+    fn step(self, by: isize) -> PromptButton {
+        let to = self.position().saturating_add_signed(by).min(Self::ORDER.len() - 1);
+        Self::ORDER.get(to).copied().unwrap_or(self)
+    }
+
+    /// The button after (or, with `back`, before) this one, wrapping round: Tab and Shift+Tab.
+    fn cycle(self, back: bool) -> PromptButton {
+        let n = Self::ORDER.len();
+        let to = if back { self.position().checked_sub(1).unwrap_or(n - 1) } else { (self.position() + 1) % n };
+        Self::ORDER.get(to).copied().unwrap_or(self)
+    }
+
+    /// What pressing the button answers.
+    fn answer(self) -> Option<bool> {
+        match self {
+            PromptButton::Save => Some(true),
+            PromptButton::DontSave => Some(false),
+            PromptButton::Cancel => None,
+        }
+    }
+}
+
+/// The "Save changes?" prompt's keys (issue #8), read before anything else can take them. Save is
+/// the button chosen when the prompt opens, so Enter saves; the arrow keys and Tab / Shift+Tab move
+/// the choice, and Enter or Space press the chosen button. Escape cancels. Don't save also has
+/// ⌘D / Ctrl+D, the macOS convention, and Alt+D / Alt+N, the mnemonics Windows and Linux desktops
+/// use for it. Returns the answer once one is given.
+pub(crate) fn save_prompt_key(ctx: &egui::Context, chosen: &mut PromptButton) -> Option<Option<bool>> {
     use egui::{Key, Modifiers};
     ctx.input_mut(|i| {
-        if i.consume_key(Modifiers::NONE, Key::Enter) {
-            Some(Some(true))
-        } else if i.consume_key(Modifiers::NONE, Key::Escape) {
-            Some(None)
-        } else if [(Modifiers::COMMAND, Key::D), (Modifiers::ALT, Key::D), (Modifiers::ALT, Key::N)].into_iter().any(|(m, k)| i.consume_key(m, k)) {
-            Some(Some(false))
-        } else {
-            None
+        if i.consume_key(Modifiers::NONE, Key::Enter) || i.consume_key(Modifiers::NONE, Key::Space) {
+            return Some(chosen.answer());
         }
+        if i.consume_key(Modifiers::NONE, Key::Escape) {
+            return Some(None);
+        }
+        if [(Modifiers::COMMAND, Key::D), (Modifiers::ALT, Key::D), (Modifiers::ALT, Key::N)].into_iter().any(|(m, k)| i.consume_key(m, k)) {
+            return Some(Some(false));
+        }
+        // Shift+Tab before Tab: a key press matches a pattern that asks for fewer modifiers.
+        if i.consume_key(Modifiers::SHIFT, Key::Tab) {
+            *chosen = chosen.cycle(true);
+        } else if i.consume_key(Modifiers::NONE, Key::Tab) {
+            *chosen = chosen.cycle(false);
+        }
+        for (key, by) in [(Key::ArrowLeft, -1), (Key::ArrowUp, -1), (Key::ArrowRight, 1), (Key::ArrowDown, 1)] {
+            if i.consume_key(Modifiers::NONE, key) {
+                *chosen = chosen.step(by);
+            }
+        }
+        None
     })
 }
 
@@ -1511,14 +1564,15 @@ fn save_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
         ui.label(egui::RichText::new(tl!("Your changes will be lost if you don't save them.")).color(t.text_muted));
         ui.add_space(14.0);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if widgets::pill_button(ui, tl!("Save"), true).clicked() {
+            let chosen = app.save_prompt_button;
+            if widgets::pill_button_marked(ui, tl!("Save"), true, chosen == PromptButton::Save).clicked() {
                 choice = Some(Some(true));
             }
-            if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
+            if widgets::pill_button_marked(ui, tl!("Cancel"), false, chosen == PromptButton::Cancel).clicked() {
                 choice = Some(None);
             }
             ui.add_space(24.0);
-            if widgets::pill_button(ui, tl!("Don't save"), false).clicked() {
+            if widgets::pill_button_marked(ui, tl!("Don't save"), false, chosen == PromptButton::DontSave).clicked() {
                 choice = Some(Some(false));
             }
         });
@@ -1765,5 +1819,36 @@ fn unlock(app: &mut PdfCraftApp, ctx: &egui::Context) {
         }
         Some(PasswordAnswer::Cancel) => app.submit_unlock(None),
         None => {}
+    }
+}
+
+#[cfg(test)]
+mod prompt_button_tests {
+    use super::PromptButton::{self, Cancel, DontSave, Save};
+
+    #[test]
+    fn opens_on_save_and_arrows_stop_at_the_ends() {
+        assert_eq!(PromptButton::default(), Save);
+        assert_eq!(Save.step(1), Save);
+        assert_eq!(Save.step(-1), Cancel);
+        assert_eq!(Cancel.step(-1), DontSave);
+        assert_eq!(DontSave.step(-1), DontSave);
+        assert_eq!(DontSave.step(1000), Save, "a long step clamps");
+        assert_eq!(Save.step(isize::MIN), DontSave, "and so does a huge negative one");
+    }
+
+    #[test]
+    fn tab_wraps_both_ways() {
+        assert_eq!(Save.cycle(false), DontSave);
+        assert_eq!(DontSave.cycle(true), Save);
+        assert_eq!(Cancel.cycle(false), Save);
+        assert_eq!(Cancel.cycle(true), DontSave);
+    }
+
+    #[test]
+    fn each_button_answers_as_labelled() {
+        assert_eq!(Save.answer(), Some(true));
+        assert_eq!(DontSave.answer(), Some(false));
+        assert_eq!(Cancel.answer(), None);
     }
 }

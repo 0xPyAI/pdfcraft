@@ -1317,14 +1317,18 @@ pub(crate) fn page_input(
         draw_handles(boxes[hit]);
     }
     // A closed paragraph moves when dragged (the four-way arrow says so; a click still opens it
-    // for typing); an edge rewraps it. The open one takes the text cursor.
-    ui.ctx().set_cursor_icon(if on_edge {
-        egui::CursorIcon::ResizeHorizontal
-    } else if active.is_none() {
-        egui::CursorIcon::Move
-    } else {
-        egui::CursorIcon::Text
-    });
+    // for typing); an edge rewraps it. The open one takes the text cursor. Only where the page
+    // shows, so the mode bar and side panels over a paragraph scrolled under them keep their own
+    // cursor (#2755).
+    if resp.contains_pointer() {
+        ui.ctx().set_cursor_icon(if on_edge {
+            egui::CursorIcon::ResizeHorizontal
+        } else if active.is_none() {
+            egui::CursorIcon::Move
+        } else {
+            egui::CursorIcon::Text
+        });
+    }
     if resp.clicked() {
         view.image_selection = None;
         // A click that moves the editor to another paragraph applies the open one first, so its
@@ -1570,7 +1574,8 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
     // The editor draws on its page only, as the page itself does: a paragraph running past the
     // page's edge (a converter relying on the page clip) must not cover the next page or the
     // tool bars (#3061).
-    let page_clip = xf.rect.intersect(view.viewport_rect());
+    let viewport = view.viewport_rect();
+    let page_clip = xf.rect.intersect(viewport);
     let ed = view.line_editor.as_mut()?;
     if hold {
         ed.focus = true;
@@ -1599,10 +1604,15 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
     let mut reveal = false;
     let mut look = None;
     // No fade-in: while it faded, the page's own copy of the text showed through the cover.
+    // Over the page, so only where the document shows: a paragraph scrolled under the mode bar or
+    // a side panel must leave them their pointer (#2755). It stays at its paragraph, cut off as
+    // the page is, rather than pushed back into the window.
     egui::Area::new(egui::Id::new("edit-text-line"))
         .order(egui::Order::Foreground)
         .fade_in(false)
         .fixed_pos(Pos2::new(ed.rect.left(), ed.rect.top()))
+        .constrain_to(viewport)
+        .constrain(false)
         .show(ctx, |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(page_clip));
             // The editor opens at the source size. Once text changes, show the real draft
@@ -1628,6 +1638,7 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
             // On the frame, a press takes hold of the box (a click selects it, a drag moves it):
             // the pointer says so there, and reads as text inside.
             if let Some(p) = ui.input(|i| i.pointer.hover_pos())
+                && ui.clip_rect().contains(p)
                 && live.expand(2.0 + FRAME_REACH).contains(p)
                 && !live.expand(2.0).contains(p)
             {

@@ -1515,3 +1515,64 @@ fn photos_and_images_dropped_on_the_signature_pad_are_imported_not_opened() {
     assert_eq!(h.state().views.len(), tabs, "nothing opened behind the dialog");
     std::fs::remove_file(photo).unwrap();
 }
+
+/// Where a mode bar tab is, by its label.
+fn mode_tab(h: &Harness<'static, PdfCraftApp>, label: &str) -> egui::Rect {
+    h.get_all_by_role_and_label(egui::accesskit::Role::Button, label).map(|n| n.rect()).find(|r| r.bottom() < 120.0).expect("a mode tab")
+}
+
+/// Scroll the page until `what` (on screen) lies across the mode bar, then the cursor over each
+/// tab it lies under: with the All tools panel closed, Read, Edit, Convert and E-Sign.
+fn mode_tab_cursors(
+    h: &mut Harness<'static, PdfCraftApp>,
+    what: impl Fn(&Harness<'static, PdfCraftApp>) -> egui::Rect,
+) -> [(&'static str, egui::CursorIcon); 4] {
+    let page = |h: &Harness<'static, PdfCraftApp>| h.state().views[0].page_screen_rect(0).expect("on screen");
+    let y = what(h).center().y - page(h).top();
+    let tabs = mode_tab(h, "Convert").center().y;
+    h.state_mut().views[0].goto = Some((0, 0.0));
+    h.run_steps(4);
+    let top = page(h).top();
+    h.state_mut().views[0].goto = Some((0, (top - (tabs - y)) / page(h).height()));
+    h.run_steps(4);
+    let under = what(h);
+    ["Read", "Edit", "Convert", "E-Sign"].map(|label| {
+        let at = mode_tab(h, label).center();
+        assert!(under.contains(at), "{under:?} lies under {label} at {at:?}");
+        h.hover_at(at);
+        h.run_steps(2);
+        (label, h.output().platform_output.cursor_icon)
+    })
+}
+
+const HAND_ON_EVERY_TAB: [(&str, egui::CursorIcon); 4] = [
+    ("Read", egui::CursorIcon::PointingHand),
+    ("Edit", egui::CursorIcon::PointingHand),
+    ("Convert", egui::CursorIcon::PointingHand),
+    ("E-Sign", egui::CursorIcon::PointingHand),
+];
+
+/// The Fill & Sign text box scrolled up under the mode bar leaves its tabs the hand (#2755): it
+/// floated over them, gave them its I-beam and took their clicks.
+#[test]
+fn mode_tabs_keep_the_hand_over_a_type_box_scrolled_under_them() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("sign.fill.text"));
+    h.state_mut().set_option("left", "closed").unwrap();
+    // The page across the window, so the box reaches under the tabs.
+    h.state_mut().views[0].fit = pdfcraft_ui_egui::canvas::Fit::Width;
+    h.run_steps(4);
+    assert_eq!(h.state().quick_tool, QuickTool::Fill(FillTool::Text));
+    click(&mut h, 10.0, 360.0);
+    h.event(egui::Event::Text("Ada Lovelace, Countess of Lovelace".into()));
+    h.run_steps(3);
+    assert_eq!(mode_tab_cursors(&mut h, type_box_rect), HAND_ON_EVERY_TAB);
+    let convert = mode_tab(&h, "Convert").center();
+    h.hover_at(convert);
+    h.run_steps(1);
+    h.drag_at(convert);
+    h.run_steps(1);
+    h.drop_at(convert);
+    h.run_steps(3);
+    assert_eq!(h.state().mode, pdfcraft_ui_egui::Mode::Convert, "the tab takes the click, not the text box");
+}

@@ -1248,6 +1248,8 @@
 	This document has no layers.	Este documento não tem camadas.
 	This document has no attachments.	Este documento não tem anexos.
 	Hide layer	Ocultar camada
+	Layer options	Opções de camadas
+	Reset to Initial Visibility	Redefinir visibilidade inicial
 	Show layer	Mostrar camada
 	on page {label}	na página {label}
 	Save attachment…	Salvar anexo…
@@ -2313,6 +2315,7 @@ key	Space	Espaço
 	Printer paper and scaling may differ. Check driver settings.	O papel e a escala da impressora podem variar. Confira as configurações do driver.
 	Drawing scale changes. Use Actual size for full-scale plans.	A escala do desenho muda. Use Tamanho real para plantas em escala.
 	Reload documents when their files change on disk	Recarregar documentos quando os arquivos mudarem no disco
+	Always use my default zoom and page layout	Sempre usar meu zoom e layout da página padrão
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Este arquivo foi alterado no disco. Recarregar mostra a nova versão e descarta suas alterações não salvas; Salvar a substitui por esta versão.
 	Reload	Recarregar
 	Couldn't reload {name}: {e}	Não foi possível recarregar {name}: {e}
@@ -2495,3 +2498,6 @@ animation effects	Off	Desativados
 	Paragraph spacing	Espaçamento entre parágrafos
 	Less	Menos
 	Other options	Outras opções
+	Thumbnail size	Tamanho das miniaturas
+	Smaller thumbnails	Miniaturas menores
+	Larger thumbnails	Miniaturas maiores

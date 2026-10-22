@@ -685,7 +685,7 @@ fn layer_choices_survive_edits() {
 #[test]
 fn set_layer_actions_toggle_in_order_and_keep_radio_groups() {
     use pdfcraft_render::LayerOp::{Off, On, Toggle};
-    let layer = |n: u32, visible: bool| Layer { id: (n, 0), name: format!("L{n}"), visible };
+    let layer = |n: u32, visible: bool| Layer { id: (n, 0), name: format!("L{n}"), visible, initial: visible };
     let run = |changes: &[(LayerOp, u32)], preserve_rb: bool| {
         // L1 and L2 are a radio-button group; L3 is on its own.
         let mut layers = vec![layer(1, true), layer(2, false), layer(3, true)];
@@ -759,6 +759,59 @@ fn set_layer_actions_change_what_renders() {
     assert!(s.set_layer_state(id, &[(LayerOp::Off, (6, 0))], true));
     assert_eq!(halves(&s), (white.clone(), white));
     assert!(!s.set_layer_state(DocId(999), &[(LayerOp::On, (5, 0))], true));
+}
+
+#[test]
+fn reset_layers_returns_to_the_files_visibility() {
+    // Red (left half, on) and Green (right half, off) are a radio-button group.
+    let content = "/OC /R BDC 1 0 0 rg 0 0 50 100 re f EMC /OC /G BDC 0 1 0 rg 50 0 50 100 re f EMC";
+    let pdf = pdfcraft_testkit::Pdf::new()
+        .obj("<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R 6 0 R] /D << /OFF [6 0 R] /RBGroups [[5 0 R 6 0 R]] >> >> >>")
+        .obj("<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+        .obj("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R /Resources << /Properties << /R 5 0 R /G 6 0 R >> >> >>")
+        .stream("", content)
+        .obj("<< /Type /OCG /Name (Red) >>")
+        .obj("<< /Type /OCG /Name (Green) >>")
+        .build();
+    // A page drawing on layer Blue, which that file has off.
+    let other = pdfcraft_testkit::Pdf::new()
+        .obj("<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R] /D << /OFF [5 0 R] >> >> >>")
+        .obj("<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+        .obj("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R /Resources << /Properties << /B 5 0 R >> >> >>")
+        .stream("", "/OC /B BDC 0 0 1 rg 0 0 10 10 re f EMC")
+        .obj("<< /Type /OCG /Name (Blue) >>")
+        .build();
+    let mut s = Session::new();
+    let id = s.open("layers.pdf", None, Arc::new(pdf), None).unwrap();
+    let shown = |s: &Session| s.get(id).unwrap().info.layers.iter().map(|l| (l.name.clone(), l.visible)).collect::<Vec<_>>();
+    let left = |s: &Session| {
+        let doc = s.get(id).unwrap();
+        let mut r = pdfcraft_render::PageRenderer::new(doc.bytes.clone(), doc.config.clone());
+        let p = r.render(pdfcraft_render::RenderRequest { page: 0, kind: pdfcraft_render::RequestKind::Pixels, scale: 1.0, ..Default::default() });
+        let i = (50 * p.width as usize + 25) * 4;
+        p.rgba[i..i + 3].to_vec()
+    };
+    assert!(s.set_layer_state(id, &[(LayerOp::On, (6, 0))], true));
+    let edit = Edit::InsertPagesFrom {
+        name: "b.pdf".into(),
+        bytes: Arc::new(other),
+        pages: None,
+        at: 1,
+        field_conflicts: pdfcraft_organize::FieldConflicts::Rename,
+    };
+    s.apply(id, edit).unwrap();
+    let blue = s.get(id).unwrap().info.layers.iter().position(|l| l.name == "Blue").unwrap();
+    assert!(s.set_layer_visible(id, blue, true));
+    assert_eq!(shown(&s), [("Red".into(), false), ("Green".into(), true), ("Blue".into(), true)]);
+    assert_eq!(left(&s), [255, 255, 255]);
+    // Every layer, the inserted one too, goes back to the file's default configuration.
+    assert!(s.reset_layers(id));
+    assert_eq!(shown(&s), [("Red".into(), true), ("Green".into(), false), ("Blue".into(), false)]);
+    assert_eq!(left(&s), [255, 0, 0]);
+    assert!(!s.reset_layers(id), "already as the file opens");
+    // What the eye sees is not an edit: Undo still undoes the insert.
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Insert pages from b.pdf"));
+    assert!(!s.reset_layers(DocId(999)));
 }
 
 #[test]
@@ -1371,9 +1424,9 @@ fn outline_titles(items: &[pdfcraft_render::OutlineItem]) -> Vec<String> {
 fn bookmark_edits_show_in_the_viewer_undo_and_save() {
     let (mut s, id) = session_with(3);
     let titles = |s: &Session| outline_titles(&s.get(id).unwrap().info.outline);
-    s.apply(id, Edit::AddBookmark { parent: vec![], index: 0, title: "Start".into(), page: 0 }).unwrap();
-    s.apply(id, Edit::AddBookmark { parent: vec![], index: 1, title: "End".into(), page: 2 }).unwrap();
-    s.apply(id, Edit::AddBookmark { parent: vec![1], index: 0, title: "Détail".into(), page: 1 }).unwrap();
+    s.apply(id, Edit::AddBookmark { parent: vec![], index: 0, title: "Start".into(), page: 0, left: None, top: None }).unwrap();
+    s.apply(id, Edit::AddBookmark { parent: vec![], index: 1, title: "End".into(), page: 2, left: None, top: None }).unwrap();
+    s.apply(id, Edit::AddBookmark { parent: vec![1], index: 0, title: "Détail".into(), page: 1, left: None, top: None }).unwrap();
     // The inspector (an independent parser) sees the same tree and destinations.
     assert_eq!(titles(&s), ["Start→1", "End→3[Détail→2]"]);
     s.apply(id, Edit::MoveBookmark { from: vec![1, 0], to_parent: vec![], index: 0 }).unwrap();
@@ -2750,6 +2803,47 @@ fn reload_reads_the_new_file_into_the_same_document() {
     assert_eq!(s.docs().len(), 2);
 }
 
+/// #3443: reloading the file (it changed on disk) keeps how the reader shows it. Reading colours
+/// reached the new renderer, not just the setting; hidden comments stay hidden. Each setting is
+/// checked alone, so neither one rides on the other being changed.
+#[test]
+fn reload_keeps_reading_colours_and_hidden_comments() {
+    let dark_share = |s: &Session, id: DocId| {
+        let doc = s.get(id).unwrap();
+        doc.renderer.set_queue(vec![pdfcraft_render::RenderRequest {
+            page: 0,
+            kind: pdfcraft_render::RequestKind::Pixels,
+            scale: 1.0,
+            ..Default::default()
+        }]);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let page = loop {
+            if let Some(page) = doc.renderer.try_recv() {
+                break page;
+            }
+            assert!(std::time::Instant::now() < deadline, "page render did not finish");
+            std::thread::yield_now();
+        };
+        let (px, _) = page.rgba.as_chunks::<4>();
+        px.iter().filter(|p| p[0] < 64 && p[1] < 64 && p[2] < 64).count() as f64 / px.len() as f64
+    };
+    let (mut s, id) = session_with(1);
+    assert!(dark_share(&s, id) < 0.1, "a white page as the file draws it");
+    assert!(s.set_reading_colors(id, ReadingColors::WHITE_ON_BLACK));
+    assert!(dark_share(&s, id) > 0.9, "white on black");
+    s.reload(id, Arc::new(fixture(2))).unwrap();
+    assert_eq!(s.reading_colors(id), Some(ReadingColors::WHITE_ON_BLACK));
+    assert!(dark_share(&s, id) > 0.9, "the reloaded page is drawn white on black too");
+    assert!(!s.get(id).unwrap().comments_hidden());
+
+    let (mut s, id) = session_with(1);
+    assert!(s.set_hide_comments(id, true));
+    s.reload(id, Arc::new(fixture(2))).unwrap();
+    assert!(s.get(id).unwrap().comments_hidden(), "hidden comments stay hidden");
+    assert_eq!(s.reading_colors(id), Some(ReadingColors::default()));
+    assert!(dark_share(&s, id) < 0.1);
+}
+
 #[test]
 fn revert_goes_back_to_the_saved_version() {
     let (mut s, id) = session_with(2);
@@ -2776,8 +2870,8 @@ fn split_by_size_and_bookmarks_and_page_filters() {
     assert_eq!(parts.last().unwrap().1, 6, "every page is in a part");
     assert_eq!(s.split_by_size(id, 1).unwrap().len(), 6, "pages larger than the limit stand alone");
     // Top-level bookmarks name the parts.
-    s.apply(id, Edit::AddBookmark { parent: vec![], index: 0, title: "Intro".into(), page: 0 }).unwrap();
-    s.apply(id, Edit::AddBookmark { parent: vec![], index: 1, title: "Results".into(), page: 3 }).unwrap();
+    s.apply(id, Edit::AddBookmark { parent: vec![], index: 0, title: "Intro".into(), page: 0, left: None, top: None }).unwrap();
+    s.apply(id, Edit::AddBookmark { parent: vec![], index: 1, title: "Results".into(), page: 3, left: None, top: None }).unwrap();
     assert_eq!(s.bookmark_splits(id), [(0, "Intro".to_string()), (3, "Results".to_string())]);
     // Filters: page numbers 2, 4, 6 are even.
     let info = &s.get(id).unwrap().info;
@@ -6253,4 +6347,38 @@ fn undo_and_redo_roll_back_on_a_refresh_panic_or_error() {
     assert_eq!(s.redo(id).unwrap().as_str(), "Protect with password");
     assert!(s.get(id).unwrap().info.encrypted);
     assert_eq!(s.get(id).unwrap().password.as_deref(), Some("u"));
+}
+
+#[test]
+fn a_bookmark_added_at_a_point_goes_there_through_undo_and_save() {
+    use pdfcraft_render::DestView;
+    let (mut s, id) = session_with(3);
+    let view = |s: &Session, i: usize| s.get(id).unwrap().info.outline.get(i).map(|o| (o.page, o.view));
+    let add = |s: &mut Session, title: &str, page: usize, left: Option<f64>, top: Option<f64>| {
+        s.apply(id, Edit::AddBookmark { parent: vec![], index: usize::MAX, title: title.into(), page, left, top })
+    };
+    add(&mut s, "Plain", 0, None, None).unwrap();
+    add(&mut s, "Section", 1, None, Some(500.5)).unwrap();
+    add(&mut s, "Table", 2, Some(72.0), Some(300.0)).unwrap();
+    // The page top (no position) is what it always was; the others carry their place.
+    assert_eq!(view(&s, 0), Some((Some(0), DestView::Xyz { left: None, top: None, zoom: None })));
+    assert_eq!(view(&s, 1), Some((Some(1), DestView::Xyz { left: None, top: Some(500.5), zoom: None })));
+    assert_eq!(view(&s, 2), Some((Some(2), DestView::Xyz { left: Some(72.0), top: Some(300.0), zoom: None })));
+
+    // A position that is not a number fails the edit, which then changes nothing.
+    for (left, top) in [(Some(f64::NAN), None), (None, Some(f64::INFINITY))] {
+        assert!(matches!(add(&mut s, "Bad", 0, left, top), Err(EditError::Bookmark(_))), "{left:?} {top:?}");
+    }
+    assert_eq!(s.get(id).unwrap().info.outline.len(), 3);
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Add bookmark"));
+
+    s.undo(id).unwrap();
+    assert_eq!(s.get(id).unwrap().info.outline.len(), 2);
+    s.redo(id).unwrap();
+    let saved = s.save_bytes(id).unwrap();
+    let mut again = Session::new();
+    let id2 = again.open("again.pdf", None, saved, None).unwrap();
+    let outline = &again.get(id2).unwrap().info.outline;
+    assert_eq!(outline[2].view, DestView::Xyz { left: Some(72.0), top: Some(300.0), zoom: None });
+    assert_eq!(outline[1].view, DestView::Xyz { left: None, top: Some(500.5), zoom: None });
 }

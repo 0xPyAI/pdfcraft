@@ -289,8 +289,21 @@ pub fn tools() -> Vec<ToolDef> {
             }),
             &["doc"],
         )),
-        t("bookmark_add", "Add a bookmark", "Add a bookmark that goes to a page, under a parent bookmark (or at the top level), at a position. Undoable.").with(schema(
-            json!({ "doc": doc(), "title": { "type": "string", "minLength": 1 }, "page": { "type": "integer", "minimum": 1 }, "parent": path("Parent bookmark (omit for the top level)"), "position": { "type": "integer", "minimum": 1, "description": "1-based position among the parent's children (default: last)." } }),
+        t(
+            "bookmark_add",
+            "Add a bookmark",
+            "Add a bookmark that goes to a page, under a parent bookmark (or at the top level), at a position. It goes to the top of the page, or to a place on it: `top` and `left` are points from the top-left of the displayed page (like the destination bookmark_list reports), each optional, and a coordinate left out keeps the reader's position that way. The zoom is kept. Undoable.",
+        )
+        .with(schema(
+            json!({
+                "doc": doc(),
+                "title": { "type": "string", "minLength": 1 },
+                "page": { "type": "integer", "minimum": 1 },
+                "parent": path("Parent bookmark (omit for the top level)"),
+                "position": { "type": "integer", "minimum": 1, "description": "1-based position among the parent's children (default: last)." },
+                "top": { "type": "number", "minimum": -1000000, "maximum": 1000000, "description": "Points from the top of the displayed page." },
+                "left": { "type": "number", "minimum": -1000000, "maximum": 1000000, "description": "Points from the left of the displayed page." }
+            }),
             &["doc", "title", "page"],
         )),
         t("bookmark_rename", "Rename a bookmark", "Change a bookmark's title. Undoable.")

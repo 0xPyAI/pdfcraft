@@ -1255,6 +1255,8 @@
 	This document has no layers.	本文件沒有圖層。
 	This document has no attachments.	本文件沒有附件。
 	Hide layer	隱藏圖層
+	Layer options	圖層選項
+	Reset to Initial Visibility	重設為初始可見性
 	Show layer	顯示圖層
 	Set layer visibility	設定圖層可見性
 	on page {label}	第 {label} 頁
@@ -2185,6 +2187,7 @@ key	Space	空格
 	Tools	工具
 	Inspector	檢查器
 	Reload documents when their files change on disk	檔案在磁碟上變更時重新載入對應的文件
+	Always use my default zoom and page layout	一律使用我的預設縮放與頁面佈局
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	此檔案已在磁碟上變更。「重新載入」會顯示新版本並捨棄未儲存的變更；「儲存」則會以此版本取代它。
 	Reload	重新載入
 	Couldn't reload {name}: {e}	無法重新載入{name}：{e}
@@ -2431,3 +2434,6 @@ animation effects	Off	關
 	Paragraph spacing	段落間距
 	Less	收起
 	Other options	其他選項
+	Thumbnail size	縮圖大小
+	Smaller thumbnails	縮小縮圖
+	Larger thumbnails	放大縮圖

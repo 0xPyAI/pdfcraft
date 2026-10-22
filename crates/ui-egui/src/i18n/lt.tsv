@@ -629,6 +629,8 @@
 	Height:	Aukštis:
 	Hide field highlights	Slėpti laukų paryškinimą
 	Hide layer	Slėpti sluoksnį
+	Layer options	Sluoksnių parinktys
+	Reset to Initial Visibility	Atkurti pradinį matomumą
 	Hide menu bar	Slėpti meniu juostą
 	Hide password	Slėpti slaptažodį
 	Hide toolbars	Slėpti įrankių juostas
@@ -969,6 +971,7 @@
 	Redaction code:	Šalinimo kodas:
 	Reload	Įkelti iš naujo
 	Reload documents when their files change on disk	Iš naujo įkelti dokumentus, kai pasikeičia jų failai diske
+	Always use my default zoom and page layout	Visada naudoti mano numatytąjį mastelį ir puslapio išdėstymą
 	Remove checkmark	Pašalinti varnelę
 	Remove invalid links and bookmarks	Pašalinti netinkamus saitus ir žymeles
 	Remove page	Pašalinti puslapį
@@ -2731,3 +2734,6 @@ theme	Appearance	Išvaizda
 	Paragraph spacing	Tarpas tarp pastraipų
 	Less	Mažiau
 	Other options	Kitos parinktys
+	Thumbnail size	Miniatiūrų dydis
+	Smaller thumbnails	Mažesnės miniatiūros
+	Larger thumbnails	Didesnės miniatiūros

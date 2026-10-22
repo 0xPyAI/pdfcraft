@@ -1333,6 +1333,8 @@
 	This document has no layers.	Ebben a dokumentumban nincs réteg.
 	This document has no attachments.	Ebben a dokumentumban nincs melléklet.
 	Hide layer	Réteg elrejtése
+	Layer options	Réteg beállításai
+	Reset to Initial Visibility	Kezdeti láthatóság visszaállítása
 	Show layer	Réteg megjelenítése
 	on page {label}	{label}. oldal
 	Save attachment…	Melléklet mentése…
@@ -2310,6 +2312,7 @@ key	Space	Szóköz
 	Printer paper and scaling may differ. Check driver settings.	A nyomtató papírja és méretezése eltérhet. Ellenőrizze az illesztőprogram beállításait.
 	Drawing scale changes. Use Actual size for full-scale plans.	A rajz méretaránya változik. Méretarányos tervekhez használja a Tényleges méret beállítást.
 	Reload documents when their files change on disk	Dokumentumok újratöltése, ha a fájljuk megváltozik a lemezen
+	Always use my default zoom and page layout	Mindig az alapértelmezett nagyításom és oldalelrendezésem használata
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Ez a fájl megváltozott a lemezen. Az Újratöltés az új változatot mutatja, és eldobja a nem mentett módosításokat; a Mentés erre a változatra cseréli le.
 	Reload	Újratöltés
 	Couldn't reload {name}: {e}	{name} újratöltése nem sikerült: {e}
@@ -2480,3 +2483,6 @@ animation effects	Off	Ki
 	Paragraph spacing	Bekezdéstávolság
 	Less	Kevesebb
 	Other options	Egyéb beállítások
+	Thumbnail size	Bélyegképek mérete
+	Smaller thumbnails	Kisebb bélyegképek
+	Larger thumbnails	Nagyobb bélyegképek
