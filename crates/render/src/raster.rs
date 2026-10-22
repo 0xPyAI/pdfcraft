@@ -7316,6 +7316,38 @@ trailer << /Root 1 0 R >>
         assert_eq!(px(75, 50), vec![255, 255, 255, 255], "outside the mask");
     }
 
+    /// Issue #3176: `CA` / `ca` belong to the graphics state at paint time, so a `gs` after
+    /// `SCN` / `scn` still fades a shading pattern, and a stroke takes the stroke alpha. The
+    /// pattern took the fill alpha current at `scn`/`SCN`, so both shapes came out opaque.
+    #[test]
+    fn shading_pattern_uses_the_alpha_current_at_paint_time() {
+        let content = "/Pattern CS /P0 SCN /S1 gs 10 w 0 75 m 100 75 l S /Pattern cs /P0 scn /F1 gs 0 0 100 50 re f";
+        let pdf = format!(
+            "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R
+  /Resources << /ExtGState << /S1 << /CA 0.25 >> /F1 << /ca 0.25 >> >> /Pattern << /P0 5 0 R >> >> >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /PatternType 2 /Shading << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] /Extend [true true]
+  /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [1 0 0] /N 1 >> >> >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+            content.len()
+        );
+        let mut r = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default());
+        let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+        assert!(p.error.is_none(), "{:?}", p.error);
+        let px = |x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..4].to_vec();
+        // Red at 25% over white is about (255, 191, 191); opaque red would be (255, 0, 0).
+        for (what, x, y) in [("the stroke under /CA 0.25", 50, 25), ("the fill under /ca 0.25", 50, 75)] {
+            let c = px(x, y);
+            assert!(c[0] >= 250 && (185..=197).contains(&c[1]) && (185..=197).contains(&c[2]), "{what}: {c:?}");
+        }
+    }
+
     /// ISO 32000-2 §8.5.4: `W` / `W*` clip with the current path once whichever path-painting
     /// operator ends it has painted it, `S`, `f` or `B` as much as `n`. The vendored interpreter
     /// applied the clip only on `n`: after `re W* S` everything later painted outside the clip,

@@ -46,7 +46,6 @@ impl<'a> Pattern<'a> {
             Object::Dict(dict) => Some(Self::Shading(ShadingPattern::new(
                 &dict,
                 &ctx.interpreter_cache.object_cache,
-                ctx.get().graphics_state.non_stroke_alpha,
                 defaults,
             )?)),
             Object::Stream(stream) => Some(Self::Tiling(Box::new(TilingPattern::new(
@@ -79,6 +78,14 @@ impl<'a> Pattern<'a> {
             }
         }
         self
+    }
+
+    /// PdfCraft patch: set the alpha of the graphics state in effect when the pattern is painted. The `gs` operator
+    /// can come after `scn`/`SCN`, so the alpha must not be captured when the pattern is selected.
+    pub(crate) fn set_alpha(&mut self, alpha: f32) {
+        if let Self::Shading(p) = self {
+            p.opacity = alpha;
+        }
     }
 
     pub(crate) fn set_transfer_function(&mut self, tf: ActiveTransferFunction) {
@@ -114,7 +121,6 @@ impl ShadingPattern {
     pub(crate) fn new(
         dict: &Dict<'_>,
         cache: &Cache,
-        opacity: f32,
         defaults: &DefaultColorSpaces<'_, '_>,
     ) -> Option<Self> {
         let shading = dict.get::<Object<'_>>(SHADING).and_then(|o| {
@@ -133,7 +139,7 @@ impl ShadingPattern {
 
         Some(Self {
             shading: Arc::new(shading),
-            opacity,
+            opacity: 1.0,
             matrix,
             transfer_function: None,
         })
