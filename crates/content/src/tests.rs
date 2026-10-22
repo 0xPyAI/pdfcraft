@@ -1,5 +1,27 @@
 use super::*;
 
+thread_local! {
+    /// Bytes the lexer read before an operand failed, on this thread.
+    pub(crate) static RESCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[test]
+fn a_long_unreadable_number_is_read_once() {
+    for junk in ["+", "5"] {
+        let n = 20_000;
+        let src = format!("{}{} 1 0 0 1 0 0 cm", junk.repeat(n), if junk == "5" { "x" } else { "" });
+        RESCANNED.with(|c| c.set(0));
+        let p = parse(src.as_bytes());
+        let rescanned = RESCANNED.with(|c| c.get());
+        assert!(rescanned <= 2 * n, "{rescanned} bytes read for a {n}-byte token");
+        assert_eq!(p.ops.last().and_then(|o| o.nums::<6>()), Some([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]));
+    }
+    // A short damaged number still recovers byte by byte.
+    let p = parse(b"-+5 0 Td");
+    assert_eq!((p.ops.len(), p.skipped), (1, 1));
+    assert_eq!(p.ops[0].nums::<2>(), Some([5.0, 0.0]));
+}
+
 #[test]
 fn operators_keep_operands_and_spans() {
     let src = b"q 1 0 0 1 72 720 cm BT /F1 12 Tf (Hello \\(world\\)) Tj [(A) -120 (B)] TJ ET Q";

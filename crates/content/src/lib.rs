@@ -74,6 +74,9 @@ fn is_delim(b: u8) -> bool {
     matches!(b, b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%')
 }
 
+/// Longest unreadable number token retried from its next byte. Real numbers are far shorter.
+const MAX_RETRIED_TOKEN: usize = 64;
+
 /// Parse a (decoded) content stream.
 pub fn parse(data: &[u8]) -> Parsed {
     parse_pieces(data, &[])
@@ -110,9 +113,19 @@ fn parse_pieces(data: &[u8], ends: &[usize]) -> Parsed {
                     lx.pos = data.len();
                 }
                 Err(_) => {
-                    // Skip the offending byte and carry on.
-                    lx.pos = at + 1;
-                    out.skipped += 1;
+                    let read = lx.pos.saturating_sub(at);
+                    #[cfg(test)]
+                    tests::RESCANNED.with(|c| c.set(c.get() + read));
+                    let number = matches!(b, b'+' | b'-' | b'.') || b.is_ascii_digit();
+                    if number && read > MAX_RETRIED_TOKEN {
+                        // A long unreadable number is skipped whole: retrying from each of its
+                        // bytes would read the rest of it again every time.
+                        out.skipped += read;
+                    } else {
+                        // Skip the offending byte and carry on.
+                        lx.pos = at + 1;
+                        out.skipped += 1;
+                    }
                 }
             }
             continue;
