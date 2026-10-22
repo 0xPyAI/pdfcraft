@@ -116,6 +116,46 @@ fn placing_moving_editing_and_deleting_a_field() {
     assert_eq!((r[2] - r[0], r[3] - r[1]), (14.0, 14.0));
 }
 
+/// The arrow keys nudge the selected field a point, Shift and an arrow ten points (#2608), as they
+/// do for a selected object or image and as dragging it does. One press is one undo step, the page
+/// does not turn with them, and the field stays selected for the next press.
+#[test]
+fn arrow_keys_nudge_the_selected_field_instead_of_turning_the_page() {
+    let mut h = harness();
+    h.state_mut().execute("form.add.text");
+    h.run_steps(1);
+    // A click places a default-size text field and selects it.
+    let p = at(&h, 40.0, 250.0);
+    h.hover_at(p);
+    h.run_steps(1);
+    h.drag_at(p);
+    h.run_steps(1);
+    h.drop_at(p);
+    h.run_steps(4);
+    let id = h.state().views[0].id;
+    let name = h.state().views[0].prepare.selected.clone().expect("the placed field is selected").0;
+    let near = |a: f64, b: f64| (a - b).abs() < 0.01;
+    let before = rect_of(&h, &name);
+    h.key_press(egui::Key::ArrowRight);
+    h.run_steps(2);
+    let right = rect_of(&h, &name);
+    assert!(near(right[0], before[0] + 1.0) && near(right[2], before[2] + 1.0), "{before:?} → {right:?}");
+    assert!(near(right[2] - right[0], before[2] - before[0]), "moved, not resized");
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Change field properties"));
+    h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::ArrowUp);
+    h.run_steps(2);
+    let up = rect_of(&h, &name);
+    assert!(near(up[1], right[1] + 10.0) && near(up[3], right[3] + 10.0), "{right:?} → {up:?}");
+    h.key_press(egui::Key::ArrowDown);
+    h.run_steps(2);
+    h.key_press(egui::Key::ArrowLeft);
+    h.run_steps(2);
+    let back = rect_of(&h, &name);
+    assert!(near(back[0], up[0] - 1.0) && near(back[1], up[1] - 1.0), "{up:?} → {back:?}");
+    assert!(h.state().views[0].prepare.selected.is_some(), "it stays selected for the next nudge");
+    assert_eq!(h.state().views[0].current, 0, "the arrows moved the field, not the page");
+}
+
 #[test]
 fn format_validate_and_calculate_tabs() {
     use pdfcraft_engine::form_scripts::{Calculate, Format, Validate};
