@@ -47,7 +47,7 @@ fn page_content(doc: &Document, page: &Dict) -> Vec<u8> {
             .flat_map(|x| match &*doc.resolve(x) {
                 Object::Stream(s) => {
                     let mut v = s.decoded().unwrap_or_default();
-                    v.push(b'\n');
+                    v.push(b' ');
                     v
                 }
                 _ => Vec::new(),
