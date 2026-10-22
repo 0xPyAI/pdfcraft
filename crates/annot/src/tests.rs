@@ -1542,6 +1542,25 @@ fn link_listing_skips_repeated_refs_and_caps_web_address_text() {
 }
 
 #[test]
+fn web_address_cap_counts_the_text_kept_after_conversion() {
+    // 200 links sharing a 64 KiB address of invalid UTF-8: 12.5 MiB of bytes, each byte kept as a
+    // three-byte replacement character.
+    let annots = "<< /Subtype /Link /Rect [0 0 1 1] /A 4 0 R >>".repeat(200);
+    let doc = doc_of(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>".into(),
+        format!("<< /Type /Page /Parent 2 0 R /Annots [{annots}] >>"),
+        "<< /S /URI /URI 5 0 R >>".into(),
+        format!("<{}>", "FF".repeat(64 << 10)),
+    ]);
+    let all = links::list(&doc);
+    assert_eq!(all.len(), 200);
+    let kept: usize = all.iter().map(|l| if let links::LinkAction::Uri(u) = &l.action { u.len() } else { 0 }).sum();
+    assert!(kept <= links::MAX_URI_BYTES, "{kept} bytes of web addresses kept");
+    assert!(kept > 0);
+}
+
+#[test]
 fn cloud_outline_has_a_bump_budget() {
     // 50 long edges would each ask for 10,000 bumps of radius 1.
     let pts: Vec<(f64, f64)> = (0..50).map(|i| (f64::from(i) * std::f64::consts::TAU / 50.0).sin_cos()).map(|(s, c)| (1e7 * c, 1e7 * s)).collect();

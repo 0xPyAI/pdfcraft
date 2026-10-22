@@ -78,7 +78,8 @@ pub struct LinkItem {
     pub style: LinkStyle,
 }
 
-/// Web-address text one listing keeps; past it a link lists as [`LinkAction::Other`].
+/// Bytes of web-address text one listing keeps, counted after conversion to UTF-8; past it a link
+/// lists as [`LinkAction::Other`].
 pub(crate) const MAX_URI_BYTES: usize = 16 << 20;
 
 fn nums(doc: &Document, o: Option<&Object>) -> Vec<f64> {
@@ -103,10 +104,13 @@ fn action_of(doc: &Document, d: &Dict, pages: &[ObjRef], uri_budget: &mut usize)
         Some(b"URI") => {
             let uri = a.get(b"URI").map(|u| doc.resolve(u));
             let bytes = uri.as_ref().and_then(|u| u.as_string()).map_or(&[][..], |s| &s.bytes[..]);
-            match uri_budget.checked_sub(bytes.len()) {
-                Some(left) => {
+            // The raw length first, so an address already over the budget is never converted; then the
+            // converted text, which is up to three times longer where the bytes are not UTF-8.
+            let text = (bytes.len() <= *uri_budget).then(|| String::from_utf8_lossy(bytes));
+            match text.and_then(|t| Some((uri_budget.checked_sub(t.len())?, t))) {
+                Some((left, text)) => {
                     *uri_budget = left;
-                    LinkAction::Uri(String::from_utf8_lossy(bytes).into_owned())
+                    LinkAction::Uri(text.into_owned())
                 }
                 None => LinkAction::Other("web address too long".into()),
             }
