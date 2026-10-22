@@ -4920,7 +4920,8 @@ fn notices(
         if secured && doc.can_unlock() && crate::widgets::pill_button(ui, tl!("Unlock…"), true).clicked() {
             unlock = true;
         }
-        if secured && crate::widgets::pill_button(ui, tl!("Don't show again"), false).clicked() {
+        // Only when the bar shows the security message: a form's stopped scripts come first.
+        if secured && !scripts_off && crate::widgets::pill_button(ui, tl!("Don't show again"), false).clicked() {
             hide_secured = true;
         }
         if repaired && !secured && info.fields.is_empty() && crate::widgets::pill_button(ui, tl!("Details"), false).clicked() {
