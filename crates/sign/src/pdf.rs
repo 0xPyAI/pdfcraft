@@ -975,6 +975,37 @@ fn finish_validation(
     }
 }
 
+/// Evidence streams read from one `/DSS` array.
+const MAX_DSS_ENTRIES: usize = 1024;
+/// Decoded bytes read from one `/DSS` array; real CRLs and OCSP responses are kilobytes each.
+const MAX_DSS_BYTES: usize = 64 << 20;
+
+/// The decoded streams of the `/DSS` evidence array `key` (`/CRLs`, `/OCSPs`), one at a time so
+/// each is checked before the next decodes: each stream once and within the evidence size cap,
+/// at most [`MAX_DSS_ENTRIES`] of them and [`MAX_DSS_BYTES`] together.
+fn dss_evidence<'a>(doc: &'a Document, dss: &Dict, key: &[u8]) -> impl Iterator<Item = Vec<u8>> + 'a {
+    let items = dss.get(key).map(|o| doc.resolve(o)).and_then(|o| o.as_array().cloned()).unwrap_or_default();
+    let mut items = items.into_iter().take(MAX_DSS_ENTRIES);
+    let mut seen = HashSet::new();
+    let mut left = MAX_DSS_BYTES;
+    std::iter::from_fn(move || {
+        for item in items.by_ref() {
+            if left == 0 {
+                return None;
+            }
+            if item.as_ref().is_some_and(|r| !seen.insert(r)) {
+                continue;
+            }
+            let o = doc.resolve(&item);
+            let Object::Stream(s) = o.as_ref() else { continue };
+            let Ok(bytes) = s.decoded_within(crate::revocation::MAX_EVIDENCE.min(left)) else { continue };
+            left = left.saturating_sub(bytes.len());
+            return Some(bytes);
+        }
+        None
+    })
+}
+
 /// Check the revocation evidence in the catalog's `/DSS` against the signer's chain at `at`.
 /// Only evidence whose signature verifies against the issuer counts; returns whether the
 /// certificate is revoked (which invalidates the signature).
@@ -985,25 +1016,13 @@ fn check_dss_revocation(doc: &Document, signer: Option<&Certificate>, at: &Optio
     let Some(dss) = doc.get(root).as_dict().and_then(|c| c.get(b"DSS").cloned()).map(|d| doc.resolve(&d)).and_then(|d| d.as_dict().cloned()) else {
         return false;
     };
-    let pull = |key: &[u8]| -> Vec<Vec<u8>> {
-        let mut out = Vec::new();
-        for item in dss.get(key).map(|o| doc.resolve(o)).and_then(|o| o.as_array().cloned()).unwrap_or_default() {
-            let o = doc.resolve(&item);
-            if let pdfcraft_cos::Object::Stream(s) = &*o
-                && let Ok(bytes) = s.decoded()
-            {
-                out.push(bytes);
-            }
-        }
-        out
-    };
     let issuer = info.chain.get(1).unwrap_or(signer);
     // A verified revocation wins; "good" from any covering evidence is reported, but never
     // contradicts a revocation.
     let mut revoked = None;
     let mut covered = false;
     let mut sources = Vec::new();
-    for r in pull(b"CRLs") {
+    for r in dss_evidence(doc, &dss, b"CRLs") {
         let Ok(list) = CertificateList::parse(&r) else { continue };
         sources.push("CRL");
         match list.check(signer, issuer, at) {
@@ -1016,7 +1035,7 @@ fn check_dss_revocation(doc: &Document, signer: Option<&Certificate>, at: &Optio
         }
     }
     if revoked.is_none() {
-        for r in pull(b"OCSPs") {
+        for r in dss_evidence(doc, &dss, b"OCSPs") {
             let Ok(resp) = OcspResponse::parse(&r) else { continue };
             sources.push("OCSP");
             match resp.check(signer, issuer, at) {
