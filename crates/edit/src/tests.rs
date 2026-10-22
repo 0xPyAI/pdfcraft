@@ -270,6 +270,100 @@ fn replace_and_remove_restore_the_original_content() {
     assert_eq!(streams(&reopen(&doc), 0), original, "back to exactly the original content");
 }
 
+/// The six numbers of the first `… cm` in `content`.
+fn first_cm(content: &str) -> [f64; 6] {
+    let line = content.lines().find(|l| l.ends_with(" cm")).unwrap_or_else(|| panic!("no cm in {content:?}"));
+    let v: Vec<f64> = line.split_whitespace().take(6).map(|x| x.parse().unwrap()).collect();
+    <[f64; 6]>::try_from(v).unwrap()
+}
+
+fn map_point(m: [f64; 6], x: f64, y: f64) -> (f64, f64) {
+    (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
+}
+
+fn near(a: (f64, f64), b: (f64, f64)) -> bool {
+    (a.0 - b.0).abs() < 0.01 && (a.1 - b.1).abs() < 0.01
+}
+
+fn shrinking(header: &str, footer: &str) -> HeaderFooter {
+    let mut hf = HeaderFooter { shrink: true, ..HeaderFooter::default() };
+    hf.text[1] = header.into();
+    hf.text[5] = footer.into();
+    hf
+}
+
+#[test]
+fn shrink_scales_the_original_content_into_the_band_between_header_and_footer() {
+    let mut doc = fixture();
+    // 8 pt text, margins 36 top and bottom: the header takes 36 + 8 (+ 4 clearance) at the top,
+    // the footer 36 + 6.4 (its capitals above the baseline, + 4) at the bottom.
+    add_header_footer(&mut doc, &[0], &shrinking("ACME", "<<Bates Number#6#1##>>"), false, &cx()).unwrap();
+    let doc = reopen(&doc);
+    let s = streams(&doc, 0);
+    // q-wrapper, shrink, original, Q-wrapper, header/footer.
+    assert_eq!(s.len(), 5, "{s:?}");
+    assert_eq!((s[0].as_str(), s[3].as_str()), ("q %PdfCraft\n", "\nQ %PdfCraft\n"));
+    assert!(s[2].contains("(Hi) Tj"), "the original content follows the shrink: {s:?}");
+    let m = first_cm(&s[1]);
+    let k = (800.0 - 48.0 - 46.4) / 800.0;
+    assert!((m[0] - k).abs() < 1e-3 && (m[3] - k).abs() < 1e-3 && m[1] == 0.0 && m[2] == 0.0, "uniform scale {k}: {m:?}");
+    // The page's corners land on the band, centred across.
+    assert!(near(map_point(m, 0.0, 0.0), ((600.0 - 600.0 * k) / 2.0, 46.4)), "{m:?}");
+    assert!(near(map_point(m, 600.0, 800.0), ((600.0 + 600.0 * k) / 2.0, 800.0 - 48.0)), "{m:?}");
+    assert!(s[4].contains("(000001) Tj"), "{}", s[4]);
+}
+
+#[test]
+fn shrink_follows_the_display_space_of_a_rotated_page() {
+    let mut doc = fixture();
+    // Page 2 is rotated 90°: shown 800 wide and 600 high. A footer alone keeps the top.
+    add_header_footer(&mut doc, &[1], &shrinking("", "<<1>>"), false, &cx()).unwrap();
+    let s = streams(&doc, 1);
+    let m = first_cm(&s[1]);
+    let page = &pdfcraft_model::pages(&doc)[1];
+    let v = page.view_matrix(&doc);
+    let k = (600.0 - 46.4) / 600.0;
+    // Display (x, y) is user v·(x, y): the shrunk content's display corners.
+    let to_user = |x: f64, y: f64| map_point(v, x, y);
+    assert!(near(map_point(m, to_user(0.0, 0.0).0, to_user(0.0, 0.0).1), to_user((800.0 - 800.0 * k) / 2.0, 46.4)), "{m:?}");
+    assert!(near(map_point(m, to_user(800.0, 600.0).0, to_user(800.0, 600.0).1), to_user((800.0 + 800.0 * k) / 2.0, 600.0)), "{m:?}");
+}
+
+#[test]
+fn shrink_is_undone_by_remove_and_not_doubled_by_update() {
+    let mut doc = fixture();
+    let original = streams(&doc, 0);
+    add_background(&mut doc, &[0], &Background::default(), false).unwrap();
+    add_header_footer(&mut doc, &[0], &shrinking("First", ""), false, &cx()).unwrap();
+    add_header_footer(&mut doc, &[0], &shrinking("Second", ""), true, &cx()).unwrap();
+    let s = streams(&doc, 0);
+    assert_eq!(s.iter().filter(|x| x.contains(" cm") && !x.contains("/PCMark")).count(), 2, "one shrink besides the original's own cm: {s:?}");
+    assert!(s[0].contains("/PCMark /Background"), "the background stays behind, full size: {s:?}");
+    // Update without shrinking: back to full size.
+    let mut plain = shrinking("Third", "");
+    plain.shrink = false;
+    add_header_footer(&mut doc, &[0], &plain, true, &cx()).unwrap();
+    assert_eq!(streams(&doc, 0).len(), 5, "background, wrapper, original, wrapper, header: {:?}", streams(&doc, 0));
+    add_header_footer(&mut doc, &[0], &shrinking("Fourth", ""), true, &cx()).unwrap();
+    assert_eq!(remove_marks(&mut doc, &[0], MarkKind::HeaderFooter).unwrap(), 2, "the header and its shrink");
+    assert_eq!(remove_marks(&mut doc, &[0], MarkKind::Background).unwrap(), 1);
+    assert_eq!(streams(&reopen(&doc), 0), original, "back to exactly the original content");
+}
+
+#[test]
+fn shrink_with_no_room_left_is_refused_without_drawing() {
+    let mut doc = fixture();
+    let mut hf = shrinking("Top", "Bottom");
+    hf.margins = [400.0, 400.0, 72.0, 72.0];
+    let err = add_header_footer(&mut doc, &[0, 1], &hf, false, &cx()).unwrap_err();
+    assert!(err.to_string().contains("no room"), "{err}");
+    assert!(!doc.is_modified());
+    // A page without content has nothing to shrink: it just gets the header.
+    let mut doc = fixture();
+    add_header_footer(&mut doc, &[2], &shrinking("Top", ""), false, &cx()).unwrap();
+    assert_eq!(streams(&doc, 2).len(), 1);
+}
+
 #[test]
 fn watermarks_rotate_fade_and_can_go_behind() {
     let mut doc = fixture();

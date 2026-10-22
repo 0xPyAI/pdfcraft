@@ -86,6 +86,21 @@ fn header_and_footer_dialog_draws_in_the_chosen_face() {
 }
 
 #[test]
+fn header_and_footer_dialog_can_shrink_the_page_content() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("edit.bates"));
+    h.run_steps(3);
+    assert!(!h.state().marks_draft.hf.shrink, "off by default, as in Acrobat");
+    h.get_by_label("Shrink the page content to make room for the header and footer").click();
+    h.run_steps(2);
+    assert!(h.state().marks_draft.hf.shrink);
+    h.get_by_label("OK").click();
+    h.run_steps(4);
+    assert_eq!(h.state().dialog, None);
+    assert_eq!(marks(&h), [MarkKind::HeaderFooter]);
+}
+
+#[test]
 fn watermark_and_background_dialogs() {
     let mut h = harness();
     h.state_mut().execute("edit.watermark");

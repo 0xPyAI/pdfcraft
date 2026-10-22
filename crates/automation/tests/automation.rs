@@ -2256,6 +2256,43 @@ fn headers_watermarks_and_backgrounds_through_tools() {
 }
 
 #[test]
+fn a_shrinking_header_and_footer_moves_the_page_content_out_of_their_way_through_tools() {
+    let dir = workdir("hf-shrink");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    // The box of "Page 1" (left, top, width, height in points), read back from a saved copy.
+    let mut saved = 0;
+    let mut text_box = |a: &mut Automation| -> [f64; 4] {
+        saved += 1;
+        let path = format!("shrunk{saved}.pdf");
+        ok(a, "doc_save", json!({ "doc": doc, "path": path }));
+        let copy = ok(a, "doc_open", json!({ "path": path }))["doc"].as_u64().unwrap();
+        let found = ok(a, "text_find", json!({ "doc": copy, "query": "Page 1" }));
+        let r = found["matches"][0]["rects"][0].as_array().unwrap_or_else(|| panic!("Page 1 is on the page: {found}"));
+        let v: Vec<f64> = r.iter().map(|x| x.as_f64().unwrap()).collect();
+        [v[0], v[1], v[2] - v[0], v[3] - v[1]]
+    };
+    let before = text_box(&mut a);
+    ok(
+        &mut a,
+        "doc_header_footer",
+        json!({ "doc": doc, "pages": [1], "header_center": "ACME", "footer_right": "<<Bates Number#6#1##>>", "shrink": true }),
+    );
+    let after = text_box(&mut a);
+    // 200 × 300 page, 8 pt text and 36 pt margins: the header takes 48 pt, the footer 46.4 pt.
+    let k = (300.0 - 48.0 - 46.4) / 300.0;
+    assert!((after[2] / before[2] - k).abs() < 0.02 && (after[3] / before[3] - k).abs() < 0.02, "scaled by {k}: {before:?} → {after:?}");
+    assert!((after[0] - (20.0 * k + (200.0 - 200.0 * k) / 2.0)).abs() < 1.0, "centred across: {before:?} → {after:?}");
+    assert!(page_text(&mut a, doc)[0].contains("000001"), "the Bates number is drawn");
+    // Margins that leave no room are refused; Remove brings the content back to full size.
+    let full = json!({ "doc": doc, "header_center": "X", "margins": [295, 36, 72, 72], "shrink": true, "replace": true });
+    assert!(matches!(a.call("doc_header_footer", &full), Err(ToolError::Failed(_))), "no room");
+    ok(&mut a, "doc_remove_marks", json!({ "doc": doc, "kind": "header_footer" }));
+    let restored = text_box(&mut a);
+    assert!(restored.iter().zip(before).all(|(r, b)| (r - b).abs() < 0.01), "{before:?} → {restored:?}");
+}
+
+#[test]
 fn watermarks_move_from_the_page_centre_through_tools() {
     let dir = workdir("wm-offset");
     let mut a = auto(&dir);
@@ -3468,6 +3505,36 @@ fn rotating_a_field_through_tools() {
 }
 
 #[test]
+fn redact_mark_respects_single_page_and_rejects_conflicting_selectors() {
+    let dir = workdir("redact-single-page");
+    std::fs::write(dir.join("memo.txt"), "Private 123-45-6789").unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "text", "path": "memo.txt" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_duplicate", json!({ "doc": doc, "pages": [1] }));
+    for selector in [json!({ "find": "Private" }), json!({ "words": ["Private"] }), json!({ "pattern": "ssn" }), json!({ "whole_pages": true })] {
+        let mut args = selector;
+        args["doc"] = json!(doc);
+        args["page"] = json!(1);
+        let result = ok(&mut a, "redact_mark", args);
+        assert_eq!(result["marked"], 1);
+        ok(&mut a, "redact_clear", json!({ "doc": doc }));
+    }
+    for args in [
+        json!({ "doc": doc, "find": "Private", "page": 1, "pages": [2] }),
+        json!({ "doc": doc, "rect": [1, 1, 10, 10], "pages": [2] }),
+        json!({ "doc": doc, "find": "Private", "page": 3 }),
+    ] {
+        assert!(matches!(a.call("redact_mark", &args), Err(ToolError::InvalidArgs(_))));
+    }
+    let result = ok(&mut a, "redact_mark", json!({ "doc": doc, "find": "Private", "page": 1 }));
+    assert_eq!(result["marks_pending"], 1, "invalid selections must not add marks");
+    ok(&mut a, "redact_apply", json!({ "doc": doc }));
+    let text = page_text(&mut a, doc);
+    assert!(!text[0].contains("Private"));
+    assert!(text[1].contains("Private"));
+}
+
+#[test]
 fn redacting_through_tools() {
     let dir = workdir("redact");
     std::fs::write(dir.join("memo.txt"), "Call 555-123-4567 today\nSSN 123-45-6789 is private\nPublic line").unwrap();
@@ -3489,6 +3556,48 @@ fn redacting_through_tools() {
     assert!(matches!(a.call("redact_apply", &json!({ "doc": doc })), Err(ToolError::Failed(_))));
     assert!(matches!(a.call("redact_mark", &json!({ "doc": doc, "find": "nowhere to be found" })), Err(ToolError::Failed(_))));
     assert!(matches!(a.call("redact_mark", &json!({ "doc": doc })), Err(ToolError::InvalidArgs(_))));
+}
+
+/// One page with the text "Secret 1234" and a Redact annotation that has neither a usable
+/// QuadPoints array nor a Rect, so there is no area to redact.
+fn redact_pdf_with_unreadable_mark() -> Vec<u8> {
+    let body = "BT /F1 24 Tf 20 150 Td (Secret 1234) Tj ET";
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>".into(),
+        format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+        "<< /Type /Annot /Subtype /Redact /QuadPoints /oops >>".into(),
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    bytes
+}
+
+/// A mark that can't be read is refused by `redact_apply`, with the reason in the reply, and the
+/// page keeps its text. (Before, the mark was skipped and the reply said there were no marks.)
+#[test]
+fn an_unreadable_redaction_mark_is_refused_with_the_reason() {
+    let dir = workdir("redact-unreadable");
+    std::fs::write(dir.join("broken.pdf"), redact_pdf_with_unreadable_mark()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "broken.pdf" }))["doc"].as_u64().unwrap();
+    let Err(ToolError::Failed(reason)) = a.call("redact_apply", &json!({ "doc": doc })) else {
+        panic!("redact_apply must refuse a mark with no readable area");
+    };
+    assert!(reason.contains("1 redaction mark(s) have no readable area") && reason.contains("nothing was redacted"), "{reason}");
+    assert!(page_text(&mut a, doc)[0].contains("Secret 1234"), "the page is unchanged");
 }
 
 #[test]
@@ -6059,6 +6168,51 @@ fn measurements_calibrate_draw_save_reopen_and_export() {
     let last = all["measurements"].as_array().unwrap().last().unwrap();
     assert!((last["reading"]["value"].as_f64().unwrap() - 10.0).abs() < 1e-6);
     assert_eq!(last["points"], json!([[100.0, 100.0], [180.0, 160.0]]));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn measurement_scale_ratio_takes_the_page_side_in_a_unit() {
+    // #2752: a plan drawn at 1:50 is "1 mm = 50 mm", so a line 10 mm long on the page is 500 mm.
+    let dir = workdir("measurement-ratio");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path":"a.pdf"}))["doc"].as_u64().unwrap();
+    let mm = 72.0 / 25.4;
+    let line = json!([[20.0, 30.0], [20.0 + 10.0 * mm, 30.0]]);
+    let read = |a: &mut Automation, doc: u64| ok(a, "measure_info", json!({"doc":doc,"page":1,"points":line}))["reading"]["value"].as_f64().unwrap();
+    let set = ok(&mut a, "measure_scale", json!({"doc":doc,"page":1,"page_distance":1,"page_unit":"mm","distance":50,"unit":"mm"}));
+    assert_eq!(set["scale"]["ratio"], "1 mm = 50 mm");
+    assert!((read(&mut a, doc) - 500.0).abs() < 1e-9);
+    // The PDF keeps its factors per point: 50 mm for every 25.4 / 72 mm of page.
+    assert!((set["scale"]["x"].as_f64().unwrap() - 50.0 / mm).abs() < 1e-9);
+    ok(&mut a, "edit_undo", json!({"doc":doc}));
+    assert!((read(&mut a, doc) - 10.0 / 25.4).abs() < 1e-9, "true size in inches without a scale");
+    ok(&mut a, "edit_redo", json!({"doc":doc}));
+    assert!((read(&mut a, doc) - 500.0).abs() < 1e-9);
+    ok(&mut a, "doc_save", json!({"doc":doc,"path":"ratio.pdf"}));
+    let reopened = ok(&mut a, "doc_open", json!({"path":"ratio.pdf"}))["doc"].as_u64().unwrap();
+    assert!((read(&mut a, reopened) - 500.0).abs() < 1e-9);
+    assert_eq!(ok(&mut a, "measure_scale", json!({"doc":reopened,"page":1,"at":[20,30]}))["scale"]["ratio"], "1 mm = 50 mm");
+    // The page side defaults to the real-world unit; any page unit converts to points.
+    ok(&mut a, "measure_scale", json!({"doc":doc,"page":1,"page_distance":2,"distance":1,"unit":"cm"}));
+    assert!((read(&mut a, doc) - 0.5).abs() < 1e-9);
+    ok(&mut a, "measure_scale", json!({"doc":doc,"page":1,"page_distance":0.25,"page_unit":"in","distance":1,"unit":"ft"}));
+    assert!((read(&mut a, doc) - 10.0 / 25.4 * 4.0).abs() < 1e-9);
+    // Units per point keep meaning points.
+    ok(&mut a, "measure_scale", json!({"doc":doc,"page":1,"units_per_point":50,"unit":"mm"}));
+    assert!((read(&mut a, doc) - 500.0 * mm).abs() < 1e-9);
+    let before = ok(&mut a, "doc_list", json!({}));
+    for args in [
+        json!({"doc":doc,"page":1,"page_distance":1,"page_unit":"ft","distance":1,"unit":"ft"}),
+        json!({"doc":doc,"page":1,"page_distance":1,"distance":1,"unit":"m"}),
+        json!({"doc":doc,"page":1,"page_distance":1,"unit":"mm"}),
+        json!({"doc":doc,"page":1,"page_unit":"mm","units_per_point":1}),
+        json!({"doc":doc,"page":1,"page_distance":1,"units_per_point":1,"distance":1}),
+        json!({"doc":doc,"page":1,"page_distance":1,"points":[[0,0],[10,0]],"distance":1}),
+    ] {
+        assert!(a.call("measure_scale", &args).is_err(), "{args}");
+        assert_eq!(ok(&mut a, "doc_list", json!({})), before);
+    }
     let _ = std::fs::remove_dir_all(dir);
 }
 

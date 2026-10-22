@@ -1315,6 +1315,7 @@ impl Automation {
                 if let Some(s) = a.opt_int("start_number")? {
                     hf.start_number = s.clamp(1, u32::MAX as i64) as u32;
                 }
+                hf.shrink = a.opt_bool("shrink")?.unwrap_or(false);
                 Edit::AddHeaderFooter { pages, settings: hf, replace }
             }
             "doc_watermark" => {
