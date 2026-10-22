@@ -515,12 +515,14 @@ pub fn verify(doc: &Document, level: Level) -> Vec<Issue> {
         let Some(d) = dict_of(o) else { continue };
         let ty = d.name(b"Type");
         let sub = d.name(b"Subtype");
-        // Actions anywhere (structure elements also have /S: their role).
-        if let Some(s) = d.name(b"S")
-            && FORBIDDEN_ACTIONS.contains(&s)
-            && is_action(d)
-        {
-            issue("6.5.1", "A {} action isn't allowed", Some(String::from_utf8_lossy(s).into_owned()), None, true);
+        // Actions anywhere (structure elements also have /S: their role), with the actions they
+        // chain to and those written directly in an /A or /OpenAction.
+        let own = (d.get(b"S").is_some() && is_action(d)).then_some(d);
+        let direct = [b"A".as_slice(), b"OpenAction"].map(|k| d.get(k).and_then(|a| a.as_dict()));
+        for a in [own].into_iter().chain(direct).flatten() {
+            if let Some(s) = chain_forbidden(a) {
+                issue("6.5.1", "A {} action isn't allowed", Some(s), None, true);
+            }
         }
         // Annotations.
         if ty == Some(b"Annot") || (sub.is_some() && d.get(b"Rect").is_some() && d.get(b"P").is_some()) {
@@ -652,10 +654,39 @@ fn is_action(d: &Dict) -> bool {
     }
 }
 
-/// Whether `o` is (or refers to) a forbidden action, or to nothing.
+/// How many actions one action and the `/Next` actions written inside it may hold before the
+/// whole chain counts as forbidden, since it can't be checked.
+const MAX_ACTION_CHAIN: usize = 1024;
+
+/// The first forbidden action type in the action `a` or in the actions written directly in its
+/// `/Next` (ISO 32000-2 12.6.2: a dictionary or an array of them). An action `/Next` refers to
+/// is an object of its own, checked and removed as one.
+fn chain_forbidden(a: &Dict) -> Option<String> {
+    let mut stack = vec![a];
+    let mut read = 0;
+    while let Some(d) = stack.pop() {
+        read += 1;
+        if read > MAX_ACTION_CHAIN {
+            return Some("too deeply chained".into());
+        }
+        if let Some(s) = d.name(b"S")
+            && FORBIDDEN_ACTIONS.contains(&s)
+        {
+            return Some(String::from_utf8_lossy(s).into_owned());
+        }
+        match d.get(b"Next") {
+            Some(Object::Dict(next)) => stack.push(next),
+            Some(Object::Array(list)) => stack.extend(list.iter().filter_map(Object::as_dict)),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Whether `o` is (or refers to) a forbidden action or one chaining to it, or to nothing.
 fn forbidden(doc: &Document, o: &Object) -> bool {
     match &*doc.resolve(o) {
-        Object::Dict(a) => a.name(b"S").is_some_and(|s| FORBIDDEN_ACTIONS.contains(&s)),
+        Object::Dict(a) => chain_forbidden(a).is_some(),
         Object::Null => true,
         _ => false,
     }
@@ -801,13 +832,19 @@ pub fn convert(doc: &mut Document, level: Level) -> Result<Report, pdfcraft_cos:
             files += 1;
         }
     }
-    // Forbidden actions left as objects of their own (nothing refers to them any more).
+    // Forbidden actions left as objects of their own, or chained to by one, and those written
+    // directly in an /A elsewhere (an outline item's, say).
     for (r, o) in objects(doc) {
-        if let Object::Dict(d) = &*o
-            && d.name(b"S").is_some_and(|s| FORBIDDEN_ACTIONS.contains(&s))
-            && is_action(d)
-        {
+        let Object::Dict(d) = &*o else { continue };
+        if d.get(b"S").is_some() && is_action(d) && chain_forbidden(d).is_some() {
             doc.set(r, Object::Null);
+            actions += 1;
+        } else if let Some(Object::Dict(a)) = d.get(b"A")
+            && chain_forbidden(a).is_some()
+        {
+            let mut nd = d.clone();
+            nd.remove(b"A");
+            doc.set(r, Object::Dict(nd));
             actions += 1;
         }
     }

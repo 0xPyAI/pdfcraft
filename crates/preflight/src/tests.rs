@@ -430,6 +430,32 @@ fn content_colour_reads_operators_one_at_a_time_and_stops_when_all_are_found() {
     assert_eq!(read, 3);
 }
 
+/// A forbidden action chained by `/Next` behind an allowed one, written directly inside its
+/// parent, is reported and removed like any other.
+#[test]
+fn forbidden_actions_chained_behind_allowed_ones_are_found_and_removed() {
+    let js = "<< /S /JavaScript /JS (app.alert(1)) >>";
+    let page = "<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>";
+    let pages = "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] >>";
+    let link = |a: &str| format!("<< /Type /Annot /Subtype /Link /Rect [0 0 0 0] /P 3 0 R /F 4 /A {a} >>");
+    let open_action = format!("<< /Type /Catalog /Pages 2 0 R /OpenAction << /S /GoTo /D [3 0 R /Fit] /Next {js} >> >>");
+    let goto = format!("<< /Type /Action /S /GoTo /D [3 0 R /Fit] /Next [{js}] >>");
+    let cases = [
+        build(&[&open_action, pages, page, &link("<< /S /GoTo /D [3 0 R /Fit] >>")], ""),
+        build(&["<< /Type /Catalog /Pages 2 0 R >>", pages, page, &link("5 0 R"), &goto], ""),
+        build(&["<< /Type /Catalog /Pages 2 0 R >>", pages, page, &link(&format!("<< /S /GoTo /D [3 0 R /Fit] /Next {js} >>"))], ""),
+    ];
+    for (i, mut doc) in cases.into_iter().enumerate() {
+        let found = messages(&verify(&doc, Level::A2b)).contains(&"A JavaScript action isn't allowed");
+        assert!(found, "case {i}: {:#?}", verify(&doc, Level::A2b));
+        let r = convert(&mut doc, Level::A2b).unwrap();
+        assert!(!r.remaining.iter().any(|x| x.clause == "6.5.1"), "case {i}: {:#?}", r.remaining);
+        let plain = pdfcraft_cos::SaveOptions { object_streams: false, ..Default::default() };
+        let bytes = pdfcraft_cos::write_full(&doc, &plain).unwrap();
+        assert!(!bytes.windows(11).any(|w| w == b"/JavaScript"), "case {i}: {}", String::from_utf8_lossy(&bytes));
+    }
+}
+
 /// Each annotation's page is found from one pass over the pages' `/Annots`, not by searching
 /// every page's list again for each annotation.
 #[test]
