@@ -2792,3 +2792,9 @@ theme	Appearance	Aparência
 	field names can't contain a period: {name}	nomes de campo não podem conter ponto: {name}
 	two cells would both be named {name}	duas células teriam o nome {name}
 	a field named {name} already exists	já existe um campo chamado {name}
+
+# Prepare a form ▸ Text field table: limits (AI-assisted, not separately native-reviewed)
+	a table has 1 to {max} rows	uma tabela tem de 1 a {max} linhas
+	a table has 1 to {max} columns	uma tabela tem de 1 a {max} colunas
+	the first row number can be at most {max}	o número da primeira linha pode ser no máximo {max}
+	the area, the spacing and the column widths must be numbers, the spacing 0 or more and each width more than 0	a área, o espaçamento e as larguras das colunas devem ser números, o espaçamento 0 ou mais e cada largura maior que 0

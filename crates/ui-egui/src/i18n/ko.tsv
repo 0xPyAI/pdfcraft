@@ -2726,3 +2726,27 @@ theme	Appearance	모양
 	{field} reads no other field	{field} reads no other field
 	{field} reads {fields}	{field} reads {fields}
 	{names} and {last}	{names} and {last}
+
+# Prepare a form ▸ Text field table (AI-assisted, not separately native-reviewed)
+	Add text field table	텍스트 필드 표 추가
+	Text field table	텍스트 필드 표
+	Text Field Table	텍스트 필드 표
+	Columns	열
+	Row spacing	행 간격
+	Column spacing	열 간격
+	First row number	첫 행 번호
+	Column widths	열 너비
+	Distribute evenly	균등하게 분배
+	Field names	필드 이름
+	N or {row} is the row number, {col} the column number, {seq} the cell number. With none of them, the row number goes last.	N 또는 {row}는 행 번호, {col}은 열 번호, {seq}는 셀 번호입니다. 아무것도 없으면 행 번호가 끝에 붙습니다.
+	Column {n}	열 {n}
+	Add fields	필드 추가
+	a table has 1 to {max} rows	표의 행 수는 1~{max}개입니다
+	a table has 1 to {max} columns	표의 열 수는 1~{max}개입니다
+	the first row number can be at most {max}	첫 행 번호는 최대 {max}입니다
+	the area, the spacing and the column widths must be numbers, the spacing 0 or more and each width more than 0	영역, 간격, 열 너비는 숫자여야 하며 간격은 0 이상, 각 너비는 0보다 커야 합니다
+	the rows are too short: make the area taller, or use fewer rows or less row spacing	행이 너무 낮습니다: 영역을 더 높게 하거나 행 수 또는 행 간격을 줄이세요
+	a column is too narrow: make the area wider, give the column more of it, or use fewer columns or less column spacing	열이 너무 좁습니다: 영역을 더 넓게 하거나, 열에 더 많은 너비를 주거나, 열 수 또는 열 간격을 줄이세요
+	field names can't contain a period: {name}	필드 이름에는 마침표를 쓸 수 없습니다: {name}
+	two cells would both be named {name}	두 셀의 이름이 모두 {name}이(가) 됩니다
+	a field named {name} already exists	{name}(이)라는 필드가 이미 있습니다

@@ -2476,3 +2476,27 @@ animation effects	Off	Joaktiv
 	Reason: 	Arsyeja: 
 	Location: 	Vendndodhja: 
 	Date: 	Data: 
+
+# Prepare a form ▸ Text field table (AI-assisted, not separately native-reviewed)
+	Add text field table	Shto tabelë fushash teksti
+	Text field table	Tabelë fushash teksti
+	Text Field Table	Tabelë fushash teksti
+	Columns	Kolonat
+	Row spacing	Hapësira mes rreshtave
+	Column spacing	Hapësira mes kolonave
+	First row number	Numri i rreshtit të parë
+	Column widths	Gjerësitë e kolonave
+	Distribute evenly	Shpërndaj në mënyrë të barabartë
+	Field names	Emrat e fushave
+	N or {row} is the row number, {col} the column number, {seq} the cell number. With none of them, the row number goes last.	N ose {row} është numri i rreshtit, {col} numri i kolonës, {seq} numri i qelizës. Pa asnjërin prej tyre, numri i rreshtit vendoset në fund.
+	Column {n}	Kolona {n}
+	Add fields	Shto fushat
+	a table has 1 to {max} rows	një tabelë ka nga 1 deri në {max} rreshta
+	a table has 1 to {max} columns	një tabelë ka nga 1 deri në {max} kolona
+	the first row number can be at most {max}	numri i rreshtit të parë mund të jetë më së shumti {max}
+	the area, the spacing and the column widths must be numbers, the spacing 0 or more and each width more than 0	zona, hapësira dhe gjerësitë e kolonave duhet të jenë numra, hapësira 0 ose më shumë dhe çdo gjerësi më e madhe se 0
+	the rows are too short: make the area taller, or use fewer rows or less row spacing	rreshtat janë shumë të ulët: bëni zonën më të lartë ose përdorni më pak rreshta ose më pak hapësirë mes rreshtave
+	a column is too narrow: make the area wider, give the column more of it, or use fewer columns or less column spacing	një kolonë është shumë e ngushtë: bëni zonën më të gjerë, jepini kolonës më shumë prej saj ose përdorni më pak kolona ose më pak hapësirë mes kolonave
+	field names can't contain a period: {name}	emrat e fushave nuk mund të përmbajnë pikë: {name}
+	two cells would both be named {name}	dy qeliza do të kishin të dyja emrin {name}
+	a field named {name} already exists	ekziston tashmë një fushë me emrin {name}

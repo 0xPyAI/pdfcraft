@@ -2726,3 +2726,27 @@ theme	Appearance	स्वरूप
 	{field} reads no other field	{field} reads no other field
 	{field} reads {fields}	{field} reads {fields}
 	{names} and {last}	{names} and {last}
+
+# Prepare a form ▸ Text field table (AI-assisted, not separately native-reviewed)
+	Add text field table	टेक्स्ट फ़ील्ड तालिका जोड़ें
+	Text field table	टेक्स्ट फ़ील्ड तालिका
+	Text Field Table	टेक्स्ट फ़ील्ड तालिका
+	Columns	कॉलम
+	Row spacing	पंक्तियों के बीच की दूरी
+	Column spacing	कॉलमों के बीच की दूरी
+	First row number	पहली पंक्ति की संख्या
+	Column widths	कॉलमों की चौड़ाई
+	Distribute evenly	बराबर बाँटें
+	Field names	फ़ील्ड के नाम
+	N or {row} is the row number, {col} the column number, {seq} the cell number. With none of them, the row number goes last.	N या {row} पंक्ति संख्या है, {col} कॉलम संख्या, {seq} सेल संख्या। इनमें से कोई न हो, तो पंक्ति संख्या अंत में लगती है।
+	Column {n}	कॉलम {n}
+	Add fields	फ़ील्ड जोड़ें
+	a table has 1 to {max} rows	तालिका में 1 से {max} पंक्तियाँ होती हैं
+	a table has 1 to {max} columns	तालिका में 1 से {max} कॉलम होते हैं
+	the first row number can be at most {max}	पहली पंक्ति की संख्या अधिकतम {max} हो सकती है
+	the area, the spacing and the column widths must be numbers, the spacing 0 or more and each width more than 0	क्षेत्र, दूरी और कॉलमों की चौड़ाई संख्याएँ होनी चाहिए; दूरी 0 या अधिक और हर चौड़ाई 0 से अधिक
+	the rows are too short: make the area taller, or use fewer rows or less row spacing	पंक्तियाँ बहुत छोटी हैं: क्षेत्र को ऊँचा करें, या कम पंक्तियाँ या पंक्तियों के बीच कम दूरी रखें
+	a column is too narrow: make the area wider, give the column more of it, or use fewer columns or less column spacing	एक कॉलम बहुत संकरा है: क्षेत्र को चौड़ा करें, कॉलम को उसका बड़ा हिस्सा दें, या कम कॉलम या कॉलमों के बीच कम दूरी रखें
+	field names can't contain a period: {name}	फ़ील्ड के नामों में पूर्ण विराम (.) नहीं हो सकता: {name}
+	two cells would both be named {name}	दो सेल का नाम {name} हो जाएगा
+	a field named {name} already exists	{name} नाम का फ़ील्ड पहले से मौजूद है
