@@ -5239,3 +5239,40 @@ fn a_clipping_copy_on_the_same_baseline_is_refused() {
     assert!(matches!(&block, Err(EditError::Invalid(m)) if m.contains("clipping path")), "{block:?}");
     assert_eq!(text::text_lines(&doc, 0).unwrap().len(), 2, "refused means untouched");
 }
+
+/// #2512: a session's drafts are laid out from the document as it was opened, never from each
+/// other, and its commit writes what a one-shot rewrite writes, whatever was laid out before.
+#[test]
+fn a_text_session_commits_what_a_rewrite_writes_whatever_it_laid_out_before() {
+    let page = "BT /F1 12 Tf 14 TL 72 700 Td (The first row of a paragraph) Tj T* (and its second row here.) Tj ET";
+    let bold = BlockStyle { bold: Some(true), ..Default::default() };
+    let drafts: [(&str, &BlockStyle); 4] = [
+        ("The first row of a paragraph\nand its second row here, with more words to wrap it onto a third row", &BlockStyle::default()),
+        ("Short", &bold),
+        ("The first row\nsecond", &BlockStyle::default()),
+        ("The first row of a paragraph\nand its second row here.", &bold),
+    ];
+    let doc = text_page(page);
+    let session = text::TextSession::open(&doc, 0, 0).unwrap();
+    assert_eq!(session.source().editor_text, "The first row of a paragraph\nand its second row here.");
+    for (text, style) in drafts {
+        let fresh = text::text_edit_layout(&text_page(page), 0, 0, text, style).unwrap();
+        assert_eq!(session.layout(text, style).unwrap(), fresh, "{text:?} is laid out from the opened page");
+    }
+    let (text, style) = drafts[0];
+    let mut by_session = doc.clone();
+    session.commit(&mut by_session, Some(text), style).unwrap();
+    let mut by_rewrite = text_page(page);
+    text::rewrite_block(&mut by_rewrite, 0, 0, Some(text), style).unwrap();
+    assert_eq!(
+        pdfcraft_cos::write_full(&by_session, &SaveOptions::default()).unwrap(),
+        pdfcraft_cos::write_full(&by_rewrite, &SaveOptions::default()).unwrap(),
+        "the commit writes what a rewrite writes"
+    );
+    // A document changed since the session opened isn't written to.
+    let before = pdfcraft_cos::write_full(&by_session, &SaveOptions::default()).unwrap();
+    let refused = session.commit(&mut by_session, Some("Again"), &BlockStyle::default());
+    assert!(matches!(&refused, Err(EditError::Invalid(m)) if m.contains("changed while it was being edited")), "{refused:?}");
+    assert_eq!(pdfcraft_cos::write_full(&by_session, &SaveOptions::default()).unwrap(), before);
+    assert!(session.is_current(&doc) && !session.is_current(&by_session));
+}
