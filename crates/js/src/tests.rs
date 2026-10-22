@@ -455,6 +455,27 @@ mod xfa_model {
         assert_eq!(o.effects, vec![XfaEffect::SetValue { som: "form1[0].page1[0].total[0]".into(), value: "5".into() }]);
     }
 
+    /// A long value written again and again stops at the run's byte budget, and the write that
+    /// does not fit is left out of the field the script reads as well as of the effect.
+    #[test]
+    fn a_value_past_the_byte_budget_is_left_out_of_reads_and_effects_alike() {
+        let o = go(
+            "var s = 'x'; while (s.length < 65536) s += s; \
+             for (var i = 0; i < 300; i++) details.note.rawValue = ('00000' + i).slice(-6) + s.slice(6); \
+             details.note.rawValue.slice(0, 6)",
+            "form1[0].page1[0].total[0]",
+            "calculate",
+        );
+        assert_eq!(o.error, None, "{o:?}");
+        let set: Vec<&str> = o
+            .effects
+            .iter()
+            .filter_map(|e| if let XfaEffect::SetValue { value, .. } = e { Some(value.get(..6).unwrap_or(value)) } else { None })
+            .collect();
+        assert_eq!(set.len(), 1);
+        assert_eq!(o.result.as_deref(), set.first().copied());
+    }
+
     /// The script runs through `eval`, so code built from strings at run time is held to the
     /// script's own size and nesting checks instead of being refused outright.
     #[test]

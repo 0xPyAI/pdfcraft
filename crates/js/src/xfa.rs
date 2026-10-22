@@ -315,7 +315,15 @@ impl XHost {
     /// earlier one; past [`MAX_EFFECTS`] (or [`MAX_ALERTS`] message boxes, or [`MAX_PAYLOAD`]
     /// bytes of text) effects are counted and dropped.
     pub(crate) fn push(&mut self, e: XfaEffect) {
-        let e = match e {
+        let e = self.clip_effect(e);
+        if self.room(payload(&e)) {
+            self.record(e);
+        }
+    }
+
+    /// `e` with its text cut to the lengths an effect keeps.
+    fn clip_effect(&mut self, e: XfaEffect) -> XfaEffect {
+        match e {
             XfaEffect::MessageBox(m) => XfaEffect::MessageBox(clip(m)),
             XfaEffect::LaunchUrl(u) => XfaEffect::LaunchUrl(clip(u)),
             XfaEffect::SetFocus(s) => XfaEffect::SetFocus(clip(s)),
@@ -328,10 +336,11 @@ impl XHost {
                 XfaEffect::SetValue { som, value }
             }
             other => other,
-        };
-        if !self.room(payload(&e)) {
-            return;
         }
+    }
+
+    /// Keep `e`, whose bytes are already charged, against the count limits.
+    fn record(&mut self, e: XfaEffect) {
         let key = match &e {
             XfaEffect::SetValue { som, .. } => Some((0u8, som.clone())),
             XfaEffect::SetPresence { som, .. } => Some((1, som.clone())),
@@ -415,16 +424,17 @@ impl XHost {
         if cut {
             self.clipped_values += 1;
         }
-        // The snapshot's copy counts as well as the effect's: past the budget the write is left
-        // out of both.
-        if !self.room(text.len()) {
+        // The snapshot's copy and the effect's are charged together, before either is kept:
+        // past the byte budget the write is left out of both.
+        let effect = XfaEffect::SetValue { som, value: text.clone() };
+        if !self.room(text.len().saturating_add(payload(&effect))) {
             return true;
         }
         if let Some(n) = self.nodes.get_mut(i) {
-            n.value = text.clone();
+            n.value = text;
             n.formatted = None;
         }
-        self.push(XfaEffect::SetValue { som, value: text });
+        self.record(effect);
         true
     }
 }
