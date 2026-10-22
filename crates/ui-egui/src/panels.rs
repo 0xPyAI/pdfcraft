@@ -786,6 +786,10 @@ pub fn right_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         ancestor.pop();
                     }
                 }
+                if panel == RightPanel::Pages {
+                    let enabled = !modal && view.panel_drag.is_none();
+                    thumbnail_size(ui, &t, view, enabled);
+                }
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match panel {
                     RightPanel::Comments => {
                         if let Some(e) = crate::comments_panel::show(ui, &t, info, view, prefs, comment_allowed, &mut nav) {
@@ -1187,6 +1191,57 @@ fn outline_item(ui: &mut egui::Ui, t: &Tokens, info: &DocInfo, item: &OutlineIte
     }
 }
 
+/// Size controls stay above the scroll area, so they remain reachable on long documents.
+fn thumbnail_size(ui: &mut egui::Ui, t: &Tokens, view: &mut crate::DocView, enabled: bool) {
+    let before = view.thumbnail_zoom();
+    let mut zoom = before;
+    let label = ui
+        .horizontal(|ui| {
+            let label = ui.label(egui::RichText::new(tl!("Thumbnail size")).small().color(t.text_muted));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.label(egui::RichText::new(format!("{:.0}%", before * 100.0)).small().color(t.text_muted));
+            });
+            label
+        })
+        .inner;
+    ui.add_enabled_ui(enabled, |ui| {
+        ui.spacing_mut().slider_width = (ui.available_width() - 52.0 - 2.0 * ui.spacing().item_spacing.x).max(1.0);
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled_ui(zoom > *crate::canvas::THUMBNAIL_ZOOM_RANGE.start(), |ui| {
+                    icons::button(ui, "zoom-out", 26.0, false, tl!("Smaller thumbnails"))
+                })
+                .inner
+                .clicked()
+            {
+                zoom -= 0.25;
+            }
+            let mut percent = zoom * 100.0;
+            let range = (*crate::canvas::THUMBNAIL_ZOOM_RANGE.start() * 100.0)..=(*crate::canvas::THUMBNAIL_ZOOM_RANGE.end() * 100.0);
+            ui.scope(|ui| {
+                // The regular field fill blends into this panel; keep the slider's full rail visible.
+                ui.visuals_mut().widgets.inactive.bg_fill = t.border;
+                let slider = ui.add(egui::Slider::new(&mut percent, range).step_by(1.0).show_value(false).trailing_fill(true)).labelled_by(label.id);
+                slider.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), f64::from(percent), tl!("Thumbnail size")));
+            });
+            zoom = percent / 100.0;
+            if ui
+                .add_enabled_ui(zoom < *crate::canvas::THUMBNAIL_ZOOM_RANGE.end(), |ui| {
+                    icons::button(ui, "zoom-in", 26.0, false, tl!("Larger thumbnails"))
+                })
+                .inner
+                .clicked()
+            {
+                zoom += 0.25;
+            }
+        });
+    });
+    if zoom != before {
+        view.set_thumbnail_zoom(zoom);
+    }
+    ui.add_space(6.0);
+}
+
 /// The page thumbnails. A click goes to the page; ⌘/Ctrl-click and ⇧-click pick several pages
 /// (the selection page commands and Print act on) without moving the document. Right-click
 /// offers Extract, Cut, Copy and Paste on the selection, or on the page clicked; dragging
@@ -1215,7 +1270,9 @@ fn pages(ui: &mut egui::Ui, t: &Tokens, info: &DocInfo, view: &mut crate::DocVie
     // scroll bar dragged by the user already wins over a scroll to a place in egui.
     let follow = view.panel_followed != Some(view.current) && view.panel_drag.is_none();
     view.panel_followed = Some(view.current);
-    let w = (ui.available_width() - 40.0).min(150.0);
+    let available = (ui.available_width() - 16.0).max(1.0);
+    let usual = (ui.available_width() - 40.0).clamp(1.0, 150.0);
+    let w = (usual * view.thumbnail_zoom()).min(available);
     let count = info.pages.len();
     let mut rows: Vec<Rect> = Vec::with_capacity(info.pages.len());
     let mut dropped = false;

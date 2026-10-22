@@ -2649,6 +2649,14 @@ impl PdfCraftApp {
                     v.open_organize();
                 }
             }
+            // Inspector thumbnail size, in percent, independent of document and grid zoom.
+            ("thumbnail-zoom", Some(v)) => {
+                let percent = value.trim_end_matches('%').parse::<f32>().map_err(|e| e.to_string())?;
+                if !percent.is_finite() || !canvas::THUMBNAIL_ZOOM_RANGE.contains(&(percent / 100.0)) {
+                    return Err("thumbnail-zoom must be between 50 and 150".into());
+                }
+                v.set_thumbnail_zoom(percent / 100.0);
+            }
             // `--grid-zoom 150`: the size of the pages in the organize grid, in percent.
             ("grid-zoom", Some(v)) => {
                 let percent = value.trim_end_matches('%').parse::<f32>().map_err(|e| e.to_string())?;
@@ -2790,6 +2798,7 @@ impl PdfCraftApp {
                     "cover",
                     "organize",
                     "grid-zoom",
+                    "thumbnail-zoom",
                     "fields",
                     "find",
                     "rotate",

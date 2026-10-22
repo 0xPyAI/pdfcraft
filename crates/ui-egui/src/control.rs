@@ -680,6 +680,7 @@ impl Host for crate::PdfCraftApp {
                 "layout": format!("{:?}", v.layout),
                 "organize": v.organize,
                 "grid_zoom": v.grid_zoom(),
+                "thumbnail_zoom": v.thumbnail_zoom(),
                 // Pages picked in the organize grid or the Pages panel (empty: the current page).
                 "selected_pages": v.selected.iter().map(|p| p + 1).collect::<Vec<_>>(),
                 "auto_scrolling": v.auto_scrolling(),
