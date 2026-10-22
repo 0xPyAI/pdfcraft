@@ -2757,7 +2757,6 @@ theme	Appearance	Aspecto
 #
 # Labels and commands the catalogs name on their own.
 	Color	Color
-	Font	Fuente
 	Folder	Carpeta
 	Comment	Comentario
 	Comment and review	Comentar y revisar
