@@ -2621,3 +2621,176 @@ animation effects	Off	Desactivados
 # Historical snapshot notice bar (View signed version / View revision).
 	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	Estás viendo la versión firmada de «{from}» (revisión {rev}). Es una instantánea: los cambios aquí no afectarán al original.
 	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.	Estás viendo la revisión {rev} de «{from}». Es una instantánea: los cambios aquí no afectarán al original.
+
+#
+# Keys the other catalogs carry that this one was missing, so Spanish covers the bundled key union
+# the way Lithuanian and Vietnamese do (`lithuanian_covers_bundled_catalog_keys_including_dynamic_dialog_labels`).
+# Same clean-room rule as the header: written from the plain meaning of the English label, reusing
+# the vocabulary already in this file (ID digital, marcador, Acercar / alejar, Portapapeles).
+#
+# The date picker.
+calendar date	January	enero
+calendar date	February	febrero
+calendar date	March	marzo
+calendar date	April	abril
+calendar date	May	mayo
+calendar date	June	junio
+calendar date	July	julio
+calendar date	August	agosto
+calendar date	September	septiembre
+calendar date	October	octubre
+calendar date	November	noviembre
+calendar date	December	diciembre
+calendar weekday	Mo	Lu
+calendar weekday	Tu	Ma
+calendar weekday	We	Mi
+calendar weekday	Th	Ju
+calendar weekday	Fr	Vi
+calendar weekday	Sa	Sá
+calendar weekday	Su	Do
+#
+# Certificate details, in their own context beside the plain labels.
+certificate	Issued to	Emitido a
+certificate	Issued by	Emitido por
+certificate	Issuer	Emisor
+certificate	Serial number	Número de serie
+certificate	Version	Versión
+certificate	Public key	Clave pública
+certificate	Key usage	Uso de la clave
+certificate	Intended usage	Uso previsto
+certificate	Basic constraints	Restricciones básicas
+certificate	Self-signed	Autofirmado
+certificate	Valid from	Válido desde
+certificate	Valid to	Válido hasta
+certificate	Validity starts	La validez empieza
+certificate	Validity ends	La validez termina
+certificate	SHA-1 digest	Huella SHA-1
+certificate	SHA-256 digest	Huella SHA-256
+#
+# What a certificate's key may be used for (X.509 key usage), as the details list them.
+	Digital Signature	Firma digital
+	Non-Repudiation	No repudio
+	Key Encipherment	Cifrado de claves
+	Data Encipherment	Cifrado de datos
+	Key Agreement	Acuerdo de claves
+	Certificate Signing	Firma de certificados
+	CRL Signing	Firma de CRL
+	Encipher Only	Solo cifrado
+	Decipher Only	Solo descifrado
+#
+# Signatures, revisions and digital IDs.
+	{who}, certificate issued by {issuer}.	{who}, certificado emitido por {issuer}.
+	{who}, certificate issued by an unknown issuer.	{who}, certificado emitido por un emisor desconocido.
+	Rev. {rev}: Signed by {name}	Rev. {rev}: Firmado por {name}
+	Rev. {rev}: Signed by an unknown signer	Rev. {rev}: Firmado por un firmante desconocido
+	Rev. {rev}: Certified by {name}	Rev. {rev}: Certificado por {name}
+	Rev. {rev}: Certified by an unknown signer	Rev. {rev}: Certificado por un firmante desconocido
+	Unsigned signature field: {name}	Campo de firma sin firmar: {name}
+	Choose a digital ID.	Elige un ID digital.
+	There is no folder to save the digital ID in.	No hay ninguna carpeta donde guardar el ID digital.
+#
+# Passwords.
+	The password is incorrect.	La contraseña es incorrecta.
+	The password must have at least 6 characters.	La contraseña debe tener al menos 6 caracteres.
+	The password must have at least 8 characters.	La contraseña debe tener al menos 8 caracteres.
+	The passwords do not match.	Las contraseñas no coinciden.
+	Only the document's owner can change its security (open it with the permissions password)	Solo el propietario del documento puede cambiar su seguridad (ábrelo con la contraseña de permisos)
+#
+# Counts.
+@plural	{n} byte|{n} bytes	{n} byte|{n} bytes
+@plural	{n} pixel|{n} pixels	{n} píxel|{n} píxeles
+@plural	{n} file|{n} files	{n} archivo|{n} archivos
+@plural	{n} comment|{n} comments	{n} comentario|{n} comentarios
+@plural	{n} result|{n} results	{n} resultado|{n} resultados
+@plural	{n} image optimized|{n} images optimized	{n} imagen optimizada|{n} imágenes optimizadas
+@plural	{n} item discarded|{n} items discarded	{n} elemento descartado|{n} elementos descartados
+@plural	Delete {n} field|Delete {n} fields	Eliminar {n} campo|Eliminar {n} campos
+#
+# Combining PDFs from a folder.
+	Add the PDFs to combine	Añade los PDF que vas a combinar
+	Drop PDFs or folders here, or choose them.	Suelta aquí PDF o carpetas, o elígelos.
+	Every PDF in the folder	Todos los PDF de la carpeta
+	Every PDF in the folder and the folders inside it	Todos los PDF de la carpeta y de las carpetas que contiene
+	Added the first {n} PDFs in {folder}	Se han añadido los primeros {n} PDF de {folder}
+	No PDFs found in {folder}	No se ha encontrado ningún PDF en {folder}
+#
+# Panels, rendering and notices.
+	Panel layout could not be restored: {error}	No se ha podido restaurar la disposición de los paneles: {error}
+	Panel move was not applied: {error}	No se ha aplicado el movimiento del panel: {error}
+	Rendering…	Renderizando…
+	Still rendering — this page is unusually complex…	Sigue renderizando: esta página es excepcionalmente compleja…
+	Loading…	Cargando…
+	This file changed on disk. Reload it to see the new version; your unsaved changes will be lost.	Este archivo cambió en el disco. Recárgalo para ver la versión nueva; se perderán los cambios sin guardar.
+	Text recognition isn't installed: its models are missing (run `cargo xtask models`, or set PDFCRAFT_MODELS).	El reconocimiento de texto no está instalado: faltan sus modelos (ejecuta `cargo xtask models` o define PDFCRAFT_MODELS).
+	Cut and stack needs Two-sided: Off. Print single-sided sheets.	Cortar y apilar necesita «A doble cara: Desactivado». Imprime hojas a una cara.
+	Error	Error
+	Warning	Advertencia
+	Information	Información
+	Success	Correcto
+#
+# Asking for something, and choosing it.
+	Enter a name.	Introduce un nombre.
+	Enter a page number	Introduce un número de página
+	Enter a URL	Introduce una URL
+	Enter the field names	Introduce los nombres de los campos
+	Choose…	Elegir…
+	Choose a file…	Elegir un archivo…
+	Choose a folder…	Elegir una carpeta…
+	Create folder	Crear carpeta
+	Open folder	Abrir carpeta
+	Save file	Guardar archivo
+	Save changes?	¿Guardar los cambios?
+#
+# Settings and their values.
+	Theme	Tema
+theme	Appearance	Aspecto
+	System	Sistema
+	English	Inglés
+	Always	Siempre
+	Never	Nunca
+	Automatically	Automáticamente
+	On	Activado
+	Enabled	Activado
+	Disabled	Desactivado
+	Mouse wheel scroll speed	Velocidad de desplazamiento de la rueda del ratón
+	Margins (in)	Márgenes (pulg.)
+#
+# Labels and commands the catalogs name on their own.
+	Color	Color
+	Font	Fuente
+	Folder	Carpeta
+	Comment	Comentario
+	Comment and review	Comentar y revisar
+	Creator	Creador
+	Producer	Productor
+	Organize	Organizar
+	Import	Importar
+	Move	Mover
+	Duplicate	Duplicar
+	Paste	Pegar
+	Select all	Seleccionar todo
+	Refresh	Actualizar
+	Next	Siguiente
+	Previous	Anterior
+	of	de
+	No results	Sin resultados
+	Search results	Resultados de la búsqueda
+	Copy to clipboard	Copiar al portapapeles
+	Copied to clipboard	Copiado al portapapeles
+	Help…	Ayuda…
+	 on page {label}	 en la página {label}
+	Page {n}	Página {n}
+	Page {n} of {total}	Página {n} de {total}
+#
+# Tooltips that spell their shortcut out.
+	Open a PDF (⌘O)	Abrir un PDF (⌘O)
+	Print (⌘P)	Imprimir (⌘P)
+	Document properties (⌘D)	Propiedades del documento (⌘D)
+	New bookmark (⌘B)	Nuevo marcador (⌘B)
+	Next (⌘G)	Siguiente (⌘G)
+	Previous (⇧⌘G)	Anterior (⇧⌘G)
+	Zoom in (⌘+)	Acercar (⌘+)
+	Zoom out (⌘−)	Alejar (⌘−)
+	Zoom in / out (also pinch or ⌘-scroll)	Acercar / alejar (también con pellizco o ⌘ + desplazamiento)
+	Rotate view clockwise (⇧⌘+)	Girar la vista a la derecha (⇧⌘+)
+	Save (M4)	Guardar (M4)
