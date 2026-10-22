@@ -719,6 +719,9 @@ mod formcalc {
         assert_eq!(calc(r#"Num2Date(45350, "YYYY-MM-DD")"#), "2024-02-29");
         assert_eq!(calc(r#"Num2Date(Date2Num("2024-02-29") + 1, "MMMM D, YYYY")"#), "March 1, 2024");
         assert_eq!(calc(r#"Time2Num("01:00:00")"#), "3600000");
+        assert_eq!(calc(r#"IsoTime2Num("12:30:45Z")"#), "45045000");
+        assert_eq!(calc(r#"IsoTime2Num("12:30:45.250")"#), "45045250");
+        assert_eq!(calc(r#"IsoTime2Num("T12:30:45")"#), "45045000");
         assert_eq!(calc(r#"Num2Time(3661000)"#), "01:01:01");
         assert_eq!(calc("Round(Pmt(10000, 0.01, 12), 2)"), "888.49");
         assert_eq!(calc("Round(FV(100, 0.01, 12), 2)"), "1268.25");

@@ -2394,9 +2394,16 @@ impl Interp<'_> {
             }
             "time2num" | "isotime2num" => {
                 let s = self.arg_str(args, 0)?;
-                let parts: Vec<u64> = s.split(':').filter_map(|p| p.trim().parse::<u64>().ok()).map(|v| v.min(1_000_000)).collect();
-                let (h, m, sec) = (parts.first().copied().unwrap_or(0), parts.get(1).copied().unwrap_or(0), parts.get(2).copied().unwrap_or(0));
-                Val::Num(((h * 3600 + m * 60 + sec) * 1000) as f64)
+                // ISO 8601 allows a leading "T", a trailing "Z" and fractional seconds.
+                let t = s.trim();
+                let t = t.strip_prefix(['T', 't']).unwrap_or(t);
+                let t = t.strip_suffix(['Z', 'z']).unwrap_or(t);
+                let mut parts = t.split(':');
+                let mut whole = || parts.next().and_then(|p| p.trim().parse::<u64>().ok()).unwrap_or(0).min(1_000_000);
+                let (h, m) = (whole(), whole());
+                let sec =
+                    parts.next().and_then(|p| p.trim().parse::<f64>().ok()).filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.0).min(1_000_000.0);
+                Val::Num(((h * 3600 + m * 60) * 1000) as f64 + (sec * 1000.0).round())
             }
             // ── financial
             "fv" => {
