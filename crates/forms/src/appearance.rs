@@ -460,6 +460,8 @@ pub enum Overflow {
     Wide { width: f64, room: f64, size: f64 },
     /// `lines` wrapped lines, of which the box shows `room`, at `size` points.
     Tall { lines: usize, room: usize, size: f64 },
+    /// One line `height` points high (ascent to descent), with `room` for it, at `size` points.
+    High { height: f64, room: f64, size: f64 },
 }
 
 impl std::fmt::Display for Overflow {
@@ -469,6 +471,9 @@ impl std::fmt::Display for Overflow {
                 write!(f, "the value does not fit: {} pt wide at {} pt, room for {} pt", fmt(*width), fmt(*size), fmt(*room))
             }
             Self::Tall { lines, room, size } => write!(f, "the value does not fit: {lines} lines at {} pt, room for {room}", fmt(*size)),
+            Self::High { height, room, size } => {
+                write!(f, "the value does not fit: {} pt high at {} pt, room for {} pt", fmt(*height), fmt(*size), fmt(*room))
+            }
         }
     }
 }
@@ -589,6 +594,9 @@ fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String]
                 }
                 if room < lines.len() {
                     overflow = Some(Overflow::Tall { lines: lines.len(), room, size });
+                } else if let Some(tw) = lines.iter().map(|l| width_of(l, size)).filter(|tw| *tw > inner_w + 0.01).reduce(f64::max) {
+                    // A character wider than the box is a line of its own, still cut at the sides.
+                    overflow = Some(Overflow::Wide { width: tw, room: inner_w, size });
                 }
             } else {
                 if size == 0.0 {
@@ -601,6 +609,11 @@ fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String]
                 }
                 // Centre Helvetica's ascent (0.718) and descent (0.207) vertically.
                 let y = (height - 0.925 * size) / 2.0 + 0.207 * size;
+                // The clip box is inside the border; a line taller than it is cut at the top and bottom.
+                let room_h = height - 2.0 * bw;
+                if 0.925 * size > room_h + 0.01 {
+                    overflow = Some(Overflow::High { height: 0.925 * size, room: room_h, size });
+                }
                 if comb {
                     let cells = f.max_len.unwrap_or(1).max(1);
                     let cell = width / cells as f64;
@@ -610,7 +623,7 @@ fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String]
                     }
                 } else {
                     let tw = width_of(&text.replace(['\n', '\r'], " "), size);
-                    if tw > inner_w + 0.01 {
+                    if overflow.is_none() && tw > inner_w + 0.01 {
                         overflow = Some(Overflow::Wide { width: tw, room: inner_w, size });
                     }
                     show(&mut body, x_for(&text, size), y, &text);
@@ -643,6 +656,8 @@ fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String]
     d.set(b"Subtype".to_vec(), Object::name("Form"));
     set_form_box(&mut d, place);
     d.set(b"Resources".to_vec(), Object::Dict(res));
+    // Nothing drawn is nothing cut, however small the box.
+    let overflow = overflow.filter(|_| !text.is_empty());
     (Stream::flate(d, &content), unencodable, overflow)
 }
 
