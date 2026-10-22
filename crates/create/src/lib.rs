@@ -414,8 +414,9 @@ const MAX_GIF_PIXELS: u64 = 1 << 24;
 const MAX_DECODED_BYTES: usize = 2 << 30;
 
 /// Most decoded bytes all the pages of one TIFF may take together: its pages stay in memory until
-/// they are embedded, and many small directories can share one compressed strip.
-const MAX_DECODED_TOTAL: usize = 2 * MAX_DECODED_BYTES;
+/// they are embedded, and many small directories can share one compressed strip. Saturates to the
+/// whole address space on 32-bit targets (wasm32), where 4 GiB doesn't fit in `usize`.
+const MAX_DECODED_TOTAL: usize = MAX_DECODED_BYTES.saturating_mul(2);
 
 /// The first `wanted` pages of a TIFF (multi-page scans become multi-page PDFs).
 fn tiff_pages(name: &str, bytes: &[u8], wanted: usize) -> Result<Vec<Embedded>, CreateError> {
