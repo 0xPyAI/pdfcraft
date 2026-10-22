@@ -2684,3 +2684,30 @@ fn embedded_field_values_expand_to_a_bounded_amount_of_text() {
     assert!(kept <= text::MAX_EMBEDDED, "{kept} bytes of embedded text laid out");
     assert!(text::natural_width(&rich, &Para::default(), &face, &|_| value.clone()) <= face.width(&value) * 70.0);
 }
+
+/// Repeated subforms each carry their own copy of a long script: the live form holds a bounded
+/// amount of script text and says it left the rest out.
+#[test]
+fn repeated_script_events_hold_a_bounded_amount_of_script() {
+    let script = format!("var a = 1; //{}", "x".repeat(32 * 1024));
+    let xml = format!(
+        r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <subform name="outer" layout="tb"><occur min="1" max="-1" initial="50"/>
+  <subform name="inner" layout="tb"><occur min="1" max="-1" initial="50"/>
+   <field name="f" w="1in" h="0.3in"><ui><textEdit/></ui>
+    <event activity="initialize"><script contentType="application/x-javascript">{script}</script></event></field>
+  </subform>
+ </subform>
+</subform>
+</template></xdp:xdp>"##
+    );
+    let (tpl, _) = parse(&xml).unwrap();
+    let live = form_tree(&tpl, None, &Overrides::default());
+    assert!(!live.events.is_empty());
+    let held: usize = live.events.iter().map(|e| e.script.len()).sum();
+    assert!(held <= crate::script::MAX_EVENT_SCRIPT_BYTES, "{held} bytes of script held by {} events", live.events.len());
+    assert!(live.truncated, "{held} bytes, {} events", live.events.len());
+}
