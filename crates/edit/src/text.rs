@@ -2514,13 +2514,16 @@ pub struct ReadingBlocks {
     /// The paragraphs, as [`reading_blocks`] returns them.
     pub blocks: Vec<TextBlock>,
     /// The page draws forms nested deeper than [`MAX_FORM_DEPTH`], more of them than
-    /// [`MAX_FORM_VISITS`], or more content and forms than one page's decode budget. Reading
-    /// leaves those out to stay bounded on hostile files, so their text is missing from
-    /// `blocks`; [`crate::reading_images`] walks the same forms and misses their images too.
+    /// [`MAX_FORM_VISITS`], or forms that run past what the page's content left of its decode
+    /// budget. Reading leaves those forms out to stay bounded on hostile files, so their text
+    /// is missing from `blocks`; [`crate::reading_images`] walks the same forms and misses
+    /// their images too.
     pub truncated: bool,
 }
 
-/// [`reading_blocks`], saying whether the limits that bound reading left text out.
+/// [`reading_blocks`], saying whether the limits that bound reading left text out. A page
+/// whose `/Contents` alone runs past its decode budget is an [`EditError::Invalid`], not a
+/// truncated result.
 pub fn reading_blocks_checked(doc: &Document, page: usize) -> Result<ReadingBlocks, EditError> {
     let (lines, truncated) = reading_lines(doc, page)?;
     Ok(ReadingBlocks { blocks: regions::group_reading_blocks(&lines), truncated })
