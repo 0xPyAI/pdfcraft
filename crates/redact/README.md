@@ -32,7 +32,9 @@ clear_marks(&mut doc, None)?;                        // remove marks without app
 
 A verification pass re-reads each redacted page and fails the operation if any glyph or inline
 image is still under an area. Content that can't be decoded makes the operation fail rather than
-leave it unredacted.
+leave it unredacted. A Redact annotation with neither a usable `/QuadPoints` array nor a usable
+`/Rect` makes it fail with `RedactError::UnreadableMark` before anything changes, instead of
+skipping that mark. The count covers the marks on the pages being applied.
 
 Before changing any page, `apply` prepares the redaction appearances with a shared 8 MiB
 budget for their uncompressed PDF content across the selected pages. It bounds repeated-text

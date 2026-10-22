@@ -3445,6 +3445,48 @@ fn redacting_through_tools() {
     assert!(matches!(a.call("redact_mark", &json!({ "doc": doc })), Err(ToolError::InvalidArgs(_))));
 }
 
+/// One page with the text "Secret 1234" and a Redact annotation that has neither a usable
+/// QuadPoints array nor a Rect, so there is no area to redact.
+fn redact_pdf_with_unreadable_mark() -> Vec<u8> {
+    let body = "BT /F1 24 Tf 20 150 Td (Secret 1234) Tj ET";
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>".into(),
+        format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+        "<< /Type /Annot /Subtype /Redact /QuadPoints /oops >>".into(),
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    bytes
+}
+
+/// A mark that can't be read is refused by `redact_apply`, with the reason in the reply, and the
+/// page keeps its text. (Before, the mark was skipped and the reply said there were no marks.)
+#[test]
+fn an_unreadable_redaction_mark_is_refused_with_the_reason() {
+    let dir = workdir("redact-unreadable");
+    std::fs::write(dir.join("broken.pdf"), redact_pdf_with_unreadable_mark()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "broken.pdf" }))["doc"].as_u64().unwrap();
+    let Err(ToolError::Failed(reason)) = a.call("redact_apply", &json!({ "doc": doc })) else {
+        panic!("redact_apply must refuse a mark with no readable area");
+    };
+    assert!(reason.contains("1 redaction mark(s) have no readable area") && reason.contains("nothing was redacted"), "{reason}");
+    assert!(page_text(&mut a, doc)[0].contains("Secret 1234"), "the page is unchanged");
+}
+
 #[test]
 fn redacting_with_codes_through_tools() {
     let dir = workdir("redact-codes");
