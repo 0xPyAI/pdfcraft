@@ -1118,6 +1118,13 @@ endbfchar
     }
 
     #[test]
+    fn stream_cut_off_inside_a_block_keeps_the_entries_before_it() {
+        let cmap = parse_with_preamble(b"1 beginbfchar <41> <0058>\n<42> <00");
+        assert_eq!(cmap.lookup_bf_string(0x41), Some(BfString::Char('X')));
+        assert_eq!(cmap.lookup_bf_string(0x42), None);
+    }
+
+    #[test]
     fn truncated_stream_with_no_entries_reports_failure() {
         // The tolerant parser keeps collected entries, but a stream that
         // breaks before any entry must still report failure so callers

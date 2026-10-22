@@ -50,8 +50,10 @@ pub(crate) fn parse_inner<'a>(
     let mut last_name: Option<Vec<u8>> = None;
 
     // PdfCraft patch: track whether the scan was cut short. A CMap with an
-    // unparseable tail keeps the entries read so far instead of being
-    // discarded wholesale; one that yielded nothing still reports failure.
+    // unparseable tail, including one that ends inside a `begin…` block,
+    // keeps the entries read so far (the block parsers push into the shared
+    // lists as they go) instead of being discarded wholesale; one that
+    // yielded nothing still reports failure.
     let mut truncated = false;
 
     // PdfCraft patch: track a `usecmap` reference that could not be resolved
@@ -94,25 +96,46 @@ pub(crate) fn parse_inner<'a>(
         } else {
             match name.as_str() {
                 Some("begincodespacerange") => {
-                    parse_codespace_range(&mut scanner, &mut _codespace_ranges, &mut ctx)?;
+                    if parse_codespace_range(&mut scanner, &mut _codespace_ranges, &mut ctx).is_none() {
+                        truncated = true;
+                        break;
+                    }
                 }
                 Some("begincidrange") => {
-                    parse_range(&mut scanner, &mut ranges, &mut ctx, "endcidrange")?;
+                    if parse_range(&mut scanner, &mut ranges, &mut ctx, "endcidrange").is_none() {
+                        truncated = true;
+                        break;
+                    }
                 }
                 Some("begincidchar") => {
-                    parse_char(&mut scanner, &mut ranges, &mut ctx, "endcidchar")?;
+                    if parse_char(&mut scanner, &mut ranges, &mut ctx, "endcidchar").is_none() {
+                        truncated = true;
+                        break;
+                    }
                 }
                 Some("beginnotdefrange") => {
-                    parse_range(&mut scanner, &mut notdef_ranges, &mut ctx, "endnotdefrange")?;
+                    if parse_range(&mut scanner, &mut notdef_ranges, &mut ctx, "endnotdefrange").is_none() {
+                        truncated = true;
+                        break;
+                    }
                 }
                 Some("beginnotdefchar") => {
-                    parse_char(&mut scanner, &mut notdef_ranges, &mut ctx, "endnotdefchar")?;
+                    if parse_char(&mut scanner, &mut notdef_ranges, &mut ctx, "endnotdefchar").is_none() {
+                        truncated = true;
+                        break;
+                    }
                 }
                 Some("beginbfchar") => {
-                    parse_bf_char(&mut scanner, &mut bf_entries, &mut ctx)?;
+                    if parse_bf_char(&mut scanner, &mut bf_entries, &mut ctx).is_none() {
+                        truncated = true;
+                        break;
+                    }
                 }
                 Some("beginbfrange") => {
-                    parse_bf_range(&mut scanner, &mut bf_entries, &mut ctx)?;
+                    if parse_bf_range(&mut scanner, &mut bf_entries, &mut ctx).is_none() {
+                        truncated = true;
+                        break;
+                    }
                 }
                 Some("usecmap") => {
                     // PdfCraft patch: an unresolvable or unparseable `usecmap`
