@@ -317,9 +317,20 @@ pub struct Revision {
 
 #[derive(Clone, Debug)]
 struct ObjStm {
-    /// (object number, byte offset within `data`).
-    index: Vec<(u32, usize)>,
+    /// One slot per member in stream order, since cross-reference entries name a member by its
+    /// position: (object number, byte offset within `data`), or `None` for a member whose number
+    /// or offset is unusable ([`objstm_member`]).
+    index: Vec<Option<(u32, usize)>>,
     data: Arc<Vec<u8>>,
+}
+
+/// Where member `num` of an object stream starts: its `offset` past `/First` (`first`), when the
+/// number is an object number and the start lies inside the decoded `len` bytes. Checked on every
+/// target, so a 32-bit build neither truncates nor wraps a large `/First` or offset (#1815).
+fn objstm_member(num: i64, offset: i64, first: Option<usize>, len: usize) -> Option<(u32, usize)> {
+    let num = u32::try_from(num).ok()?;
+    let start = first?.checked_add(usize::try_from(offset).ok()?)?;
+    (start < len).then_some((num, start))
 }
 
 /// Where an overlay slot came from.
@@ -435,7 +446,7 @@ impl ObjectReader {
                 let bytes = streams.values().fold(0usize, |bytes, stream| {
                     bytes
                         .saturating_add(stream.data.capacity())
-                        .saturating_add(stream.index.capacity().saturating_mul(std::mem::size_of::<(u32, usize)>()))
+                        .saturating_add(stream.index.capacity().saturating_mul(std::mem::size_of::<Option<(u32, usize)>>()))
                 });
                 if bytes > Self::STREAM_BYTES || streams.len() >= Self::OBJECTS {
                     // Retain one oversized active stream so its next object does not require
@@ -950,9 +961,9 @@ impl Document {
                 // Offsets may count from a header that does not start the file.
                 usize::try_from(offset).is_ok_and(|off| at(off) || (self.header_offset != 0 && at(off.saturating_add(self.header_offset))))
             }
-            Some(XrefEntry::InStream { stream, index }) => {
-                self.objstm(stream).is_ok_and(|stm| usize::try_from(index).ok().and_then(|i| stm.index.get(i)).is_some_and(|(n, _)| *n == num))
-            }
+            Some(XrefEntry::InStream { stream, index }) => self
+                .objstm(stream)
+                .is_ok_and(|stm| usize::try_from(index).ok().and_then(|i| stm.index.get(i)).is_some_and(|m| m.is_some_and(|(n, _)| n == num))),
         }
     }
 
@@ -1065,7 +1076,7 @@ impl Document {
             let bytes = streams.values().fold(0usize, |bytes, stream| {
                 bytes
                     .saturating_add(stream.data.capacity())
-                    .saturating_add(stream.index.capacity().saturating_mul(std::mem::size_of::<(u32, usize)>()))
+                    .saturating_add(stream.index.capacity().saturating_mul(std::mem::size_of::<Option<(u32, usize)>>()))
             });
             bytes > Self::EDITOR_OBJSTM_BYTES || streams.len() > Self::EDITOR_OBJSTM_OBJECTS
         };
@@ -1156,14 +1167,9 @@ impl Document {
             }
             Some(XrefEntry::InStream { stream, index }) => {
                 let stm = self.objstm(stream)?;
-                let (n, off) = stm
-                    .index
-                    .get(index as usize)
-                    .copied()
-                    .or_else(|| stm.index.iter().find(|(n, _)| *n == num).copied())
-                    .ok_or(CosError::MissingObject(num))?;
-                let off =
-                    if n == num { off } else { stm.index.iter().find(|(n, _)| *n == num).map(|(_, o)| *o).ok_or(CosError::MissingObject(num))? };
+                // The member at the entry's position, else wherever the stream lists `num`.
+                let at = usize::try_from(index).ok().and_then(|i| stm.index.get(i)).copied().flatten().filter(|(n, _)| *n == num);
+                let (_, off) = at.or_else(|| stm.index.iter().flatten().find(|(n, _)| *n == num).copied()).ok_or(CosError::MissingObject(num))?;
                 Lexer::new(&stm.data, off).object()
             }
         }
@@ -1187,13 +1193,13 @@ impl Document {
         };
         let Object::Stream(s) = &*loaded else { return Err(CosError::MissingObject(num)) };
         let n = s.dict.int(b"N").unwrap_or(0).clamp(0, 1_000_000) as usize;
-        let first = s.dict.int(b"First").unwrap_or(0).max(0) as usize;
+        let first = usize::try_from(s.dict.int(b"First").unwrap_or(0).max(0)).ok();
         let data = s.decoded_within(self.stream_limit)?;
         let mut lx = Lexer::new(&data, 0);
         let mut index = Vec::with_capacity(n);
         for _ in 0..n {
             let (Some(Object::Int(onum)), Some(Object::Int(off))) = (lx.object().ok(), lx.object().ok()) else { break };
-            index.push((onum.max(0) as u32, first + off.max(0) as usize));
+            index.push(objstm_member(onum, off, first, data.len()));
         }
         let stm = Arc::new(ObjStm { index, data: Arc::new(data) });
         // Same bound as the object cache: decoded object streams can be megabytes each.
@@ -1945,8 +1951,10 @@ impl Document {
                 && s.dict.name(b"Type") == Some(b"ObjStm")
                 && let Ok(stm) = self.objstm(num)
             {
-                for (idx, (inner, _)) in stm.index.iter().enumerate() {
-                    entries.entry(*inner).or_insert(XrefEntry::InStream { stream: num, index: idx as u32 });
+                for (idx, member) in stm.index.iter().enumerate() {
+                    if let Some((inner, _)) = member {
+                        entries.entry(*inner).or_insert(XrefEntry::InStream { stream: num, index: idx as u32 });
+                    }
                 }
             }
         }
@@ -2574,7 +2582,7 @@ endobj
             assert!(reader.document.cache.lock().unwrap().len() < ObjectReader::OBJECTS);
             let decoded = reader.document.objstms.lock().unwrap();
             assert!(decoded.len() < ObjectReader::OBJECTS);
-            let bytes: usize = decoded.values().map(|s| s.data.capacity() + s.index.capacity() * std::mem::size_of::<(u32, usize)>()).sum();
+            let bytes: usize = decoded.values().map(|s| s.data.capacity() + s.index.capacity() * std::mem::size_of::<Option<(u32, usize)>>()).sum();
             assert!(bytes <= ObjectReader::STREAM_BYTES || decoded.len() == 1, "only one oversized stream may remain");
         }
         drop(reader);
@@ -2695,6 +2703,16 @@ endobj
     /// says it lives in object stream 4.
     #[test]
     fn hybrid_reference_files_read_the_xref_stream_too() {
+        let doc = Document::open(Arc::new(object_stream_file("3 0 ", "<< /Hidden (yes) >>", 0))).unwrap();
+        assert!(doc.repair_log().is_empty(), "{:?}", doc.repair_log());
+        assert_compact_matches_materialized(&doc);
+        assert_eq!(text_of(&doc, 3, b"Hidden").as_deref(), Some("yes"));
+    }
+
+    /// A hybrid-reference file whose classic table leaves object 3 out, and whose `/XRefStm`
+    /// stream puts it at position `member` of object stream 4, which holds `header` (the number
+    /// and offset pairs) and then `members`.
+    fn object_stream_file(header: &str, members: &str, member: u8) -> Vec<u8> {
         let mut out = b"%PDF-1.5\n".to_vec();
         let mut offs = [0usize; 6];
         let mut obj = |out: &mut Vec<u8>, n: usize, body: &[u8]| {
@@ -2705,12 +2723,13 @@ endobj
         };
         obj(&mut out, 1, b"<< /Type /Catalog /Pages 2 0 R >>");
         obj(&mut out, 2, b"<< /Type /Pages /Kids [] /Count 0 /Extra 3 0 R >>");
-        let inner = b"3 0 << /Hidden (yes) >>";
-        let mut stm = format!("<< /Type /ObjStm /N 1 /First 4 /Length {} >>\nstream\n", inner.len()).into_bytes();
-        stm.extend_from_slice(inner);
+        let count = header.split_whitespace().count() / 2;
+        let inner = format!("{header}{members}");
+        let mut stm = format!("<< /Type /ObjStm /N {count} /First {} /Length {} >>\nstream\n", header.len(), inner.len()).into_bytes();
+        stm.extend_from_slice(inner.as_bytes());
         stm.extend_from_slice(b"\nendstream");
         obj(&mut out, 4, &stm);
-        let data = [2u8, 0, 4, 0];
+        let data = [2u8, 0, 4, member];
         let mut xs = format!("<< /Type /XRef /Size 6 /W [1 2 1] /Index [3 1] /Length {} >>\nstream\n", data.len()).into_bytes();
         xs.extend_from_slice(&data);
         xs.extend_from_slice(b"\nendstream");
@@ -2722,11 +2741,47 @@ endobj
             out.extend_from_slice(line.as_bytes());
         }
         out.extend_from_slice(format!("trailer << /Size 6 /Root 1 0 R /XRefStm {} >>\nstartxref\n{table}\n%%EOF\n", offs[5]).as_bytes());
-        let doc = Document::open(Arc::new(out)).unwrap();
-        assert!(doc.repair_log().is_empty(), "{:?}", doc.repair_log());
-        assert_compact_matches_materialized(&doc);
-        let hidden = doc.get(ObjRef::new(3, 0));
-        assert_eq!(hidden.as_dict().and_then(|d| d.get(b"Hidden").and_then(|h| h.as_string().map(|s| s.to_text()))), Some("yes".into()));
+        out
+    }
+
+    fn text_of(doc: &Document, num: u32, key: &[u8]) -> Option<String> {
+        doc.get(ObjRef::new(num, 0)).as_dict().and_then(|d| d.get(key).and_then(|v| v.as_string().map(|s| s.to_text())))
+    }
+
+    /// An object stream member numbered 2^32 + 3 is not object 3 (#1815): the number used to be
+    /// cast to `u32`, which dropped the high bits.
+    #[test]
+    fn object_stream_numbers_beyond_u32_are_not_truncated() {
+        let control = Document::open(Arc::new(object_stream_file("3 0 ", "<< /Member (yes) >>", 0))).unwrap();
+        assert_eq!(text_of(&control, 3, b"Member").as_deref(), Some("yes"));
+        let doc = Document::open(Arc::new(object_stream_file("4294967299 0 ", "<< /Member (yes) >>", 0))).unwrap();
+        assert!(matches!(*doc.get(ObjRef::new(3, 0)), Object::Null), "{:?}", doc.get(ObjRef::new(3, 0)));
+        assert!(!doc.xref_entry_is_exact(3));
+    }
+
+    /// Member starts are checked rather than cast, so they cannot wrap on any target (#1815).
+    #[test]
+    fn object_stream_member_starts_are_checked() {
+        assert_eq!(objstm_member(3, 4, Some(10), 20), Some((3, 14)));
+        assert_eq!(objstm_member(3, 9, Some(10), 20), Some((3, 19)), "the last byte");
+        assert_eq!(objstm_member(3, 10, Some(10), 20), None, "at the end of the data");
+        assert_eq!(objstm_member(3, 1, Some(usize::MAX), 20), None, "/First plus the offset overflows");
+        assert_eq!(objstm_member(3, i64::MAX, Some(10), 20), None);
+        assert_eq!(objstm_member(3, -1, Some(10), 20), None);
+        assert_eq!(objstm_member(3, 0, None, 20), None, "/First does not fit in usize");
+        assert_eq!(objstm_member(i64::from(u32::MAX), 0, Some(0), 1), Some((u32::MAX, 0)));
+        assert_eq!(objstm_member(i64::from(u32::MAX) + 1, 0, Some(0), 1), None);
+        assert_eq!(objstm_member(-1, 0, Some(0), 1), None);
+    }
+
+    /// A member at a negative offset is unusable, not the stream's first member (#1815): the
+    /// offset used to be clamped to zero, which read the object at `/First`.
+    #[test]
+    fn object_stream_negative_offsets_are_refused() {
+        let doc = Document::open(Arc::new(object_stream_file("7 0 3 -1 ", "<< /First (yes) >>", 1))).unwrap();
+        assert!(matches!(*doc.get(ObjRef::new(3, 0)), Object::Null), "{:?}", doc.get(ObjRef::new(3, 0)));
+        let control = Document::open(Arc::new(object_stream_file("7 0 3 19 ", "<< /First (yes) >> << /Second (yes) >>", 1))).unwrap();
+        assert_eq!(text_of(&control, 3, b"Second").as_deref(), Some("yes"));
     }
 
     #[test]
