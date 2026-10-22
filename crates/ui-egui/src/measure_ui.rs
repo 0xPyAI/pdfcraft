@@ -55,6 +55,10 @@ pub struct MeasureView {
     pub unit: String,
     /// The unit picked for the page side of the scale; `None` follows `unit`.
     pub page_unit: Option<PageUnit>,
+    /// The "1:N" field of the drawing scale, as typed.
+    pub ratio_text: String,
+    /// The "1:N" field was edited and not yet applied.
+    ratio_dirty: bool,
     pub precision: u8,
     pub name: String,
     pub whole_page: bool,
@@ -83,6 +87,8 @@ impl Default for MeasureView {
             real_distance: 1.0,
             unit: "in".into(),
             page_unit: None,
+            ratio_text: String::new(),
+            ratio_dirty: false,
             precision: 2,
             name: "Drawing scale".into(),
             whole_page: true,
@@ -98,6 +104,35 @@ impl Default for MeasureView {
 /// is pt, in, mm or cm (a plan at 1:50 in millimetres is 1 mm = 50 mm), else the display unit.
 pub(crate) fn page_unit_of(picked: Option<PageUnit>, unit: &str, display: crate::units::Unit) -> PageUnit {
     picked.or_else(|| PageUnit::from_label(unit)).or_else(|| PageUnit::from_label(display.label())).unwrap_or(PageUnit::Pt)
+}
+/// Drawing scales an architect's rule offers, as the N of 1:N.
+pub(crate) const RATIOS: [f64; 10] = [1.0, 5.0, 10.0, 20.0, 25.0, 50.0, 100.0, 200.0, 500.0, 1000.0];
+/// "1:200", "1/200", "1 : 200" or a bare "200" (a comma works as the decimal mark), as the N of 1:N.
+/// `None` for anything else, for zero, negative or absurd values.
+pub(crate) fn parse_ratio(text: &str) -> Option<f64> {
+    let text = text.trim().replace(',', ".");
+    let n = match text.split_once([':', '/']) {
+        Some((one, n)) => n.trim().parse::<f64>().ok()? / one.trim().parse::<f64>().ok()?,
+        None => text.parse::<f64>().ok()?,
+    };
+    (n.is_finite() && (1e-6..=1e9).contains(&n)).then_some(n)
+}
+/// "1:200", or "1:2.5" for a ratio that isn't a whole number.
+pub(crate) fn format_ratio(n: f64) -> String {
+    let rounded = (n * 100.0).round() / 100.0;
+    if (rounded - rounded.round()).abs() < 1e-9 { format!("1:{}", rounded.round()) } else { format!("1:{rounded}") }
+}
+/// Fill the scale fields for 1:N: 1 mm on the page is N mm, shown in metres. Returns `false`, changing nothing, when `n` is not a usable ratio.
+pub(crate) fn set_ratio(state: &mut MeasureView, n: f64) -> bool {
+    if !n.is_finite() || n <= 0.0 {
+        return false;
+    }
+    state.unit = "m".into();
+    state.page_unit = Some(PageUnit::Mm);
+    state.drawing_points = 1.0;
+    state.real_distance = n / 1000.0;
+    state.ratio_text = format_ratio(n);
+    true
 }
 impl MeasureView {
     pub fn cancel(&mut self) {
@@ -363,7 +398,27 @@ fn panel_body(app: &mut PdfCraftApp, ui: &mut egui::Ui, _t: &Tokens) {
         ui.add(egui::Slider::new(&mut state.sensitivity, 1.0..=20.0).text(tl!("Sensitivity")));
     }
     ui.separator();
-    ui.label(tl!("Drawing scale"));
+    // "1:N" fills the fields below and applies at once, as does picking a common scale.
+    let mut chosen = None;
+    ui.horizontal(|ui| {
+        ui.label(tl!("Drawing scale"));
+        let typed = ui.add(crate::widgets::line(&mut state.ratio_text).hint_text("1:100").desired_width(56.0).char_limit(16));
+        typed.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, tl!("Scale")));
+        state.ratio_dirty |= typed.changed();
+        if typed.lost_focus() && std::mem::take(&mut state.ratio_dirty) {
+            match parse_ratio(&state.ratio_text) {
+                Some(n) => chosen = Some(n),
+                None => state.error = Some(tl!("Enter a scale such as 1:50.").into()),
+            }
+        }
+        egui::ComboBox::from_id_salt("measure-common-scales").selected_text(tl!("Common scales")).width(20.0).show_ui(ui, |ui| {
+            for n in RATIOS {
+                if ui.selectable_label(state.ratio_text == format_ratio(n), format_ratio(n)).clicked() {
+                    chosen = Some(n);
+                }
+            }
+        });
+    });
     ui.horizontal(|ui| {
         ui.add(egui::DragValue::new(&mut state.drawing_points).range(0.000001..=1e9));
         let page_unit = page_unit_of(state.page_unit, &state.unit, units);
@@ -427,7 +482,16 @@ fn panel_body(app: &mut PdfCraftApp, ui: &mut egui::Ui, _t: &Tokens) {
         }
     }
     let export = ui.button(tl!("Export measurements as CSV")).clicked();
-    if apply && let Some(info) = info {
+    if let Some(n) = chosen
+        && set_ratio(state, n)
+    {
+        state.error = None;
+    }
+    // Apply scale, or a 1:N typed or picked: the fields are applied to the document at once.
+    if (apply || chosen.is_some())
+        && doc.allows_annotation()
+        && let Some(info) = info
+    {
         let result =
             doc.measurement_to_user(page, [0.0, 0.0]).and_then(|a| doc.measurement_to_user(page, [1.0, 0.0]).map(|b| (a, b))).and_then(|(a, b)| {
                 let page_unit = page_unit_of(state.page_unit, &state.unit, units);
@@ -511,5 +575,79 @@ fn export_csv(app: &mut PdfCraftApp) {
                 app.notify(&e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What Apply scale builds from the panel's fields, then a distance read with it.
+    fn measured(state: &MeasureView, from: Point, to: Point) -> f64 {
+        let page_unit = page_unit_of(state.page_unit, &state.unit, crate::units::Unit::Points);
+        let scale = Scale::ratio([0.0, 0.0], [1.0, 0.0], state.drawing_points, page_unit, state.real_distance, &state.unit, 4).expect("scale");
+        measure::reading(Kind::Distance, &[from, to], &scale).expect("reading").value
+    }
+
+    #[test]
+    fn typed_ratios_are_read_leniently() {
+        assert_eq!(parse_ratio("1:200"), Some(200.0));
+        assert_eq!(parse_ratio(" 1 : 50 "), Some(50.0));
+        assert_eq!(parse_ratio("1/20"), Some(20.0));
+        assert_eq!(parse_ratio("250"), Some(250.0));
+        assert_eq!(parse_ratio("1:2,5"), Some(2.5));
+        assert_eq!(parse_ratio("2:1"), Some(0.5));
+    }
+
+    #[test]
+    fn invalid_ratios_are_refused() {
+        for bad in ["", " ", ":", "1:", ":50", "1:0", "0", "-5", "1:-5", "0:5", "abc", "1:abc", "1:50:2", "1:inf", "NaN", "1e12", "1:1e12"] {
+            assert_eq!(parse_ratio(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn ratios_are_written_as_people_say_them() {
+        assert_eq!(format_ratio(50.0), "1:50");
+        assert_eq!(format_ratio(2.5), "1:2.5");
+        assert_eq!(format_ratio(0.5), "1:0.5");
+        for n in RATIOS {
+            assert_eq!(parse_ratio(&format_ratio(n)), Some(n));
+        }
+    }
+
+    #[test]
+    fn every_offered_ratio_reads_paper_length_times_n_in_metres_whatever_the_unit_was() {
+        for unit in ["mm", "cm", "m", "km", "in", "ft"] {
+            for n in RATIOS {
+                let mut state = MeasureView { unit: unit.into(), ..Default::default() };
+                assert!(set_ratio(&mut state, n));
+                assert_eq!(state.unit, "m");
+                // 72 pt is one inch of paper: 25.4 mm x N, shown in metres.
+                let v = measured(&state, [0.0, 0.0], [0.0, 72.0]);
+                let expected = 25.4 * n / 1000.0;
+                assert!((v - expected).abs() < 1e-9 * expected.max(1.0), "1:{n} in {unit} gave {v}, wanted {expected}");
+            }
+        }
+    }
+
+    #[test]
+    fn any_starting_unit_becomes_metres() {
+        let mut state = MeasureView { unit: "yards?".into(), ..Default::default() };
+        assert!(set_ratio(&mut state, 50.0));
+        assert_eq!(state.unit, "m");
+        // 1 mm of paper at 1:50 is 50 mm.
+        let v = measured(&state, [0.0, 0.0], [72.0 / 25.4, 0.0]);
+        assert!((v - 0.05).abs() < 1e-9, "{v}");
+    }
+
+    #[test]
+    fn an_unusable_ratio_changes_nothing() {
+        let mut state = MeasureView::default();
+        let before = (state.drawing_points, state.real_distance, state.unit.clone(), state.page_unit);
+        for n in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(!set_ratio(&mut state, n));
+        }
+        assert_eq!((state.drawing_points, state.real_distance, state.unit.clone(), state.page_unit), before);
     }
 }
