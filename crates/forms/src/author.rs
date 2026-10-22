@@ -767,10 +767,10 @@ fn form_stream(place: crate::appearance::Placement, content: Vec<u8>, resources:
 }
 
 /// A push button: background, border, its icon (`/MK /I`, scaled to fit and centred) and its
-/// centred caption (unless the layout is icon only, `/TP 1`). The caption is drawn in Helvetica,
-/// with the first character it can't draw (drawn as `?`), for the caller to mark and report.
-/// A push button's appearance: its icon and caption, the caption in the font its `/DA` asks for
-/// (the widget's, else `field_da`, the field's own or inherited one).
+/// centred caption (unless the layout is icon only, `/TP 1`). The caption uses the font, size and
+/// color its `/DA` asks for (the widget's, else `field_da`, the field's own or inherited one).
+/// Also returns the first caption character the font can't draw (drawn as `?`), for the caller to
+/// mark and report.
 fn button_appearance(doc: &Document, w: &Widget, field_da: &str) -> (Stream, Option<char>) {
     let (mut c, place) = frame_only(doc, w);
     let (width, height) = (place.layout_w, place.layout_h);
