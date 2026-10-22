@@ -8,8 +8,8 @@ use crate::data::{
 };
 use crate::data::{add_data_instances, remove_data_instance, write_data_value};
 use crate::fixtures::{
-    TINY_GIF, bound_date_template, fields_template, scripted_template, shell, static_shell, template, template_with_data, tiny_png,
-    unnamed_hidden_template,
+    TINY_GIF, bound_date_template, fields_template, scripted_template, shell, static_shell, template, template_with_data, tiny_bmp, tiny_png,
+    tiny_tiff, unnamed_hidden_template,
 };
 use crate::layout::Item;
 use crate::layout::WidgetKind;
@@ -1424,7 +1424,7 @@ fn pictures_are_embedded_once_across_relayouts_and_bad_data_pictures_are_reporte
     assert!(!root.as_dict().unwrap().contains(b"PCXfaImages"));
     // Pictures in the data that aren't pictures: a warning naming the field, the template's
     // picture shown instead.
-    for (data, what) in [("Qk0AAAAA", "not a JPEG, PNG or GIF"), ("not base64!", "not base64")] {
+    for (data, what) in [("Qk0AAAAA", "not a JPEG, PNG, GIF, BMP or TIFF"), ("not base64!", "not base64")] {
         let tpl = fields_template(&format!("<form><page1><photo>{data}</photo></page1></form>"));
         let form = layout_xml(&tpl).unwrap();
         assert!(form.warnings.iter().any(|w| w.contains("photo") && w.contains(what)), "{what}: {:?}", form.warnings);
@@ -1469,6 +1469,54 @@ fn pictures_are_embedded_once_across_relayouts_and_bad_data_pictures_are_reporte
         })
     }
     assert!(find_image(&t.root.children).is_some_and(|n| n > 1_200_000));
+}
+
+/// Designer forms often carry BMP and TIFF pictures, declared as `image/bmp` and `image/tif`
+/// (the Government of Canada's IMM 5257 and IMM 5710 have both). They were left out.
+#[test]
+fn bmp_and_tiff_pictures_are_decoded_and_drawn() {
+    use crate::image::{Kind, decode, kind, size};
+    for palette in [false, true] {
+        let bmp = tiny_bmp(palette);
+        assert_eq!(kind(&bmp), Some(Kind::Bmp));
+        assert_eq!(size(&bmp), Some((2, 1)));
+        let d = decode(&bmp).unwrap();
+        assert_eq!((d.width, d.height, d.color_space), (2, 1, "DeviceRGB"), "palette: {palette}");
+        assert_eq!(d.samples, vec![255, 0, 0, 0, 0, 255], "red then blue, palette: {palette}");
+        assert_eq!(d.alpha, None);
+    }
+    for lzw in [false, true] {
+        let tiff = tiny_tiff(lzw);
+        assert_eq!(kind(&tiff), Some(Kind::Tiff));
+        assert_eq!(size(&tiff), Some((1, 1)));
+        let d = decode(&tiff).unwrap();
+        assert_eq!((d.width, d.height, d.color_space), (1, 1, "DeviceRGB"), "lzw: {lzw}");
+        assert_eq!(d.samples, vec![0x12, 0x34, 0x56], "lzw: {lzw}");
+    }
+    assert_eq!(kind(b"MM\0*\0\0\0\x08"), Some(Kind::Tiff), "big-endian");
+    let mut cut = tiny_tiff(true);
+    cut.truncate(60);
+    assert!(decode(&cut).is_err());
+    // In a form: drawn, with no warning, whatever the declared type says.
+    use base64::Engine;
+    for (data, declared) in
+        [(tiny_bmp(false), "image/bmp"), (tiny_bmp(true), "image/x-ms-bmp"), (tiny_tiff(false), "image/tif"), (tiny_tiff(true), "image/tiff")]
+    {
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+        let gif = base64::engine::general_purpose::STANDARD.encode(TINY_GIF);
+        let xml =
+            fields_template("").replace(&format!(r#"<image contentType="image/gif">{gif}"#), &format!(r#"<image contentType="{declared}">{b64}"#));
+        assert!(xml.contains(declared));
+        let mut doc = Document::open(Arc::new(shell(&xml))).unwrap();
+        let report = render_into(&mut doc).unwrap();
+        assert!(!report.warnings.iter().any(|w| w.contains("left out")), "{declared}: {:?}", report.warnings);
+        let samples: Vec<u8> = if declared.contains("bmp") { vec![255, 0, 0, 0, 0, 255] } else { vec![0x12, 0x34, 0x56] };
+        let drawn = doc.object_numbers().into_iter().any(|n| {
+            matches!(&*doc.get(pdfcraft_cos::ObjRef { num: n, generation: 0 }), Object::Stream(st)
+                if st.dict.name(b"Subtype") == Some(b"Image") && st.decoded().ok().as_ref() == Some(&samples))
+        });
+        assert!(drawn, "{declared}: its pixels are an image XObject");
+    }
 }
 
 /// A repeating subform drawn inside positioned content (a top-to-bottom table in an area of a
@@ -2502,4 +2550,41 @@ fn som_indices_count_earlier_same_named_siblings() {
     let children = [draw(Some("a")), draw(Some("b")), draw(Some("a")), draw(None), draw(Some("a")), draw(Some("b"))];
     let sibs = SomIndices::of(&children);
     assert_eq!((0..=children.len()).map(|i| sibs.at(i)).collect::<Vec<_>>(), [0, 0, 1, 0, 2, 1, 0]);
+}
+
+/// A TIFF is drawn as viewers show it, turned by its Orientation tag: a 2 × 1 picture (red,
+/// blue) tagged 6 (turn 90° clockwise) is 1 × 2, red above blue, in layout and in the PDF.
+#[test]
+fn a_tiff_picture_is_turned_by_its_orientation_tag() {
+    let strip: &[u8] = &[255, 0, 0, 0, 0, 255];
+    let (bps_at, strip_at) = (8 + 2 + 10 * 12 + 4, 8 + 2 + 10 * 12 + 4 + 6);
+    let mut b = b"II*\0".to_vec();
+    b.extend_from_slice(&8u32.to_le_bytes());
+    b.extend_from_slice(&10u16.to_le_bytes());
+    for (tag, ty, count, value) in [
+        (256u16, 3u16, 1u32, 2u32),
+        (257, 3, 1, 1),
+        (258, 3, 3, bps_at as u32),
+        (259, 3, 1, 1),
+        (262, 3, 1, 2),
+        (273, 4, 1, strip_at as u32),
+        (274, 3, 1, 6),
+        (277, 3, 1, 3),
+        (278, 3, 1, 1),
+        (279, 4, 1, strip.len() as u32),
+    ] {
+        b.extend_from_slice(&tag.to_le_bytes());
+        b.extend_from_slice(&ty.to_le_bytes());
+        b.extend_from_slice(&count.to_le_bytes());
+        b.extend_from_slice(&value.to_le_bytes());
+    }
+    b.extend_from_slice(&0u32.to_le_bytes());
+    for _ in 0..3 {
+        b.extend_from_slice(&8u16.to_le_bytes());
+    }
+    b.extend_from_slice(strip);
+    let d = crate::image::decode(&b).unwrap();
+    assert_eq!(crate::image::size(&b), Some((1, 2)), "layout size");
+    assert_eq!((d.width, d.height), (1, 2), "decoded size");
+    assert_eq!(d.samples, vec![255, 0, 0, 0, 0, 255]);
 }
