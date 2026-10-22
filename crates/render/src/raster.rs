@@ -7439,6 +7439,9 @@ endstream endobj
     // ICC profiles whose stream dictionaries are the same (vendored hayro-interpret patch 48).
     mod icc_profile_cache;
 
+    // A symbolic TrueType font draws through its (3, 0) cmap subtable first (#4156).
+    mod symbolic_truetype_cmap;
+
     /// Render `pdf`'s first page at 72 dpi with no time limit beyond the test's own.
     fn render_first_page(pdf: Vec<u8>) -> RenderedPage {
         let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
