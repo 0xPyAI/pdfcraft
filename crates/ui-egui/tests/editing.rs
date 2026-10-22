@@ -10,6 +10,17 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use pdfcraft_render::{PageRenderer, RenderRequest, RequestKind};
 use pdfcraft_ui_egui::{CloseRequest, Dialog, OpenOutcome, PdfCraftApp};
 
+/// Tests that render pixels (`h.render()`) take this first, so only one wgpu device exists at a
+/// time. Lavapipe crashes when another test creates its Vulkan instance meanwhile (segfault in
+/// `vkCreateSampler` during a concurrent `vkCreateInstance`). Declared before the harness, so it
+/// is released after the device is dropped.
+static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn gpu() -> std::sync::MutexGuard<'static, ()> {
+    // A test that panicked while holding it leaves nothing to clean up.
+    GPU.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// An `n`-page document with a proper xref table; page `i` shows "Page i+1".
 fn fixture(n: usize) -> Vec<u8> {
     let mut objs: Vec<String> = vec!["<< /Type /Catalog /Pages 2 0 R >>".into()];
@@ -75,6 +86,7 @@ fn type_selection(h: &mut Harness<'static, PdfCraftApp>, text: &str) {
 #[test]
 fn organize_page_range_tracks_thumbnails_and_applies_typed_selection() {
     use egui::accesskit::Role;
+    let _gpu = gpu();
     let mut h = organize(100);
     h.get_by_label("Select page 2").click();
     h.run_steps(2);
@@ -2810,6 +2822,7 @@ fn clicking_existing_text_selects_its_source_font_style() {
 
 #[test]
 fn deleting_a_draft_does_not_show_the_original_text_underneath() {
+    let _gpu = gpu();
     let mut h = harness(1, |_| {});
     assert!(h.state_mut().execute("edit.edit_text"));
     h.run_steps(2);
@@ -2856,6 +2869,7 @@ fn deleting_a_draft_does_not_show_the_original_text_underneath() {
 
 #[test]
 fn switching_from_a_narrow_editor_keeps_one_frame_and_a_wide_heading_on_one_line() {
+    let _gpu = gpu();
     let bytes = source_font_fixture_with_text(
         "BT /F1 18 Tf 20 220 Td (Editable PDF heading) Tj ET BT /F2 18 Tf 20 120 Td (Mono) Tj ET BT /F2 18 Tf 20 98 Td (Text) Tj ET",
     );
@@ -2916,6 +2930,7 @@ fn switching_from_a_narrow_editor_keeps_one_frame_and_a_wide_heading_on_one_line
 /// dark for pale text) until its textless background was ready, and drew it again in its own fonts.
 #[test]
 fn opening_a_paragraph_leaves_the_page_as_it_is() {
+    let _gpu = gpu();
     let bytes = source_font_fixture_with_text("0 0 0.45 rg 10 180 280 70 re f 1 1 1 rg BT /F2 20 Tf 20 205 Td (White on a banner) Tj ET");
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
@@ -2976,6 +2991,7 @@ fn opening_a_paragraph_leaves_the_page_as_it_is() {
 /// never spans the first one (it took the first paragraph's measured extent for a frame).
 #[test]
 fn a_quick_click_into_another_paragraph_keeps_both_in_place() {
+    let _gpu = gpu();
     let bytes = source_font_fixture_with_text("BT /F1 24 Tf 20 220 Td (Top) Tj ET BT /F2 24 Tf 20 120 Td (Bottom) Tj ET");
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
@@ -3097,6 +3113,7 @@ fn ink(pixels: &image::RgbaImage, r: egui::Rect) -> usize {
 /// used to come back under the new outline for those frames and then jump to the new one.
 #[test]
 fn an_applied_paragraph_keeps_its_edited_look_until_the_page_is_redrawn() {
+    let _gpu = gpu();
     let bytes = source_font_fixture_with_text("BT /F1 24 Tf 20 220 Td (Topmost) Tj ET BT /F2 24 Tf 20 120 Td (Bottom) Tj ET");
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
@@ -3339,6 +3356,7 @@ fn text_tool_clicking_source_text_edits_instead_of_adding_a_copy() {
 
 #[test]
 fn text_tool_mixed_style_row_grows_in_the_editor_and_saved_pdf() {
+    let _gpu = gpu();
     let bytes = source_font_fixture_with_text("BT /F1 12 Tf 20 220 Td (Small ) Tj /F2 12 Tf (row) Tj ET");
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
@@ -3980,6 +3998,7 @@ fn paragraph_drag_shot(h: &mut Harness<'static, PdfCraftApp>, name: &str) {
 }
 
 fn check_paragraph_overlap_drag(identical: bool, reopen_between: bool) {
+    let _gpu = gpu();
     let (stationary, moving) = if identical { ("Repeated", "Repeated") } else { ("Stationary beta", "Moving alpha") };
     let content =
         format!("BT /F1 12 Tf 60 220 Td ({stationary}) Tj ET BT /F1 12 Tf 250 100 Td (Keep here) Tj ET BT /F1 12 Tf 60 320 Td ({moving}) Tj ET");
@@ -4590,6 +4609,7 @@ fn host_dirty_hears_when_unsaved_work_appears_and_goes() {
 
 #[test]
 fn one_editor_contains_mixed_styles_and_visual_rows() {
+    let _gpu = gpu();
     let bytes = source_font_fixture_with_text(
         "BT 0 0.2 0.5 rg /F1 1 Tf 18 0 0 18 20 240 Tm (Heading) Tj ET \
          BT 0 g /F2 12 Tf 20 215 Td (Plain ) Tj /F1 12 Tf 0 0.2 0.5 rg (bold) Tj /F2 12 Tf 0 g ( words) Tj ET \
@@ -4820,6 +4840,7 @@ fn private_document_regions_open_as_one_editor() {
 fn inline_editor_preserves_source_font_and_previews_live_bounds() {
     use pdfcraft_cos::{Dict, Document, Object, Stream, write_incremental};
     use skrifa::MetadataProvider as _;
+    let _gpu = gpu();
     let mut cos = Document::open(std::sync::Arc::new(source_font_fixture_with_text(
         "BT /F1 18 Tf 20 220 Td (Stable source text) Tj ET BT /F1 12 Tf 20 194 Td (The second row stays here) Tj ET",
     )))
@@ -5212,6 +5233,7 @@ fn red(pixels: &image::RgbaImage, r: egui::Rect) -> usize {
 #[test]
 fn a_resized_image_keeps_its_new_size_until_the_page_is_redrawn() {
     use pdfcraft_cos::{Dict, Document, Object, Stream, write_incremental};
+    let _gpu = gpu();
     let mut doc = Document::open(std::sync::Arc::new(fixture(1))).unwrap();
     let mut image = Dict::new();
     image.set(b"Type".to_vec(), Object::name("XObject"));
@@ -5757,6 +5779,7 @@ fn read_mode_shortcut_applies_the_open_paragraph() {
 /// page clip) opens in an editor that draws on its page only. It covered the next page.
 #[test]
 fn a_paragraph_running_off_its_page_edits_without_covering_the_next_page() {
+    let _gpu = gpu();
     let text = |first: &str, count: usize, leading: usize| {
         let mut s = String::from("BT /F1 14 Tf\n");
         for i in 0..count {
