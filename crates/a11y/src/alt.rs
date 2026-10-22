@@ -23,6 +23,8 @@ pub enum AltError {
     Untagged,
     #[error("object {0} is not a figure")]
     NotAFigure(u32),
+    #[error("the page has more content than can be edited")]
+    TooLarge,
     #[error("{0}")]
     Cos(#[from] pdfcraft_cos::CosError),
 }
@@ -375,7 +377,16 @@ fn artifact_marked_content(doc: &mut Document, page: &pdfcraft_model::Page, ids:
     let mut budget = DecodeBudget::page();
     for entry in &entries {
         match &*doc.resolve(entry) {
-            Object::Stream(s) => streams.push(Some((s.clone(), budget.decode(s).unwrap_or_default()))),
+            Object::Stream(s) => {
+                let data = match budget.decode(s) {
+                    Ok(data) => data,
+                    // Content past the budget may hold more of the figure: editing the rest
+                    // would leave that part marked as a figure the tree no longer has.
+                    Err(_) if budget.exhausted() => return Err(AltError::TooLarge),
+                    Err(_) => Vec::new(),
+                };
+                streams.push(Some((s.clone(), data)));
+            }
             _ => streams.push(None),
         }
     }

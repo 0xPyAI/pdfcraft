@@ -1262,3 +1262,19 @@ fn repeated_content_references_share_one_decode_budget() {
     let data = crate::alt::page_content(&doc, &page);
     assert!(data.len() <= MAX_PAGE_DECODED + 300, "{} bytes", data.len());
 }
+
+/// A figure whose marked content goes on in a stream past the page's decode budget is refused,
+/// not removed with that content still pointing at it.
+#[test]
+fn marking_decorative_refuses_content_past_the_decode_budget() {
+    use pdfcraft_cos::{Dict, Object, ObjRef, Stream};
+    let mut doc = figures_doc();
+    let filler = doc.add(Stream::flate(Dict::new(), &vec![b' '; 1 << 20]));
+    let last = doc.add(Stream::from_raw(Dict::new(), b"/Figure << /MCID 0 >> BDC 0 0 5 5 re f EMC".to_vec()));
+    let mut contents = vec![Object::Ref(ObjRef::new(4, 0))];
+    contents.extend(std::iter::repeat_n(Object::Ref(filler), 256));
+    contents.push(Object::Ref(last));
+    doc.update_dict(ObjRef::new(3, 0), |p| p.set(b"Contents".to_vec(), Object::Array(contents))).unwrap();
+    assert!(mark_decorative(&mut doc, ObjRef::new(7, 0)).is_err());
+    assert_eq!(figures(&doc).len(), 2, "the figure stays");
+}
