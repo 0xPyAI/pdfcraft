@@ -151,6 +151,32 @@ fn filtered_unknown_and_damaged_inline_images_keep_the_existing_fallback() {
     }
 }
 
+/// A zlib stream (one stored block) for 64 DeviceGray samples whose bytes hold " EI\n" at offset 41,
+/// the way a stored deflate block copies incompressible samples verbatim (#3579).
+const FLATE_WITH_EI: &str = "789c014000bfffed746159d50788f7ea604984cd08e00b4c8983207f56fe82c77ef8dfb8b9a3a586382045490a3120\
+    31206c2025630aaa4353e6813e233b96539c18bc3a2c5009e9d51b81";
+
+#[test]
+fn flate_inline_image_is_not_cut_at_an_ei_inside_its_compressed_bytes() {
+    let flate: Vec<u8> = (0..FLATE_WITH_EI.len()).step_by(2).map(|i| u8::from_str_radix(&FLATE_WITH_EI[i..i + 2], 16).unwrap()).collect();
+    assert_eq!(flate.len(), 75);
+    assert_eq!(&flate[41..45], b" EI\n");
+    for parameters in [b"/W 64 /H 1 /BPC 8 /CS /G /F /Fl".as_slice(), b"/W 64 /H 1 /BPC 8 /CS /G /F /Fl /L 75"] {
+        let mut src = b"q 200 0 0 200 100 300 cm BI ".to_vec();
+        src.extend_from_slice(parameters);
+        src.extend_from_slice(b" ID ");
+        src.extend_from_slice(&flate);
+        src.extend_from_slice(b"\nEI Q BT /F1 24 Tf 72 200 Td (AFTER) Tj ET");
+        let parsed = parse(&src);
+        let label = String::from_utf8_lossy(parameters);
+        assert_eq!(parsed.ops[2].inline.as_ref().unwrap().1.len(), 75, "{label}");
+        let names: Vec<&[u8]> = parsed.ops.iter().map(|o| o.op.as_slice()).collect();
+        assert_eq!(names, [&b"q"[..], b"cm", b"BI", b"Q", b"BT", b"Tf", b"Td", b"Tj", b"ET"], "{label}");
+        assert_eq!(parsed.skipped, 0, "{label}");
+        assert_eq!(parse(&serialize_ops(&parsed.ops)).ops[2].inline, parsed.ops[2].inline, "{label}");
+    }
+}
+
 fn inline_pdf(content: &[u8], object_streams: bool) -> Vec<u8> {
     use pdfcraft_cos::{Document, SaveOptions, Stream, write_full};
 
@@ -282,4 +308,154 @@ fn pieces_parse_as_one_stream_and_splice_back() {
     let out = pieces.splice([(std::ops::Range { start: 10, end: 5 }, b"x".to_vec()), (1000..2000, Vec::new())]);
     assert_eq!(out.len(), 3);
     assert!(Pieces::join::<&[u8]>(&[]).splice([(0..1, b"x".to_vec())]).is_empty());
+}
+
+#[test]
+fn stream_boundary_comment_matches_space_concatenation() {
+    for eol in [b"\n".as_slice(), b"\r", b"\r\n"] {
+        let mut tail = b"(HIDDEN) Tj".to_vec();
+        tail.extend(eol);
+        tail.extend(b"(LIVE) Tj");
+        let pieces = Pieces::join(&[b"BT % comment".as_slice(), b"(ALSO HIDDEN) Tj", &tail, b"ET"]);
+        let parsed = pieces.parse();
+        let shown: Vec<_> = parsed.ops.iter().filter(|op| op.is("Tj")).collect();
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].operands[0].as_string().unwrap().bytes, b"LIVE");
+    }
+}
+
+#[test]
+fn comment_edges_terminate_at_next_piece_byte_zero() {
+    for eol in [b"\n".as_slice(), b"\r", b"\r\n"] {
+        let mut next = eol.to_vec();
+        next.extend_from_slice(b"q Q");
+        let pieces = Pieces::join(&[b"% outgoing".as_slice(), next.as_slice()]);
+        let parsed = pieces.parse();
+        assert_eq!(pieces.comment_edges(&parsed), vec![(false, true), (true, false)], "EOL {eol:?}");
+        assert_eq!(parsed.ops.iter().map(|op| op.op.as_slice()).collect::<Vec<_>>(), vec![b"q".as_slice(), b"Q"]);
+    }
+}
+
+#[test]
+fn comment_edges_span_empty_pieces_and_end_of_content() {
+    let pieces = Pieces::join(&[b"q % outgoing".as_slice(), b"", b"", b"ignored\nQ"]);
+    let parsed = pieces.parse();
+    assert_eq!(pieces.comment_edges(&parsed), vec![(false, true), (true, true), (true, true), (true, false)]);
+    assert_eq!(parsed.ops.iter().map(|op| op.op.as_slice()).collect::<Vec<_>>(), vec![b"q".as_slice(), b"Q"]);
+
+    let pieces = Pieces::join(&[b"% outgoing".as_slice(), b"", b"still ignored"]);
+    let parsed = pieces.parse();
+    assert_eq!(pieces.comment_edges(&parsed), vec![(false, true), (true, true), (true, true)]);
+    assert!(parsed.ops.is_empty());
+
+    let pieces = Pieces::join::<&[u8]>(&[]);
+    assert!(pieces.comment_edges(&pieces.parse()).is_empty());
+}
+
+#[test]
+fn comment_edges_ignore_percent_inside_operands_and_image_data() {
+    for first in [
+        b"(literal % not a comment) Tj".as_slice(),
+        b"/Percent#25Name MP",
+        b"[(literal % not a comment)] TJ",
+        b"/P << /ActualText (literal % not a comment) >> BDC EMC",
+        b"BI /W 1 /H 1 /BPC 8 /CS /G ID % EI",
+    ] {
+        let pieces = Pieces::join(&[first, b"q Q"]);
+        let parsed = pieces.parse();
+        assert_eq!(pieces.comment_edges(&parsed), vec![(false, false), (false, false)], "{first:?}");
+        assert_eq!(parsed.ops.last().unwrap().op, b"Q");
+        assert_eq!(parsed.skipped, 0);
+    }
+}
+
+#[test]
+fn compound_operand_comment_split_is_owned_by_spanning_operator() {
+    for parts in [[b"[(A) % ignored".as_slice(), b"still ignored\n(B)] TJ"], [b"/P << /MCID 0 % ignored".as_slice(), b"still ignored\n>> BDC"]] {
+        let pieces = Pieces::join(&parts);
+        let parsed = pieces.parse();
+        // The object lexer consumes this nested comment. Its containing operator spans
+        // both pieces, which forces both to be rewritten together by the redactor.
+        assert_eq!(pieces.comment_edges(&parsed), vec![(false, false), (false, false)]);
+        assert_eq!(parsed.ops.len(), 1);
+        assert_eq!(pieces.pieces_of(&parsed.ops[0]), (0, 1));
+        assert_eq!(parsed.skipped, 0);
+    }
+}
+
+#[test]
+fn comment_edges_do_not_confuse_local_comments_with_boundary_comments() {
+    let pieces = Pieces::join(&[b"% local\nq % crossing".as_slice(), b"ignored\n% local again\nQ\n% final local\n", b"q Q"]);
+    let parsed = pieces.parse();
+    assert_eq!(pieces.comment_edges(&parsed), vec![(false, true), (true, false), (false, false)]);
+    assert_eq!(parsed.ops.iter().map(|op| op.op.as_slice()).collect::<Vec<_>>(), vec![b"q".as_slice(), b"Q", b"q", b"Q"]);
+}
+
+#[test]
+fn comment_edge_storage_depends_on_piece_count_not_comment_count() {
+    let mut first = b"%\n".repeat(16_384);
+    first.extend_from_slice(b"q % crossing");
+    let pieces = Pieces::join(&[first.as_slice(), b"ignored\nQ"]);
+    let parsed = pieces.parse();
+    assert_eq!(pieces.comment_edges(&parsed), vec![(false, true), (true, false)]);
+    assert_eq!(parsed.ops.len(), 2);
+    // Also exercise public parsing without piece-boundary metadata.
+    assert_eq!(parse(&first).ops.len(), 1);
+}
+
+#[test]
+fn piece_lookup_preserves_exact_boundary_and_empty_piece_mapping() {
+    // Joined layout: q<space><space>Q<space>; separator belongs to prior piece.
+    let pieces = Pieces::join(&[b"q".as_slice(), b"", b"Q"]);
+    for (at, expected) in [(0, 0), (1, 0), (2, 1), (3, 2), (4, 2), (5, 2), (usize::MAX, 2)] {
+        assert_eq!(pieces.piece_of(at), expected, "position {at}");
+    }
+    let empty = Pieces::join::<&[u8]>(&[]);
+    assert_eq!(empty.piece_of(0), 0);
+    assert_eq!(empty.piece_of(usize::MAX), 0);
+}
+
+#[test]
+fn inline_image_terminator_without_preceding_whitespace() {
+    let cases: &[(&[u8], &[u8])] = &[
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G /F /AHx ID 2060A0E0>EI Q BT /F1 18 Tf (After) Tj ET", b"2060A0E0>"),
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G /Filter /ASCIIHexDecode ID 2060A0E0>EI Q BT /F1 18 Tf (After) Tj ET", b"2060A0E0>"),
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G /F [/AHx] ID 2060A0E0>EI Q BT /F1 18 Tf (After) Tj ET", b"2060A0E0>"),
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G /F [/AHx /RL] ID 2060A0E0>EI Q BT /F1 18 Tf (After) Tj ET", b"2060A0E0>"),
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G /F /A85 ID 5s,^g~>EI Q BT /F1 18 Tf (After) Tj ET", b"5s,^g~>"),
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G /Filter /ASCII85Decode ID 5s,^g~>EI Q BT /F1 18 Tf (After) Tj ET", b"5s,^g~>"),
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G /F [/A85 /RL] ID 5s,^g~>EI Q BT /F1 18 Tf (After) Tj ET", b"5s,^g~>"),
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G ID ab()EI Q BT /F1 18 Tf (After) Tj ET", b"ab()"),
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G ID ab[]EI Q BT /F1 18 Tf (After) Tj ET", b"ab[]"),
+        (b"BI /W 4 /H 1 /BPC 8 /CS /G ID \x20\x60\xa0\xe0EI Q BT /F1 18 Tf (After) Tj ET", b"\x20\x60\xa0\xe0"),
+    ];
+
+    for (src, expected_data) in cases {
+        let p = parse(src);
+        assert_eq!(p.skipped, 0, "stream should have 0 skipped bytes: {}", String::from_utf8_lossy(src));
+        let names: Vec<&[u8]> = p.ops.iter().map(|o| o.op.as_slice()).collect();
+        assert_eq!(
+            names,
+            [&b"BI"[..], b"Q", b"BT", b"Tf", b"Tj", b"ET"],
+            "operators after inline image must be preserved: {}",
+            String::from_utf8_lossy(src)
+        );
+        let (_, img) = p.ops[0].inline.as_ref().unwrap();
+        assert_eq!(img, expected_data, "inline image data must match: {}", String::from_utf8_lossy(src));
+    }
+}
+
+#[test]
+fn ascii85_inline_image_does_not_terminate_at_gt_ei_inside_payload() {
+    for src in [
+        b"BI /W 4 /H 1 /BPC 8 /CS /G /F /A85 ID !!!!>EI !!~>\nEI Q BT /F1 18 Tf (After) Tj ET".as_slice(),
+        b"BI /W 4 /H 1 /BPC 8 /CS /G /F [/A85 /AHx] ID !!!!>EI !!~>\nEI Q BT /F1 18 Tf (After) Tj ET".as_slice(),
+    ] {
+        let p = parse(src);
+        assert_eq!(p.skipped, 0);
+        let names: Vec<&[u8]> = p.ops.iter().map(|o| o.op.as_slice()).collect();
+        assert_eq!(names, [&b"BI"[..], b"Q", b"BT", b"Tf", b"Tj", b"ET"]);
+        let (_, img) = p.ops[0].inline.as_ref().unwrap();
+        assert_eq!(img, b"!!!!>EI !!~>");
+    }
 }

@@ -8,7 +8,7 @@ use pdfcraft_content::Matrix;
 use pdfcraft_cos::{Dict, Document, ObjRef, Object};
 
 use crate::interp::{Mode, Scope, process};
-use crate::{RedactError, Report, annots_of, page_streams};
+use crate::{RedactError, Report, annots_of, listed_annotations, page_streams};
 
 /// The categories of Acrobat's Remove Hidden Information panel that PdfCraft handles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -97,17 +97,45 @@ fn name_tree_len(doc: &Document, node: &Dict, depth: usize) -> usize {
     leaves + kids.iter().filter_map(|k| doc.resolve(k).as_dict().cloned()).map(|k| name_tree_len(doc, &k, depth + 1)).sum::<usize>()
 }
 
+/// The most distinct outline items one count reads, over all levels together.
+const OUTLINE_ITEM_BUDGET: usize = 100_000;
+
 fn outline_len(doc: &Document, first: Option<&Object>, depth: usize) -> usize {
+    let (mut seen, mut counted) = (std::collections::HashSet::new(), 0);
+    outline_len_seen(doc, first, depth, &mut seen, &mut counted)
+}
+
+/// Counts an outline level and everything below it, each item once. `seen` holds the indirect items
+/// already counted, and `counted` every item counted so far, inline ones included, which the total
+/// budget applies to. An item that two others name (as `/First` or `/Next`) is counted where the walk
+/// first reaches it, and a level stops at an item already seen, because the walk that reached that
+/// item counts the rest of its level. A hostile outline therefore costs one step per item, not 2^n
+/// steps for n levels of shared children. The depth limit of 64 only matters for outlines nested that
+/// deep: an item first reached through a deeper path is not visited again from a shallower one, so
+/// items nested beyond the limit may stay uncounted.
+fn outline_len_seen(
+    doc: &Document,
+    first: Option<&Object>,
+    depth: usize,
+    seen: &mut std::collections::HashSet<ObjRef>,
+    counted: &mut usize,
+) -> usize {
     let mut n = 0;
     let mut cur = first.cloned();
     let mut guard = 0;
     while let Some(o) = cur {
         guard += 1;
-        if guard > 100_000 || depth > 64 {
+        if guard > 100_000 || depth > 64 || *counted >= OUTLINE_ITEM_BUDGET {
+            break;
+        }
+        if let Object::Ref(r) = &o
+            && !seen.insert(*r)
+        {
             break;
         }
         let Some(d) = doc.resolve(&o).as_dict().cloned() else { break };
-        n += 1 + outline_len(doc, d.get(b"First"), depth + 1);
+        *counted += 1;
+        n += 1 + outline_len_seen(doc, d.get(b"First"), depth + 1, seen, counted);
         cur = d.get(b"Next").cloned();
     }
     n
@@ -138,14 +166,16 @@ fn hidden_layers(doc: &Document) -> Vec<ObjRef> {
 }
 
 /// Glyphs of hidden text, or content of hidden layers, on every page (`write` = remove them).
-fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Result<usize, RedactError> {
+fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Result<(usize, std::collections::HashSet<ObjRef>), RedactError> {
     let off = if layers { hidden_layers(doc) } else { Vec::new() };
-    if !text && off.is_empty() {
-        return Ok(0);
+    if !text && !layers {
+        return Ok((0, std::collections::HashSet::new()));
     }
     let mut total = 0;
+    let mut retained_off_layers = std::collections::HashSet::new();
     // The original image and form XObjects the rewrite drops or replaces, on any page.
     let mut doomed = Vec::new();
+    let mut retired_properties = Vec::new();
     let n = pdfcraft_model::pages(doc).len();
     for pi in 0..n {
         let page = pdfcraft_model::pages(doc).swap_remove(pi);
@@ -163,14 +193,23 @@ fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Re
             let c = page.crop(doc);
             scope.hidden_text = Some([c[0].min(c[2]), c[1].min(c[3]), c[0].max(c[2]), c[1].max(c[3])]);
         }
-        scope.hidden_layers = off.clone();
+        scope.hidden_layers = off.iter().copied().collect();
+        scope.layers_enabled = layers;
         let out = process(doc, &mut scope, &data, &resources, Matrix::IDENTITY);
+        if let Some(error) = out.error {
+            return Err(error.into());
+        }
         let blocks = scope.layer_blocks;
-        total += out.residue + blocks + report.glyphs;
+        let glyphs = scope.report.glyphs;
+        let retained_for_page = std::mem::take(&mut scope.retained_off_layers);
+        drop(scope);
+        total += out.residue + blocks + glyphs;
+        retained_off_layers.extend(retained_for_page);
         if !write {
             continue;
         }
         doomed.extend_from_slice(&out.doomed);
+        retired_properties.extend(out.retired_properties);
         let mut new_list = list.clone();
         let mut changed = false;
         for (i, new) in out.streams.into_iter().enumerate() {
@@ -184,24 +223,24 @@ fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Re
             changed = true;
         }
         if changed || !out.xobjects.is_empty() || !out.replaced.is_empty() {
+            // Pin inherited resources before replacing them. When no page still inherits the
+            // original holder, retiring it also retires descriptions no longer used anywhere.
+            crate::localize_resources(doc, &[pi])?;
+            let mut cleaned_page = page.dict.clone();
+            cleaned_page.set(b"Contents".to_vec(), Object::Array(new_list.clone()));
+            let (_, page_content) = page_streams(doc, &cleaned_page, pi)?;
             let mut res = resources;
             if !out.xobjects.is_empty() || !out.replaced.is_empty() {
                 let mut xo = res.get(b"XObject").and_then(|x| doc.resolve(x).as_dict().cloned()).unwrap_or_default();
                 // A full save keeps whatever is still referenced: unlink the originals this page no
                 // longer draws so the removed form or image bytes cannot survive in the saved file.
-                let page_content: Vec<Vec<u8>> = new_list
-                    .iter()
-                    .map(|o| match &*doc.resolve(o) {
-                        Object::Stream(s) => s.decoded().unwrap_or_default(),
-                        _ => Vec::new(),
-                    })
-                    .collect();
                 crate::interp::prune(&mut xo, &out.replaced, &page_content);
                 for (n, r) in &out.xobjects {
                     xo.set(n.clone(), Object::Ref(*r));
                 }
                 res.set(b"XObject".to_vec(), Object::Dict(xo));
             }
+            retired_properties.extend(crate::interp::prune_properties(doc, &mut res, &page_content)?);
             doc.update_dict(page.obj, |d| {
                 d.set(b"Contents".to_vec(), Object::Array(new_list));
                 d.set(b"Resources".to_vec(), Object::Dict(res));
@@ -210,8 +249,8 @@ fn content_pass(doc: &mut Document, text: bool, layers: bool, write: bool) -> Re
     }
     // What a page no longer draws must not stay reachable through an inherited or shared
     // /Resources either.
-    crate::interp::unlink_doomed(doc, &doomed)?;
-    Ok(total)
+    crate::interp::unlink_doomed(doc, &doomed, &retired_properties)?;
+    Ok((total, retained_off_layers))
 }
 
 /// How many items each category would remove (categories with nothing are included as 0).
@@ -234,10 +273,10 @@ pub fn scan(doc: &Document) -> Vec<(Hidden, usize)> {
                 Hidden::Attachments => sub(doc, &names, b"EmbeddedFiles").map_or(0, |t| name_tree_len(doc, &t, 0)) + count_sub(b"FileAttachment"),
                 Hidden::Comments => annots.iter().filter(|a| is_comment(a.name(b"Subtype").unwrap_or(b""))).count(),
                 Hidden::FormFields => pdfcraft_forms::fields(doc).len(),
-                Hidden::HiddenText => content_pass(&mut doc2, true, false, false).unwrap_or(0),
+                Hidden::HiddenText => content_pass(&mut doc2, true, false, false).map(|(n, _)| n).unwrap_or(0),
                 Hidden::HiddenLayers => {
                     let off = hidden_layers(doc).len();
-                    if off == 0 { 0 } else { off + content_pass(&mut doc2, false, true, false).unwrap_or(0) }
+                    off + content_pass(&mut doc2, false, true, false).map(|(n, _)| n).unwrap_or(0)
                 }
                 Hidden::Bookmarks => sub(doc, &cat, b"Outlines").map_or(0, |o| outline_len(doc, o.get(b"First"), 0)),
                 Hidden::LinksActionsScripts => {
@@ -256,6 +295,12 @@ pub fn scan(doc: &Document) -> Vec<(Hidden, usize)> {
 }
 
 /// Remove the chosen categories. Returns what was removed per category.
+///
+/// # Errors
+///
+/// This operation is not transactional: an error may leave `doc` partially modified, with
+/// sensitive content still present. Call this on a working clone and replace the original only
+/// on success. On any error, discard the working clone; do not save or reuse it.
 pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden, usize)>, RedactError> {
     let counts = scan(doc);
     let count = |h: Hidden| counts.iter().find(|c| c.0 == h).map_or(0, |c| c.1);
@@ -263,9 +308,14 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
     let mut done = Vec::new();
     // Content first (it needs the layers and the form still in place).
     let (text, layers) = (which.contains(&Hidden::HiddenText), which.contains(&Hidden::HiddenLayers));
-    if (text && count(Hidden::HiddenText) > 0) || (layers && count(Hidden::HiddenLayers) > 0) {
-        content_pass(doc, text, layers, true)?;
-    }
+    let retained_off_layers = if (text && count(Hidden::HiddenText) > 0) || (layers && count(Hidden::HiddenLayers) > 0) {
+        content_pass(doc, text, layers, true)?.1
+    } else {
+        std::collections::HashSet::new()
+    };
+    // Every annotation the pages list now: whatever is no longer listed at the end (flattened
+    // widgets included) leaves the structure tree too.
+    let listed_before = listed_annotations(doc);
     if which.contains(&Hidden::FormFields) && count(Hidden::FormFields) > 0 {
         // Fields without appearances get one first, so their values stay visible.
         for f in pdfcraft_forms::fields(doc) {
@@ -286,16 +336,16 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
             || (which.contains(&Hidden::Attachments) && s == b"FileAttachment")
             || (which.contains(&Hidden::LinksActionsScripts) && s == b"Link")
     };
+    // The annotations to remove, on every page first, so a pop-up listed on another page than
+    // its parent goes with it.
+    let removed: std::collections::HashSet<ObjRef> = pdfcraft_model::pages(doc)
+        .iter()
+        .flat_map(|p| annots_of(doc, &p.dict))
+        .filter_map(|a| a.as_ref())
+        .filter(|&r| doc.get(r).as_dict().is_some_and(drop_annot))
+        .collect();
     for p in pdfcraft_model::pages(doc) {
         let list = annots_of(doc, &p.dict);
-        let mut removed: Vec<ObjRef> = Vec::new();
-        for a in &list {
-            if let Some(r) = a.as_ref()
-                && doc.get(r).as_dict().is_some_and(drop_annot)
-            {
-                removed.push(r);
-            }
-        }
         let mut kept = Vec::new();
         for a in list {
             let Some(r) = a.as_ref() else {
@@ -335,6 +385,12 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
             }
         })?;
     }
+    // A tagged PDF's structure tree still points at the removed links, comments and flattened
+    // widgets (#2447): drop those references, or the full rewrite keeps the annotations, URLs,
+    // text and field values included.
+    let still = listed_annotations(doc);
+    let gone: std::collections::HashSet<ObjRef> = listed_before.difference(&still).copied().collect();
+    crate::tags::drop_object_refs(doc, &gone)?;
     let off = hidden_layers(doc);
     let mut cat = doc.get(root).as_dict().cloned().unwrap_or_default();
     let mut names = sub(doc, &cat, b"Names");
@@ -371,7 +427,7 @@ pub fn remove_hidden(doc: &mut Document, which: &[Hidden]) -> Result<Vec<(Hidden
             Hidden::HiddenLayers if !off.is_empty() => {
                 // The off layers leave the configuration (their content is gone already).
                 if let Some(mut oc) = sub(doc, &cat, b"OCProperties") {
-                    let keep = |o: &Object| !o.as_ref().is_some_and(|r| off.contains(&r));
+                    let keep = |o: &Object| !o.as_ref().is_some_and(|r| off.contains(&r) && !retained_off_layers.contains(&r));
                     if let Some(Object::Array(a)) = oc.get(b"OCGs").map(|g| (*doc.resolve(g)).clone()) {
                         oc.set(b"OCGs".to_vec(), Object::Array(a.into_iter().filter(keep).collect()));
                     }
