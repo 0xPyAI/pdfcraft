@@ -77,9 +77,17 @@ pub struct TextLine {
     /// does not require one rendering mode, so a line that starts as ink can continue as a mask;
     /// [`refuse_clipping_text`] reads this rather than the origin's mode alone.
     clips: bool,
+    /// Why the line can't be edited: its font's writing mode (its CMap's `WMode`) couldn't be read,
+    /// so which way its glyphs advance is unknown. The line is listed as horizontal text.
+    unreadable_mode: Option<String>,
 }
 
 impl TextLine {
+    /// Refuses editing a line whose font's writing mode couldn't be read (§9.7.4.3).
+    fn ensure_editable(&self) -> Result<(), EditError> {
+        self.unreadable_mode.as_ref().map_or(Ok(()), |why| Err(EditError::Invalid(why.clone())))
+    }
+
     /// Origin of the source baseline in PDF user space, independent of font ascent/descent.
     pub fn baseline(&self) -> [f64; 2] {
         [self.origin.x, self.origin.baseline]
@@ -599,6 +607,12 @@ struct Ts {
     render_mode: i64,
     /// The transparency parameters the `gs` operators have set so far (see [`Paint`]).
     gs: Gs,
+    /// The font's vertical advance per unit of font size (`/DW2`'s w1, normally −1) when its
+    /// CMap writes vertically (`WMode 1`, §9.7.4.3): each glyph then moves the pen down, not right.
+    vertical: Option<f64>,
+    /// Why the font's writing mode couldn't be read (a broken or cyclic CMap). Its text is then
+    /// listed as horizontal, but the lines in it are refused for editing.
+    unreadable: Option<Rc<str>>,
 }
 
 fn content_streams(doc: &Document, page: &Dict) -> Vec<(Object, Vec<u8>)> {
@@ -749,9 +763,15 @@ struct Shown {
 
 impl Shown {
     /// The unit direction of its baseline, where it starts and ends along it, and the baseline's
-    /// offset across it (for upright text: the user-space x, x and y).
+    /// offset across it (for upright text: the user-space x, x and y). A vertical run goes along
+    /// its column instead, the way the pen moves: for upright text down, with the column's x
+    /// across.
     fn span(&self) -> ((f64, f64), f64, f64, f64) {
-        let dir = direction(&self.tm.then(&self.state.ctm));
+        let m = self.tm.then(&self.state.ctm);
+        let dir = match self.state.vertical {
+            Some(w1) => direction(&Matrix([m.0[2] * w1.signum(), m.0[3] * w1.signum(), 0.0, 0.0, 0.0, 0.0])),
+            None => direction(&m),
+        };
         let (start, across) = to_frame(dir, (self.start_x, self.baseline));
         (dir, start, to_frame(dir, (self.end_x, self.end_y)).0, across)
     }
@@ -766,12 +786,13 @@ struct Pen {
     across: f64,
     end: f64,
     size: f64,
+    vertical: bool,
 }
 
 impl Pen {
     fn after(s: &Shown) -> Self {
         let (dir, _, end, across) = s.span();
-        Pen { bt: s.bt, dir, across, end, size: s.size.max(1.0) }
+        Pen { bt: s.bt, dir, across, end, size: s.size.max(1.0), vertical: s.state.vertical.is_some() }
     }
 
     /// Whether `s` could continue the same line on geometry alone: on the same baseline, starting
@@ -780,6 +801,8 @@ impl Pen {
         let (dir, start, _, across) = s.span();
         let gap = start - self.end;
         let same_dir = (dir.0 - self.dir.0).abs() < 1e-3 && (dir.1 - self.dir.1).abs() < 1e-3;
+        // A column continues a column (along which the pen moves), a baseline a baseline.
+        let same_dir = same_dir && self.vertical == s.state.vertical.is_some();
         (same_dir && (across - self.across).abs() < self.size * 0.3 && gap > -self.size && gap < self.size * reach, gap)
     }
 }
@@ -881,10 +904,16 @@ impl Carry {
             rise: 0.0,
             render_mode: 0,
             gs: Gs::default(),
+            vertical: None,
+            unreadable: None,
         };
         Carry { ts, stack: Vec::new(), marked: Vec::new(), layers: Vec::new() }
     }
 }
+
+/// A font resource's metrics, fallback face and vertical advance (see [`Ts`]), read once per page.
+/// The advance is an error message when the font's writing mode can't be read.
+type CachedFont = (Rc<Metrics>, Option<String>, Result<Option<f64>, String>);
 
 /// A `Do` met while interpreting: its operator index, XObject name and the state there.
 type Invocation = (usize, Vec<u8>, Ts);
@@ -893,12 +922,12 @@ fn interpret(
     doc: &Document,
     ops: &[Op],
     resources: &Dict,
-    cache: &mut HashMap<Vec<u8>, (Rc<Metrics>, Option<String>)>,
+    cache: &mut HashMap<Vec<u8>, CachedFont>,
     carry: &mut Carry,
     mut invoked: Option<&mut Vec<Invocation>>,
     // `Some(properties)`: read `/ActualText`, looking named property lists up in `properties`.
     logical_text: Option<&Dict>,
-) -> Vec<Shown> {
+) -> Result<Vec<Shown>, EditError> {
     let fonts_res = resources.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
     let states = resources.get(b"ExtGState").map(|g| doc.resolve(g)).and_then(|g| g.as_dict().cloned()).unwrap_or_default();
     let mut out: Vec<Shown> = Vec::new();
@@ -991,14 +1020,21 @@ fn interpret(
             b"Tf" => {
                 ts.size = op.num(1).unwrap_or(ts.size);
                 if let Some(name) = op.name(0) {
-                    let (m, face) = cache.entry(name.to_vec()).or_insert_with(|| {
+                    let (m, face, vertical) = cache.entry(name.to_vec()).or_insert_with(|| {
                         let dict = fonts_res.get(name).and_then(|f| doc.resolve(f).as_dict().cloned());
                         let metrics = dict.as_ref().map_or_else(Metrics::fallback, |d| Metrics::from_dict(doc, d));
+                        let vertical = dict.as_ref().map_or(Ok(None), |d| vertical_advance(doc, d).map_err(|e| e.to_string()));
                         let face = dict.filter(is_type3_fallback).map(|_| metrics.base_font.clone());
-                        (Rc::new(metrics), face)
+                        (Rc::new(metrics), face, vertical)
                     });
                     ts.font = Some((name.to_vec(), m.clone()));
                     ts.face = face.clone();
+                    // Which way the glyphs advance is unknown (§9.7.4.3): list the font's text as
+                    // horizontal and record why, so editing its lines is refused (not the page).
+                    match vertical {
+                        Ok(v) => (ts.vertical, ts.unreadable) = (*v, None),
+                        Err(e) => (ts.vertical, ts.unreadable) = (None, Some(Rc::from(e.as_str()))),
+                    }
                 }
             }
             b"Tc" => ts.char_spacing = op.num(0).unwrap_or(0.0),
@@ -1059,6 +1095,10 @@ fn interpret(
                 let mut text = String::new();
                 let mut decodable = true;
                 let mut x_text = 0.0;
+                // Vertical text (§9.4.4): the pen moves along y instead, and each glyph is centred
+                // on it horizontally; `half` is half the widest glyph.
+                let vertical = ts.vertical;
+                let (mut y_text, mut half) = (0.0, 0.0_f64);
                 // Where each word's glyphs start and end along the run (text space), and whether
                 // the next glyph continues the last word.
                 let mut words: Vec<(f64, f64)> = Vec::new();
@@ -1075,6 +1115,21 @@ fn interpret(
                                 match shown {
                                     Some(t) => text.push_str(&t),
                                     None => decodable = false,
+                                }
+                                let spacing = ts.char_spacing + if m.is_space(code, len) { ts.word_spacing } else { 0.0 };
+                                if let Some(w1) = vertical {
+                                    half = half.max((m.width(code) * ts.size * ts.scale).abs() / 2.0);
+                                    if !blank {
+                                        let ink_end = y_text + w1 * ts.size;
+                                        let (lo, hi) = (y_text.min(ink_end), y_text.max(ink_end));
+                                        match words.last_mut() {
+                                            Some(word) if in_word => *word = (word.0.min(lo), word.1.max(hi)),
+                                            _ => words.push((lo, hi)),
+                                        }
+                                    }
+                                    in_word = !blank;
+                                    y_text += w1 * ts.size + spacing;
+                                    continue;
                                 }
                                 if !blank {
                                     let ink_end = x_text + m.width(code) * ts.size * ts.scale;
@@ -1093,6 +1148,18 @@ fn interpret(
                         }
                         other => {
                             if let Some(n) = other.as_f64() {
+                                if vertical.is_some() {
+                                    // Down by n/1000 em, not scaled by `Tz`.
+                                    let dy = -n / 1000.0 * ts.size;
+                                    if -dy > ts.size * 0.2 && !text.ends_with(' ') {
+                                        text.push(' ');
+                                    }
+                                    if dy.abs() > ts.size.abs() * 0.2 {
+                                        in_word = false;
+                                    }
+                                    y_text += dy;
+                                    continue;
+                                }
                                 let dx = -n / 1000.0 * ts.size * ts.scale;
                                 // A large gap inside TJ reads as a space.
                                 if dx - tracking > (ts.size * ts.scale).abs() * 0.2 && !text.ends_with(' ') {
@@ -1108,15 +1175,22 @@ fn interpret(
                         }
                     }
                 }
-                tm = Matrix([1.0, 0.0, 0.0, 1.0, x_text, 0.0]).then(&tm);
+                tm = Matrix([1.0, 0.0, 0.0, 1.0, x_text, y_text]).then(&tm);
                 let end = tm.then(&ts.ctm).apply(0.0, ts.rise);
-                // The box: from descent to ascent along the run.
-                let corners = [
-                    trm0.apply(0.0, ts.rise + m.descent * ts.size),
-                    trm0.apply(x_text, ts.rise + m.descent * ts.size),
-                    trm0.apply(0.0, ts.rise + m.ascent * ts.size),
-                    trm0.apply(x_text, ts.rise + m.ascent * ts.size),
-                ];
+                // The box from `a` to `b` along the run: from descent to ascent across it, or for
+                // vertical text, the widest glyph's width centred on the pen.
+                let span = |a: f64, b: f64| match vertical {
+                    Some(_) => {
+                        [trm0.apply(-half, ts.rise + a), trm0.apply(half, ts.rise + a), trm0.apply(-half, ts.rise + b), trm0.apply(half, ts.rise + b)]
+                    }
+                    None => [
+                        trm0.apply(a, ts.rise + m.descent * ts.size),
+                        trm0.apply(b, ts.rise + m.descent * ts.size),
+                        trm0.apply(a, ts.rise + m.ascent * ts.size),
+                        trm0.apply(b, ts.rise + m.ascent * ts.size),
+                    ],
+                };
+                let corners = span(0.0, if vertical.is_some() { y_text } else { x_text });
                 let rect = corners
                     .iter()
                     .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)]);
@@ -1130,8 +1204,7 @@ fn interpret(
                 let ink = words
                     .iter()
                     .map(|&(a, b)| {
-                        let (y0, y1) = (ts.rise + m.descent * ts.size, ts.rise + m.ascent * ts.size);
-                        [trm0.apply(a, y0), trm0.apply(b, y0), trm0.apply(a, y1), trm0.apply(b, y1)]
+                        span(a, b)
                             .iter()
                             .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |r, p| [r[0].min(p.0), r[1].min(p.1), r[2].max(p.0), r[3].max(p.1)])
                     })
@@ -1146,9 +1219,18 @@ fn interpret(
                     op: i,
                     extra_ops: Vec::new(),
                     glyph_count,
-                    advance: x_text,
+                    // Vertical text: the TJ adjustment that undoes the run is n = -1000 y / size; the
+                    // preview divides by size × `Tz`, so `Tz` is put back here.
+                    advance: if vertical.is_some() { y_text * ts.scale } else { x_text },
                     tracking: 0.0,
-                    tm: Matrix([tm.0[0], tm.0[1], tm.0[2], tm.0[3], tm.0[4] - x_text * tm.0[0], tm.0[5] - x_text * tm.0[1]]),
+                    tm: Matrix([
+                        tm.0[0],
+                        tm.0[1],
+                        tm.0[2],
+                        tm.0[3],
+                        tm.0[4] - x_text * tm.0[0] - y_text * tm.0[2],
+                        tm.0[5] - x_text * tm.0[1] - y_text * tm.0[3],
+                    ]),
                     state: ts.clone(),
                     tlm,
                     bt_op: at_bt.0,
@@ -1184,7 +1266,7 @@ fn interpret(
     carry.marked = marked;
     carry.layers = layers;
     positioned_tracking(&mut out);
-    out
+    Ok(out)
 }
 
 /// The lines of text on a page (0-based), in content order.
@@ -1199,7 +1281,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
     let pieces = Pieces::join(&content_streams(doc, &p.dict).into_iter().map(|(_, d)| d).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
     let properties = res.get(b"Properties").and_then(|o| doc.dict(o)).unwrap_or_default();
-    let shown = interpret(doc, &ops, &res, &mut cache, &mut carry, None, Some(&properties));
+    let shown = interpret(doc, &ops, &res, &mut cache, &mut carry, None, Some(&properties))?;
     let mut last: Option<(usize, Pen)> = None; // the stream piece and where its last run ended
     for mut s in shown {
         // A single RTL glyph's ActualText (e.g. lam-alef) is an inline ligature, not a
@@ -1244,6 +1326,9 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
             l.visual_order |= s.visual_order;
             l.actual_text |= s.actual_text;
             l.clips |= s.state.render_mode >= 4;
+            if l.unreadable_mode.is_none() {
+                l.unreadable_mode = s.state.unreadable.as_deref().map(str::to_owned);
+            }
             // Spaces may use a separate subset font; they do not change the visible style.
         } else {
             lines.push(TextLine {
@@ -1266,6 +1351,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
                 logical_order: s.logical_order,
                 actual_text: s.actual_text,
                 clips: s.state.render_mode >= 4,
+                unreadable_mode: s.state.unreadable.as_deref().map(str::to_owned),
                 ops: std::iter::once(s.op).chain(s.extra_ops.iter().copied()).collect(),
                 origin: Origin {
                     tm: s.tm.0,
@@ -1338,6 +1424,9 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
         l.visual_order |= s.visual_order;
         l.actual_text |= s.actual_text;
         l.clips |= s.state.render_mode >= 4;
+        if l.unreadable_mode.is_none() {
+            l.unreadable_mode = s.state.unreadable.as_deref().map(str::to_owned);
+        }
     } else {
         lines.push(TextLine {
             text: s.text.clone(),
@@ -1359,6 +1448,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
             logical_order: s.logical_order,
             actual_text: s.actual_text,
             clips: s.state.render_mode >= 4,
+            unreadable_mode: s.state.unreadable.as_deref().map(str::to_owned),
             ops: std::iter::once(s.op).chain(s.extra_ops.iter().copied()).collect(),
             origin: Origin {
                 tm: s.tm.0,
@@ -1467,17 +1557,17 @@ fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), E
         budget: FormBudget,
     }
     /// `stream` gives the stream number of the operator at an index of `ops`.
-    fn walk(w: &mut Walk, ops: &[Op], resources: &Dict, carry: &mut Carry, stream: &dyn Fn(usize) -> usize) {
+    fn walk(w: &mut Walk, ops: &[Op], resources: &Dict, carry: &mut Carry, stream: &dyn Fn(usize) -> usize) -> Result<(), EditError> {
         let mut cache = HashMap::new();
         let mut invoked = Vec::new();
         let properties = resources.get(b"Properties").and_then(|o| w.doc.dict(o)).unwrap_or_default();
-        let shown = interpret(w.doc, ops, resources, &mut cache, carry, Some(&mut invoked), Some(&properties));
+        let shown = interpret(w.doc, ops, resources, &mut cache, carry, Some(&mut invoked), Some(&properties))?;
         let mut last = None;
         let mut last_stream = None;
         let mut forms = invoked.into_iter().peekable();
         for s in shown {
             while let Some((_, name, ts)) = forms.next_if(|f| f.0 < s.op) {
-                enter(w, resources, &name, ts);
+                enter(w, resources, &name, ts)?;
                 // Text after a form starts a new line.
                 last = None;
             }
@@ -1489,11 +1579,12 @@ fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), E
             add_shown(&mut w.lines, &mut last, s, si);
         }
         for (_, name, ts) in forms {
-            enter(w, resources, &name, ts);
+            enter(w, resources, &name, ts)?;
         }
+        Ok(())
     }
-    fn enter(w: &mut Walk, resources: &Dict, name: &[u8], ts: Ts) {
-        let Some(form) = form_call(w.doc, resources, name, ts.ctm, &w.path, &mut w.budget) else { return };
+    fn enter(w: &mut Walk, resources: &Dict, name: &[u8], ts: Ts) -> Result<(), EditError> {
+        let Some(form) = form_call(w.doc, resources, name, ts.ctm, &w.path, &mut w.budget) else { return Ok(()) };
         let ops = parse(&form.data).ops;
         // The form starts with the graphics state at its `Do`, its own matrix applied.
         let mut carry = Carry { ts: Ts { ctm: form.ctm, ..ts }, stack: Vec::new(), marked: Vec::new(), layers: Vec::new() };
@@ -1502,10 +1593,11 @@ fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), E
         if let Some(r) = form.obj {
             w.path.push(r);
         }
-        walk(w, &ops, &form.resources, &mut carry, &|_| stream);
+        walk(w, &ops, &form.resources, &mut carry, &|_| stream)?;
         if form.obj.is_some() {
             w.path.pop();
         }
+        Ok(())
     }
     let p = page_dict(doc, page)?;
     let res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
@@ -1519,7 +1611,7 @@ fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), E
     let pieces = Pieces::join(&streams.into_iter().map(|(_, data)| data).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
     let stream_of = |i: usize| ops.get(i).map_or(0, |op| pieces.pieces_of(op).0);
-    walk(&mut w, &ops, &res, &mut carry, &stream_of);
+    walk(&mut w, &ops, &res, &mut carry, &stream_of)?;
     let mut lines = w.lines;
     // A visual-order Indic font draws pre-base vowel signs before their consonant.
     for l in lines.iter_mut().filter(|l| l.visual_order && !l.actual_text) {
@@ -1979,6 +2071,7 @@ pub(crate) fn replace_line_with_limit(doc: &mut Document, page: usize, line: usi
     let text = text.replace(['\n', '\r'], " ");
     let lines = text_lines(doc, page)?;
     let target = lines.get(line).cloned().ok_or_else(|| EditError::Invalid(format!("page {} has no line {}", page + 1, line + 1)))?;
+    target.ensure_editable()?;
     // Copies of the line drawn on the same baseline go with it, so the replacement is all that
     // shows. Which operators go is settled here, before any font is generated, so that a refusal
     // leaves the document untouched.
@@ -2188,6 +2281,7 @@ pub fn clear_block(doc: &mut Document, page: usize, block: usize) -> Result<(), 
     let blocks = group_blocks(&lines);
     let target = blocks.get(block).ok_or_else(|| EditError::Invalid("the paragraph no longer exists".into()))?;
     let targets: Vec<&TextLine> = target.lines.iter().filter_map(|i| lines.get(*i)).collect();
+    targets.iter().try_for_each(|line| line.ensure_editable())?;
     let mut drops = coincident_ops(&lines, &targets);
     drops.extend(target.lines.iter().filter_map(|i| lines.get(*i)).flat_map(|l| l.ops.iter().copied()));
     let p = page_dict(doc, page)?;
@@ -2195,7 +2289,7 @@ pub fn clear_block(doc: &mut Document, page: usize, block: usize) -> Result<(), 
     let streams = content_streams(doc, &p.dict);
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
-    let shown = interpret(doc, &ops, &res, &mut HashMap::new(), &mut Carry::new(), None, None);
+    let shown = interpret(doc, &ops, &res, &mut HashMap::new(), &mut Carry::new(), None, None)?;
     let mut patches = HashMap::new();
     for s in shown.into_iter().filter(|s| drops.contains(&s.op)) {
         if s.state.render_mode >= 4 {
@@ -2373,6 +2467,7 @@ fn rewrite_block_from(
     dropped.extend(members.iter().flat_map(|l| l.ops.iter().copied()));
     refuse_clipping_text(&lines, &dropped)?;
     let first = members.first().copied().ok_or_else(|| EditError::Invalid("the paragraph has no source runs".into()))?;
+    members.iter().try_for_each(|line| line.ensure_editable())?;
     let p = page_dict(doc, page)?;
     let mut res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
     let mut fonts_res = res.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
@@ -2801,6 +2896,24 @@ pub(crate) fn selectable_blocks(
         .collect())
 }
 
+/// The vertical advance per unit of font size of a font that writes vertically: `/DW2`'s w1
+/// (default −1000, §9.7.4.3), or `None` for horizontal text. Per-glyph `/W2` entries are not
+/// read. An encoding whose writing mode can't be read is an error, as in [`vertical_encoding`];
+/// listing text treats it as horizontal and records the error (see [`Ts::unreadable`]).
+fn vertical_advance(doc: &Document, font: &Dict) -> Result<Option<f64>, EditError> {
+    if !vertical_encoding(doc, font)? {
+        return Ok(None);
+    }
+    let descendant = font.get(b"DescendantFonts").and_then(|d| doc.resolve(d).as_array().and_then(|a| a.first().cloned()));
+    let w1 = descendant
+        .and_then(|d| doc.resolve(&d).as_dict().and_then(|d| d.get(b"DW2").cloned()))
+        .and_then(|a| doc.resolve(&a).as_array().and_then(|a| a.get(1).cloned()))
+        .and_then(|w| doc.resolve(&w).as_f64())
+        .filter(|w| w.is_finite())
+        .unwrap_or(-1000.0);
+    Ok(Some(w1 / 1000.0))
+}
+
 /// Detect vertical CMaps before moving horizontal text. A broken/cyclic embedded CMap is
 /// refused rather than guessing which direction TJ advances its text matrix.
 fn vertical_encoding(doc: &Document, font: &Dict) -> Result<bool, EditError> {
@@ -2866,6 +2979,7 @@ pub(crate) fn translate_blocks(doc: &mut Document, page: usize, indexes: &[usize
         let b = blocks.get(*index).ok_or_else(|| EditError::Invalid("a selected paragraph no longer exists".into()))?;
         for line in &b.lines {
             let l = lines.get(*line).ok_or_else(|| EditError::Invalid("a selected text line no longer exists".into()))?;
+            l.ensure_editable()?;
             selected.extend(l.ops.iter().copied());
         }
     }
@@ -2873,7 +2987,7 @@ pub(crate) fn translate_blocks(doc: &mut Document, page: usize, indexes: &[usize
     let fonts = res.get(b"Font").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
-    let shown = interpret(doc, &ops, &res, &mut HashMap::new(), &mut Carry::new(), None, None);
+    let shown = interpret(doc, &ops, &res, &mut HashMap::new(), &mut Carry::new(), None, None)?;
     let mut patches = HashMap::new();
     // Keep full precision: a tiny rounded text-space change can be magnified by a CTM,
     // and restoring rise/spacing must not alter following unselected text.
