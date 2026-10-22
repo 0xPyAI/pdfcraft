@@ -1126,6 +1126,10 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
             // Checked before anything changes, so a refused move leaves the field as it was.
             let add = inherited(doc, f.obj);
             check_place(doc, af, f.obj, &parts, &add)?;
+            // From here a failure (a write that `check_place` couldn't foresee) would leave the
+            // field half moved in `doc`. The engine runs every edit on a copy of the document and
+            // keeps it only when the edit succeeds (`Session::apply`), so the open document never
+            // sees that.
             own_inherited(doc, f.obj, &add)?;
             detach(doc, f.obj)?;
             attach(doc, af, f.obj, &parts)?;
