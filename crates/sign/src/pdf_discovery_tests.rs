@@ -383,13 +383,17 @@ fn dss_evidence_decodes_each_stream_once_within_its_caps() {
     }
     let mut dss = Dict::new();
     dss.set(b"CRLs".to_vec(), Object::Array(items));
-    let read: Vec<Vec<u8>> = dss_evidence(&doc, &dss, b"CRLs").collect();
+    let mut crls = DssEvidence::new(&doc, &dss, b"CRLs");
+    let read: Vec<Vec<u8>> = crls.by_ref().collect();
     assert_eq!(read, vec![b"evidence".to_vec()]);
-    // Distinct streams stop at the entry and byte budgets.
+    assert!(!crls.cut, "repeats and oversized streams are not a cap");
+    // Distinct streams stop at the entry and byte budgets, and say so.
     let items: Vec<Object> =
         (0..MAX_DSS_ENTRIES + 10).map(|_| Object::Ref(doc.add(Object::Stream(Stream::flate(Dict::new(), &[1; 1 << 16]))))).collect();
     dss.set(b"OCSPs".to_vec(), Object::Array(items));
-    let total: usize = dss_evidence(&doc, &dss, b"OCSPs").map(|b| b.len()).sum();
+    let mut ocsps = DssEvidence::new(&doc, &dss, b"OCSPs");
+    let total: usize = ocsps.by_ref().map(|b| b.len()).sum();
     assert!(total <= MAX_DSS_BYTES, "{total}");
-    assert!(dss_evidence(&doc, &dss, b"OCSPs").count() <= MAX_DSS_ENTRIES);
+    assert!(ocsps.cut);
+    assert!(DssEvidence::new(&doc, &dss, b"OCSPs").count() <= MAX_DSS_ENTRIES);
 }

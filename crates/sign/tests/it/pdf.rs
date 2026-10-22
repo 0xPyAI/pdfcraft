@@ -1547,6 +1547,37 @@ fn a_revoked_certificate_stays_invalid_when_it_was_also_expired_at_signing() {
 }
 
 #[test]
+fn a_revocation_behind_many_dss_entries_is_not_reported_valid() {
+    let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
+    let signed = pdfcraft_sign::sign(&open(&fixture()), &id, &opts()).unwrap();
+    let t = |year| Time { year, month: 1, day: 1, hour: 0, minute: 0, second: 0 };
+    let crl = self_crl(&id, t(2026), t(2027), Time { year: 2026, month: 6, day: 1, hour: 8, minute: 0, second: 0 });
+    let anchor = id.chain.first().cloned().unwrap_or_else(|| id.certificate.clone());
+    let trust = TrustStore { certs: vec![anchor] };
+    // `/CRLs`: the revoking CRL after `benign` other entries; `repeated` lists one stream for all of them.
+    let status = |benign: usize, repeated: bool| {
+        let ltv = edit_after(&signed, |doc| {
+            let one = doc.add(stream_of(b"benign"));
+            let mut crls: Vec<Object> = (0..benign)
+                .map(|k| if repeated { Object::Ref(one) } else { Object::Ref(doc.add(stream_of(format!("benign {k}").as_bytes()))) })
+                .collect();
+            crls.push(Object::Ref(doc.add(stream_of(&crl))));
+            set_dss(doc, Object::Dict(dict_of(vec![("Type", Object::name("DSS")), ("CRLs", Object::Array(crls))])));
+        });
+        let s = signatures(&open(&ltv), &ltv, &trust).into_iter().find(|s| s.signed && !s.doc_timestamp).unwrap();
+        (s.status, s.details)
+    };
+    let (found, details) = status(1, false);
+    assert_eq!(found, Status::Invalid, "{details:?}");
+    // Repeats of one stream don't use up the entry cap, so the revocation is still found.
+    let (found, details) = status(2000, true);
+    assert_eq!(found, Status::Invalid, "{details:?}");
+    // Past the cap of distinct entries the check is incomplete, so the signature is not valid.
+    let (found, details) = status(1100, false);
+    assert_eq!(found, Status::Unknown, "{details:?}");
+}
+
+#[test]
 fn an_untrusted_timestamp_does_not_set_the_validation_time() {
     let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
     // The TSA claims 2027 (inside the signer's validity) but is not trusted; the signer's own
