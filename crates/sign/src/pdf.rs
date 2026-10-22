@@ -1338,12 +1338,23 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
             (Some(k), _) => k,
             // The Document Security Store's own arrays and dictionaries, when they only grew.
             (_, _) if dss.contains(&num) => kind::SECURITY_STORE,
-            // A signed page's indirect /Annots array, still an array: what it gained.
+            // A signed page's indirect /Annots array, still an array: what it lost, then what it
+            // gained. Dropping a signed annotation is never hidden behind an added signature.
             (_, Object::Array(now)) if signed_annots.contains(&r) && before.as_deref().is_some_and(|b| b.as_array().is_some()) => {
                 let was: HashSet<ObjRef> =
                     before.as_deref().and_then(Object::as_array).map(|a| a.iter().filter_map(Object::as_ref).collect()).unwrap_or_default();
-                let added: Vec<ObjRef> = now.iter().filter_map(Object::as_ref).filter(|r| !was.contains(r)).collect();
-                added_annots(doc, &added)
+                let kept: HashSet<ObjRef> = now.iter().filter_map(Object::as_ref).collect();
+                let removed: Vec<ObjRef> = was.iter().filter(|r| !kept.contains(r)).copied().collect();
+                if removed.is_empty() {
+                    let added: Vec<ObjRef> = now.iter().filter_map(Object::as_ref).filter(|r| !was.contains(r)).collect();
+                    added_annots(doc, &added)
+                } else if removed.iter().any(|r| old.get(*r).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Widget"))) {
+                    // A form field or signature widget taken off the page: no permission covers it.
+                    kind::OTHER
+                } else {
+                    // Deleting comments is a comment change (permitted at P 3 only).
+                    kind::COMMENTS
+                }
             }
             (_, Object::Dict(d)) => {
                 let was = before.as_deref().and_then(Object::as_dict);

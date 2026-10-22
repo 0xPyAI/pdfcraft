@@ -178,6 +178,30 @@ fn an_indirect_annots_array_is_judged_by_the_annotations_it_gains() {
     let certified = pdfcraft_sign::sign(&open(&unsigned), &id, &SignOptions { certify: Some(2), ..opts() }).unwrap();
     let s = check(&edit_after(&certified, comment));
     assert_eq!((s.status, s.modification), (Status::Invalid, Modification::Disallowed(vec![kind::COMMENTS])));
+    // Under that certification, a signed comment swapped for a new signature widget is still a
+    // deleted comment, and a form field taken off the page is permitted by no level.
+    let commented = pdfcraft_sign::sign(&open(&edit_after(&unsigned, comment)), &id, &SignOptions { certify: Some(2), ..opts() }).unwrap();
+    let swap = |drop: &dyn Fn(&Document, &Object) -> bool| {
+        edit_after(&commented, |doc| {
+            let mut w = pdfcraft_cos::Dict::new();
+            w.set(b"Type".to_vec(), Object::name("Annot"));
+            w.set(b"Subtype".to_vec(), Object::name("Widget"));
+            w.set(b"FT".to_vec(), Object::name("Sig"));
+            w.set(b"T".to_vec(), PdfString::text("Later"));
+            w.set(b"Rect".to_vec(), Object::Array(vec![Object::Int(0); 4]));
+            let w = doc.add(Object::Dict(w));
+            let mut a = doc.get(annots).as_array().cloned().unwrap();
+            a.retain(|o| !drop(doc, o));
+            a.push(Object::Ref(w));
+            doc.set(annots, Object::Array(a));
+        })
+    };
+    let subtype =
+        |doc: &Document, o: &Object, t: &[u8]| o.as_ref().is_some_and(|r| doc.get(r).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(t)));
+    let s = check(&swap(&|doc, o| subtype(doc, o, b"Text")));
+    assert_eq!((s.status, s.modification), (Status::Invalid, Modification::Disallowed(vec![kind::COMMENTS])));
+    let s = check(&swap(&|doc, o| subtype(doc, o, b"Widget") && o.as_ref().is_some_and(|r| r.num == 6)));
+    assert_eq!((s.status, s.modification), (Status::Invalid, Modification::Disallowed(vec![kind::OTHER])));
 }
 
 /// Issue #1328: a signature field whose /V is null, directly or through a reference, is unsigned:
