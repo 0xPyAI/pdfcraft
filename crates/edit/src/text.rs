@@ -525,7 +525,7 @@ struct Ts {
     render_mode: i64,
 }
 
-fn content_streams(doc: &Document, page: &Dict) -> Vec<(Object, Vec<u8>)> {
+pub(crate) fn content_streams(doc: &Document, page: &Dict) -> Vec<(Object, Vec<u8>)> {
     let list: Vec<Object> = match page.get(b"Contents") {
         None => Vec::new(),
         Some(c) => match &*doc.resolve(c) {
