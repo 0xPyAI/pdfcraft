@@ -24,6 +24,7 @@ that warning and keeps the existing layout and accepted widget values.
   page areas, content areas and media; measurements in mm, cm, in, pt and px; fonts, paragraphs,
   margins, borders (edge order rules), captions with reserves, check-button items, pictures,
   rich text (`exData` XHTML: paragraphs, `br`, bold/italic/underline/size spans, embedded fields),
+  text-field limits (`text/maxChars` and `exData/maxLength`, carried into AcroForm `/MaxLen`),
   inline JPEG, PNG and GIF images, lines, rectangles, occurrences, `breakBefore`/`breakAfter`, overflow
   leaders, `columnWidths` and `colSpan`.
 - **Layout** (`layout`): positioned, `tb`, `lr-tb`/`rl-tb`, `table` and `row` layouts; a
