@@ -3378,6 +3378,17 @@ usage = "Reference picture of the vendored vello_common probe module, for people
 sha256 = "78c59a0cfd2c829909d77006f94e34dac1ae5d1f90e7f10f72e84de541fef697"
 
 [[asset]]
+path = "crates/ui-egui/src/i18n/nb.tsv"
+title = "Norwegian Bokmål interface translation catalog"
+author = "PdfCraft contributors"
+source = "Contributor-original: clean-room translations of PdfCraft's English UI labels, no proprietary localisation resources"
+licence = "MIT OR Apache-2.0"
+licence_file = "LICENSE-MIT"
+kind = "translation"
+usage = "Norwegian Bokmål UI strings, compiled in by crates/ui-egui/src/i18n/mod.rs"
+sha256 = "ded29f83905d714188a0c1208a478f0da928556a309743824113d749b78ff0fa"
+
+[[asset]]
 path = "assets/icons/superscript.svg"
 title = "Lucide icon \"superscript\""
 author = "Lucide Contributors (portions Cole Bemis, Feather)"
