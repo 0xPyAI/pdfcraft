@@ -1,8 +1,9 @@
 //! The Comments panel (Acrobat's right-hand comment list; 11-visual-spec §3, audit `a15-*`).
 //!
-//! Header "Comments N" with search; an "Add a comment" box that posts a sticky note on the
-//! current page; cards grouped by page. Selecting a card selects the comment on the page and
-//! opens its reply box and "…" menu (Edit, Set status, Delete). Status replies show as a badge.
+//! Header "Comments N" (comments, as Acrobat counts them) with "N replies" under it and search;
+//! an "Add a comment" box that posts a sticky note on the current page; cards grouped by page.
+//! Selecting a card selects the comment on the page and opens its reply box and "…" menu (Edit,
+//! Set status, Delete). Status replies show as a badge.
 
 use std::collections::HashMap;
 
@@ -93,9 +94,10 @@ pub fn count(info: &DocInfo) -> usize {
     info.annotations.iter().filter(|a| !a.is_reply() && a.state.is_none()).count()
 }
 
-/// The replies under the header's count (not status changes or checkmarks).
+/// The replies under the header's count, at any depth: not status changes, checkmarks or a
+/// Replace Text caret (grouped with its strikeout, not a reply to it).
 pub fn reply_count(info: &DocInfo) -> usize {
-    info.annotations.iter().filter(|a| a.is_reply() && a.state.is_none()).count()
+    info.annotations.iter().filter(|a| a.is_reply() && a.state.is_none() && !a.grouped).count()
 }
 
 fn matches(a: &Annotation, q: &str) -> bool {
@@ -166,12 +168,14 @@ pub(crate) fn show(
     let mut replies: HashMap<(usize, usize), Vec<&Annotation>> = HashMap::new();
     let mut page_counts: HashMap<usize, usize> = HashMap::new();
     // Replies find their parent by reference (`/NM` need not be unique) and keep source order.
-    // Page badges count roots before filtering.
+    // A reply at any depth joins the thread of the comment it starts from, as comment_list lists
+    // it; a status or checkmark stays with the annotation it was set on. Page badges count roots
+    // before filtering.
+    let tops = pdfcraft_render::thread_tops(&info.annotations);
     for a in &info.annotations {
-        if a.is_reply() {
-            if let Some(parent) = a.parent {
-                replies.entry(parent).or_default().push(a);
-            }
+        if let Some(parent) = a.parent {
+            let key = if a.state.is_none() { tops.get(&(a.page, a.index)).copied().unwrap_or(parent) } else { parent };
+            replies.entry(key).or_default().push(a);
         } else {
             let count = page_counts.entry(a.page).or_default();
             *count = count.saturating_add(1);
@@ -514,8 +518,7 @@ fn card(
     edit
 }
 
-/// A 26 pt round badge: a type glyph (comments) or initials (replies).
-/// A round avatar; returns where it was drawn.
+/// A 26 pt round badge: a type glyph (comments) or initials (replies). Returns where it was drawn.
 fn avatar(ui: &mut egui::Ui, t: &Tokens, icon: Option<&str>, text: Option<&str>, color: Color32) -> egui::Rect {
     let (r, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
     let bg = if t.dark() { Color32::from_gray(0x55) } else { Color32::from_gray(0xD8) };

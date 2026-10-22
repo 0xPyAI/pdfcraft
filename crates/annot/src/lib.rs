@@ -2256,6 +2256,8 @@ pub struct Summary {
     pub in_reply_to: Option<String>,
     /// The page and `/Annots` position `/IRT` points at, by reference (`/NM` need not be unique).
     pub parent: Option<(usize, usize)>,
+    /// `/RT /Group`: grouped with the `/IRT` annotation (Replace Text's caret), not a reply to it.
+    pub grouped: bool,
     pub rect: [f32; 4],
     pub color: Option<[f32; 3]>,
     pub state: Option<String>,
@@ -2351,6 +2353,7 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
                 name: text_value(doc, d, b"NM"),
                 in_reply_to,
                 parent,
+                grouped: d.name(b"RT") == Some(b"Group"),
                 rect,
                 color,
                 state: text_value(doc, d, b"State"),

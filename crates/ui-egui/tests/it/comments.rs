@@ -1086,8 +1086,8 @@ fn the_panel_filters_and_sorts() {
 }
 
 // Contributor-original PDF. Two roots deliberately share /NM; the replies (on another page,
-// with dates opposite to source order) point at the first by reference. An unnamed root has
-// no thread.
+// with dates opposite to source order) point at the first by reference. Nothing replies to the
+// unnamed root.
 const REVIEW_FIXTURE: &[u8] = b"%PDF-1.7
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj
@@ -1153,7 +1153,7 @@ fn the_panel_preserves_threads_source_order_and_unfiltered_page_counts() {
     h.state_mut().views[0].comments.hidden_checks.clear();
     h.run_steps(2);
     h.get_by_label("Unnamed root");
-    assert_eq!(h.query_all_by_label("Needle first reply").count(), 0, "an unnamed root has no replies");
+    assert_eq!(h.query_all_by_label("Needle first reply").count(), 0, "nothing replies to the unnamed root");
 }
 
 // Contributor-original PDF, shaped like PyMuPDF output: every page's first comment is named
@@ -1204,6 +1204,46 @@ const SINGLE_COMMENT: &[u8] = b"%PDF-1.7
 4 0 obj << /Type /Annot /Subtype /Text /Rect [20 140 40 160] /NM (only) /T (Alpha) /Contents (Only note) >> endobj
 trailer << /Root 1 0 R >>
 %%EOF";
+
+// Contributor-original PDF. Page 1: an unnamed comment with a reply and a reply to that reply,
+// and a Replace Text strikeout with its grouped caret. Page 2: an `/IRT` to the annotation
+// itself, to an annotation no page lists (object 11) and to a pop-up.
+const THREAD_EDGES: &[u8] = b"%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [5 0 R 6 0 R 7 0 R 8 0 R 9 0 R] >> endobj
+4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [10 0 R 12 0 R 13 0 R 14 0 R] >> endobj
+5 0 obj << /Type /Annot /Subtype /Text /Rect [20 160 40 180] /T (Alpha) /Contents (Unnamed parent) >> endobj
+6 0 obj << /Type /Annot /Subtype /Text /Rect [20 160 40 180] /IRT 5 0 R /T (Beta) /Contents (Direct reply) >> endobj
+7 0 obj << /Type /Annot /Subtype /Text /Rect [20 160 40 180] /IRT 6 0 R /T (Gamma) /Contents (Reply to the reply) >> endobj
+8 0 obj << /Type /Annot /Subtype /StrikeOut /Rect [60 100 160 112] /IT /StrikeOutTextEdit /T (Alpha) /Contents (Struck words) >> endobj
+9 0 obj << /Type /Annot /Subtype /Caret /Rect [158 96 166 104] /IRT 8 0 R /RT /Group /T (Alpha) /Contents (Replacement words) >> endobj
+10 0 obj << /Type /Annot /Subtype /Text /Rect [20 160 40 180] /IRT 10 0 R /T (Delta) /Contents (Points at itself) >> endobj
+11 0 obj << /Type /Annot /Subtype /Text /Rect [20 120 40 140] /T (Nobody) /Contents (Listed on no page) >> endobj
+12 0 obj << /Type /Annot /Subtype /Text /Rect [20 120 40 140] /IRT 11 0 R /T (Delta) /Contents (Points at an unlisted note) >> endobj
+13 0 obj << /Type /Annot /Subtype /Popup /Rect [120 100 280 180] >> endobj
+14 0 obj << /Type /Annot /Subtype /Text /Rect [20 80 40 100] /IRT 13 0 R /T (Delta) /Contents (Points at a pop-up) >> endobj
+trailer << /Root 1 0 R >>
+%%EOF";
+
+#[test]
+fn replies_that_lead_nowhere_stay_comments_and_deeper_replies_join_their_thread() {
+    let h = harness_with_bytes(THREAD_EDGES.to_vec(), |app| app.set_option("panel", "comments").unwrap());
+    // An `/IRT` that reaches no listed comment leaves its annotation a comment of its own,
+    // rather than a reply shown nowhere.
+    for orphan in ["Points at itself", "Points at an unlisted note", "Points at a pop-up"] {
+        assert!(h.get_by_label(orphan).rect().top() > h.get_by_label("Page 2").rect().top(), "{orphan}");
+    }
+    // A reply to a reply joins the thread of the comment it starts from, also when that comment
+    // has no /NM.
+    let (parent, direct, deeper) = (h.get_by_label("Unnamed parent"), h.get_by_label("Direct reply"), h.get_by_label("Reply to the reply"));
+    assert!(parent.rect().top() < direct.rect().top() && direct.rect().top() < deeper.rect().top());
+    assert!(deeper.rect().top() < h.get_by_label("Struck words").rect().top(), "under its own thread");
+    // Comments: the unnamed parent, the strikeout and the three on page 2. Replies: the two
+    // replies, not the Replace Text caret grouped with its strikeout.
+    h.get_by_label("5");
+    h.get_by_label("2 replies");
+}
 
 #[test]
 fn the_panel_reveals_edits_and_reopens_a_late_thread_without_changing_its_replies() {

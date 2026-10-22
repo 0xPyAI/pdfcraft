@@ -3,6 +3,8 @@
 //! Geometry follows the automation convention: points from the top-left of the displayed page,
 //! y down. It is converted to PDF user space (crop box, `/Rotate`) here.
 
+use std::collections::HashMap;
+
 use pdfcraft_engine::{
     Edit, LineEnding, Markup, NOTE_SIZE, NewAnnotation, NoteIcon, ReviewState, Rgb, Shape, StampGroup, StampKind, Style, SummarySort,
 };
@@ -198,26 +200,22 @@ impl Automation {
             }
             v
         };
+        // Every reply under the comment its thread starts from, at any depth, in document order:
+        // a reply to a reply keeps its `/IRT` on the direct parent, so following one level would
+        // drop it. Parents are found by reference, as `/NM` need not be unique.
+        let tops = pdfcraft_render::thread_tops(&all);
+        let mut threads: HashMap<(usize, usize), Vec<&Annotation>> = HashMap::new();
+        for r in &all {
+            if let Some(&top) = tops.get(&(r.page, r.index)) {
+                threads.entry(top).or_default().push(r);
+            }
+        }
         let roots: Vec<Value> = all
             .iter()
             .filter(|c| !c.is_reply() && only.is_none_or(|p| c.page == p))
             .map(|c| {
                 let mut v = view(c);
-                // Every reply under this comment, at any depth, in document order. A reply to a
-                // reply keeps its `/IRT` on the direct parent, so following one level would drop it.
-                // Parents are found by reference: `/NM` need not be unique.
-                let descends_from = |r: &Annotation, root: &Annotation| -> bool {
-                    let mut parent = r.parent;
-                    for _ in 0..64 {
-                        let Some(at) = parent else { return false };
-                        if at == (root.page, root.index) {
-                            return true;
-                        }
-                        parent = all.iter().find(|x| (x.page, x.index) == at).and_then(|x| x.parent);
-                    }
-                    false
-                };
-                let thread: Vec<&Annotation> = all.iter().filter(|r| r.is_reply() && descends_from(r, c)).collect();
+                let thread = threads.get(&(c.page, c.index)).map(Vec::as_slice).unwrap_or(&[]);
                 let status = thread.iter().rev().filter(|r| !r.is_mark()).find_map(|r| r.state.clone());
                 v["status"] = json!(status);
                 v["marked"] = json!(thread.iter().rev().find(|r| r.is_mark()).is_some_and(|r| r.state.as_deref() == Some("Marked")));

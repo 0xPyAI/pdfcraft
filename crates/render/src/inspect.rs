@@ -421,10 +421,14 @@ pub struct Annotation {
     /// `/NM` of this annotation, and of the one it replies to (`/IRT`).
     pub name: Option<String>,
     pub in_reply_to: Option<String>,
-    /// The page and `/Annots` position of the annotation `/IRT` points at, found by object
+    /// The page and `/Annots` position of the comment `/IRT` points at, found by object
     /// reference. Threads follow this rather than `/NM`, which need not be unique: PyMuPDF
-    /// names the first comment on every page `fitz-A0`.
+    /// names the first comment on every page `fitz-A0`. `None` when `/IRT` leads to no listed
+    /// comment ([`link_replies`]).
     pub parent: Option<(usize, usize)>,
+    /// `/RT /Group`: grouped with the annotation `/IRT` points at (Replace Text's caret with its
+    /// strikeout) rather than a reply to it.
+    pub grouped: bool,
     /// Rect in PDF user space: [x0, y0, x1, y1].
     pub rect: [f32; 4],
     pub color: Option<[f32; 3]>,
@@ -452,15 +456,59 @@ impl Annotation {
         matches!(self.state.as_deref(), Some("Marked" | "Unmarked"))
     }
 
-    /// A reply (or status reply) to another annotation rather than a comment of its own.
+    /// A reply (or status reply) to another comment rather than a comment of its own.
     pub fn is_reply(&self) -> bool {
-        self.in_reply_to.is_some() || self.parent.is_some()
+        self.parent.is_some()
     }
 
     /// Whether this annotation's `/IRT` points at `other`.
     pub fn replies_to(&self, other: &Annotation) -> bool {
         self.parent == Some((other.page, other.index))
     }
+}
+
+/// Settle the reply links of a document's annotations: a reply keeps its `parent` only when
+/// following the links reaches a comment of its own within 64 steps. An `/IRT` to an unlisted
+/// object, a pop-up, the annotation itself or a loop leaves it a comment of its own, so it stays
+/// in view instead of hanging off nothing. Both comment readers (inspect, and the engine's list
+/// after an edit) run this.
+pub fn link_replies(annotations: &mut [Annotation]) {
+    let at: HashMap<(usize, usize), usize> =
+        annotations.iter().enumerate().filter(|(_, a)| a.subtype != "Popup").map(|(i, a)| ((a.page, a.index), i)).collect();
+    let links: Vec<Option<usize>> =
+        annotations.iter().enumerate().map(|(i, a)| a.parent.and_then(|p| at.get(&p).copied()).filter(|&j| j != i)).collect();
+    for (i, a) in annotations.iter_mut().enumerate() {
+        let mut up = links.get(i).copied().flatten();
+        let mut settled = false;
+        for _ in 0..64 {
+            let Some(j) = up else { break };
+            up = links.get(j).copied().flatten();
+            if up.is_none() {
+                settled = true;
+                break;
+            }
+        }
+        if !settled {
+            a.parent = None;
+        }
+    }
+}
+
+/// The comment each reply's thread starts from, by the reply's page and `/Annots` position: a
+/// reply to a reply files under that comment too. Expects links [`link_replies`] settled.
+pub fn thread_tops(annotations: &[Annotation]) -> HashMap<(usize, usize), (usize, usize)> {
+    let parents: HashMap<(usize, usize), (usize, usize)> = annotations.iter().filter_map(|a| Some(((a.page, a.index), a.parent?))).collect();
+    parents
+        .iter()
+        .map(|(&reply, &first)| {
+            let mut top = first;
+            for _ in 0..64 {
+                let Some(&up) = parents.get(&top) else { break };
+                top = up;
+            }
+            (reply, top)
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1370,6 +1418,7 @@ impl<'a> Inspector<'a> {
                 name: self.text(d, b"NM"),
                 in_reply_to,
                 parent,
+                grouped: self.name(d, b"RT").as_deref() == Some("Group"),
                 rect,
                 color,
                 index,
@@ -1388,6 +1437,7 @@ impl<'a> Inspector<'a> {
             info.annotations.push(annotation);
         }
         info.annotations.sort_by(|a, b| a.page.cmp(&b.page).then(b.rect[3].total_cmp(&a.rect[3])));
+        link_replies(&mut info.annotations);
     }
 
     fn link(&self, page: usize, index: usize, d: &Dictionary, text_budget: &mut usize) -> Option<Link> {

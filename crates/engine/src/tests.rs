@@ -3420,18 +3420,20 @@ fn comments_lock_take_checkmarks_hide_and_summarize() {
 }
 
 /// Replies thread by their `/IRT` reference, not `/NM`: PyMuPDF names the first comment on every
-/// page `fitz-A0`, which used to file every reply under page 1's comment. Both readers (inspect on
-/// open, and the comment list the engine refreshes after an edit) must agree.
+/// page `fitz-A0`, which used to file every reply under page 1's comment. An `/IRT` to the
+/// annotation itself leaves it a comment of its own. Both readers (inspect on open, and the
+/// comment list the engine refreshes after an edit) must agree.
 #[test]
 fn replies_thread_by_reference_when_names_repeat_across_pages() {
     let pdf = b"%PDF-1.7
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj
-3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [5 0 R] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [5 0 R 8 0 R] >> endobj
 4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [6 0 R 7 0 R] >> endobj
 5 0 obj << /Type /Annot /Subtype /Text /Rect [20 140 40 160] /NM (fitz-A0) /T (Alpha) /Contents (COVER) >> endobj
 6 0 obj << /Type /Annot /Subtype /Text /Rect [20 140 40 160] /NM (fitz-A0) /T (Beta) /Contents (SECOND) >> endobj
 7 0 obj << /Type /Annot /Subtype /Text /Rect [20 100 40 120] /NM (fitz-A1) /IRT 6 0 R /T (Gamma) /Contents (ANSWER) >> endobj
+8 0 obj << /Type /Annot /Subtype /Text /Rect [20 100 40 120] /NM (fitz-A1) /IRT 8 0 R /T (Delta) /Contents (SELF) >> endobj
 trailer << /Root 1 0 R >>
 %%EOF";
     let mut s = Session::new().with_clock(|| 1_700_000_000);
@@ -3440,9 +3442,12 @@ trailer << /Root 1 0 R >>
         let all = &s.get(id).unwrap().info.annotations;
         let answer = all.iter().find(|a| a.contents.as_deref() == Some("ANSWER")).unwrap();
         assert_eq!(answer.parent, Some((1, 0)), "{answer:?}");
+        let looped = all.iter().find(|a| a.contents.as_deref() == Some("SELF")).unwrap();
+        assert!(!looped.is_reply(), "{looped:?}");
         let text = comment_summary("fitz.pdf", all, SummarySort::Page);
         let (cover, second) = text.split_once("SECOND").unwrap();
         assert!(!cover.contains("ANSWER"), "page 1's comment has no replies: {text}");
+        assert!(cover.contains("Number: 2  Author: Delta"), "the self-reply is a comment of its own: {text}");
         assert_eq!(second.matches("    Author:").count(), replies, "{text}");
     };
     check(&s, 1);
