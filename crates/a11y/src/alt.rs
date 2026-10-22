@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use pdfcraft_content::Matrix;
-use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, Stream};
+use pdfcraft_cos::{DecodeBudget, Dict, Document, ObjRef, Object, PdfString, Stream};
 
 /// A Figure element (after the role map).
 #[derive(Clone, Debug, PartialEq)]
@@ -157,22 +157,19 @@ fn bdc_mcid(doc: &Document, props: &Dict, op: &pdfcraft_content::Op) -> Option<i
 }
 
 pub(crate) fn page_content(doc: &Document, page: &Dict) -> Vec<u8> {
+    page_content_within(doc, page, &mut DecodeBudget::page())
+}
+
+/// The page's content streams, decoded against `budget` and joined with a space. Streams that
+/// don't decode, or arrive after the budget is spent, are left out.
+pub(crate) fn page_content_within(doc: &Document, page: &Dict, budget: &mut DecodeBudget) -> Vec<u8> {
     let Some(c) = page.get(b"Contents") else { return Vec::new() };
-    match &*doc.resolve(c) {
-        Object::Stream(s) => s.decoded().unwrap_or_default(),
-        Object::Array(a) => a
-            .iter()
-            .flat_map(|x| match &*doc.resolve(x) {
-                Object::Stream(s) => {
-                    let mut v = s.decoded().unwrap_or_default();
-                    v.push(b' ');
-                    v
-                }
-                _ => Vec::new(),
-            })
-            .collect(),
-        _ => Vec::new(),
+    let mut out = Vec::new();
+    for data in budget.decode_contents(doc, c).into_iter().flatten() {
+        out.extend_from_slice(&data);
+        out.push(b' ');
     }
+    out
 }
 
 fn union(a: Option<[f64; 4]>, b: [f64; 4]) -> [f64; 4] {
@@ -322,9 +319,10 @@ fn artifact_marked_content(doc: &mut Document, page: &pdfcraft_model::Page, ids:
     let Some(entries) = content_entries(doc, &page.dict) else { return Ok(false) };
     let props = page_properties(doc, &page.dict);
     let mut streams: Vec<Option<(Stream, Vec<u8>)>> = Vec::with_capacity(entries.len());
+    let mut budget = DecodeBudget::page();
     for entry in &entries {
         match &*doc.resolve(entry) {
-            Object::Stream(s) => streams.push(Some((s.clone(), s.decoded().unwrap_or_default()))),
+            Object::Stream(s) => streams.push(Some((s.clone(), budget.decode(s).unwrap_or_default()))),
             _ => streams.push(None),
         }
     }

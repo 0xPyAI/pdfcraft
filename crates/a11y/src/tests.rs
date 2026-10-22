@@ -1191,3 +1191,13 @@ fn horizontally_scaled_wrapped_heading_keeps_a_space_between_lines() {
     let titles: Vec<String> = headings(&doc).into_iter().map(|h| h.title).collect();
     assert_eq!(titles, ["I Overview"]);
 }
+
+#[test]
+fn repeated_content_references_share_one_decode_budget() {
+    use pdfcraft_cos::{Dict, MAX_PAGE_DECODED, Object, Stream};
+    let mut doc = Document::new_empty();
+    let stream = doc.add(Stream::flate(Dict::new(), &vec![b' '; 1 << 20]));
+    let page: Dict = [(b"Contents".to_vec(), Object::Array(vec![Object::Ref(stream); 300]))].into_iter().collect();
+    let data = crate::alt::page_content(&doc, &page);
+    assert!(data.len() <= MAX_PAGE_DECODED + 300, "{} bytes", data.len());
+}
