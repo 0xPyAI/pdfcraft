@@ -849,25 +849,20 @@ impl<'a> Inspector<'a> {
     }
 
     fn text(&self, d: &Dictionary, key: &[u8]) -> Option<String> {
-        let o = self.resolve(d.get(key).ok()?);
-        let s = match o {
-            Object::String(bytes, _) => text_string(bytes),
-            Object::Name(n) => String::from_utf8_lossy(n).into_owned(),
-            _ => return None,
-        };
-        let s = s.trim_matches('\0').trim().to_string();
+        let s = trimmed_text(self.resolve(d.get(key).ok()?))?;
         (!s.is_empty()).then_some(s)
     }
 
-    /// [`Self::text`] when it fits in `budget`, which it then spends. A string longer than the
-    /// budget is not converted at all.
+    /// [`Self::text`], converted and spent from `budget` as [`spend`] does. Text that trims to
+    /// nothing spends its raw length too.
     fn budgeted_text(&self, d: &Dictionary, key: &[u8], budget: &mut usize) -> Option<String> {
-        match self.resolve(d.get(key).ok()?) {
-            Object::String(bytes, _) | Object::Name(bytes) if bytes.len() <= *budget => {}
-            _ => return None,
+        let o = self.resolve(d.get(key).ok()?);
+        let (Object::String(bytes, _) | Object::Name(bytes)) = o else { return None };
+        let text = spend(bytes, budget, |_| trimmed_text(o).unwrap_or_default())?;
+        if text.is_empty() {
+            *budget = budget.saturating_sub(bytes.len());
+            return None;
         }
-        let text = self.text(d, key)?;
-        *budget = budget.checked_sub(text.len())?;
         Some(text)
     }
 
@@ -1323,12 +1318,8 @@ impl<'a> Inspector<'a> {
                 }
                 Some("URI") => {
                     let uri = a.get(b"URI").ok().and_then(|u| self.resolve(u).as_str().ok())?;
-                    let uri = (uri.len() <= *text_budget).then(|| String::from_utf8_lossy(uri).into_owned());
-                    match uri.filter(|u| u.len() <= *text_budget) {
-                        Some(uri) => {
-                            *text_budget = text_budget.saturating_sub(uri.len());
-                            LinkTarget::Uri(uri)
-                        }
+                    match spend(uri, text_budget, |b| String::from_utf8_lossy(b).into_owned()) {
+                        Some(uri) => LinkTarget::Uri(uri),
                         None => LinkTarget::Other("URI".into()),
                     }
                 }
@@ -1687,6 +1678,32 @@ impl<'a> Inspector<'a> {
 /// ([`pdfcraft_cos::PdfString::to_text`]) so the panels and outline editing agree.
 fn text_string(bytes: &[u8]) -> String {
     pdfcraft_cos::PdfString::literal(bytes).to_text()
+}
+
+/// A string or name value as text, without surrounding NULs and white space.
+fn trimmed_text(o: &Object) -> Option<String> {
+    let s = match o {
+        Object::String(bytes, _) => text_string(bytes),
+        Object::Name(n) => String::from_utf8_lossy(n).into_owned(),
+        _ => return None,
+    };
+    Some(s.trim_matches('\0').trim().to_string())
+}
+
+/// `convert(bytes)` when the result fits in `budget`, which it then spends. Bytes longer than the
+/// budget are not converted. A conversion that comes out too long spends the raw length, so a
+/// string many entries share is converted only until the budget runs out.
+fn spend(bytes: &[u8], budget: &mut usize, convert: impl FnOnce(&[u8]) -> String) -> Option<String> {
+    if bytes.len() > *budget {
+        return None;
+    }
+    let text = convert(bytes);
+    if text.len() > *budget {
+        *budget = budget.saturating_sub(bytes.len());
+        return None;
+    }
+    *budget = budget.saturating_sub(text.len());
+    Some(text)
 }
 
 fn limited_pdf_string(bytes: &[u8], max_bytes: usize) -> Option<String> {
@@ -2716,6 +2733,32 @@ trailer << /Root 1 0 R >>
             Inspector::new(reader).fill(&mut info);
             assert_eq!(info.links.len(), 1, "{:?}", info.links);
         }
+    }
+
+    /// A conversion rejected as too long, or trimmed to nothing, still spends the budget, so a string
+    /// many entries share is converted only a few times.
+    #[test]
+    fn rejected_text_conversions_spend_the_budget() {
+        let mut budget = 10;
+        let mut conversions = 0;
+        for _ in 0..10 {
+            // Each 0xFF becomes the three-byte replacement character.
+            let kept = spend(&[0xFF; 5], &mut budget, |b| {
+                conversions += 1;
+                String::from_utf8_lossy(b).into_owned()
+            });
+            assert_eq!(kept, None);
+        }
+        assert_eq!((conversions, budget), (2, 0));
+
+        let pdf = "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+             2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n\
+             trailer << /Root 1 0 R >>\n%%EOF";
+        let doc = Document::load_mem(pdf.as_bytes()).expect("loads");
+        let d = Dictionary::from_iter([("Contents", Object::string_literal("   "))]);
+        let mut budget = 10;
+        assert_eq!(Inspector::new(&doc).budgeted_text(&d, b"Contents", &mut budget), None);
+        assert_eq!(budget, 7);
     }
 
     /// Links and attachments sharing one long string each keep a copy only within
