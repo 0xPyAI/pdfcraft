@@ -2352,3 +2352,110 @@ animation effects	Off	Joaktiv
 	Move tag later	Zhvendose etiketën më vonë
 	Remove "{name}" from this list? The file itself is not deleted.	Të hiqet «{name}» nga kjo listë? Vetë skedari nuk fshihet.
 	Previous tab	Skeda e mëparshme
+# Untranslated: English text until a translator fills these in.
+	Alignment	Alignment
+	Back to Prepare a form	Back to Prepare a form
+	Bulleted list	Bulleted list
+	Characters	Characters
+	Characters without spaces	Characters without spaces
+	Collapse all pages	Collapse all pages
+	Counting words… {n} pages read	Counting words… {n} pages read
+	Create Link…	Create Link…
+	Crop Image	Crop Image
+	Current page only	Current page only
+	Cut Image	Cut Image
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.
+	Drag a field to move it, or select it and press {up} or {down}.	Drag a field to move it, or select it and press {up} or {down}.
+	Earlier in calculation order	Earlier in calculation order
+	Edit {field}'s formula	Edit {field}'s formula
+	Every field calculates after the fields it reads.	Every field calculates after the fields it reads.
+	Every field outside a loop calculates after the fields it reads.	Every field outside a loop calculates after the fields it reads.
+	Exclude image/OCR text	Exclude image/OCR text
+	Exclude tagged code blocks	Exclude tagged code blocks
+	Exclude tagged tables	Exclude tagged tables
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.
+	Expand all pages	Expand all pages
+	Fill colour:	Fill colour:
+	Fix order	Fix order
+	Font	Font
+	Font size	Font size
+	Found {n} untagged content problems.	Found {n} untagged content problems.
+	Full Screen	Full Screen
+	Hide hover previews for highlights without comment text	Hide hover previews for highlights without comment text
+	Later in calculation order	Later in calculation order
+	Less	Less
+	Links on page	Links on page
+	Loop	Loop
+	Make Properties Default	Make Properties Default
+	Make properties default	Make properties default
+	Mark as artifact	Mark as artifact
+	Merge image fragments	Merge image fragments
+	Missing from the calculation order saved in the PDF: other PDF viewers may not calculate it.	Missing from the calculation order saved in the PDF: other PDF viewers may not calculate it.
+	Mobile	Mobile
+	Move only what must move, so every field calculates after the fields it reads.	Move only what must move, so every field calculates after the fields it reads.
+	Moves only what must move	Moves only what must move
+	New file only	New file only
+	New file: {name}	New file: {name}
+	No field reads it	No field reads it
+	No order can fix a loop. Change one of the formulas.	No order can fix a loop. Change one of the formulas.
+	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.
+	No untagged content was found.	No untagged content was found.
+	Not in order	Not in order
+	Not now	Not now
+	Numbered list	Numbered list
+	Old file: {name}	Old file: {name}
+	Opacity:	Opacity:
+	Open in Full Screen mode?	Open in Full Screen mode?
+	Optimizing… merging image fragments	Optimizing… merging image fragments
+	Order · top calculates first	Order · top calculates first
+	Other options	Other options
+	Outline colour:	Outline colour:
+	Page properties	Page properties
+	Pages counted	Pages counted
+	Pages selected	Pages selected
+	Paragraph spacing	Paragraph spacing
+	Print as image	Print as image
+	Reads {names}, which read it back. No order can fix a loop: change one of the formulas.	Reads {names}, which read it back. No order can fix a loop: change one of the formulas.
+	Reads {name}, which calculates later, so it shows an old value.	Reads {name}, which calculates later, so it shows an old value.
+	Recognize Text…	Recognize Text…
+	Redact Image	Redact Image
+	Redaction mark appearance	Redaction mark appearance
+	Remove Crop	Remove Crop
+	Remove this leaf tag from reading order and mark its direct content as an artifact	Remove this leaf tag from reading order and mark its direct content as an artifact
+	Resolution:	Resolution:
+	Save anyway	Save anyway
+	Save over the changed file?	Save over the changed file?
+	Script	Script
+	Scroll speed (mouse wheel and arrow keys)	Scroll speed (mouse wheel and arrow keys)
+	Sending sheet {s} of {n} to {printer}…	Sending sheet {s} of {n} to {printer}…
+	Show on the page which fields each field reads	Show on the page which fields each field reads
+	Shown while the pointer is over a mark.	Shown while the pointer is over a mark.
+	Side by side	Side by side
+	Some content could not be classified safely and was kept in the count.	Some content could not be classified safely and was kept in the count.
+	Some pages contain no countable text. Scanned images need OCR first.	Some pages contain no countable text. Scanned images need OCR first.
+	Standard	Standard
+	Subscript	Subscript
+	Superscript	Superscript
+	The labels are in English: the signature's font can't draw them in this language.	The labels are in English: the signature's font can't draw them in this language.
+	The order saved in the PDF needs tidying	The order saved in the PDF needs tidying
+	Too early	Too early
+	Turn upside down (180°)	Turn upside down (180°)
+	What takes up the space in this file, by kind of content.	What takes up the space in this file, by kind of content.
+	Word count	Word count
+	Word counting stopped unexpectedly.	Word counting stopped unexpectedly.
+	Words	Words
+	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.
+	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.
+	Zoom — type a percentage and press Enter	Zoom — type a percentage and press Enter
+	the name is not a plain file name	the name is not a plain file name
+	{fields} read each other	{fields} read each other
+	{field} reads its own value	{field} reads its own value
+	{field} reads no other field	{field} reads no other field
+	{field} reads {fields}	{field} reads {fields}
+	{names} and {last}	{names} and {last}
+	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.
+# Untranslated: English text until a translator fills these in.
+	Calculation order	Calculation order
+	Find untagged content	Find untagged content
+	Tag form fields	Tag form fields
+	Word count…	Word count…
