@@ -357,8 +357,13 @@ pub(crate) fn page_input(
         .and_then(|(_, si)| items.iter().find(|(i, _)| *i == si))
         .map(|(_, a)| screen_rect(xf, info, page, a.content.rect()));
     let corner = selected_rect.and_then(|r| handles(r).into_iter().find(|(c, ..)| c.distance(p) <= 6.0));
+    // Cursors only where the page shows: the mode bar and side panels over a page scrolled under
+    // them keep their own (#2755).
+    let shows = resp.contains_pointer();
     if adding_text && hit.is_none() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+        if shows {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+        }
         if resp.clicked() {
             // Text that can't be drawn stays where it is being typed (#125).
             if cv.hold_blocked() {
@@ -383,9 +388,9 @@ pub(crate) fn page_input(
         }
         return consumed;
     }
-    if let Some((_, left, top)) = corner {
+    if let Some((_, left, top)) = corner.filter(|_| shows) {
         ui.ctx().set_cursor_icon(if left == top { egui::CursorIcon::ResizeNwSe } else { egui::CursorIcon::ResizeNeSw });
-    } else if hit.is_some() {
+    } else if hit.is_some() && shows {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
     }
     if resp.drag_started() {
@@ -523,56 +528,63 @@ pub(crate) fn editor(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, ad
     let (mut commit, mut cancel, mut done) = (false, false, false);
     let mut undrawable = None;
     let memo = &view.content.undrawable;
-    egui::Area::new(egui::Id::new(("added-text", view.id.0))).order(egui::Order::Foreground).fixed_pos(r.min).constrain(false).show(ctx, |ui| {
-        let Some(t) = view.content.draft.as_mut() else { return };
-        ui.set_width(r.width() + 64.0);
-        if let Some(source_rect) = source_rect.filter(|_| !background_ready) {
-            ui.painter().rect_filled(source_rect.union(r).expand(1.0), CornerRadius::ZERO, Color32::WHITE);
-        }
-        // The box is white in every theme, so the caret must not follow the theme (pale in dark mode) (#655).
-        ui.visuals_mut().text_cursor.stroke.color = crate::edit_text_ui::caret_color_on(Color32::WHITE);
-        let [cr, cg, cb] = t.style.color.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            let resp = ui.add(
-                egui::TextEdit::multiline(&mut t.text)
-                    .font(font)
-                    .desired_width(r.width().max(60.0))
-                    .desired_rows(1)
-                    .background_color(if background_ready { Color32::TRANSPARENT } else { Color32::WHITE })
-                    .text_color(Color32::from_rgb(cr, cg, cb))
-                    .hint_text(tl!("Type text"))
-                    .id_salt("added-text-edit"),
-            );
-            if t.focus {
-                resp.request_focus();
-                t.focus = false;
+    // Over the page, so only where the document shows: text scrolled under the mode bar or a side
+    // panel must leave them their pointer (#2755).
+    egui::Area::new(egui::Id::new(("added-text", view.id.0)))
+        .order(egui::Order::Foreground)
+        .fixed_pos(r.min)
+        .constrain_to(view.viewport_rect())
+        .constrain(false)
+        .show(ctx, |ui| {
+            let Some(t) = view.content.draft.as_mut() else { return };
+            ui.set_width(r.width() + 64.0);
+            if let Some(source_rect) = source_rect.filter(|_| !background_ready) {
+                ui.painter().rect_filled(source_rect.union(r).expand(1.0), CornerRadius::ZERO, Color32::WHITE);
             }
-            let buttons = egui::Frame::NONE
-                .fill(tokens.card)
-                .stroke(Stroke::new(1.0, tokens.border))
-                .corner_radius(CornerRadius::same(6))
-                .inner_margin(2)
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
-                    ui.horizontal(|ui| {
-                        done = crate::icons::button(ui, "check", 24.0, false, tl!("Done adding text")).clicked();
-                        cancel = crate::icons::button(ui, "x", 24.0, false, tl!("Discard this text (Esc)")).clicked();
-                    });
-                })
-                .response
-                .rect;
-            // Pressing a button takes the focus from the text: that is not a click away.
-            let on_buttons = ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| buttons.contains(p));
-            cancel |= ui.input(|i| i.key_pressed(egui::Key::Escape));
-            commit = done || resp.lost_focus() && !on_buttons && !view.objects.hold_editor;
+            // The box is white in every theme, so the caret must not follow the theme (pale in dark mode) (#655).
+            ui.visuals_mut().text_cursor.stroke.color = crate::edit_text_ui::caret_color_on(Color32::WHITE);
+            let [cr, cg, cb] = t.style.color.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let resp = ui.add(
+                    egui::TextEdit::multiline(&mut t.text)
+                        .font(font)
+                        .desired_width(r.width().max(60.0))
+                        .desired_rows(1)
+                        .background_color(if background_ready { Color32::TRANSPARENT } else { Color32::WHITE })
+                        .text_color(Color32::from_rgb(cr, cg, cb))
+                        .hint_text(tl!("Type text"))
+                        .id_salt("added-text-edit"),
+                );
+                if t.focus {
+                    resp.request_focus();
+                    t.focus = false;
+                }
+                let buttons = egui::Frame::NONE
+                    .fill(tokens.card)
+                    .stroke(Stroke::new(1.0, tokens.border))
+                    .corner_radius(CornerRadius::same(6))
+                    .inner_margin(2)
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
+                        ui.horizontal(|ui| {
+                            done = crate::icons::button(ui, "check", 24.0, false, tl!("Done adding text")).clicked();
+                            cancel = crate::icons::button(ui, "x", 24.0, false, tl!("Discard this text (Esc)")).clicked();
+                        });
+                    })
+                    .response
+                    .rect;
+                // Pressing a button takes the focus from the text: that is not a click away.
+                let on_buttons = ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| buttons.contains(p));
+                cancel |= ui.input(|i| i.key_pressed(egui::Key::Escape));
+                commit = done || resp.lost_focus() && !on_buttons && !view.objects.hold_editor;
+            });
+            // Page text is drawn with the standard fonts; anything else would be saved as `?` (#125).
+            undrawable = self::undrawable(t, memo);
+            if let Some(c) = undrawable {
+                ui.label(egui::RichText::new(undrawable_message(c)).small().color(UNDRAWABLE));
+            }
         });
-        // Page text is drawn with the standard fonts; anything else would be saved as `?` (#125).
-        undrawable = self::undrawable(t, memo);
-        if let Some(c) = undrawable {
-            ui.label(egui::RichText::new(undrawable_message(c)).small().color(UNDRAWABLE));
-        }
-    });
     if cancel {
         view.content.draft = None;
         return (None, false);
