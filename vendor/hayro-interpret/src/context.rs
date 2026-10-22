@@ -146,6 +146,13 @@ impl<'a> InterpreterCache<'a> {
     pub fn decoded_image_decodes(&self) -> usize {
         self.decoded_cache.decodes()
     }
+
+    /// PdfCraft patch (40): how many `/ICCBased` profiles were read through this cache, for
+    /// diagnostics and tests. A profile used again, by the same stream object or by a copy with
+    /// the same dictionary and bytes, is read once.
+    pub fn icc_profile_reads(&self) -> usize {
+        self.object_cache.icc_profile_reads()
+    }
 }
 
 /// A per-page interpretation context that borrows shared data from an [`InterpreterCache`].
