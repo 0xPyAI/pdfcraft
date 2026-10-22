@@ -354,7 +354,7 @@ fn xfdf_annots(doc: &Document, out: &mut String) {
                 && le.len() == 2
             {
                 let name = |o: &Object| o.as_name().map(|x| String::from_utf8_lossy(x).into_owned()).unwrap_or_else(|| "None".into());
-                let _ = write!(attrs, " head=\"{}\" tail=\"{}\"", name(&le[0]), name(&le[1]));
+                let _ = write!(attrs, " head=\"{}\" tail=\"{}\"", esc(&name(&le[0])), esc(&name(&le[1])));
             }
             // A callout: its leader path, text-box inset, intent and (single-name) line ending.
             let cl = nums_of(doc, d.get(b"CL"));

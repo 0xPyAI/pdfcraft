@@ -1758,3 +1758,26 @@ fn an_imported_redaction_rect_with_a_non_number_is_not_used() {
     let mark = imported_redact_mark(fdf);
     assert!(mark.get(b"QuadPoints").is_none(), "quads were drawn from a malformed /Rect: {mark:?}");
 }
+
+/// Line-ending names are attribute values: a name holding a quote or angle bracket cannot add
+/// attributes or elements to the exported XFDF.
+#[test]
+fn xfdf_line_ending_names_are_escaped() {
+    let mut doc = blank();
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    let hostile = b"a\" tail=\"x\"><field name=\"Name\"><value>pwned</value></field><b".to_vec();
+    let mut line = Dict::new();
+    line.set(b"Type".to_vec(), Object::name("Annot"));
+    line.set(b"Subtype".to_vec(), Object::name("Line"));
+    line.set(b"Rect".to_vec(), Object::Array(vec![10.into(), 20.into(), 30.into(), 40.into()]));
+    line.set(b"L".to_vec(), Object::Array(vec![10.into(), 20.into(), 30.into(), 40.into()]));
+    line.set(b"LE".to_vec(), Object::Array(vec![Object::Name(hostile.clone()), Object::Name(hostile.clone())]));
+    let line = doc.add(line);
+    doc.update_dict(page, |d| d.set(b"Annots".to_vec(), Object::Array(vec![Object::Ref(line)]))).unwrap();
+    let xml = export_xfdf(&doc, true, false, "form.pdf");
+    let parsed = roxmltree::Document::parse(&xml).unwrap();
+    assert!(!parsed.descendants().any(|n| n.has_tag_name("field")), "{xml}");
+    let el = parsed.descendants().find(|n| n.has_tag_name("line")).unwrap();
+    let want = String::from_utf8(hostile).unwrap();
+    assert_eq!((el.attribute("head"), el.attribute("tail")), (Some(want.as_str()), Some(want.as_str())));
+}
