@@ -63,7 +63,7 @@ const CKB_DAYS: [&str; 7] = ["یەکشەممە", "دووشەممە", "سێشەم
 
 /// The languages month and weekday names can be written in (Preferences ▸ Date format ▸ Language):
 /// the interface languages, in the same order and with the same names.
-pub static DATE_LANGUAGES: [DateLanguage; 33] = [
+pub static DATE_LANGUAGES: [DateLanguage; 34] = [
     DateLanguage {
         code: "en",
         name: "English",
@@ -555,6 +555,15 @@ pub static DATE_LANGUAGES: [DateLanguage; 33] = [
         days: ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"],
         days_short: ["일", "월", "화", "수", "목", "금", "토"],
     },
+    DateLanguage {
+        code: "nb",
+        name: "Norsk bokmål",
+        months: ["januar", "februar", "mars", "april", "mai", "juni", "juli", "august", "september", "oktober", "november", "desember"],
+        months_with_day: None,
+        months_short: ["jan.", "feb.", "mar.", "apr.", "mai", "jun.", "jul.", "aug.", "sep.", "okt.", "nov.", "des."],
+        days: ["søndag", "mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag"],
+        days_short: ["søn.", "man.", "tir.", "ons.", "tor.", "fre.", "lør."],
+    },
 ];
 
 /// The date language for `code` (any case), or `None` when there's none.
@@ -862,6 +871,8 @@ mod tests {
         assert_eq!(in_lang("ddd", "zh-hant"), "週六");
         assert_eq!(in_lang("dddd, d mmmm yyyy", "sq"), "e shtunë, 7 mars 2026");
         assert_eq!(in_lang("ddd d mmm", "sq"), "sht 7 mar");
+        assert_eq!(in_lang("dddd d. mmmm yyyy", "nb"), "lørdag 7. mars 2026");
+        assert_eq!(in_lang("ddd d. mmm", "nb"), "lør. 7. mar.");
         assert_eq!(date_language("PT-BR").map(|l| l.code), Some("pt-br"));
         assert!(date_language("xx").is_none());
         for l in &DATE_LANGUAGES {
@@ -983,6 +994,7 @@ mod tests {
         assert_eq!(unwritable("8. října 2026"), "ř");
         assert_eq!(unwritable("2026年10月8日"), "年月日");
         assert_eq!(unwritable("sábado, 7 de março – 2026?"), "", "Western European, dashes and ? are fine");
+        assert_eq!(unwritable("lørdag 7. mars, søn. 8. mai (æøå ÆØÅ)"), "", "Norwegian letters are Western European");
         let mut s = Session::new().with_clock(|| 1_700_000_000);
         s.set_date_format("d. mmmm yyyy").unwrap();
         assert_eq!(s.today_text_for_pdf(None, Some("es")).as_deref(), Ok("14. noviembre 2023"));

@@ -372,11 +372,12 @@ fn primary_ui_fonts_cover_latin_and_cyrillic_catalogs() {
         ("sq", include_str!("../src/i18n/sq.tsv")),
         ("ca", include_str!("../src/i18n/ca.tsv")),
         ("ro", include_str!("../src/i18n/ro.tsv")),
+        ("nb", include_str!("../src/i18n/nb.tsv")),
     ] {
         // Vietnamese stacks its diacritics: the precomposed letters and the base letters they
         // combine with, including `đ` and the tone marks `ạ ả ấ ầ ẩ ẫ ậ ắ ằ ẳ ẵ ặ ế ề ể ễ ệ`.
         let mut text = String::from(
-            "áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽãõçâêôàÃÕÇÂÊÔÀñÑüÜäÄöÖőűß„“¿¡«»…ґҐєЄіІїЇәғқңөұүһӘҒҚҢӨҰҮҺđĐạảấầẩẫậắằẳẵặếềểễệọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ",
+            "áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽãõçâêôàÃÕÇÂÊÔÀñÑüÜäÄöÖőűßæøåÆØÅ„“¿¡«»…ґҐєЄіІїЇәғқңөұүһӘҒҚҢӨҰҮҺđĐạảấầẩẫậắằẳẵặếềểễệọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ",
         );
         for line in catalog.lines().filter(|l| !l.starts_with('#')) {
             if let Some(translation) = line.split('\t').nth(2) {
