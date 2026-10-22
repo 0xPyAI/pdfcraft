@@ -3360,6 +3360,60 @@ trailer << /Root 1 0 R >>
         assert_eq!(px(off), vec![255, 255, 255, 255], "toggled-off layer must not draw");
     }
 
+    /// #2986: an optional content membership dictionary with a visibility expression (`/VE`,
+    /// ISO 32000-2 §8.11.2.2) shows its content only when the expression is true, and the
+    /// expression takes precedence over `/OCGs` and `/P`. It was ignored, so content under it
+    /// stayed visible when its layers were hidden. A malformed expression falls back to `/OCGs`.
+    #[test]
+    fn visibility_expressions_decide_what_a_membership_dictionary_shows() {
+        let render = |ocmd: &str, off: &[i32]| {
+            let pdf = format!(
+                "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R 6 0 R] /D << /Order [5 0 R 6 0 R] >> >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R /Resources << /Properties << /M1 7 0 R >> >> >> endobj
+4 0 obj << /Length 44 >> stream
+/OC /M1 BDC 1 0 0 rg 0 0 100 100 re f EMC
+endstream endobj
+5 0 obj << /Type /OCG /Name (A) >> endobj
+6 0 obj << /Type /OCG /Name (B) >> endobj
+7 0 obj {ocmd} endobj
+trailer << /Root 1 0 R >>
+%%EOF"
+            );
+            let layers = off.iter().map(|n| (*n, 0, false)).collect();
+            let mut r = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig { layers: Arc::new(layers), ..Default::default() });
+            let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 0.5, tag: 0, ..Default::default() });
+            p.rgba[..4] == [255, 0, 0, 255]
+        };
+        let and = "<< /Type /OCMD /VE [/And 5 0 R 6 0 R] >>";
+        assert!(render(and, &[]), "And: both on");
+        assert!(!render(and, &[5]), "And: one off");
+        let or = "<< /Type /OCMD /VE [/Or 5 0 R 6 0 R] >>";
+        assert!(render(or, &[5]), "Or: one on");
+        assert!(!render(or, &[5, 6]), "Or: both off");
+        let not = "<< /Type /OCMD /VE [/Not 5 0 R] >>";
+        assert!(!render(not, &[]), "Not: the group is on");
+        assert!(render(not, &[5]), "Not: the group is off");
+        let nested = "<< /Type /OCMD /VE [/And [/Not 5 0 R] 6 0 R] >>";
+        assert!(render(nested, &[5]), "nested: A off, B on");
+        assert!(!render(nested, &[]), "nested: A on");
+        // /VE wins over /OCGs and /P.
+        let both = "<< /Type /OCMD /OCGs [5 0 R] /P /AllOn /VE [/Not 5 0 R] >>";
+        assert!(render(both, &[5]), "the expression, not /P, decides");
+        // A malformed expression falls back to /OCGs and /P.
+        // So is one naming an object that isn't a listed group: a missing one, or the page
+        // (review on #2987).
+        for bad in ["[/Xor 5 0 R]", "[/Not 5 0 R 6 0 R]", "[/And]", "[5 0 R]", "[/And (5)]", "[/Or 8 0 R]", "[/Or 3 0 R]"] {
+            let ocmd = format!("<< /Type /OCMD /OCGs [5 0 R] /VE {bad} >>");
+            assert!(render(&ocmd, &[]), "{bad}: /OCGs on");
+            assert!(!render(&ocmd, &[5]), "{bad}: /OCGs off");
+        }
+        // Nesting past the limit is malformed too, and does not recurse without end.
+        let deep = format!("<< /Type /OCMD /OCGs [5 0 R] /VE {}5 0 R{} >>", "[/Not ".repeat(41), "]".repeat(41));
+        assert!(!render(&deep, &[5]), "too deep: /OCGs decides");
+    }
+
     /// From `cargo xtask fuzz`: a tiling pattern with no /Resources inherits the page's, where
     /// its own name points back at it. It painted itself until the stack overflowed (vendored
     /// hayro-interpret patch: `MAX_PAINT_NESTING`). Ordinary patterns must still paint.
