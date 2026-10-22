@@ -225,7 +225,9 @@ fn inline_image(data: &[u8], pos: usize) -> Result<(Dict, Vec<u8>, usize), usize
     }
     // One whitespace byte separates ID from the data.
     let begin = (lx.pos + 1).min(data.len());
-    let end = unfiltered_image_end(data, begin, &dict).or_else(|| end_of_image(data, begin, filter_eod(&dict)));
+    let end = unfiltered_image_end(data, begin, &dict)
+        .or_else(|| declared_image_end(data, begin, &dict))
+        .or_else(|| image_data_end(data, begin, filter_eod(&dict)));
     Ok(match end {
         Some((end_data, end)) => (dict, data[begin..end_data].to_vec(), end),
         None => (dict, data[begin..].to_vec(), data.len()),
@@ -319,6 +321,42 @@ fn unfiltered_image_end(data: &[u8], begin: usize, dict: &Dict) -> Option<(usize
     let ei = end_data.checked_add(separator)?;
     let end = ei.checked_add(2)?;
     if data.get(ei..end) == Some(b"EI") && data.get(end).is_none_or(|b| is_ws(*b) || is_delim(*b)) { Some((end_data, end)) } else { None }
+}
+
+/// The length declared by `/L` (or `/Length`, ISO 32000-2 §8.9.7), used when `EI` follows the
+/// declared bytes after optional whitespace. A declared length without that `EI` is ignored.
+fn declared_image_end(data: &[u8], begin: usize, dict: &Dict) -> Option<(usize, usize)> {
+    let length = dict.get(b"L").or_else(|| dict.get(b"Length"))?.as_int()?;
+    let end_data = begin.checked_add(usize::try_from(length).ok()?)?;
+    let after = data.get(end_data..)?;
+    let ei = end_data.checked_add(after.iter().position(|b| !is_ws(*b))?)?;
+    let end = ei.checked_add(2)?;
+    if data.get(ei..end) == Some(b"EI") && data.get(end).is_none_or(|b| is_ws(*b) || is_delim(*b)) { Some((end_data, end)) } else { None }
+}
+
+/// Where inline image data of unknown length ends. A candidate `EI` followed by binary bytes before
+/// the next `EI` lies inside the (compressed) data, unless another inline image starts first.
+fn image_data_end(data: &[u8], begin: usize, eod: &[u8]) -> Option<(usize, usize)> {
+    let mut candidate = end_of_image(data, begin, eod)?;
+    loop {
+        let (end_data, end) = candidate;
+        let Some(next) = end_of_image(data, end, eod) else {
+            return Some(candidate);
+        };
+        let between = data.get(end..next.0).unwrap_or_default();
+        if !between.iter().any(|b| !b.is_ascii()) || starts_inline_image(between) {
+            return Some((end_data, end));
+        }
+        candidate = next;
+    }
+}
+
+/// Whether `bytes` hold a whitespace-delimited `BI` operator.
+fn starts_inline_image(bytes: &[u8]) -> bool {
+    bytes
+        .windows(2)
+        .enumerate()
+        .any(|(i, pair)| pair == b"BI" && (i == 0 || is_ws(bytes[i - 1])) && bytes.get(i + 2).is_none_or(|b| is_ws(*b) || is_delim(*b)))
 }
 
 /// Where inline image data starting at `begin` ends: (end of the data, position after `EI`). The
