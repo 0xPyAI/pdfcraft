@@ -1890,8 +1890,8 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text"]
 tools = ["text_edit"]
-evidence = ["crates/edit/src/tests.rs::paragraphs_move_and_rewrap_to_a_new_width", "crates/ui-egui/tests/editing.rs::dragging_a_paragraph_moves_it_and_its_edge_rewraps_it", "crates/ui-egui/tests/editing.rs::an_open_paragraph_moves_by_its_frame_and_by_the_arrow_keys", "crates/ui-egui/tests/editing.rs::arrow_keys_nudge_a_selected_image_instead_of_turning_the_page", "crates/automation/tests/automation.rs::editing_existing_text_through_tools"]
-notes = "existing paragraphs: drag the box to move it, drag the handle on its right edge to rewrap it to a new width (upright pages); the move is applied in page space through the paragraph's CTM, in its own q … Q; a click still opens it for typing (#40); once open, its frame grabs the box (click to select, drag to move) while the text keeps the caret, and the arrow keys nudge the selected box or image a point, Shift ten points (#1520)"
+evidence = ["crates/edit/src/tests.rs::paragraphs_move_and_rewrap_to_a_new_width", "crates/ui-egui/tests/editing.rs::dragging_a_paragraph_moves_it_and_its_edge_rewraps_it", "crates/ui-egui/tests/editing.rs::a_paragraph_rewraps_from_the_outer_half_of_its_edge_handles", "crates/ui-egui/tests/editing.rs::an_open_paragraph_moves_by_its_frame_and_by_the_arrow_keys", "crates/ui-egui/tests/editing.rs::arrow_keys_nudge_a_selected_image_instead_of_turning_the_page", "crates/automation/tests/automation.rs::editing_existing_text_through_tools"]
+notes = "existing paragraphs: drag the box to move it, drag the handle on its left or right edge to rewrap it to a new width (upright pages), including the half of the handle outside the box, which started an area selection instead (#2276); the move is applied in page space through the paragraph's CTM, in its own q … Q; a click still opens it for typing (#40); once open, its frame grabs the box (click to select, drag to move) while the text keeps the caret, and the arrow keys nudge the selected box or image a point, Shift ten points (#1520)"
 
 [[feature]]
 id = "edit.paragraph-detection"

@@ -4072,6 +4072,61 @@ fn a_quick_flick_on_either_edge_rewraps_the_paragraph() {
     assert!(h.state().views[0].line_editor.is_none());
 }
 
+/// #2276: a paragraph's rewrap handle is drawn half outside its box, and the resize pointer
+/// shows a few pixels further out still. A press there started an area selection instead: its
+/// rectangle followed the pointer, and on release the box went back to its old width.
+#[test]
+fn a_paragraph_rewraps_from_the_outer_half_of_its_edge_handles() {
+    let mut h = harness(1, |_| {});
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let lines = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().text_lines(0).iter().map(|l| l.text.clone()).collect::<Vec<_>>()
+    };
+    let block = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().text_blocks(0)[0].clone()
+    };
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let k = r.width() / 200.0;
+    let screen = |x: f64, y: f64| egui::pos2(r.left() + x as f32 * k, r.top() + (300.0 - y as f32) * k);
+    let near = |a: [f64; 4], b: [f64; 4]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1.5);
+    // The box is 2 px outside the text and its handle 7 px wide, centred on the box's edge: press
+    // 3 px outside the box, on the handle. Near the box's top, clear of the tool's toast.
+    let outside = 2.0 + 3.0;
+    let before = block(&h);
+    let grip = screen(before.rect[2], before.rect[3] - 6.0) + egui::vec2(outside, 0.0);
+    drag(&mut h, grip, grip - egui::vec2((before.rect[2] - before.rect[0] - 45.0) as f32 * k, 0.0));
+    assert_eq!(lines(&h), ["Page", "1"], "narrowed from the right handle");
+    let narrowed = block(&h);
+    assert!(narrowed.rect[2] < before.rect[2] - 20.0 && (narrowed.rect[0] - before.rect[0]).abs() < 1.5, "{:?} → {:?}", before.rect, narrowed.rect);
+    let id = h.state().views[0].id;
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Edit text"));
+    assert!(h.state().views[0].line_editor.is_none());
+    // Saved and reopened, the paragraph keeps its new width.
+    let saved = h.state_mut().session.save_bytes(id).unwrap();
+    let mut reopen = pdfcraft_engine::Session::new();
+    let rid = reopen.open("saved.pdf", None, saved, None).unwrap();
+    assert!(near(reopen.get(rid).unwrap().text_blocks(0)[0].rect, narrowed.rect));
+    // Undo gives the old width back, redo the new one.
+    h.state_mut().undo();
+    h.run_steps(2);
+    assert_eq!(lines(&h), ["Page 1"]);
+    assert!(near(block(&h).rect, before.rect), "{:?} → {:?}", before.rect, block(&h).rect);
+    h.state_mut().redo();
+    h.run_steps(2);
+    assert!(near(block(&h).rect, narrowed.rect), "{:?} → {:?}", narrowed.rect, block(&h).rect);
+    // The left handle's outer half too.
+    h.state_mut().undo();
+    h.run_steps(2);
+    let grip = screen(before.rect[0], before.rect[3] - 6.0) - egui::vec2(outside, 0.0);
+    let inward = (before.rect[2] - before.rect[0] - 45.0) as f32;
+    drag(&mut h, grip, grip + egui::vec2(inward * k, 0.0));
+    assert_eq!(lines(&h), ["Page", "1"], "narrowed from the left handle");
+    assert!((block(&h).rect[0] - (before.rect[0] + f64::from(inward))).abs() < 1.5, "{:?} → {:?}", before.rect, block(&h).rect);
+}
+
 /// The Pages panel, in a window tall enough to show every thumbnail of a short fixture.
 fn pages_panel(pages: usize) -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1400.0, 1900.0)).build_eframe(move |_cc| {
