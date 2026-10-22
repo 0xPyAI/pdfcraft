@@ -140,27 +140,27 @@ pub(crate) type Step = Result<Vec<u8>, Failure>;
 /// [`FilterError::Unsupported`] (callers keep such data encoded), as does a chain longer than
 /// [`MAX_CHAIN`]. `max_output` bounds every intermediate buffer.
 pub fn decode(chain: &[(Filter, Params)], data: &[u8], max_output: usize) -> Result<Vec<u8>, FilterError> {
-    decode_counted(chain, data, max_output).map(|(v, _)| v).map_err(|(e, _)| e)
+    run(chain, data, max_output, true, false).map(|(v, _, _)| v).map_err(|(e, _)| e)
 }
 
-/// Like [`decode`], also giving the bytes every stage that ran decoded, on success and on
-/// failure: the work a caller charging an allowance spent. A stage's output counts even when a
-/// later stage shrinks it.
+/// Like [`decode`] for a caller charging an allowance: `max_output` bounds the bytes all stages
+/// decode together, each stage getting what the earlier ones left, and the result gives those
+/// bytes, on success and on failure. A stage's output counts even when a later stage or its
+/// predictor shrinks it.
 pub fn decode_counted(chain: &[(Filter, Params)], data: &[u8], max_output: usize) -> Result<(Vec<u8>, usize), (FilterError, usize)> {
-    run(chain, data, max_output, true).map(|(v, _, spent)| (v, spent))
+    run(chain, data, max_output, true, true).map(|(v, _, spent)| (v, spent))
 }
 
 /// Like [`decode`], but on corrupt data returns what was decoded before the error and
 /// reports `partial = true` (the behaviour viewers expect). The remaining filters of the
 /// chain still run on the partial data. Limit and unsupported errors are still errors.
 pub fn decode_tolerant(chain: &[(Filter, Params)], data: &[u8], max_output: usize) -> Result<(Vec<u8>, bool), FilterError> {
-    decode_tolerant_counted(chain, data, max_output).map(|(v, partial, _)| (v, partial)).map_err(|(e, _)| e)
+    run(chain, data, max_output, false, false).map(|(v, partial, _)| (v, partial)).map_err(|(e, _)| e)
 }
 
-/// [`decode_tolerant`], also giving the bytes every stage that ran decoded, as
-/// [`decode_counted`] does.
+/// [`decode_tolerant`] bounded and counted as [`decode_counted`] is.
 pub fn decode_tolerant_counted(chain: &[(Filter, Params)], data: &[u8], max_output: usize) -> Result<(Vec<u8>, bool, usize), (FilterError, usize)> {
-    run(chain, data, max_output, false)
+    run(chain, data, max_output, false, true)
 }
 
 /// Longest filter chain decoded. Real streams use one to three filters; every stage may produce
@@ -168,8 +168,9 @@ pub fn decode_tolerant_counted(chain: &[(Filter, Params)], data: &[u8], max_outp
 pub const MAX_CHAIN: usize = 8;
 
 /// The decoded data, whether it is partial and the bytes all stages decoded, or the error and
-/// the bytes decoded before it.
-fn run(chain: &[(Filter, Params)], data: &[u8], max: usize, strict: bool) -> Result<(Vec<u8>, bool, usize), (FilterError, usize)> {
+/// the bytes decoded before it. `max` bounds each stage, or with `cumulative` all of them
+/// together.
+fn run(chain: &[(Filter, Params)], data: &[u8], max: usize, strict: bool, cumulative: bool) -> Result<(Vec<u8>, bool, usize), (FilterError, usize)> {
     if chain.len() > MAX_CHAIN {
         return Err((FilterError::Unsupported(format!("a chain of {} filters", chain.len())), 0));
     }
@@ -182,33 +183,49 @@ fn run(chain: &[(Filter, Params)], data: &[u8], max: usize, strict: bool) -> Res
     for (filter, params) in chain {
         #[cfg(test)]
         STAGE_BYTES.with(|c| c.set(c.get() + cur.len()));
-        cur = Cow::Owned(match decode_one(filter, params, &cur, max) {
+        let limit = if cumulative { max.saturating_sub(spent) } else { max };
+        let (step, work) = decode_one(filter, params, &cur, limit);
+        spent = spent.saturating_add(work);
+        cur = Cow::Owned(match step {
             Ok(v) => v,
             Err(Failure { error: FilterError::Corrupt { .. }, partial: out }) if !strict => {
                 partial = true;
                 out
             }
-            Err(f) => return Err((f.error, spent.saturating_add(f.partial.len()))),
+            Err(Failure { error: FilterError::LimitExceeded(_), .. }) => return Err((FilterError::LimitExceeded(max), spent)),
+            Err(f) => return Err((f.error, spent)),
         });
-        spent = spent.saturating_add(cur.len());
     }
     Ok((cur.into_owned(), partial, spent))
 }
 
-fn decode_one(filter: &Filter, params: &Params, data: &[u8], max: usize) -> Step {
+/// One stage's result and the bytes its decoder produced (before any predictor).
+fn decode_one(filter: &Filter, params: &Params, data: &[u8], max: usize) -> (Step, usize) {
     match filter {
         Filter::Flate => with_predictor(flate::decode(data, max), params, "FlateDecode"),
         Filter::Lzw => with_predictor(lzw::decode(data, params.early_change != 0, max), params, "LZWDecode"),
-        Filter::AsciiHex => asciihex::decode(data, max),
-        Filter::Ascii85 => ascii85::decode(data, max),
-        Filter::RunLength => runlength::decode(data, max),
-        other => Err(Failure { error: FilterError::Unsupported(other.name().to_owned()), partial: Vec::new() }),
+        Filter::AsciiHex => counted(asciihex::decode(data, max)),
+        Filter::Ascii85 => counted(ascii85::decode(data, max)),
+        Filter::RunLength => counted(runlength::decode(data, max)),
+        other => (Err(Failure { error: FilterError::Unsupported(other.name().to_owned()), partial: Vec::new() }), 0),
     }
 }
 
-/// Applies the predictor to a decoder's result, including to partial output on failure.
-fn with_predictor(step: Step, params: &Params, name: &'static str) -> Step {
-    match step {
+/// A step with the bytes it produced, its output or its partial output.
+fn counted(step: Step) -> (Step, usize) {
+    let n = match &step {
+        Ok(v) => v.len(),
+        Err(f) => f.partial.len(),
+    };
+    (step, n)
+}
+
+/// Applies the predictor to a decoder's result, including to partial output on failure. The
+/// count is the decoder's output: a PNG predictor drops a tag byte per row, but the decoder
+/// produced it.
+fn with_predictor(step: Step, params: &Params, name: &'static str) -> (Step, usize) {
+    let (step, n) = counted(step);
+    let step = match step {
         Ok(v) => predictor::decode(params, v, name),
         Err(Failure { error, partial }) => {
             let partial = match predictor::decode(params, partial, name) {
@@ -217,7 +234,8 @@ fn with_predictor(step: Step, params: &Params, name: &'static str) -> Step {
             };
             Err(Failure { error, partial })
         }
-    }
+    };
+    (step, n)
 }
 
 /// Encodes `data` with `filter`. Supported: Flate (zlib, level 6), LZW, ASCIIHex,
@@ -387,5 +405,36 @@ mod tests {
         let (out, partial) = decode_tolerant(&[(Filter::Flate, p)], &z, 1 << 20).unwrap();
         assert!(partial);
         assert_eq!(&data[..out.len()], &out[..]);
+    }
+
+    /// A counted decode bounds what all stages decode together: Flate inflating 1 MiB of hex
+    /// that ASCIIHex halves is 1.5 MiB of work, past a 1.25 MiB allowance. A plain decode keeps
+    /// the limit per stage.
+    #[test]
+    fn a_counted_decode_bounds_all_stages_together() {
+        let hex: Vec<u8> = std::iter::repeat_n(b"ab".as_slice(), 1 << 19).flatten().copied().collect();
+        let data = encode_flate(&hex);
+        let chain = [(Filter::Flate, Params::default()), (Filter::AsciiHex, Params::default())];
+        let max = (1 << 20) + (1 << 18);
+        assert_eq!(decode(&chain, &data, max).map(|d| d.len()).ok(), Some(1 << 19));
+        assert!(matches!(decode_counted(&chain, &data, max), Err((FilterError::LimitExceeded(m), _)) if m == max));
+        assert_eq!(decode_counted(&chain, &data, 2 << 20).map(|(_, spent)| spent).ok(), Some((1 << 20) + (1 << 19)));
+    }
+
+    /// A PNG predictor drops a tag byte per row, but Flate produced it: the count includes it,
+    /// also when the predictor fails on a bad tag.
+    #[test]
+    fn a_counted_decode_counts_output_before_the_predictor() {
+        let params = Params { predictor: 12, ..Params::default() };
+        let rows = vec![7u8; 1 << 16];
+        let data = encode(&Filter::Flate, &params, &rows).unwrap();
+        let chain = [(Filter::Flate, params.clone())];
+        let (out, spent) = decode_counted(&chain, &data, usize::MAX).unwrap();
+        assert!(out == rows);
+        assert_eq!(spent, 2 << 16);
+        let bad: Vec<u8> = std::iter::repeat_n([0u8, 7], 1 << 15).flatten().chain([9, 7]).collect();
+        let (e, spent) = decode_counted(&chain, &encode_flate(&bad), usize::MAX).unwrap_err();
+        assert!(matches!(e, FilterError::Corrupt { .. }), "{e}");
+        assert_eq!(spent, bad.len());
     }
 }
