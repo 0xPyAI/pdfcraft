@@ -2325,10 +2325,11 @@ impl Interp<'_> {
                     }
                     text = if frac.is_empty() { g } else { format!("{g}.{frac}") };
                 }
+                let nonzero = text.chars().any(|c| ('1'..='9').contains(&c));
                 if pic.contains('$') {
                     text = format!("${text}");
                 }
-                if num < 0.0 {
+                if num < 0.0 && nonzero {
                     text = format!("-{text}");
                 }
                 Val::Str(text)
