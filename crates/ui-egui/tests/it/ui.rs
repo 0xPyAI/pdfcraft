@@ -180,6 +180,17 @@ fn escape_in_a_dialog_over_the_expanded_all_tools_leaves_the_view_open() {
 }
 
 #[test]
+fn escape_in_the_command_palette_over_the_expanded_all_tools_leaves_the_view_open() {
+    let mut h = harness(|app| app.set_option("tools", "full").unwrap());
+    h.state_mut().palette_open = true;
+    h.run_steps(3);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(!h.state().palette_open, "Escape closed the palette");
+    assert!(h.state().all_tools_full, "and only the palette");
+}
+
+#[test]
 fn another_workspace_from_the_mode_option_puts_the_expanded_all_tools_away() {
     let mut app = PdfCraftApp::new();
     app.set_option("tools", "full").unwrap();

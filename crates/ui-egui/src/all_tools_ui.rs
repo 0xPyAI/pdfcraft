@@ -25,14 +25,19 @@ fn label_hit(label: &str, translated: &str, query: &str, rtl: bool) -> bool {
 
 /// Whether `group` matches `query` (already trimmed and lower-cased), in English or the UI
 /// language. `None` is no match; otherwise the items that matched, empty when the tool's own
-/// name did.
+/// name did. An entry with a menu (Watermark: Add, Update, Remove) also matches by its commands'
+/// names, so "remove watermark" finds it.
 fn matches(query: &str, group: &ToolGroup) -> Option<Vec<&'static str>> {
     let rtl = crate::i18n::current().rtl();
     let hit = |label: &str| label_hit(label, tl!(label), query, rtl);
     if query.is_empty() || hit(group.label) {
         return Some(Vec::new());
     }
-    let items: Vec<_> = group.sections.iter().flat_map(|s| s.items.iter()).map(|i| i.label).filter(|l| hit(l)).collect();
+    let action_hit = |id: &&str| {
+        pdfcraft_engine::commands::command(id).is_some_and(|spec| label_hit(spec.label, &crate::i18n::menu_label(spec.id, spec.label), query, rtl))
+    };
+    let items: Vec<_> =
+        group.sections.iter().flat_map(|s| s.items.iter()).filter(|i| hit(i.label) || i.actions.iter().any(action_hit)).map(|i| i.label).collect();
     (!items.is_empty()).then_some(items)
 }
 
@@ -40,8 +45,8 @@ fn matches(query: &str, group: &ToolGroup) -> Option<Vec<&'static str>> {
 /// category's tiles that match the search. Choosing a tile opens that tool's panel.
 pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
-    // A dialog or prompt over the view owns Escape.
-    if !app.modal_open() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+    // A dialog, prompt or the command palette over the view owns Escape.
+    if !app.modal_open() && !app.palette_open && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         app.all_tools_full = false;
         return;
     }
@@ -171,6 +176,12 @@ mod tests {
         let rotate = matches("rotate", group("organize")).expect("Organize pages lists Rotate");
         assert!(!rotate.is_empty() && rotate.iter().all(|l| l.to_lowercase().contains("rotate")), "{rotate:?}");
         assert_eq!(matches("no such tool anywhere", group("organize")), None);
+    }
+
+    #[test]
+    fn search_finds_an_entry_by_its_menus_commands() {
+        let found = matches("remove watermark", group("edit")).expect("Watermark's menu has Remove watermark");
+        assert!(found.contains(&"Watermark"), "{found:?}");
     }
 
     #[test]
