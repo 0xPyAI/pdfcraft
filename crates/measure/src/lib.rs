@@ -522,6 +522,15 @@ pub fn list(doc: &Document) -> Listing {
     }
     out
 }
+/// Most viewports [`set_scale`] gives a page, and most [`scale_at`] reads.
+const MAX_VIEWPORTS: usize = 1024;
+
+#[cfg(test)]
+thread_local! {
+    /// Numbers read from viewport `/BBox` arrays.
+    pub(crate) static VIEWPORT_NUMBERS_READ: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Last containing viewport wins, using the first point of the measurement (ISO 32000-2 §12.9).
 /// Outside every viewport the page measures true size in inches.
 pub fn scale_at(doc: &Document, page_index: usize, at: Point) -> Result<Scale> {
@@ -535,12 +544,17 @@ pub fn scale_at_or(doc: &Document, page_index: usize, at: Point, per_point: f64,
     if let Some(o) = p.dict.get(b"VP") {
         let o = doc.resolve(o);
         let arr = o.as_array().ok_or_else(|| invalid("invalid page viewports"))?;
-        for viewport in arr.iter().rev() {
+        // The last viewports win; a page holds at most MAX_VIEWPORTS of its own.
+        for viewport in arr.iter().rev().take(MAX_VIEWPORTS) {
             let o = doc.resolve(viewport);
             let Some(d) = o.as_dict() else { continue };
             if let Some(bbox) = d.get(b"BBox") {
                 let o = doc.resolve(bbox);
-                let b: Option<Vec<f64>> = o.as_array().and_then(|a| a.iter().map(|v| doc.resolve(v).as_f64()).collect());
+                let b: Option<Vec<f64>> = o.as_array().filter(|a| a.len() == 4).and_then(|a| {
+                    #[cfg(test)]
+                    VIEWPORT_NUMBERS_READ.with(|n| n.set(n.get() + a.len()));
+                    a.iter().map(|v| doc.resolve(v).as_f64()).collect()
+                });
                 if let Some(b) = b.filter(|b| b.len() == 4 && b.iter().all(|v| v.is_finite()))
                     && at[0] >= b[0].min(b[2])
                     && at[0] <= b[0].max(b[2])
@@ -566,7 +580,7 @@ pub fn set_scale(doc: &mut Document, page_index: usize, bbox: [f64; 4], name: &s
         Some(o) => doc.resolve(o).as_array().cloned().ok_or_else(|| invalid("invalid page viewports"))?,
         None => Vec::new(),
     };
-    if list.len() >= 1024 {
+    if list.len() >= MAX_VIEWPORTS {
         return Err(invalid("page has too many measurement viewports"));
     }
     let mut d = Dict::new();

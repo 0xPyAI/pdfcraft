@@ -1611,6 +1611,28 @@ fn a_timestamp_token_may_sign_with_a_different_digest_than_its_imprint() {
     assert_eq!((token.digest, token.imprint, token.gen_time), (pdfcraft_sign::DigestAlg::Sha1, imprint, time));
 }
 
+/// A token answers the request that asked for it: a requested nonce or policy must come back.
+#[test]
+fn a_timestamp_response_must_carry_the_requested_nonce_and_policy() {
+    use pdfcraft_sign::timestamp::{TimestampQuery, parse_response, respond};
+    let tsa = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    let alg = pdfcraft_sign::DigestAlg::Sha256;
+    let time = Time { year: 2026, month: 10, day: 6, hour: 12, minute: 0, second: 0 };
+    let query = |nonce: Option<u64>, policy: Option<&str>| {
+        let mut q = TimestampQuery::new(alg, alg.digest(&[b"document"])).unwrap();
+        (q.nonce, q.policy) = (nonce, policy.map(str::to_string));
+        q
+    };
+    let answer = |q: &TimestampQuery| respond(&tsa.key, &tsa.certificate, &tsa.chain, alg, q, "1.2.3.4", time, 9).unwrap();
+    let with_nonce = answer(&query(Some(42), None));
+    assert!(parse_response(&with_nonce, &query(Some(42), Some("1.2.3.4"))).is_ok());
+    assert!(parse_response(&with_nonce, &query(None, None)).is_ok());
+    assert!(parse_response(&with_nonce, &query(Some(43), None)).is_err(), "another request's nonce");
+    assert!(parse_response(&with_nonce, &query(Some(42), Some("1.2.3.5"))).is_err(), "another policy");
+    let without_nonce = answer(&query(None, None));
+    assert!(parse_response(&without_nonce, &query(Some(42), None)).is_err(), "no nonce in the token");
+}
+
 #[cfg(windows)]
 #[test]
 fn windows_store_enumeration_and_missing_identity() {

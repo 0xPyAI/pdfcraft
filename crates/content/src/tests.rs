@@ -203,6 +203,9 @@ fn filtered_unknown_and_damaged_inline_images_end_where_the_renderer_ends_them()
         let parsed = parse(src);
         assert_eq!(parsed.ops[0].inline.as_ref().unwrap().1, b"abc");
         assert_eq!(parsed.ambiguous_images, ambiguous);
+        let mut reader = ops(src);
+        reader.by_ref().for_each(drop);
+        assert_eq!(reader.ambiguous_images(), ambiguous, "the streaming reader counts it too");
     }
 }
 

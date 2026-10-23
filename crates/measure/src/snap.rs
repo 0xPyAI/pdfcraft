@@ -256,6 +256,8 @@ impl Walker<'_> {
         let mut current = None;
         let mut closures = Vec::new();
         let mut path = Geometry::default();
+        // Read on the first `Do` and kept: resolving a direct dictionary copies it.
+        let mut xobjects = None;
         let point = |m: Matrix, x: f64, y: f64| {
             let (x, y) = m.apply(x, y);
             [x, y]
@@ -390,7 +392,11 @@ impl Walker<'_> {
                 }
                 "Do" => {
                     if let Some(name) = op.name(0) {
-                        let xobjects = resources.get(b"XObject").map(|o| self.doc.resolve(o));
+                        let xobjects = xobjects.get_or_insert_with(|| {
+                            #[cfg(test)]
+                            XOBJECT_DICT_READS.with(|n| n.set(n.get() + 1));
+                            resources.get(b"XObject").map(|o| self.doc.resolve(o))
+                        });
                         if let Some(o) = xobjects.as_ref().and_then(|o| o.as_dict()).and_then(|d| d.get(name)) {
                             let r = o.as_ref();
                             if r.is_some_and(|r| self.seen.contains(&r)) {
@@ -426,6 +432,12 @@ impl Walker<'_> {
         Ok(())
     }
 }
+#[cfg(test)]
+thread_local! {
+    /// Times a content stream's `/XObject` resources were read.
+    pub(crate) static XOBJECT_DICT_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub fn geometry(doc: &Document, page_index: usize) -> Result<Geometry> {
     let p = crate::page(doc, page_index)?;
     let resources = p.dict.get(b"Resources").map(|o| doc.resolve(o));

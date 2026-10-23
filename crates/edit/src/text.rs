@@ -530,12 +530,13 @@ impl TextLine {
         self.origin.baseline
     }
 
-    /// Paint position of the line's last text-showing operator: `(content-stream index,
-    /// operator index in the page's joined stream)`. Lines paint in order of this tuple.
+    /// Paint position of the line's first operator: `(content-stream index, operator index in
+    /// the page's joined stream)`. A line joins runs painted at different times, so anything
+    /// painted after this position may lie on top of part of it.
     /// (Lines from `text_lines` never come from form XObjects, so `stream` is always a
     /// page content-stream index and `ops` are indices into the joined operator list.)
-    pub fn paint_pos(&self) -> (usize, usize) {
-        (self.stream, self.ops.iter().max().copied().unwrap_or(0))
+    pub fn first_paint_pos(&self) -> (usize, usize) {
+        (self.stream, self.ops.iter().min().copied().unwrap_or(0))
     }
 
     fn rotation(&self) -> f64 {
@@ -902,7 +903,14 @@ struct Carry {
     marked: Vec<Option<usize>>,
     /// For each open marked-content sequence, its optional content group when it is `/OC`.
     layers: Vec<Option<Vec<u8>>>,
+    /// Bytes of glyph text the rest of the page may still produce (see [`MAX_PAGE_TEXT`]).
+    text_left: usize,
 }
+
+/// The most glyph text one page's extraction produces, in bytes. A ToUnicode destination is
+/// copied for every glyph showing its code, so a small page can otherwise expand into gigabytes;
+/// real pages hold far less (a whole novel is about 1 MB).
+const MAX_PAGE_TEXT: usize = 16 << 20;
 
 impl Carry {
     fn new() -> Self {
@@ -922,7 +930,7 @@ impl Carry {
             vertical: None,
             unreadable: None,
         };
-        Carry { ts, stack: Vec::new(), marked: Vec::new(), layers: Vec::new() }
+        Carry { ts, stack: Vec::new(), marked: Vec::new(), layers: Vec::new(), text_left: MAX_PAGE_TEXT }
     }
 }
 
@@ -1134,7 +1142,13 @@ fn interpret(
                                 let blank =
                                     m.is_space(code, len) || shown.as_deref().is_some_and(|t| !t.is_empty() && t.chars().all(char::is_whitespace));
                                 match shown {
-                                    Some(t) => text.push_str(&t),
+                                    Some(t) => {
+                                        carry.text_left = carry
+                                            .text_left
+                                            .checked_sub(t.len())
+                                            .ok_or_else(|| EditError::Invalid("the page's text is too large to read".into()))?;
+                                        text.push_str(&t);
+                                    }
                                     None => decodable = false,
                                 }
                                 let spacing = ts.char_spacing + if m.is_space(code, len) { ts.word_spacing } else { 0.0 };
@@ -1292,7 +1306,19 @@ fn interpret(
 
 /// The lines of text on a page (0-based), in content order.
 pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError> {
-    let p = page_dict(doc, page)?;
+    text_lines_in(doc, &page_dict(doc, page)?, true)
+}
+
+/// The lines `page`'s glyphs show, in content order, without `/ActualText` replacements: what the
+/// page draws, not what its marked-content metadata says the glyphs mean. For checks that must
+/// not trust that metadata (the redaction audit). Takes the page itself, so a caller going
+/// through every page doesn't walk the page tree again for each.
+pub fn glyph_text_lines(doc: &Document, page: &pdfcraft_model::Page) -> Result<Vec<TextLine>, EditError> {
+    text_lines_in(doc, page, false)
+}
+
+/// [`text_lines`] of `p`; with `actual_text`, `/ActualText` replaces the glyphs it spans.
+fn text_lines_in(doc: &Document, p: &pdfcraft_model::Page, actual_text: bool) -> Result<Vec<TextLine>, EditError> {
     let res = p.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
     let mut cache = HashMap::new();
     let mut lines: Vec<TextLine> = Vec::new();
@@ -1302,7 +1328,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
     let pieces = Pieces::join(&content_streams(doc, &p.dict)?.into_iter().map(|(_, d)| d).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
     let properties = res.get(b"Properties").and_then(|o| doc.dict(o)).unwrap_or_default();
-    let shown = interpret(doc, &ops, &res, &mut cache, &mut carry, None, Some(&properties))?;
+    let shown = interpret(doc, &ops, &res, &mut cache, &mut carry, None, actual_text.then_some(&properties))?;
     let mut last: Option<(usize, Pen)> = None; // the stream piece and where its last run ended
     for mut s in shown {
         // A single RTL glyph's ActualText (e.g. lam-alef) is an inline ligature, not a
@@ -1604,7 +1630,7 @@ fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), E
         let mut forms = invoked.into_iter().peekable();
         for s in shown {
             while let Some((_, name, ts)) = forms.next_if(|f| f.0 < s.op) {
-                enter(w, resources, &name, ts)?;
+                enter(w, resources, &name, ts, &mut carry.text_left)?;
                 // Text after a form starts a new line.
                 last = None;
             }
@@ -1616,21 +1642,23 @@ fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), E
             add_shown(&mut w.lines, &mut last, s, si);
         }
         for (_, name, ts) in forms {
-            enter(w, resources, &name, ts)?;
+            enter(w, resources, &name, ts, &mut carry.text_left)?;
         }
         Ok(())
     }
-    fn enter(w: &mut Walk, resources: &Dict, name: &[u8], ts: Ts) -> Result<(), EditError> {
+    /// `text_left`: the page's text budget, shared with the forms the page draws.
+    fn enter(w: &mut Walk, resources: &Dict, name: &[u8], ts: Ts, text_left: &mut usize) -> Result<(), EditError> {
         let Some(form) = form_call(w.doc, resources, name, ts.ctm, &w.path, &mut w.budget) else { return Ok(()) };
         let ops = parse(&form.data).ops;
         // The form starts with the graphics state at its `Do`, its own matrix applied.
-        let mut carry = Carry { ts: Ts { ctm: form.ctm, ..ts }, stack: Vec::new(), marked: Vec::new(), layers: Vec::new() };
+        let mut carry = Carry { ts: Ts { ctm: form.ctm, ..ts }, stack: Vec::new(), marked: Vec::new(), layers: Vec::new(), text_left: *text_left };
         let stream = w.next_stream;
         w.next_stream = w.next_stream.saturating_add(1);
         if let Some(r) = form.obj {
             w.path.push(r);
         }
         walk(w, &ops, &form.resources, &mut carry, &|_| stream)?;
+        *text_left = carry.text_left;
         if form.obj.is_some() {
             w.path.pop();
         }
