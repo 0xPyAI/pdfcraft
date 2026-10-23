@@ -694,7 +694,7 @@ pub fn tools() -> Vec<ToolDef> {
                 "stamp": { "type": "string" },
                 "dynamic": { "type": "boolean" },
                 "strokes": { "type": "array", "items": { "type": "array", "items": point() } },
-                "icon": { "type": "string", "description": "note: Comment, Note, Help, Insert, Key, NewParagraph, Paragraph; attachment: PushPin, Paperclip, Graph, Tag." },
+                "icon": { "type": "string", "description": "note: Comment, Note, Help, Insert, Key, NewParagraph, Paragraph (the standard names), Check, Circle, Cross, CrossHairs, Star, RightArrow, UpArrow; attachment: PushPin, Paperclip, Graph, Tag." },
                 "color": color(),
                 "fill": color(),
                 "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
