@@ -211,7 +211,7 @@ fn parse_rich(body: XmlNode) -> RichText {
         size: Option<f64>,
         h_scale: Option<f64>,
         /// The `href` of the `<a>` the text is in.
-        link: Option<String>,
+        link: Option<std::sync::Arc<str>>,
     }
     /// `base` with the CSS declarations in `css` applied: weight, style, underline, size and
     /// `xfa-font-horizontal-scale`. Anything else is ignored.
@@ -292,7 +292,7 @@ fn parse_rich(body: XmlNode) -> RichText {
                         // anchor) leaves the text as it was.
                         "a" => {
                             if let Some(href) = c.attribute("href").map(str::trim).filter(|h| !h.is_empty()) {
-                                st.link = Some(href.to_string());
+                                st.link = Some(std::sync::Arc::from(href));
                             }
                         }
                         _ => {}

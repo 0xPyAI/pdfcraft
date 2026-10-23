@@ -153,8 +153,9 @@ pub struct Span {
     pub baseline: f64,
     pub text: String,
     pub face: Face,
-    /// Where the text links to (its run's `<a href>`), as the template writes it.
-    pub link: Option<String>,
+    /// Where the text links to (its run's `<a href>`), as the template writes it, shared with the
+    /// link's other spans.
+    pub link: Option<std::sync::Arc<str>>,
 }
 
 /// A laid-out block of text.
@@ -170,8 +171,9 @@ struct Word {
     text: String,
     face: Face,
     width: f64,
-    /// The link of the run the word came from.
-    link: Option<String>,
+    /// The link of the run the word came from, shared, not copied, so a long link over many
+    /// words costs one address.
+    link: Option<std::sync::Arc<str>>,
 }
 
 /// The width of `w` without the spaces it ends with: what it takes at the end of a line, where

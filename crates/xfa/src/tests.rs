@@ -412,6 +412,20 @@ fn rich_text_links_keep_their_address() {
     );
 }
 
+/// A link's address is held once, however many runs, words and lines its text takes: every
+/// piece shares it rather than copying it, so a long address over many words stays one string.
+#[test]
+fn a_links_pieces_share_one_address() {
+    let words = "one two three four five six seven eight nine ten ".repeat(8);
+    let href = format!("https://example.com/{}", "x".repeat(1500));
+    let xdp = rich_draw_form("2in", &format!(r#"<a href="{href}">{words}<b>bold</b> {words}</a>"#));
+    let form = layout_xml(&xdp).unwrap();
+    let links: Vec<std::sync::Arc<str>> =
+        form.pages.iter().flat_map(|p| &p.items).filter_map(|i| if let Item::Text(s) = i { s.link.clone() } else { None }).collect();
+    assert!(links.len() > 10, "the link's text takes many lines: {}", links.len());
+    assert!(links.iter().all(|l| std::sync::Arc::ptr_eq(l, &links[0]) && **l == *href), "every piece shares one address");
+}
+
 /// A link's text becomes a link annotation on the page, one over each line it takes when it
 /// wraps, each over its own text; a second layout replaces them rather than adding more.
 #[test]
