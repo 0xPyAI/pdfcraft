@@ -163,6 +163,24 @@ fn a_field_with_a_null_value_is_unsigned_and_can_be_signed() {
     }
 }
 
+/// A signature field whose widget is hidden (annotation flag Hidden, 2) or not shown on screen
+/// (NoView, 32) is listed as not visible, whatever its rectangle, as form widgets are: a form's
+/// requestor box with flags 96 (NoView and ReadOnly) has no box on the page to show. A widget
+/// that is only printable (4) stays visible.
+#[test]
+fn a_hidden_signature_field_is_listed_as_not_visible() {
+    let field = pdfcraft_cos::ObjRef { num: 6, generation: 0 };
+    let visible_with = |flags: i64| {
+        let bytes = edit_after(&fixture(), |doc| doc.update_dict(field, |d| d.set(b"F".to_vec(), Object::Int(flags))).unwrap());
+        let listed = signatures(&open(&bytes), &bytes, &TrustStore::default());
+        listed.iter().find(|s| s.field == "Approval").map(|s| s.visible).expect("listed")
+    };
+    assert!(visible_with(4), "printable only: shown");
+    for flags in [2, 32, 96, 34] {
+        assert!(!visible_with(flags), "flags {flags}: not shown");
+    }
+}
+
 /// Follow-up to #1374: a signature field whose /V is neither null nor a signature dictionary is
 /// refused by name with an error saying so, instead of being overwritten or called signed.
 #[test]

@@ -6241,8 +6241,8 @@ milestone = "M9"
 status = "shipped"
 commands = ["sign.panel"]
 tools = ["sign_list"]
-evidence = ["crates/ui-egui/tests/it/signing.rs::drawing_a_signature_creating_an_id_signing_and_trusting"]
-notes = ""
+evidence = ["crates/ui-egui/tests/it/signing.rs::drawing_a_signature_creating_an_id_signing_and_trusting", "crates/sign/tests/it/pdf.rs::a_hidden_signature_field_is_listed_as_not_visible"]
+notes = "sign_list reports a signature as visible only when its widget has a box and isn't Hidden or NoView, as form widgets are read, so a hidden field gets no badge on the page"
 
 [[feature]]
 id = "sign.validation-banner"
