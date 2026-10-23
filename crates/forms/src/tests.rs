@@ -1949,6 +1949,39 @@ fn editing_one_script_keeps_the_other_actions_and_the_chain() {
 }
 
 #[test]
+fn replacing_a_chained_action_with_another_type_keeps_the_chain() {
+    let mut doc = fixture();
+    let go = field(&fields(&doc), "go").obj;
+    let s = |t: &str| Object::String(PdfString::text(t));
+    let mut named = Dict::new();
+    named.set(b"S".to_vec(), Object::name("Named"));
+    named.set(b"N".to_vec(), Object::name("NextPage"));
+    let named = doc.add(Object::Dict(named));
+    // A chain as an array: a link, then a menu item that points back at the link (a loop).
+    let mut uri = Dict::new();
+    uri.set(b"S".to_vec(), Object::name("URI"));
+    uri.set(b"URI".to_vec(), s("https://example.org"));
+    let uri = doc.add(Object::Dict(uri));
+    doc.update_dict(named, |d| d.set(b"Next".to_vec(), Object::Ref(uri))).unwrap();
+    let chain = Object::Array(vec![Object::Ref(uri), Object::Ref(named)]);
+    let mut up = Dict::new();
+    up.set(b"S".to_vec(), Object::name("JavaScript"));
+    up.set(b"JS".to_vec(), s("app.alert(1);"));
+    up.set(b"Next".to_vec(), chain.clone());
+    doc.update_dict(go, |d| d.set(b"A".to_vec(), Object::Dict(up))).unwrap();
+    assert_eq!(field_action_chains(&doc, "go").unwrap(), [(Trigger::MouseUp, 2)]);
+    set_field_actions(&mut doc, "go", &[(Trigger::MouseUp, FieldAction::Uri("https://example.com".into()))]).unwrap();
+    let w = doc.get(go).as_dict().cloned().unwrap();
+    let a = doc.resolve(w.get(b"A").unwrap()).as_dict().cloned().unwrap();
+    assert_eq!(a.get(b"Next"), Some(&chain));
+    assert_eq!(field_actions(&doc, "go").unwrap(), [(Trigger::MouseUp, FieldAction::Uri("https://example.com".into()))]);
+    assert_eq!(field_action_chains(&doc, "go").unwrap(), [(Trigger::MouseUp, 2)]);
+    // Deleting the trigger's action deletes its chain with it.
+    set_field_actions(&mut doc, "go", &[]).unwrap();
+    assert_eq!(field_action_chains(&doc, "go").unwrap(), []);
+}
+
+#[test]
 fn push_buttons_read_hide_actions() {
     let mut doc = fixture();
     let go = field(&fields(&doc), "go").obj;

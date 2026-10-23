@@ -740,6 +740,7 @@ impl crate::PdfCraftApp {
             self.session.get(id).map(|doc| doc.form.iter().filter(|x| x.name != name).map(|x| x.name.clone()).collect()).unwrap_or_default();
         d.others = others.clone();
         d.actions = self.session.get(id).map(|doc| doc.field_actions(name)).unwrap_or_default();
+        d.chained = self.session.get(id).map(|doc| doc.field_action_chains(name)).unwrap_or_default();
         if let Some(o) = d.original.as_mut() {
             o.others = others;
             o.actions = d.actions.clone();
@@ -854,6 +855,9 @@ pub struct FieldDraft {
     pub new_action: ActionDraft,
     /// Actions tab: the trigger whose script `new_action` is editing (Edit), if any.
     pub editing: Option<pdfcraft_engine::FieldTrigger>,
+    /// Actions tab: how many actions the document chains after each trigger's first one. They are
+    /// kept when that first action is replaced.
+    pub chained: Vec<(pdfcraft_engine::FieldTrigger, usize)>,
     original: Box<Option<FieldDraft>>,
 }
 
@@ -916,6 +920,7 @@ impl FieldDraft {
             actions: Vec::new(),
             new_action: ActionDraft::default(),
             editing: None,
+            chained: Vec::new(),
             original: Box::new(None),
         };
         d.original = Box::new(Some(d.clone()));
@@ -1613,14 +1618,20 @@ fn actions_tab(ui: &mut egui::Ui, d: &mut FieldDraft, t: &crate::theme::Tokens) 
         for (i, (tr, act)) in d.actions.iter().enumerate() {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(tl!(tr.label())).strong());
-                ui.label(act.describe());
+                let more = d.chained.iter().find(|(x, _)| x == tr).map_or(0, |(_, n)| *n);
+                if more == 0 {
+                    ui.label(act.describe());
+                } else {
+                    let then = crate::i18n::trn(crate::i18n::current(), more as u64, "then {n} more action", "then {n} more actions");
+                    ui.label(format!("{}, {then}", act.describe()));
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.push_id(i, |ui| {
                         if ui.button(tl!("Delete")).clicked() {
                             remove = Some(i);
                         }
                         if let pdfcraft_engine::FieldAction::JavaScript(js) = act
-                            && ui.add_enabled(d.editing != Some(*tr), egui::Button::new(tl!("Edit"))).clicked()
+                            && ui.add_enabled(d.editing.is_none(), egui::Button::new(tl!("Edit"))).clicked()
                         {
                             edit = Some((*tr, js.clone()));
                         }
