@@ -21,7 +21,9 @@ let report = optimize_with_progress(&mut doc, &settings, &mut |stage| keep_going
   side-by-side tiles, rotated strips, masks. Content arrays use the shared space boundary
   policy, so trailing comments, split operands and graphics state keep their meaning after merging.
 - **Images:** the effective resolution of each image is measured where pages draw it (the CTM
-  through form XObjects, up to 12 deep; the smallest over all uses). If a use can't be
+  through form XObjects, up to 12 deep; the smallest over all uses).
+  Page-local `/UserUnit` scaling is included, so large-format pages are measured in physical inches.
+  If a use can't be
   measured (forms nested deeper, or drawn too many times), no image is resampled. Colour and grayscale images above a
   threshold are resampled with a bicubic (Catmull-Rom) filter to a target resolution and
   stored as JPEG (Acrobat's quality steps) or ZIP; soft masks are resampled with their image.
