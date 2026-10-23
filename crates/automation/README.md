@@ -15,6 +15,12 @@ tools() -> Vec<ToolDef>                                  // name, title, descrip
 mcp::McpServer::new(a).serve(stdin, stdout)?             // newline-delimited JSON-RPC 2.0
 ```
 
+`content_update.rotate` rotates an added image counter-clockwise by an integer multiple of
+90 degrees. Large positive and negative signed 64-bit angles are normalized before combining
+them with the image's current orientation. Full turns retain its appearance, rectangle, crop
+and flips. Angles that are not multiples of 90 are refused without changing the document or
+its undo/redo history.
+
 `Content` is `Json(Value)` or `Png { data, width, height }`. Errors are `UnknownTool`, `InvalidArgs` (the call didn't match the schema) or `Failed` (a readable message for the agent).
 
 ## Conventions
@@ -64,6 +70,20 @@ semantics; they never silently act on partial text.
 
 ## Shared field properties
 
+For an individual push button, `form_set_props` also edits its visible normal label:
+
+```json
+{"doc": 1, "field": "clear_button", "caption": "Clear Form", "widget": 1}
+```
+
+`widget` is a 1-based index (default 1), used only with `caption`; an empty caption clears the
+label. Neither renames the field. `form_fields` returns the first widget's `caption` and all
+`captions` as `[{"widget": 1, "caption": "Clear Form"}]`. Other widgets and icon-only layouts
+keep their settings. CLI and MCP use the same edit, including undo/redo and save/reopen.
+The desktop exposes it as **Button Properties → Options → Label**. Rollover/down labels and
+icon layout are not edited here; the existing caption font and unsupported-character warning
+policy apply.
+
 `form_set_props` accepts either `field` (one name) or `fields` (1–1000 unique names):
 
 ```json
@@ -75,7 +95,7 @@ The batch is atomic and creates one undo step. A missing or locked field, invali
 unknown argument or malformed appearance refuses the whole edit. Set `locked: false` to
 unlock and change fields together. Only supplied properties change: each field/widget keeps
 its other colours, fonts, values and unknown PDF dictionary keys. `"none"` removes a border
-or fill colour. Names, rectangles and rotations require the single-field form. Results keep
+or fill colour. Names, rectangles, rotations and captions require the single-field form. Results keep
 `field` for single edits and return `fields` for batches. CLI and MCP use the same tool.
 
 ## MCP server
@@ -108,7 +128,7 @@ claude mcp add pdfcraft -- pdfcraft-cli mcp --root <dir>
 1. Add the engine capability first, with its tests (the tool is a thin adapter).
 2. Add a `ToolDef` in `src/tools.rs`: a precise description, the schema, `ro()`/`destructive()`, and `cmd()` if a registry command exists.
 3. Handle it in `Automation::call`, validating pages and positions with the existing helpers.
-4. Add an end-to-end test in `tests/automation.rs`. `tool_table_is_well_formed` checks names, schemas and command links.
+4. Add an end-to-end test in `tests/it/automation.rs`. `tool_table_is_well_formed` checks names, schemas and command links.
 
 
 ## Moving several page objects
