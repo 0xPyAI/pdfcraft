@@ -129,7 +129,16 @@ fn undrawn_on(doc: &Document, all: &[pdfcraft_model::Page], pages: &[usize], whi
     None
 }
 
+/// Runs [`flatten_in`] on a copy of `doc` (unchanged objects are shared) and keeps it only on
+/// success, so a page refused part way leaves the pages before it as they were.
 fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<usize, EditError> {
+    let mut work = doc.clone();
+    let drawn = flatten_in(&mut work, pages, which)?;
+    *doc = work;
+    Ok(drawn)
+}
+
+fn flatten_in(doc: &mut Document, pages: &[usize], which: Which) -> Result<usize, EditError> {
     let all = page_list(doc);
     check(pages, all.len())?;
     // `?` in an appearance can still be fixed (a field's value, a comment's text are stored as
@@ -257,7 +266,6 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
             .map(|(_, e)| e.clone())
             .collect();
         if !content.is_empty() {
-            crate::check_on_top(doc, &page)?;
             // The page's own resources, with the appearances as XObjects.
             let mut res = page.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
             let mut xo = res.get(b"XObject").map(|x| doc.resolve(x)).and_then(|x| x.as_dict().cloned()).unwrap_or_default();

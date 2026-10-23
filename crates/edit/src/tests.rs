@@ -6549,3 +6549,25 @@ fn reading_spends_one_decode_budget_on_content_and_forms() {
     });
     assert!(crate::text::reading_blocks_checked(&doc, 0).unwrap().truncated);
 }
+
+/// A page that can't take flattened content on top (marked content nested past the depth budget)
+/// refuses the whole flatten: the pages before it keep their comments and content.
+#[test]
+fn a_flatten_refused_on_a_later_page_changes_nothing() {
+    let deep = stream("", &"/Artifact BMC\n".repeat(10_001));
+    let mut doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 4 0 R /Annots [5 0 R] >>",
+        &stream("", " "),
+        "<< /Type /Annot /Subtype /Square /Rect [10 10 50 50] /F 4 /AP << /N 9 0 R >> >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 7 0 R /Annots [8 0 R] >>",
+        &deep,
+        "<< /Type /Annot /Subtype /Square /Rect [10 10 50 50] /F 4 /AP << /N 9 0 R >> >>",
+        "<< /Type /XObject /Subtype /Form /BBox [0 0 40 40] /Length 0 >>\nstream\n\nendstream",
+    ]);
+    let first = pdfcraft_cos::ObjRef::new(3, 0);
+    let before = (*doc.get(first)).clone();
+    assert!(matches!(flatten(&mut doc, &[0, 1], true, false), Err(EditError::Invalid(_))));
+    assert_eq!((*doc.get(first)).clone(), before, "the first page keeps its comment and content");
+}
