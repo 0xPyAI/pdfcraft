@@ -4642,6 +4642,64 @@ fn stamps_through_tools() {
     assert!(matches!(a.call("stamp_custom", &json!({ "doc": doc, "page": 1, "path": "nope.png", "at": [1, 1] })), Err(ToolError::Failed(_))));
 }
 
+/// #4077: a PDF page placed at a given width (a text column, 483 pt) through `rect`, fitted
+/// inside it keeping its shape and centred, and still vector (its text is text).
+#[test]
+fn custom_stamps_fit_a_pdf_page_inside_a_rect() {
+    let dir = workdir("stamp_rect");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "blank", "width": 595, "height": 842 }))["doc"].as_u64().unwrap();
+    let rect_of = |a: &mut Automation, i: usize| -> Vec<f64> {
+        let list = ok(a, "comment_list", json!({ "doc": doc }));
+        list["comments"][i]["rect"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect()
+    };
+    // Without rect, the page keeps its natural size, at most 200 pt: 200 × 300 is 133⅓ × 200.
+    ok(&mut a, "stamp_custom", json!({ "doc": doc, "page": 1, "path": "b.pdf", "file_page": 2, "at": [100, 150] }));
+    let natural = rect_of(&mut a, 0);
+    assert!((natural[2] - natural[0] - 400.0 / 3.0).abs() < 0.01 && (natural[3] - natural[1] - 200.0).abs() < 0.01, "{natural:?}");
+    // 483 × 750: the width limits the 200 × 300 page to 483 × 724.5, centred top to bottom.
+    ok(&mut a, "stamp_custom", json!({ "doc": doc, "page": 1, "path": "b.pdf", "file_page": 2, "rect": [56, 50, 539, 800] }));
+    assert_eq!(rect_of(&mut a, 1), [56.0, 62.75, 539.0, 787.25]);
+    assert!(page_text(&mut a, doc)[0].contains("Page 2"), "the stamped page's text is still text");
+    assert_eq!(ok(&mut a, "edit_undo", json!({ "doc": doc }))["undone"], "Add stamp");
+    assert_eq!(ok(&mut a, "comment_list", json!({ "doc": doc }))["count"], 1);
+
+    for (args, why) in [
+        (json!({ "rect": [10, 10, 10, 50] }), "zero width"),
+        (json!({ "rect": [10, 10, 50, 10] }), "zero height"),
+        (json!({ "rect": [0, 0, 1e-10, 100] }), "thinner than a point"),
+        (json!({ "rect": [0, 0, 20000, 100] }), "wider than a PDF page can be"),
+        (json!({ "rect": [0, 0, 100, f64::NAN] }), "not a number"),
+        (json!({ "rect": [0, 0, 100] }), "three numbers"),
+        (json!({ "rect": [0, 0, 100, 100], "at": [10, 10] }), "both a box and a point"),
+        (json!({}), "neither a box nor a point"),
+    ] {
+        let mut call = json!({ "doc": doc, "page": 1, "path": "b.pdf" });
+        call.as_object_mut().unwrap().extend(args.as_object().unwrap().clone());
+        assert!(matches!(a.call("stamp_custom", &call), Err(ToolError::InvalidArgs(_))), "{why}");
+    }
+    let past_the_end = json!({ "doc": doc, "page": 1, "path": "b.pdf", "file_page": 9, "rect": [0, 0, 100, 100] });
+    assert!(matches!(a.call("stamp_custom", &past_the_end), Err(ToolError::Failed(_))));
+    assert_eq!(ok(&mut a, "comment_list", json!({ "doc": doc }))["count"], 1, "a refused stamp adds nothing");
+
+    // On a quarter-turned page the picture is fitted as displayed: an 80 × 40 picture in a
+    // 100 × 100 box is 100 × 50 on screen, centred.
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, 80, 40);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().unwrap().write_image_data(&[200; 80 * 40 * 3]).unwrap();
+    }
+    std::fs::write(dir.join("wide.png"), png_bytes).unwrap();
+    let turned = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_rotate", json!({ "doc": turned, "pages": [1], "degrees": 90 }));
+    ok(&mut a, "stamp_custom", json!({ "doc": turned, "page": 1, "path": "wide.png", "rect": [50, 60, 150, 160] }));
+    let list = ok(&mut a, "comment_list", json!({ "doc": turned }));
+    let rect: Vec<f64> = list["comments"][0]["rect"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    assert_eq!(rect, [50.0, 85.0, 150.0, 135.0]);
+}
+
 #[test]
 fn bookmark_split_with_equal_titles_keeps_every_part() {
     let dir = workdir("organize_dup_titles");
