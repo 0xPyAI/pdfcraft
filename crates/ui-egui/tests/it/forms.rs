@@ -451,6 +451,53 @@ fn an_undelimited_date_field_takes_a_typed_date_and_its_calendar_opens_on_it() {
     h.get_by_label("March 2025");
 }
 
+/// #4274: the calendar had no way to pick today; from another month the only way back was the
+/// arrows. Today is picked in each field's own format, whichever month the calendar shows, and
+/// is one edit as a clicked day is.
+#[test]
+fn the_calendar_picks_today_in_the_fields_format_from_any_month() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = harness();
+    // 2023-11-14 on the injected clock.
+    let s = h.state_mut();
+    s.session = std::mem::take(&mut s.session).with_clock(|| 1_700_000_000);
+    assert_eq!(h.state().session.today(), (2023, 11, 14));
+    for (name, rect) in [("due", [50.0, 40.0, 200.0, 60.0]), ("start", [50.0, 80.0, 200.0, 100.0])] {
+        h.state_mut().apply_edit(pdfcraft_engine::Edit::AddField { page: 0, rect, kind: pdfcraft_engine::NewField::Date, name: Some(name.into()) });
+    }
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::SetFieldProps {
+        name: "start".into(),
+        props: Box::new(pdfcraft_engine::FieldProps {
+            format: Some(pdfcraft_engine::form_scripts::Format::Date("yyyy-mm-dd".into())),
+            ..Default::default()
+        }),
+    }));
+    h.run_steps(4);
+    // Two months on, and two months back: Today still picks the 14th of November.
+    for (name, arrow, shown, want) in [("due", "›", "January 2024", "11/14/2023"), ("start", "‹", "September 2023", "2023-11-14")] {
+        click_field(&mut h, name, 0);
+        h.get_by_label("November 2023");
+        for _ in 0..2 {
+            h.get_by_label(arrow).click();
+            h.run_steps(2);
+        }
+        h.get_by_label(shown);
+        if let Ok(dir) = std::env::var("PDFCRAFT_SHOTS") {
+            h.render().unwrap().save(format!("{dir}/calendar-today-{name}.png")).unwrap();
+        }
+        h.get_by_label("Today").click();
+        h.run_steps(4);
+        assert_eq!(value(&h, name), [want], "today in {name}'s format");
+        assert!(h.state().views[0].forms.focus.is_none(), "picking closes the field, as a clicked day does");
+        assert!(h.query_by_label("Today").is_none(), "and its calendar");
+    }
+    // One edit each, as a clicked day is.
+    h.state_mut().undo();
+    h.run_steps(2);
+    assert_eq!(value(&h, "start"), Vec::<String>::new());
+    assert_eq!(value(&h, "due"), ["11/14/2023"]);
+}
+
 #[test]
 fn lithuanian_calendar_localizes_months_and_weekdays_without_changing_field_values() {
     use egui_kittest::kittest::Queryable;

@@ -290,8 +290,8 @@ pub(crate) fn commit(view: &mut DocView, form: &[FormField]) {
 
 const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-/// The date picker under a focused date field. Returns the picked date, formatted with the
-/// field's own format.
+/// The date picker under a focused date field: a month of days, and a Today button under them.
+/// Returns the picked date, formatted with the field's own format.
 fn calendar(ctx: &egui::Context, view: &mut DocView, field: egui::Rect, fmt: &str, today: (i64, u32, u32)) -> Option<String> {
     use pdfcraft_engine::form_scripts::{DateTime, format_date, parse_date};
     let fx = view.forms.focus.as_mut()?;
@@ -345,7 +345,7 @@ fn calendar(ctx: &egui::Context, view: &mut DocView, field: egui::Rect, fmt: &st
                     (Some(a), Some(b)) => (b - a).num_days() as usize,
                     _ => 31,
                 };
-                egui::Grid::new(("date-grid", view.id.0)).spacing([4.0, 2.0]).show(ui, |ui| {
+                let grid = egui::Grid::new(("date-grid", view.id.0)).spacing([4.0, 2.0]).show(ui, |ui| {
                     for d in ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] {
                         ui.label(egui::RichText::new(tl_ctx!("calendar weekday", d)).small());
                     }
@@ -381,6 +381,24 @@ fn calendar(ctx: &egui::Context, view: &mut DocView, field: egui::Rect, fmt: &st
                         }
                     }
                 });
+                // Today, whichever month the calendar shows: picked as a click on its day would
+                // pick it. A year the field's date can't hold offers no button.
+                if let Ok(ty) = i32::try_from(today.0) {
+                    ui.add_space(4.0);
+                    // As wide as the grid, so the button sits centred under it without widening the popup.
+                    ui.allocate_ui_with_layout(vec2(grid.response.rect.width(), 0.0), egui::Layout::top_down(egui::Align::Center), |ui| {
+                        let mut button = ui.small_button(tl!("Today"));
+                        if let Some(month) = today.1.checked_sub(1).and_then(|i| MONTHS.get(i as usize)) {
+                            button = button.on_hover_text(crate::i18n::fmt(
+                                tl!("{month} {day}, {y}"),
+                                &[("month", tl_ctx!("calendar date", month)), ("day", &today.2.to_string()), ("y", &ty.to_string())],
+                            ));
+                        }
+                        if button.clicked() {
+                            picked = Some(format_date(DateTime { y: ty, m: today.1, d: today.2, hh: 0, mm: 0, ss: 0 }, fmt));
+                        }
+                    });
+                }
             });
         });
     if let Some(fx) = view.forms.focus.as_mut() {
