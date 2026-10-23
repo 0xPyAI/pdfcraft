@@ -3107,3 +3107,35 @@ fn inherited_and_widget_password_values_are_cleared() {
     assert!(!has_v(&doc, 7), "a widget's value is removed");
     assert!(has_v(&doc, 10), "a shared ancestor keeps its value");
 }
+
+/// #3943 review: a cleared password field saves as Acrobat saves it (black-box test). One with a
+/// default value gets it back, and its appearance shows as many masking characters as the
+/// default has, not as the typed password had; one without is left empty and draws none. The
+/// default value and the scripts stay, and a field already at its default needs no clearing.
+#[test]
+fn a_cleared_password_field_returns_to_its_default_value() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),                 // 1
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(), // 2
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R 8 0 R] >>".into(),       // 3
+        "<< /Fields [6 0 R 7 0 R 8 0 R] /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(), // 4
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(), // 5
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (pw) /Ff 8192 /DV (DEF-1) /V (NEWPASS-77777) /AA << /K << /S /JavaScript /JS (1;) >> >> /Rect [50 700 250 720] /P 3 0 R >>".into(), // 6
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (pw3) /Ff 8192 /V (PW3-TYPED-9) /Rect [50 650 250 670] /P 3 0 R >>".into(), // 7
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (blank) /Ff 8192 /V [()] /Rect [50 600 250 620] /P 3 0 R >>".into(), // 8 holds nothing (an empty string in an array)
+    ];
+    let mut doc = document(&objs);
+    assert_eq!(clear_password_values(&mut doc).unwrap(), 2);
+    let all = fields(&doc);
+    let (pw, pw3) = (field(&all, "pw"), field(&all, "pw3"));
+    assert_eq!(pw.value, ["DEF-1"], "back to its default");
+    assert_eq!(pw.default, ["DEF-1"], "the default stays");
+    assert!(pw.actions.scripts.keystroke.is_some(), "the scripts stay");
+    assert!(pw3.value.iter().all(|v| v.is_empty()), "no default: empty");
+    let shown = ap(&doc, &pw.widgets[0]);
+    assert!(shown.contains("(*****)") && !shown.contains("NEWPASS") && !shown.contains("******"), "{shown}");
+    let shown3 = ap(&doc, &pw3.widgets[0]);
+    assert!(!shown3.contains('*') && !shown3.contains("PW3"), "{shown3}");
+    assert!(!has_password_values(&doc), "a field at its default holds no typed password");
+    assert_eq!(clear_password_values(&mut doc).unwrap(), 0);
+}

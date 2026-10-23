@@ -2060,7 +2060,9 @@ fn password_field_values_are_kept_in_memory_but_written_to_no_file() {
 
     let saved = s.save_bytes(id).unwrap();
     assert!(!appears_in_pdf(&saved, "hunter2"), "Save");
-    assert!(appears_in_pdf(&saved, "*******"), "the masked appearance is kept");
+    // As Acrobat saves it (#3943 review): no default value, so an empty field whose appearance
+    // no longer shows how long the typed password was.
+    assert!(!appears_in_pdf(&saved, "*******"), "the typed length is not kept in the appearance");
     assert!(!appears_in_pdf(&s.save_full_bytes(id).unwrap(), "hunter2"), "a full rewrite");
     assert!(!appears_in_pdf(&s.reduced_bytes(id).unwrap().0, "hunter2"), "Reduce File Size");
     let snaps = s.autosave_snapshots();
@@ -2070,7 +2072,7 @@ fn password_field_values_are_kept_in_memory_but_written_to_no_file() {
     // takes, and Split writes each part the same way.
     let extracted = s.extract(id, &[0]).unwrap();
     assert!(!appears_in_pdf(&extracted, "hunter2"), "Extract Pages");
-    assert!(appears_in_pdf(&extracted, "*******"), "the extracted page keeps the masked appearance");
+    assert!(!appears_in_pdf(&extracted, "*******"), "nor on the extracted page");
     for (_, _, part) in s.split_by_size(id, 1).unwrap() {
         assert!(!appears_in_pdf(&part, "hunter2"), "Split");
     }
@@ -2095,7 +2097,7 @@ fn a_signed_file_carries_no_password_field_value() {
     assert!(appears_in_pdf(&s.get(id).unwrap().bytes, "hunter2"), "the working bytes hold it");
     let signed = s.sign(id, &digital_id, SignOptions { rect: None, ..SignOptions::default() }).unwrap();
     assert!(!appears_in_pdf(&signed, "hunter2"), "the signed file");
-    assert!(appears_in_pdf(&signed, "*******"), "the masked appearance is signed in");
+    assert!(!appears_in_pdf(&signed, "*******"), "nor the typed length");
 }
 
 /// A value its field's font can't draw is kept, and the edit that drew it reports it in

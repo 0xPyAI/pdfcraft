@@ -1294,13 +1294,12 @@ pub(crate) fn ask_viewers_to_redraw(doc: &mut Document) -> Result<(), FormError>
 }
 
 /// Text fields with the Password flag (inherited or their own) whose value (`/V`, inherited or
-/// their own) is not empty, or one of whose separate widgets carries a `/V`.
+/// their own) is not empty and not their default value (`/DV`, which the form's author wrote and
+/// a save restores), or one of whose separate widgets carries a `/V`.
 fn password_fields(doc: &Document) -> Vec<Field> {
     let on_widget = |f: &Field| f.widgets.iter().any(|w| w.obj != f.obj && doc.get(w.obj).as_dict().is_some_and(|d| d.get(b"V").is_some()));
-    fields(doc)
-        .into_iter()
-        .filter(|f| f.kind == FieldKind::Text && f.has(flags::PASSWORD) && (f.value.iter().any(|v| !v.is_empty()) || on_widget(f)))
-        .collect()
+    let typed = |f: &Field| f.value.iter().any(|v| !v.is_empty()) && f.value.first() != f.default.first();
+    fields(doc).into_iter().filter(|f| f.kind == FieldKind::Text && f.has(flags::PASSWORD) && (typed(f) || on_widget(f))).collect()
 }
 
 /// Whether any text field with the Password flag holds a value in `doc`.
@@ -1326,7 +1325,10 @@ fn field_chain(doc: &Document, r: ObjRef) -> Vec<ObjRef> {
 /// Remove the values of the text fields with the Password flag, for a copy of the document about
 /// to be written to a file (#3926). ISO 32000-2 §12.7.5.3, Table 231, Password flag, note: "it is
 /// imperative that PDF processors never store the value of the text field in the PDF file if
-/// this flag is set". The appearance keeps its masking characters.
+/// this flag is set". As Acrobat saves such a field (#3943 review, black-box test): a field with
+/// a default value (`/DV`, which the form's author wrote) gets it back as its value, one without
+/// is left empty, and its appearance is drawn again from that value, so the masking characters
+/// no longer show how long the typed password was. `/DV` and the field's scripts stay.
 ///
 /// A value can sit on the field, on one of its widgets, or on an ancestor it inherits from
 /// (`/V` is inheritable). Each is removed; an ancestor's only when every field inheriting from it
@@ -1366,9 +1368,13 @@ pub fn clear_password_values(doc: &mut Document) -> Result<usize, FormError> {
                 shared_value_kept = true;
             }
         }
-        if shared_value_kept {
-            doc.update_dict(f.obj, |d| d.set(b"V".to_vec(), PdfString::text("")))?;
+        let restored: Vec<String> = f.default.first().cloned().into_iter().collect();
+        match restored.first() {
+            Some(dv) => doc.update_dict(f.obj, |d| d.set(b"V".to_vec(), PdfString::text(dv)))?,
+            None if shared_value_kept => doc.update_dict(f.obj, |d| d.set(b"V".to_vec(), PdfString::text("")))?,
+            None => {}
         }
+        redraw(doc, f, &restored, &mut NoScripts)?;
     }
     Ok(targets.len())
 }
