@@ -1759,7 +1759,9 @@ fn check_mark_takes_the_fields_text_colour() {
     for name in [&check, &radio] {
         set_props(&mut doc, name, &blue).unwrap();
         let ap = on_ap(&reopen(&doc), name);
-        assert!(ap.contains("0 0 1 RG") || ap.contains("0 0 1 rg"), "{name}: the mark is blue: {ap}");
+        // The check strokes, the radio's default circle fills.
+        let op = if name == &check { "0 0 1 RG" } else { "0 0 1 rg" };
+        assert!(ap.contains(op), "{name}: the mark is blue: {ap}");
         assert!(!ap.contains("0 G\n") && !ap.contains("0 g\n"), "{name}: no black left: {ap}");
     }
     // A style change redraws too, and keeps the colour.
