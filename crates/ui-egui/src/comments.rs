@@ -1559,7 +1559,10 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
     let c = view.comments.composer.as_ref()?;
     let page = c.page;
     let Some(xf) = view.page_xform(page) else {
-        // Scrolled away: keep the draft until the page is back.
+        // Scrolled away: keep the draft until the page is back, and give it the keyboard then.
+        if let Some(c) = view.comments.composer.as_mut() {
+            c.focus = true;
+        }
         return None;
     };
     let cx = PageCx { page, xf: &xf, info, tool: QuickTool::Select, prefs, allowed: true, hidden: false, redact_mark: ([0.89, 0.13, 0.13], 1.0) };
