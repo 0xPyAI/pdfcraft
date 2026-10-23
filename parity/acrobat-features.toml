@@ -5165,8 +5165,8 @@ milestone = "M6"
 status = "partial"
 commands = ["tools.js_console"]
 tools = ["js_run"]
-evidence = ["crates/js/src/tests.rs::calculate_scripts_read_fields_and_set_the_value", "crates/engine/src/tests.rs::form_javascript_validates_calculates_and_formats", "crates/automation/tests/it/automation.rs::javascript_through_tools"]
-notes = "boa (pure Rust) with the forms object model: event, getField/Field (value, readonly, display, colours, items, check boxes), app, util.printf/printd/printx, console, display, color; no annotations, layers or dialogs (app.response returns null) yet."
+evidence = ["crates/js/src/tests.rs::calculate_scripts_read_fields_and_set_the_value", "crates/engine/src/tests.rs::form_javascript_validates_calculates_and_formats", "crates/automation/tests/it/automation.rs::javascript_through_tools", "crates/js/src/tests.rs::an_xfa_form_sees_the_xfa_plugin_installed", "crates/js/src/tests.rs::a_plain_form_sees_the_xfa_version_but_not_installed", "crates/engine/src/tests.rs::scripts_in_an_xfa_form_see_the_xfa_plugin_installed"]
+notes = "boa (pure Rust) with the forms object model: event, getField/Field (value, readonly, display, colours, items, check boxes), app, util.printf/printd/printx, console, display, color; xfa_version (3.5) in every document and xfa_installed in XFA forms, so their version check passes; no annotations, layers or dialogs (app.response returns null) yet, and no app.findComponent."
 
 [[feature]]
 id = "form.js-console"
