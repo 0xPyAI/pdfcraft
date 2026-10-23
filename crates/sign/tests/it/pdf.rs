@@ -163,6 +163,24 @@ fn a_field_with_a_null_value_is_unsigned_and_can_be_signed() {
     }
 }
 
+/// A signature field whose widget is hidden (annotation flag Hidden, 2) or not shown on screen
+/// (NoView, 32) is listed as not visible, whatever its rectangle, as form widgets are: a form's
+/// requestor box with flags 96 (NoView and ReadOnly) has no box on the page to show. A widget
+/// that is only printable (4) stays visible.
+#[test]
+fn a_hidden_signature_field_is_listed_as_not_visible() {
+    let field = pdfcraft_cos::ObjRef { num: 6, generation: 0 };
+    let visible_with = |flags: i64| {
+        let bytes = edit_after(&fixture(), |doc| doc.update_dict(field, |d| d.set(b"F".to_vec(), Object::Int(flags))).unwrap());
+        let listed = signatures(&open(&bytes), &bytes, &TrustStore::default());
+        listed.iter().find(|s| s.field == "Approval").map(|s| s.visible).expect("listed")
+    };
+    assert!(visible_with(4), "printable only: shown");
+    for flags in [2, 32, 96, 34] {
+        assert!(!visible_with(flags), "flags {flags}: not shown");
+    }
+}
+
 /// Follow-up to #1374: a signature field whose /V is neither null nor a signature dictionary is
 /// refused by name with an error saying so, instead of being overwritten or called signed.
 #[test]
@@ -665,12 +683,20 @@ trailer << /Root 1 0 R >>
     }
 }
 
+/// Held by every test that changes the user's keychain search list. Each saves the list, changes
+/// it and restores what it saved, so two at once could undo each other's temporary keychain or
+/// put back one already deleted.
+#[cfg(target_os = "macos")]
+static KEYCHAIN_SEARCH_LIST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Signing with Keychain identities, in a throwaway keychain file. Ignored by default: creating
 /// a keychain touches the user's keychain search list (restored afterwards).
 #[cfg(target_os = "macos")]
 #[test]
 #[ignore = "creates a temporary macOS keychain; run with --ignored"]
 fn signing_with_keychain_identities() {
+    // A test that failed while holding it leaves the list restored, so a poisoned lock is fine.
+    let _list = KEYCHAIN_SEARCH_LIST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     use std::process::Command;
     let dir = std::env::temp_dir().join(format!("pdfcraft-keychain-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -683,7 +709,7 @@ fn signing_with_keychain_identities() {
     let restore = || {
         let mut args = vec!["list-keychains", "-d", "user", "-s"];
         args.extend(saved.iter().map(String::as_str));
-        sec(&args);
+        sec(&args)
     };
     restore();
     // Everything that can fail runs before the clean-up below.
@@ -705,9 +731,11 @@ fn signing_with_keychain_identities() {
             assert_eq!(s.status, Status::Valid, "{:?}", s.details);
         }
     }));
+    // The list first: it is what outlives the test if deleting the keychain goes wrong.
+    let restored = restore();
     sec(&["delete-keychain", k]);
-    restore();
     let _ = std::fs::remove_dir_all(&dir);
+    assert!(restored.status.success(), "the keychain search list wasn't restored: {}", String::from_utf8_lossy(&restored.stderr));
     result.unwrap();
 }
 
@@ -718,20 +746,28 @@ fn signing_with_keychain_identities() {
 #[test]
 #[ignore = "creates a temporary macOS keychain; run with --ignored"]
 fn keychain_identities_carry_their_issuers() {
+    // A test that failed while holding it leaves the list restored, so a poisoned lock is fine.
+    let _list = KEYCHAIN_SEARCH_LIST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     use std::process::Command;
-    let dir = std::env::temp_dir().join(format!("pdfcraft-keychain-chain-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    // The same path every run: trustd remembers which keychain file it found an issuer in, and
+    // after a run's keychain is deleted it keeps looking there, so a keychain at a new path
+    // would get an empty chain until that memory expires.
+    let dir = std::env::temp_dir().join("pdfcraft-keychain-chain");
     let kc = dir.join("test.keychain-db");
     let sec = |args: &[&str]| Command::new("security").args(args).output().unwrap();
+    let k = kc.to_str().unwrap();
+    // Left over by a run that was killed before its clean-up.
+    sec(&["delete-keychain", k]);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
     let list = String::from_utf8(sec(&["list-keychains", "-d", "user"]).stdout).unwrap();
     let saved: Vec<String> = list.lines().map(|l| l.trim().trim_matches('"').to_string()).filter(|l| !l.is_empty()).collect();
-    let k = kc.to_str().unwrap();
     assert!(sec(&["create-keychain", "-p", "pc-test", k]).status.success());
     let set_list = |extra: Option<&str>| {
         let mut args = vec!["list-keychains", "-d", "user", "-s"];
         args.extend(saved.iter().map(String::as_str));
         args.extend(extra);
-        sec(&args);
+        sec(&args)
     };
     // macOS finds an identity's issuers in the keychains on the search list.
     set_list(Some(k));
@@ -742,15 +778,29 @@ fn keychain_identities_carry_their_issuers() {
         assert!(out.status.success(), "chain-legacy.p12: {}", String::from_utf8_lossy(&out.stderr));
         let listed = pdfcraft_sign::keychain::identities(Some(&kc)).unwrap();
         assert_eq!(listed.len(), 1, "{listed:?}");
-        let id = pdfcraft_sign::keychain::find(&pdfcraft_sign::keychain::reference(&listed[0].certificate)).unwrap();
+        // The Security framework caches the search list in-process and learns of `security
+        // list-keychains` asynchronously, so after another Keychain test it takes a moment to look
+        // in the new keychain.
+        let reference = pdfcraft_sign::keychain::reference(&listed[0].certificate);
+        let mut found = pdfcraft_sign::keychain::find(&reference);
+        for _ in 0..50 {
+            if found.is_ok() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            found = pdfcraft_sign::keychain::find(&reference);
+        }
+        let id = found.unwrap();
         let issuers: Vec<_> = id.chain.iter().map(|c| c.subject.common_name()).collect();
         assert_eq!(issuers, [Some("PrintCraft Test Root CA")]);
         let file = pkcs12::open(&data("chain.p12"), "test").unwrap();
         assert_eq!(id.chain.iter().map(|c| &c.raw).collect::<Vec<_>>(), file.chain.iter().map(|c| &c.raw).collect::<Vec<_>>());
     }));
+    // The list first: it is what outlives the test if deleting the keychain goes wrong.
+    let restored = set_list(None);
     sec(&["delete-keychain", k]);
-    set_list(None);
     let _ = std::fs::remove_dir_all(&dir);
+    assert!(restored.status.success(), "the keychain search list wasn't restored: {}", String::from_utf8_lossy(&restored.stderr));
     result.unwrap();
 }
 
@@ -1547,6 +1597,37 @@ fn a_revoked_certificate_stays_invalid_when_it_was_also_expired_at_signing() {
 }
 
 #[test]
+fn a_revocation_behind_many_dss_entries_is_not_reported_valid() {
+    let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
+    let signed = pdfcraft_sign::sign(&open(&fixture()), &id, &opts()).unwrap();
+    let t = |year| Time { year, month: 1, day: 1, hour: 0, minute: 0, second: 0 };
+    let crl = self_crl(&id, t(2026), t(2027), Time { year: 2026, month: 6, day: 1, hour: 8, minute: 0, second: 0 });
+    let anchor = id.chain.first().cloned().unwrap_or_else(|| id.certificate.clone());
+    let trust = TrustStore { certs: vec![anchor] };
+    // `/CRLs`: the revoking CRL after `benign` other entries; `repeated` lists one stream for all of them.
+    let status = |benign: usize, repeated: bool| {
+        let ltv = edit_after(&signed, |doc| {
+            let one = doc.add(stream_of(b"benign"));
+            let mut crls: Vec<Object> = (0..benign)
+                .map(|k| if repeated { Object::Ref(one) } else { Object::Ref(doc.add(stream_of(format!("benign {k}").as_bytes()))) })
+                .collect();
+            crls.push(Object::Ref(doc.add(stream_of(&crl))));
+            set_dss(doc, Object::Dict(dict_of(vec![("Type", Object::name("DSS")), ("CRLs", Object::Array(crls))])));
+        });
+        let s = signatures(&open(&ltv), &ltv, &trust).into_iter().find(|s| s.signed && !s.doc_timestamp).unwrap();
+        (s.status, s.details)
+    };
+    let (found, details) = status(1, false);
+    assert_eq!(found, Status::Invalid, "{details:?}");
+    // Repeats of one stream don't use up the entry cap, so the revocation is still found.
+    let (found, details) = status(2000, true);
+    assert_eq!(found, Status::Invalid, "{details:?}");
+    // Past the cap of distinct entries the check is incomplete, so the signature is not valid.
+    let (found, details) = status(1100, false);
+    assert_eq!(found, Status::Unknown, "{details:?}");
+}
+
+#[test]
 fn an_untrusted_timestamp_does_not_set_the_validation_time() {
     let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
     // The TSA claims 2027 (inside the signer's validity) but is not trusted; the signer's own
@@ -1578,6 +1659,28 @@ fn a_timestamp_token_may_sign_with_a_different_digest_than_its_imprint() {
         pdfcraft_sign::timestamp::respond(&tsa.key, &tsa.certificate, &tsa.chain, pdfcraft_sign::DigestAlg::Sha256, &q, "1.2.3.4", time, 9).unwrap();
     let token = pdfcraft_sign::timestamp::parse_response(&resp, &q).unwrap();
     assert_eq!((token.digest, token.imprint, token.gen_time), (pdfcraft_sign::DigestAlg::Sha1, imprint, time));
+}
+
+/// A token answers the request that asked for it: a requested nonce or policy must come back.
+#[test]
+fn a_timestamp_response_must_carry_the_requested_nonce_and_policy() {
+    use pdfcraft_sign::timestamp::{TimestampQuery, parse_response, respond};
+    let tsa = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    let alg = pdfcraft_sign::DigestAlg::Sha256;
+    let time = Time { year: 2026, month: 10, day: 6, hour: 12, minute: 0, second: 0 };
+    let query = |nonce: Option<u64>, policy: Option<&str>| {
+        let mut q = TimestampQuery::new(alg, alg.digest(&[b"document"])).unwrap();
+        (q.nonce, q.policy) = (nonce, policy.map(str::to_string));
+        q
+    };
+    let answer = |q: &TimestampQuery| respond(&tsa.key, &tsa.certificate, &tsa.chain, alg, q, "1.2.3.4", time, 9).unwrap();
+    let with_nonce = answer(&query(Some(42), None));
+    assert!(parse_response(&with_nonce, &query(Some(42), Some("1.2.3.4"))).is_ok());
+    assert!(parse_response(&with_nonce, &query(None, None)).is_ok());
+    assert!(parse_response(&with_nonce, &query(Some(43), None)).is_err(), "another request's nonce");
+    assert!(parse_response(&with_nonce, &query(Some(42), Some("1.2.3.5"))).is_err(), "another policy");
+    let without_nonce = answer(&query(None, None));
+    assert!(parse_response(&without_nonce, &query(Some(42), None)).is_err(), "no nonce in the token");
 }
 
 #[cfg(windows)]
