@@ -388,8 +388,8 @@ fn opt_export_values_select_button_states() {
 }
 
 /// A check box laid out for a round XFA check button (`/PCXfaRound true`) draws its background
-/// and border as a circle inside the widget, inset by half the border so the stroke stays in;
-/// one without the key keeps its rectangle.
+/// and border as a circle inside the widget, inset by half the border so the stroke stays in,
+/// or a disc when the border is as wide as the circle; one without the key keeps its rectangle.
 #[test]
 fn a_round_xfa_check_button_draws_a_round_background_and_border() {
     let widget = |name: &str, extra: &str| {
@@ -400,14 +400,15 @@ fn a_round_xfa_check_button_draws_a_round_background_and_border() {
     let objs: Vec<String> = vec![
         "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
-        "<< /Type /Page /Parent 2 0 R /Annots [5 0 R 6 0 R 7 0 R] >>".into(),
-        "<< /Fields [5 0 R 6 0 R 7 0 R] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [5 0 R 6 0 R 7 0 R 8 0 R] >>".into(),
+        "<< /Fields [5 0 R 6 0 R 7 0 R 8 0 R] >>".into(),
         widget("round", " /PCXfaRound true"),
         widget("square", ""),
         widget("dashed", " /PCXfaRound true /BS << /W 2 /S /D >>").replace("/BS << /W 1 /S /S >>", ""),
+        widget("thick", " /PCXfaRound true /BS << /W 30 /S /S >>").replace("/BS << /W 1 /S /S >>", ""),
     ];
     let mut doc = document(&objs);
-    for name in ["round", "square", "dashed"] {
+    for name in ["round", "square", "dashed", "thick"] {
         redraw_field(&mut doc, name).unwrap();
     }
     // The Off state: only the frame.
@@ -428,6 +429,9 @@ fn a_round_xfa_check_button_draws_a_round_background_and_border() {
     assert!(square.contains("0 0 20 20 re f") && square.contains("re S"), "a square box keeps its rectangle: {square}");
     let dashed = off("dashed");
     assert!(dashed.contains("[3] 0 d\n19 10 m"), "a dashed round border stays dashed: {dashed}");
+    // A border wider than the 20pt circle fills it: a disc in the border's colour, no stroke.
+    let thick = off("thick");
+    assert!(thick.contains("1 0 0 rg\n20 10 m") && !thick.contains(" S\n"), "a border as wide as the circle is a disc: {thick}");
 }
 
 /// Issue #1323: a text field without a format keeps a whitespace-only value as typed; only an
