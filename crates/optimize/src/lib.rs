@@ -370,6 +370,13 @@ fn lzw_to_flate(s: &Stream, max: usize) -> Option<Stream> {
     let chain = s.filters();
     let stages = chain.get(..=lzw)?;
     let (_, params) = stages.last()?;
+    // The decoded stages' parameters must be direct integers: `filters` reads anything else (a
+    // reference, 12.5, a name) as the default, and the dictionary carried over would then
+    // describe the new data differently from how it was encoded.
+    let direct = |p: &Option<&Dict>| p.is_none_or(|d| d.iter().all(|(_, v)| matches!(v, Object::Int(_))));
+    if !parms.get(..=lzw)?.iter().all(direct) {
+        return None;
+    }
     let data = pdfcraft_filters::decode(stages, &s.raw, max).ok()?;
     let flate = Params { early_change: 1, ..params.clone() };
     let raw = pdfcraft_filters::encode(&Filter::Flate, &flate, &data).ok()?;

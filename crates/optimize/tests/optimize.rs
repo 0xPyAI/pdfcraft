@@ -1271,6 +1271,18 @@ fn lzw_streams_that_cannot_be_read_or_are_not_asked_for_stay_unchanged() {
     bad_predictor.dict.set(b"DecodeParms".to_vec(), Object::Dict(parms));
     let mut indirect_parms = filtered(&["LZWDecode"], good.clone());
     indirect_parms.dict.set(b"DecodeParms".to_vec(), Object::Ref(ObjRef { num: 999, generation: 0 }));
+    // Columns the reader can't take as an integer: read as the default 1 here, so the data is
+    // predicted with one column and decodes, but a viewer resolving the value would use another.
+    let one_column = Params { predictor: 12, ..Params::default() };
+    let odd_columns = |columns: Object| {
+        let mut s = filtered(&["LZWDecode"], lzw(&ops, &one_column));
+        let mut parms = Dict::new();
+        parms.set(b"Predictor".to_vec(), Object::Int(12));
+        parms.set(b"Columns".to_vec(), columns);
+        s.dict.set(b"DecodeParms".to_vec(), Object::Dict(parms));
+        s
+    };
+    assert_eq!(odd_columns(Object::Real(12.5)).decoded_strict().unwrap(), ops, "read with one column");
     let mut objstm = filtered(&["LZWDecode"], good.clone());
     objstm.dict.set(b"Type".to_vec(), Object::name("ObjStm"));
     let mut external = filtered(&["LZWDecode"], good.clone());
@@ -1281,6 +1293,8 @@ fn lzw_streams_that_cannot_be_read_or_are_not_asked_for_stay_unchanged() {
         ("indirect DecodeParms", indirect_parms, Settings::default()),
         ("external file", external, Settings::default()),
         ("object stream, rewritten on save", objstm, Settings::default()),
+        ("Columns by reference", odd_columns(Object::Ref(ObjRef { num: 9, generation: 0 })), Settings::default()),
+        ("Columns not an integer", odd_columns(Object::Real(12.5)), Settings::default()),
         ("crypt filter", filtered(&["Crypt", "LZWDecode"], good.clone()), Settings::default()),
         ("option off", filtered(&["LZWDecode"], good.clone()), Settings { lzw_to_flate: false, ..Settings::default() }),
     ];
