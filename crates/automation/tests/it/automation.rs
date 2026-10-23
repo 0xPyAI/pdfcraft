@@ -6422,7 +6422,9 @@ fn cut_stack_printing_through_tools() {
         &mut a,
         "doc_print",
         json!({
-            "doc": doc, "pages": "2-10", "subset": "odd", "reverse": true,
+            // Even pages by page number (#3984): 2, 4, 6, 8 and 10 (counting places in the range,
+            // "even" would have been 3, 5, 7 and 9).
+            "doc": doc, "pages": "2-10", "subset": "even", "reverse": true,
             "layout": "multiple", "order": "cut-stack", "per_sheet": 2, "auto_rotate": false,
             "orientation": "landscape", "path": "range.pdf"
         }),

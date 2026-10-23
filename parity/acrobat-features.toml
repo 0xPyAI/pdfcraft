@@ -8013,8 +8013,8 @@ milestone = "M10"
 status = "shipped"
 commands = ["print.dialog"]
 tools = ["doc_print"]
-evidence = ["crates/print/src/tests.rs::page_selection"]
-notes = ""
+evidence = ["crates/print/src/tests.rs::page_selection", "crates/print/src/tests.rs::odd_and_even_pages_are_page_numbers_not_places_in_the_range", "crates/automation/tests/it/automation.rs::cut_stack_printing_through_tools"]
+notes = "Odd and even are page numbers, as Acrobat counts them (Adobe Acrobat DC Help, 11/28/2019, Options in the Print dialog box, p. 515: a range of 2, 7–10 with Even Pages Only prints pages 2, 8 and 10), for a typed range, picked thumbnails and the current page; Reverse turns the chosen pages round (#3984). Not yet: with page labels, odd and even still count page numbers (a document whose front matter is numbered i, ii, iii… keeps label 2 among the odd pages when it is page 5); the Acrobat help consulted doesn't say how Acrobat counts there, and the other Print-dialog behaviours #3984 mentions are open."
 
 [[feature]]
 id = "print.scaling"
