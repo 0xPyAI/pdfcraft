@@ -704,6 +704,28 @@ fn cover_and_line_comparisons_are_bounded() {
     assert!(crate::audit(&doc, limits).expect("within the budget").is_empty());
 }
 
+/// A run that draws no word still costs a comparison: the covered text walks every run of a
+/// covered line, so a word followed by many `( ) Tj` must not be checked for free (review on
+/// #4198).
+#[test]
+fn runs_without_words_count_against_the_comparison_bound() {
+    let mut content = b"BT /F1 24 Tf 100 700 Td (SECRET) Tj".to_vec();
+    content.extend_from_slice(&b" ( ) Tj".repeat(50));
+    content.extend_from_slice(
+        b" ET
+0 g
+98 688 94 32 re f
+",
+    );
+    let doc = open(one_page(&content, ""));
+    let lines = pdfcraft_edit::glyph_text_lines(&doc, &pdfcraft_model::pages(&doc)[0]).expect("text");
+    assert_eq!(lines.iter().map(|l| (l.ink.len(), l.runs().count())).collect::<Vec<_>>(), [(1, 51)]);
+    let limits = crate::Limits { comparisons: 50, covered_text: usize::MAX };
+    assert!(matches!(crate::audit(&doc, limits), Err(crate::AuditError::TooManyComparisons)));
+    let limits = crate::Limits { comparisons: 51, covered_text: usize::MAX };
+    assert_eq!(crate::audit(&doc, limits).expect("within the budget").len(), 1);
+}
+
 /// Covered text is document text: a document whose permissions withhold copying reports where
 /// its covers are but not what they hide, unless it was opened with the owner password.
 #[test]

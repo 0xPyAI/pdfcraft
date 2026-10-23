@@ -138,10 +138,12 @@ struct Budget {
 }
 
 impl Budget {
-    /// Resets the comparison count for a page with these `lines`.
+    /// Resets the comparison count for a page with these `lines`. A line costs its word boxes
+    /// or its runs, whichever are more (at least one): a cover check walks the boxes, and the
+    /// covered text walks the runs, which can draw no words at all (`( ) Tj`).
     fn start_page(&mut self, lines: &[TextLine]) {
         self.comparisons = 0;
-        self.page_cost = lines.iter().fold(0, |n, line| n.saturating_add(line.ink.len().max(1)));
+        self.page_cost = lines.iter().fold(0, |n, line| n.saturating_add(line.ink.len().max(line.runs().count()).max(1)));
     }
 
     /// The text `cover` hides in the `lines` that `hides` ([`covered_words`]), joined with single
