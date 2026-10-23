@@ -1650,23 +1650,40 @@ pub fn delete_annotation(doc: &mut Document, page: usize, index: usize) -> Resul
     if let Some(r) = target.as_ref() {
         unlocked(doc, r)?;
     }
-    let doomed = with_replies_and_popups(doc, &list, target.as_ref());
-    let kept: Vec<Object> =
-        list.into_iter().enumerate().filter(|(i, e)| *i != index && !e.as_ref().is_some_and(|r| doomed.contains(&r))).map(|(_, e)| e).collect();
+    // An inline comment has no reference to collect; the pop-up it names still goes.
+    let seed = target.as_ref().or_else(|| target.as_dict().and_then(|d| d.reference(b"Popup")));
+    let doomed = with_replies_and_popups(doc, &list, seed);
+    let kept: Vec<Object> = list.into_iter().enumerate().filter(|(i, e)| *i != index && !goes_with(e, &doomed)).map(|(_, e)| e).collect();
     Ok(set_annots(doc, p, kept)?)
+}
+
+/// Whether the `/Annots` entry `entry` goes with `going` (from [`with_replies_and_popups`]): it is
+/// one of them, or it is written inline (a file can, though the standard asks for references) and
+/// replies to (`/IRT`) or pops up for (`/Parent`) one of them. An inline entry has no reference
+/// for the walk to collect, so it is matched here.
+pub fn goes_with(entry: &Object, going: &HashSet<ObjRef>) -> bool {
+    match entry.as_ref() {
+        Some(r) => going.contains(&r),
+        None => entry.as_dict().is_some_and(|d| [d.reference(b"IRT"), d.reference(b"Parent")].into_iter().flatten().any(|r| going.contains(&r))),
+    }
 }
 
 /// `doomed` and what goes with it, as Acrobat deletes a comment: the entries of `list` (one or
 /// more pages' `/Annots`) that reply to (`/IRT`) or pop up for (`/Parent`) anything going, their
-/// own replies, and the pop-ups going annotations name (`/Popup`). Each annotation is visited
-/// once, so a long or cyclic chain costs no more than its length.
+/// own replies, and the pop-ups going annotations name (`/Popup`). An inline reply has no
+/// reference to collect, but the pop-up it names is. Each annotation is visited once, so a long or
+/// cyclic chain costs no more than its length. Filter a list with [`goes_with`], which also
+/// matches inline entries.
 pub fn with_replies_and_popups(doc: &Document, list: &[Object], doomed: impl IntoIterator<Item = ObjRef>) -> HashSet<ObjRef> {
     let mut hanging: HashMap<ObjRef, Vec<ObjRef>> = HashMap::new();
-    for r in list.iter().filter_map(Object::as_ref) {
-        let obj = doc.get(r);
+    for e in list {
+        let obj = doc.resolve(e);
         let Some(d) = obj.as_dict() else { continue };
+        // What goes with the annotation this entry hangs off: the entry, or for an inline one the
+        // pop-up it names.
+        let Some(goes) = e.as_ref().or_else(|| d.reference(b"Popup")) else { continue };
         for on in [d.reference(b"IRT"), d.reference(b"Parent")].into_iter().flatten() {
-            hanging.entry(on).or_default().push(r);
+            hanging.entry(on).or_default().push(goes);
         }
     }
     let mut going = HashSet::new();

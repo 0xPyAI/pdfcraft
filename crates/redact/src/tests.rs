@@ -1051,8 +1051,15 @@ fn clearing_marks_leaves_the_annotation_list_as_it_was() {
     let before = doc.get(page);
     mark(&mut doc, 0, &[[0.0, 0.0, 50.0, 50.0]], "");
     pdfcraft_annot::add_reply(&mut doc, 0, 0, "a reply", "Tester", &Meta::default()).unwrap();
+    // And a reply written inline, as a file can.
+    let mut inline = Dict::new();
+    inline.set(b"Subtype".to_vec(), Object::name("Text"));
+    inline.set(b"IRT".to_vec(), Object::Ref(marks(&doc)[0].obj));
+    let mut listed = annots_of(&doc, doc.get(page).as_dict().unwrap());
+    listed.push(Object::Dict(inline));
+    doc.update_dict(page, |d| d.set(b"Annots".to_vec(), Object::Array(listed))).unwrap();
     assert_eq!(clear_marks(&mut doc, None), Ok(1), "one mark");
-    assert_eq!(doc.get(page), before, "the page has no /Annots again: the reply went with its mark");
+    assert_eq!(doc.get(page), before, "the page has no /Annots again: both replies went with their mark");
 
     let mut doc = pdf(vec![
         b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
