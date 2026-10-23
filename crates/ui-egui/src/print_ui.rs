@@ -223,6 +223,8 @@ impl PrintDraft {
         self.handling == Handling::Multiple && self.order == PageOrder::CutStack
     }
 
+    /// The spooler job for this print: the dialog's copies, two-sided and colour settings, the
+    /// driver options changed from the printer's defaults, and the chosen paper.
     pub fn job(&self, title: &str) -> spool::Job {
         spool::Job {
             printer: self.printer.clone(),

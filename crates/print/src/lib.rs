@@ -309,9 +309,10 @@ pub const LABEL_PAPER: usize = 19;
 /// The CUPS media name for `PAPERS[index]`, so the spooler feeds the sheet the PDF was laid out
 /// on rather than the queue's default; `None` only past the end of `PAPERS`. The common sizes
 /// use their PPD keywords (`w288h432` is the usual 4×6 label, `Env10` the US #10 envelope).
-/// The rest use PWG 5101.1 names (the IANA registry for ARCH E1), which carry their dimensions:
-/// CUPS feeds the PPD size of those dimensions whatever the driver calls it (`ARCHD`, `AnsiD`),
-/// and driverless IPP printers use these names themselves (#3752).
+/// The rest use PWG 5101.1 names (for ARCH E1, which 5101.1 lacks, the IANA registry's), spelled
+/// exactly: a driverless printer may take only the names it advertises. They carry their
+/// dimensions, so CUPS feeds the PPD size of those dimensions whatever the driver calls it
+/// (`ARCHD`, `AnsiD`) (#3752).
 pub fn cups_media(index: usize) -> Option<&'static str> {
     Some(match PAPERS.get(index)?.0 {
         "US Letter" => "Letter",
@@ -321,12 +322,12 @@ pub fn cups_media(index: usize) -> Option<&'static str> {
         "A4" => "A4",
         "A5" => "A5",
         "A6" => "iso_a6_105x148mm",
-        "ARCH A (9 x 12 in)" => "arch_a_9x12in",
-        "ARCH B (12 x 18 in)" => "arch_b_12x18in",
-        "ARCH C (18 x 24 in)" => "arch_c_18x24in",
-        "ARCH D (24 x 36 in)" => "arch_d_24x36in",
+        "ARCH A (9 x 12 in)" => "na_arch-a_9x12in",
+        "ARCH B (12 x 18 in)" => "na_arch-b_12x18in",
+        "ARCH C (18 x 24 in)" => "na_arch-c_18x24in",
+        "ARCH D (24 x 36 in)" => "na_arch-d_24x36in",
         "ARCH E1 (30 x 42 in)" => "na_arch-e1_30x42in",
-        "ARCH E (36 x 48 in)" => "arch_e_36x48in",
+        "ARCH E (36 x 48 in)" => "na_arch-e_36x48in",
         "ANSI C (17 x 22 in)" => "na_c_17x22in",
         "ANSI D (22 x 34 in)" => "na_d_22x34in",
         "ANSI E (34 x 44 in)" => "na_e_34x44in",

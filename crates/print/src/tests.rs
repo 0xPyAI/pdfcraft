@@ -674,10 +674,10 @@ fn paper_matching_accepts_rounded_metric_sizes_but_not_custom_or_invalid_sizes()
     }
 }
 
+/// #3752: 13 of the 21 sizes had no media name, so their jobs went out on the queue's default
+/// paper (A4 on the report's queue) whatever the sheets were laid out on.
 #[test]
 fn every_paper_reaches_the_spooler_by_a_name_of_its_size() {
-    // #3752: 13 of the 21 sizes had no media name, so their jobs went out on the queue's default
-    // paper (A4 on the report's queue) whatever the sheets were laid out on.
     let ppd_keywords = ["Letter", "Legal", "Tabloid", "A3", "A4", "A5", "w288h432", "Env10"];
     for (i, (name, (w, h))) in PAPERS.iter().enumerate() {
         let media = cups_media(i).unwrap_or_else(|| panic!("{name} has no media name"));
@@ -700,6 +700,36 @@ fn every_paper_reaches_the_spooler_by_a_name_of_its_size() {
         assert!((pw - w).abs() < 0.5 && (ph - h).abs() < 0.5, "{name}: {media} is {pw:.2} x {ph:.2} pt, not {w} x {h}");
     }
     assert_eq!((cups_media(PAPERS.len()), media_option(PAPERS.len())), (None, None));
+    // The names themselves, spelled as PWG 5101.1 has them: a driverless printer may take only the
+    // names it advertises, so one CUPS can merely parse (ARCH A was `arch_a_9x12in`) is not enough.
+    // ARCH E1 isn't in 5101.1; its name is the IANA registry's.
+    let names: Vec<(&str, &str)> = PAPERS.iter().enumerate().map(|(i, (name, _))| (*name, cups_media(i).unwrap_or_default())).collect();
+    assert_eq!(
+        names,
+        [
+            ("US Letter", "Letter"),
+            ("US Legal", "Legal"),
+            ("Tabloid", "Tabloid"),
+            ("A3", "A3"),
+            ("A4", "A4"),
+            ("A5", "A5"),
+            ("A6", "iso_a6_105x148mm"),
+            ("ARCH A (9 x 12 in)", "na_arch-a_9x12in"),
+            ("ARCH B (12 x 18 in)", "na_arch-b_12x18in"),
+            ("ARCH C (18 x 24 in)", "na_arch-c_18x24in"),
+            ("ARCH D (24 x 36 in)", "na_arch-d_24x36in"),
+            ("ARCH E1 (30 x 42 in)", "na_arch-e1_30x42in"),
+            ("ARCH E (36 x 48 in)", "na_arch-e_36x48in"),
+            ("ANSI C (17 x 22 in)", "na_c_17x22in"),
+            ("ANSI D (22 x 34 in)", "na_d_22x34in"),
+            ("ANSI E (34 x 44 in)", "na_e_34x44in"),
+            ("A2", "iso_a2_420x594mm"),
+            ("A1", "iso_a1_594x841mm"),
+            ("A0", "iso_a0_841x1189mm"),
+            ("4 x 6 in label (101.6 x 152.4 mm)", "w288h432"),
+            ("US #10 Envelope (4.125 x 9.5 in)", "Env10"),
+        ]
+    );
 }
 
 #[test]
