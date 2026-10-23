@@ -10,6 +10,9 @@ use crate::object::{Dict, ObjRef, Object, PdfString, Stream};
 use crate::{Bytes, CosError};
 
 const MAX_DEPTH: usize = 128;
+/// Objects one top-level [`Lexer::object`] call may build. Real arrays (page trees, parent
+/// trees, widths) stay far below; a decompressed object stream of `0 0 0 ...` does not.
+const MAX_NODES: usize = 1 << 22;
 
 /// One of the six PDF whitespace characters (ISO 32000-2 §7.2.3, Table 1).
 pub fn is_whitespace(b: u8) -> bool {
@@ -28,11 +31,13 @@ fn is_regular(b: u8) -> bool {
 pub struct Lexer<'a> {
     pub data: &'a [u8],
     pub pos: usize,
+    /// Objects built by the current top-level [`Lexer::object`] call.
+    nodes: usize,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(data: &'a [u8], pos: usize) -> Self {
-        Self { data, pos: pos.min(data.len()) }
+        Self { data, pos: pos.min(data.len()), nodes: 0 }
     }
 
     fn peek(&self) -> Option<u8> {
@@ -84,12 +89,21 @@ impl<'a> Lexer<'a> {
 
     /// Parse one direct object. References `N G R` are recognised.
     pub fn object(&mut self) -> Result<Object, CosError> {
+        self.nodes = 0;
         self.object_depth(0)
+    }
+
+    fn over_budget(&self) -> bool {
+        self.nodes > MAX_NODES
     }
 
     fn object_depth(&mut self, depth: usize) -> Result<Object, CosError> {
         if depth > MAX_DEPTH {
             return Err(self.err("nesting too deep"));
+        }
+        self.nodes = self.nodes.saturating_add(1);
+        if self.over_budget() {
+            return Err(self.err("object too large"));
         }
         self.skip_ws();
         let Some(b) = self.peek() else { return Err(self.err("unexpected end of data")) };
@@ -125,6 +139,7 @@ impl<'a> Lexer<'a> {
                             let before = self.pos;
                             match self.object_depth(depth + 1) {
                                 Ok(o) => items.push(o),
+                                Err(e) if self.over_budget() => return Err(e),
                                 // Tolerate junk inside arrays by skipping one byte.
                                 Err(_) if self.pos == before => self.pos += 1,
                                 Err(e) => return Err(e),
@@ -283,6 +298,9 @@ impl<'a> Lexer<'a> {
                     // Tolerate garbage between entries (seen in damaged files): skip a token.
                     let before = self.pos;
                     let _ = self.object_depth(depth + 1);
+                    if self.over_budget() {
+                        return Err(self.err("object too large"));
+                    }
                     if self.pos == before {
                         self.pos += 1;
                     }
@@ -672,5 +690,21 @@ mod tests {
         }
         let deep = "[".repeat(10_000);
         assert!(Lexer::new(deep.as_bytes(), 0).object().is_err());
+    }
+
+    #[test]
+    fn one_object_has_a_node_budget() {
+        // A wide array (from a tiny compressed object stream) must not grow without bound.
+        let wide = |n: usize| format!("[{}]", "0 ".repeat(n));
+        let at_cap = Lexer::new(wide(MAX_NODES - 1).as_bytes(), 0).object();
+        assert!(matches!(at_cap, Ok(Object::Array(ref items)) if items.len() == MAX_NODES - 1));
+        assert!(Lexer::new(wide(MAX_NODES).as_bytes(), 0).object().is_err());
+        // The same inside a dictionary value and behind tolerated junk.
+        assert!(Lexer::new(format!("<< /A {} >>", wide(MAX_NODES)).as_bytes(), 0).object().is_err());
+        assert!(Lexer::new(format!("[[{}] ]", "0 ".repeat(MAX_NODES)).as_bytes(), 0).object().is_err());
+        // The budget is per top-level object: a lexer reused for many operands keeps working.
+        let two = wide(MAX_NODES - 1).repeat(2);
+        let mut lx = Lexer::new(two.as_bytes(), 0);
+        assert!(lx.object().is_ok() && lx.object().is_ok());
     }
 }

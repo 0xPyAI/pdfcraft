@@ -284,6 +284,9 @@ const MAX_CMAP_ENTRIES: usize = 1 << 20;
 /// Most codespace or CID ranges kept from a CMap; Adobe's largest published CMaps have a few
 /// thousand.
 const MAX_CMAP_RANGES: usize = 1 << 16;
+/// Largest decoded Encoding or ToUnicode CMap stream read; real CMaps stay well under it, and a larger
+/// one is not decoded at all.
+const MAX_CMAP_BYTES: usize = 16 << 20;
 
 /// Code → Unicode of a font. Explicit mappings and sequential ranges are kept as declared, so a range
 /// costs one record however many codes it covers; where two overlap, the one declared later wins.
@@ -688,7 +691,7 @@ impl Metrics {
             m.codes = Codes::Two;
             if let Some(e) = font.get(b"Encoding").map(|e| doc.resolve(e))
                 && let Object::Stream(s) = &*e
-                && let Ok(data) = s.decoded()
+                && let Ok(data) = s.decoded_within(MAX_CMAP_BYTES)
             {
                 let (spaces, cids) = parse_cmap(&data);
                 if !spaces.is_empty() {
@@ -1290,7 +1293,7 @@ fn unicode_map(doc: &Document, font: &Dict, composite: bool) -> Unicode {
     }
     match font.get(b"ToUnicode").map(|t| doc.resolve(t)).as_deref() {
         Some(Object::Stream(s)) => {
-            if let Ok(data) = s.decoded() {
+            if let Ok(data) = s.decoded_within(MAX_CMAP_BYTES) {
                 parse_to_unicode(&data, &mut out);
             }
         }
@@ -1646,6 +1649,38 @@ mod tests {
         assert!(m.subset);
         assert_eq!(m.encode("ab").as_deref(), Some(&b"ab"[..]));
         assert_eq!(m.encode("abc"), None);
+    }
+
+    #[test]
+    fn cmap_streams_decode_within_a_size_cap() {
+        // A valid CMap padded past the cap (a small Flate stream of whitespace) is not decoded whole.
+        let to_unicode = b"1 begincodespacerange <0000> <FFFF> endcodespacerange 1 beginbfrange <0024> <0026> <0041> endbfrange";
+        let encoding = b"1 begincodespacerange <0000> <FFFF> endcodespacerange 1 begincidrange <0000> <FFFF> 0 endcidrange";
+        for padded in [false, true] {
+            let mut doc = Document::new_empty();
+            let mut stream = |cmap: &[u8]| {
+                let mut data = cmap.to_vec();
+                if padded {
+                    data.resize(MAX_CMAP_BYTES + 1, b' ');
+                }
+                Object::Ref(doc.add(Object::Stream(Stream::flate(Dict::new(), &data))))
+            };
+            let (tu, enc) = (stream(to_unicode), stream(encoding));
+            let mut desc = Dict::new();
+            desc.set(b"Subtype".to_vec(), Object::name("CIDFontType2"));
+            let f = font(
+                &mut doc,
+                vec![
+                    ("Subtype", Object::name("Type0")),
+                    ("Encoding", enc),
+                    ("DescendantFonts", Object::Array(vec![Object::Dict(desc)])),
+                    ("ToUnicode", tu),
+                ],
+            );
+            let m = Metrics::from_dict(&doc, &f);
+            assert_eq!(m.decode(&[0, 0x24]) == "A", !padded, "ToUnicode, padded: {padded}");
+            assert_eq!(matches!(m.codes, Codes::Ranges(_)), !padded, "Encoding, padded: {padded}");
+        }
     }
 
     #[test]

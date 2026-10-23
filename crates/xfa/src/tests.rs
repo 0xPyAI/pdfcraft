@@ -405,6 +405,45 @@ fn repeated_pictures_are_bounded_in_total_bytes() {
 }
 
 #[test]
+fn empty_repeating_subforms_spend_the_layout_budget() {
+    // Four nested levels of 50 empty instances are 6.25 million instances that place nothing
+    // and measure nothing; each one counts against the layout budget.
+    let level = "<subform layout=\"tb\"><occur initial=\"50\" max=\"-1\"/>";
+    let tpl = format!("<template><subform layout=\"tb\">{}{}</subform></template>", level.repeat(4), "</subform>".repeat(4));
+    assert!(matches!(layout_xml(&tpl), Err(XfaError::TooLarge(_))));
+    // Three levels (125,000 instances) still lay out.
+    let tpl = format!("<template><subform layout=\"tb\">{}{}</subform></template>", level.repeat(3), "</subform>".repeat(3));
+    assert!(layout_xml(&tpl).is_ok());
+}
+
+#[test]
+fn a_packet_stream_listed_many_times_is_read_once() {
+    let mut doc = Document::open(Arc::new(shell("<template><subform/></template>"))).unwrap();
+    let packet = pdfcraft_cos::ObjRef::new(5, 0);
+    let items: Vec<Object> =
+        (0..1000).flat_map(|_| [Object::String(pdfcraft_cos::PdfString::literal(b"template".to_vec())), Object::Ref(packet)]).collect();
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |c| {
+        let mut acro = c.get(b"AcroForm").and_then(Object::as_dict).cloned().unwrap();
+        acro.set(b"XFA".to_vec(), Object::Array(items));
+        c.set(b"AcroForm".to_vec(), Object::Dict(acro));
+    })
+    .unwrap();
+    let p = read_packets(&doc).unwrap().unwrap();
+    assert_eq!(p.xdp.matches("<template").count(), 1);
+}
+
+#[test]
+fn empty_repeating_subforms_drawn_in_a_positioned_root_spend_the_layout_budget() {
+    // The same four levels inside a positioned root are drawn, not flowed.
+    let level = "<subform layout=\"tb\"><occur initial=\"50\" max=\"-1\"/>";
+    let nest =
+        |n: usize| format!("<template><subform><subform layout=\"tb\">{}{}</subform></subform></template>", level.repeat(n), "</subform>".repeat(n));
+    assert!(matches!(layout_xml(&nest(4)), Err(XfaError::TooLarge(_))));
+    assert!(layout_xml(&nest(3)).is_ok());
+}
+
+#[test]
 fn the_packets_can_be_one_stream_or_named_parts() {
     // Named parts, with the template split from the rest.
     let doc = Document::open(Arc::new(shell(&template(0)))).unwrap();
