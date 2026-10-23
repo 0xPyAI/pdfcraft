@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, SaveOptions, Stream, write_full};
-use pdfcraft_optimize::{Settings, optimize};
+use pdfcraft_optimize::{OptimizeError, Settings, Stage, optimize, optimize_with_progress};
 
 /// A photo-like RGB picture: colourful gradients with a little texture, so the colour transform
 /// matters everywhere and a medium-quality JPEG is smaller than a maximum-quality one.
@@ -360,4 +360,56 @@ fn merging_jpeg_strips_keeps_their_colour_transform() {
     assert_eq!(report.merged_images, 1, "{report:?}");
     let difference = mean_difference(&before, &render(&doc, 1.0));
     assert!(difference <= TOLERANCE, "colours moved by {difference:.1}");
+}
+
+/// `jpeg` with `bytes` right after its SOI marker.
+fn after_soi(jpeg: &[u8], bytes: &[u8]) -> Vec<u8> {
+    let mut v = jpeg[..2].to_vec();
+    v.extend_from_slice(bytes);
+    v.extend_from_slice(&jpeg[2..]);
+    v
+}
+
+#[test]
+fn a_jpeg_header_that_takes_more_than_a_few_steps_to_read_is_left_as_it_is() {
+    // Decoders skip stray bytes between segments and any number of fill bytes before a marker,
+    // so a stream can make a header scan walk megabytes. Optimize reads the header again for
+    // every group of fragments it tries: it stops at the first stray byte, or after a few
+    // thousand steps, and leaves such an image as it is.
+    let (w, h) = (128, 128);
+    let plain = rgb_jpeg(&photo(w, h), w, h);
+    for (what, jpeg, expect) in [
+        ("three fill bytes before the first segment", after_soi(&plain, &[0xFF; 3]), Outcome::Reencoded),
+        ("one stray byte before the first segment", after_soi(&plain, &[0]), Outcome::Untouched),
+        ("8 MB of stray bytes before the first segment", after_soi(&plain, &vec![0; 8_000_000]), Outcome::Untouched),
+        ("10,000 fill bytes before the first segment", after_soi(&plain, &[0xFF; 10_000]), Outcome::Untouched),
+    ] {
+        let (mut doc, img) = showing(w, h, 72, "DeviceRGB", jpeg, Parms::None);
+        let original = stream(&doc, img);
+        optimize(&mut doc, &Settings::default()).unwrap();
+        let outcome = if stream(&doc, img) == original { Outcome::Untouched } else { Outcome::Reencoded };
+        assert_eq!(outcome, expect, "{what}");
+    }
+}
+
+#[test]
+fn cancelling_works_from_the_first_call_with_a_jpeg_drawn_many_times() {
+    // One JPEG with 8 MB of stray bytes after SOI, drawn 64 times at the same place (the case
+    // reported on #3012). Fragment merging reads its header for each group it tries, before the
+    // first progress call. The header scan stops at the first stray byte, so that call is the
+    // first image, and cancelling there stops Optimize.
+    let (w, h) = (128, 8);
+    let jpeg = after_soi(&rgb_jpeg(&photo(w, h), w, h), &vec![0; 8_000_000]);
+    let mut doc = Document::new_empty();
+    let img = jpeg_image(&mut doc, w, h, "DeviceRGB", jpeg, Parms::None);
+    let content = format!("q {w} 0 0 {h} 0 0 cm /Im Do Q
+").repeat(64);
+    one_page(&mut doc, w, h, &[("Im".to_string(), img)], &content);
+    let mut stages = Vec::new();
+    let result = optimize_with_progress(&mut doc, &Settings::default(), &mut |stage| {
+        stages.push(stage);
+        false
+    });
+    assert!(matches!(result, Err(OptimizeError::Cancelled)), "{result:?}");
+    assert_eq!(stages, [Stage::Images { done: 0, total: 1 }]);
 }

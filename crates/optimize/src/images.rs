@@ -286,21 +286,31 @@ fn color_transform(doc: &Document, s: &Stream) -> Option<Option<i64>> {
     }
 }
 
+/// Markers and fill bytes [`adobe_transform`] reads before the first scan, at most. Encoders
+/// write a few dozen segments.
+const MAX_HEADER_STEPS: usize = 4096;
+
 /// The transform flag of a JPEG's Adobe APP14 segment (0: samples stored as they are,
 /// 1: YCbCr, 2: YCCK), the last one if there are several, as decoders read them; `Some(None)`
-/// without one. `None` if the segments before the first scan can't be read.
+/// without one. `None` if the segments before the first scan can't be read, which includes a
+/// stray byte between segments and a header of more than [`MAX_HEADER_STEPS`] steps.
+///
+/// Each step reads one marker or fill byte and jumps over its segment, so the work is bounded
+/// by the step count, not by the size of the stream. That matters: Optimize asks again for every
+/// group of fragments it tries, and the same image can be drawn many times.
 fn adobe_transform(data: &[u8]) -> Option<Option<u8>> {
     if data.get(..2)? != [0xFF, 0xD8] {
         return None;
     }
     let mut flag = None;
     let mut i = 2usize;
-    // Every step moves on by at least one byte, and reading past the end returns.
-    loop {
+    // Reading past the end returns.
+    for _ in 0..MAX_HEADER_STEPS {
+        // Decoders skip stray bytes between segments, but a stream can hold megabytes of them
+        // and each would be a step: the header counts as unreadable and the image is left as
+        // it is.
         if *data.get(i)? != 0xFF {
-            // Stray bytes between segments, which decoders skip.
-            i = i.checked_add(1)?;
-            continue;
+            return None;
         }
         let marker = *data.get(i.checked_add(1)?)?;
         match marker {
@@ -325,6 +335,7 @@ fn adobe_transform(data: &[u8]) -> Option<Option<u8>> {
             }
         }
     }
+    None
 }
 
 /// 8-bit samples of a JPEG `w` × `h` with `n` components (grey or RGB): YCbCr converted to RGB
