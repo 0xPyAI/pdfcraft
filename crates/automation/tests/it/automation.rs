@@ -4809,6 +4809,33 @@ fn links_through_tools() {
     assert!(matches!(a.call("link_add", &json!({ "doc": doc, "page": 1, "rect": [0, 0, 50, 20] })), Err(ToolError::InvalidArgs(_))));
 }
 
+/// #4168: a Launch action whose file is a PDF (here with Windows `\` separators, relative to the
+/// source as a remote link is) opens that PDF in PdfCraft through link_open, within the root; one
+/// naming a program is listed but never followed.
+#[test]
+fn a_launch_link_to_a_pdf_opens_it_like_a_remote_link() {
+    let (_base, root) = sandbox("launch-pdf");
+    std::fs::create_dir_all(root.join("ts")).unwrap();
+    std::fs::create_dir_all(root.join("se")).unwrap();
+    std::fs::write(root.join("se/se_B2.pdf"), fixture(2)).unwrap();
+    // The helper writes a GoToR; the action is renamed (the parser rebuilds the shifted offsets).
+    let launch = |file: &str| String::from_utf8(remote_link_pdf(file, None)).unwrap().replace("/S /GoToR", "/S /Launch").into_bytes();
+    std::fs::write(root.join("ts/TS_304.pdf"), launch(r"..\se\se_B2.pdf")).unwrap();
+    std::fs::write(root.join("ts/program.pdf"), launch("tool.exe")).unwrap();
+    let mut a = auto(&root);
+    let source = ok(&mut a, "doc_open", json!({ "path": "ts/TS_304.pdf" }))["doc"].as_u64().unwrap();
+    let info = ok(&mut a, "doc_info", json!({ "doc": source }));
+    let link = &info["links"][0]["target"];
+    assert_eq!((link["action"].as_str(), link["remote_document"].as_str()), (Some("Launch"), Some("../se/se_B2.pdf")), "{info}");
+    let opened = ok(&mut a, "link_open", json!({ "doc": source, "page": 1, "index": 1 }));
+    assert_eq!(opened["path"].as_str().map(|p| p.replace('\\', "/")).as_deref(), Some("se/se_B2.pdf"), "{opened}");
+    assert_eq!(opened["document"]["pages"], 2);
+    let program = ok(&mut a, "doc_open", json!({ "path": "ts/program.pdf" }))["doc"].as_u64().unwrap();
+    let before = a.session().docs().len();
+    assert!(matches!(err(&mut a, "link_open", json!({ "doc": program, "page": 1, "index": 1 })), ToolError::InvalidArgs(_) | ToolError::Failed(_)));
+    assert_eq!(a.session().docs().len(), before, "nothing was opened or launched");
+}
+
 #[test]
 fn local_gotor_link_open_refuses_directories_devices_and_non_pdf_targets() {
     let (_base, root) = sandbox("gotor-not-a-file");

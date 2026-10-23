@@ -2598,7 +2598,8 @@ fn info(d: &Document) -> Value {
                     })).collect::<Vec<_>>(),
                     "preserve_rb": preserve_rb,
                 }),
-                pdfcraft_render::LinkTarget::RemoteGoTo { file, destination, new_window } => json!({
+                pdfcraft_render::LinkTarget::RemoteGoTo { launch, file, destination, new_window } => json!({
+                    "action": if *launch { "Launch" } else { "GoToR" },
                     "remote_document": file,
                     "destination": match destination {
                         pdfcraft_render::RemoteDestination::Default => json!({ "kind": "default" }),
