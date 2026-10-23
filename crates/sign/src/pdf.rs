@@ -1467,6 +1467,23 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
             list.push(what);
         }
     }
+    // An object the signed revision had and this one frees is a change too, and the loop above
+    // only sees objects that still exist. File plumbing (cross-reference and object streams) is
+    // rewritten by every save and is not a change.
+    let current: HashSet<u32> = doc.object_numbers().into_iter().collect();
+    for num in old.object_numbers().into_iter().filter(|n| !current.contains(n)) {
+        let r = ObjRef { num, generation: old.generation(num) };
+        let was = old.get(r);
+        let signed_role = old_content.contains(&r) || signed_pages.contains(&r) || signed_resources.contains_key(&r);
+        // A signed page's content or resource is judged by that role, whatever /Type its stream carried.
+        if !signed_role && matches!(&*was, Object::Stream(s) if matches!(s.dict.name(b"Type"), Some(b"XRef" | b"ObjStm"))) {
+            continue;
+        }
+        let what = if signed_role { kind::PAGE_CONTENT } else { kind::OTHER };
+        if !disallowed.contains(&what) {
+            disallowed.push(what);
+        }
+    }
     if disallowed.is_empty() { Modification::Allowed(allowed) } else { Modification::Disallowed(disallowed) }
 }
 
@@ -1771,6 +1788,15 @@ fn change_kind(doc: &Document, old: &Document, d: &Dict, before: Option<&Dict>) 
     // A later revision cannot make an existing object a signature by relabelling it: a signature
     // change is only a brand-new object, or one that was already a signature object when signed.
     let signature_ok = before.is_none_or(is_signature_dict);
+    // A signature widget that already held a signature is what the signature shows: moving it or
+    // swapping its appearance can hide the signed page under it. Judged by the signed revision,
+    // so relabelling the widget now does not change that.
+    if before.is_some_and(|b| {
+        b.name(b"Subtype") == Some(b"Widget") && b.name(b"FT") == Some(b"Sig") && b.get(b"V").is_some_and(|v| old.resolve(v).as_dict().is_some())
+    }) && before != Some(d)
+    {
+        return kind::PAGE_CONTENT;
+    }
     match ty {
         // Only a new signature value or policy: rewriting a signed one is not a signature (#1788).
         Some(b"Sig" | b"DocTimeStamp" | b"SigRef" | b"TransformParams") if before.is_none() => return kind::SIGNATURE,
