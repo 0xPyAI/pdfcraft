@@ -3139,3 +3139,44 @@ fn a_cleared_password_field_returns_to_its_default_value() {
     assert!(!has_password_values(&doc), "a field at its default holds no typed password");
     assert_eq!(clear_password_values(&mut doc).unwrap(), 0);
 }
+
+/// #3943 review: the quick check that skips forms without a Password field still sees one whose
+/// widget is only on the page, not listed in `/Fields`; one that inherits the flag from a parent
+/// that is not listed either; and one deeper in the field tree whose widget is on no page. Each
+/// is alone in its own document, so each path of the check is needed.
+#[test]
+fn a_password_field_missing_from_the_field_list_is_still_cleared() {
+    let form = |fields: &str, annots: &str, rest: &[&str]| {
+        let mut objs: Vec<String> = vec![
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+            format!("<< /Type /Page /Parent 2 0 R /Annots [{annots}] >>"),
+            format!("<< /Fields [{fields}] /DA (/Helv 0 Tf 0 g) >>"),
+        ];
+        objs.extend(rest.iter().map(|o| o.to_string()));
+        document(&objs)
+    };
+    let page_only =
+        form("", "5 0 R", &["<< /Type /Annot /Subtype /Widget /FT /Tx /T (pin) /Ff 8192 /V (secret5) /Rect [50 700 150 720] /P 3 0 R >>"]);
+    let inherited = form(
+        "",
+        "5 0 R",
+        &[
+            "<< /Type /Annot /Subtype /Widget /T (kid) /Parent 6 0 R /Rect [50 650 150 670] /P 3 0 R >>",
+            "<< /FT /Tx /T (acct) /Ff 8192 /V (secret6) /Kids [5 0 R] >>",
+        ],
+    );
+    let off_page = form(
+        "5 0 R",
+        "",
+        &[
+            "<< /T (grp) /Kids [6 0 R] >>",
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (hidden) /Ff 8192 /V (secret7) /Parent 5 0 R /Rect [0 0 0 0] >>",
+        ],
+    );
+    for (what, mut doc) in [("page only", page_only), ("inherited", inherited), ("on no page", off_page)] {
+        assert!(has_password_values(&doc), "{what}");
+        assert_eq!(clear_password_values(&mut doc).unwrap(), 1, "{what}");
+        assert!(fields(&doc).iter().all(|f| f.value.iter().all(|v| v.is_empty())), "{what}: {:?}", fields(&doc));
+    }
+}
