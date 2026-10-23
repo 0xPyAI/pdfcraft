@@ -2730,6 +2730,66 @@ trailer << /Root 1 0 R >>
     assert!(matches!(a.call("accessibility_set_alt", &json!({ "doc": fd, "figure": 6, "alt": "x" })), Err(ToolError::Failed(_))));
 }
 
+/// A table's summary and a header cell's scope are set through `accessibility_set_tag_property`
+/// (#4103, #4104): the summary clears the table-summary finding, both are listed with the tags,
+/// undone, and saved.
+#[test]
+fn table_summary_and_header_scope_through_automation() {
+    let dir = workdir("a11y-table");
+    let content = "/TH << /MCID 0 >> BDC 10 150 40 20 re f EMC /TD << /MCID 1 >> BDC 60 150 40 20 re f EMC";
+    let pdf = format!(
+        "%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 5 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /StructParents 0 >> endobj
+4 0 obj << /Length {} >> stream
+{content}
+endstream endobj
+5 0 obj << /Type /StructTreeRoot /K 6 0 R /ParentTree 11 0 R >> endobj
+6 0 obj << /S /Document /P 5 0 R /K [7 0 R] >> endobj
+7 0 obj << /S /Table /P 6 0 R /K [8 0 R] >> endobj
+8 0 obj << /S /TR /P 7 0 R /K [9 0 R 10 0 R] >> endobj
+9 0 obj << /S /TH /P 8 0 R /Pg 3 0 R /K 0 >> endobj
+10 0 obj << /S /TD /P 8 0 R /Pg 3 0 R /K 1 >> endobj
+11 0 obj << /Nums [0 [9 0 R 10 0 R]] >> endobj
+trailer << /Root 1 0 R >>
+%%EOF",
+        content.len()
+    );
+    std::fs::write(dir.join("table.pdf"), pdf).unwrap();
+    let mut a = auto(&dir);
+    let fd = ok(&mut a, "doc_open", json!({ "path": "table.pdf" }))["doc"].as_u64().unwrap();
+    let summary_status = |a: &mut Automation| {
+        let r = ok(a, "accessibility_check", json!({ "doc": fd, "rules": ["table-summary"] }));
+        r["results"].as_array().unwrap().iter().find(|x| x["rule"] == "table-summary").unwrap()["status"].as_str().unwrap().to_owned()
+    };
+    assert_eq!(summary_status(&mut a), "failed");
+    let args =
+        |object: u32, property: &str, value: &str| json!({ "doc": fd, "object": object, "generation": 0, "property": property, "value": value });
+    let tags = ok(&mut a, "accessibility_set_tag_property", args(7, "summary", "Opening hours by day"));
+    let tag = |tags: &Value, object: u64| tags["tags"].as_array().unwrap().iter().find(|t| t["object"] == object).unwrap().clone();
+    assert_eq!(tag(&tags, 7)["summary"], "Opening hours by day");
+    assert_eq!(summary_status(&mut a), "passed");
+    let tags = ok(&mut a, "accessibility_set_tag_property", args(9, "scope", "Column"));
+    assert_eq!(tag(&tags, 9)["scope"], "Column");
+    // A scope is Row, Column or Both; only a table has a summary and only a header cell a scope.
+    for (object, property, value) in [(9, "scope", "column"), (10, "scope", "Row"), (9, "summary", "No")] {
+        assert!(
+            matches!(err(&mut a, "accessibility_set_tag_property", args(object, property, value)), ToolError::Failed(_)),
+            "{property} {value} on {object}"
+        );
+    }
+    assert_eq!(ok(&mut a, "edit_undo", json!({ "doc": fd }))["undone"], "Change tag properties");
+    assert_eq!(tag(&ok(&mut a, "accessibility_tags", json!({ "doc": fd })), 9)["scope"], Value::Null);
+    ok(&mut a, "edit_redo", json!({ "doc": fd }));
+    ok(&mut a, "doc_save", json!({ "doc": fd, "path": "tagged-table.pdf" }));
+    let saved = pdfcraft_cos::Document::open(std::sync::Arc::new(std::fs::read(dir.join("tagged-table.pdf")).unwrap())).unwrap();
+    // Saving renumbers the objects: the tags are found by type.
+    let saved = pdfcraft_engine::a11y::tags(&saved);
+    assert_eq!(saved.iter().find(|t| t.kind == "Table").and_then(|t| t.summary.as_deref()), Some("Opening hours by day"));
+    assert_eq!(saved.iter().find(|t| t.kind == "TH").and_then(|t| t.scope.as_deref()), Some("Column"));
+}
+
 #[test]
 fn marking_a_leaf_tag_as_an_artifact_through_automation_is_undoable_and_saved() {
     let dir = workdir("a11y-artifact");
