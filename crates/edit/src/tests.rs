@@ -2414,6 +2414,44 @@ fn missing_glyphs_substitute_helvetica_and_impossible_text_is_refused() {
     assert!(text::replace_line(&mut doc, 0, 5, "x").is_err(), "no such line");
 }
 
+/// #4280: two paragraphs in subsets without Ç or Ã, one regular and one bold. Each edit that adds
+/// an accent sets the paragraph in a standard font of its own weight. Editing the bold one must
+/// not turn the regular one, set in its stand-in earlier, bold too, and the editor's frame for the
+/// bold one must not reach the regular one.
+#[test]
+fn a_bold_stand_in_font_leaves_an_earlier_regular_one_alone() {
+    let widths = vec!["600"; 26].join(" ");
+    let font = |base: &str| {
+        format!("<< /Type /Font /Subtype /Type1 /BaseFont /{base} /FirstChar 65 /LastChar 90 /Widths [{widths}] /Encoding /WinAnsiEncoding >>")
+    };
+    let (regular, bold) = (font("ABCDEF+Garamond"), font("ABCDEF+Garamond-Bold"));
+    let content = stream("", "BT /F1 12 Tf 72 700 Td (ACAO) Tj ET BT /F2 12 Tf 300 400 Td (TENSAO) Tj ET");
+    let mut doc = build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>",
+        &content,
+        &regular,
+        &bold,
+    ]);
+    let block = |doc: &Document, text: &str| text::text_blocks(doc, 0).unwrap().iter().position(|b| b.text == text).unwrap();
+    let acao = block(&doc, "ACAO");
+    assert_eq!(text::replace_block(&mut doc, 0, acao, "AÇÃO").unwrap().substituted.as_deref(), Some("Times-Roman"));
+    let first = text::text_lines(&doc, 0).unwrap().into_iter().find(|l| l.text == "AÇÃO").unwrap();
+
+    let tensao = block(&doc, "TENSAO");
+    let layout = text::text_edit_layout(&doc, 0, tensao, "TENSÃO", &text::BlockStyle::default()).unwrap();
+    let draft = layout.draft_rect.unwrap();
+    assert!(draft[3] < first.rect[1] || draft[1] > first.rect[3], "the frame {draft:?} reaches the regular paragraph at {:?}", first.rect);
+    assert_eq!(text::replace_block(&mut doc, 0, tensao, "TENSÃO").unwrap().substituted.as_deref(), Some("Times-Bold"));
+
+    let doc = reopen(&doc);
+    let lines = text::text_lines(&doc, 0).unwrap();
+    let font_of = |text: &str| lines.iter().find(|l| l.text == text).map(|l| l.base_font.clone());
+    assert_eq!(font_of("AÇÃO").as_deref(), Some("Times-Roman"), "{lines:?}");
+    assert_eq!(font_of("TENSÃO").as_deref(), Some("Times-Bold"), "{lines:?}");
+}
+
 #[test]
 fn paragraphs_are_found_and_rewrapped() {
     let mut doc = text_page(

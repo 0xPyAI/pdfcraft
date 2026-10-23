@@ -1845,8 +1845,6 @@ fn source_family(base_font: &str) -> crate::added::Family {
     }
 }
 
-const SUBSTITUTE_NAME: &str = "PCEdHelv";
-const SUBSTITUTE: &[u8] = SUBSTITUTE_NAME.as_bytes();
 const MAX_TYPE3_GLYPHS: usize = 240;
 
 /// The generated fonts for one replacement: one per run of at most `max_glyphs` unique characters,
@@ -2883,7 +2881,9 @@ fn rewrite_block_from(
         f.set(b"Subtype".to_vec(), Object::name("Type1"));
         f.set(b"BaseFont".to_vec(), Object::name(base));
         f.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
-        let name = if style.family.is_none() { String::from_utf8_lossy(SUBSTITUTE).into_owned() } else { format!("PCEd{}", base.replace('-', "")) };
+        // Named after its face, as the line and region rewrites name theirs: one name for every
+        // stand-in would repoint the paragraphs set in an earlier one at this face (#4280).
+        let name = format!("PCEd{}", base.replace('-', ""));
         fonts_res.set(name.clone().into_bytes(), Object::Dict(f));
         if style.family.is_none() {
             substituted = Some(base.to_string());
