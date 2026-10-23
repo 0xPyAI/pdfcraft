@@ -278,7 +278,7 @@ pub fn tools() -> Vec<ToolDef> {
         t(
             "bookmark_list",
             "List bookmarks",
-            "The bookmarks in outline order, one page at a time: each with its path (1-based, as the other bookmark tools take it), title, target page and open state, and its children on the same page. next is the offset of the following page, or null at the end. Bookmarks nested deeper than 33 levels are not listed.",
+            "The bookmarks in outline order, one page at a time: each with its path (1-based, as the other bookmark tools take it), title, target page and open state, its colour ([r, g, b], 0-1) and bold or italic style when it has them, and its children on the same page. next is the offset of the following page, or null at the end. Bookmarks nested deeper than 33 levels are not listed.",
         )
         .ro()
         .with(schema(
@@ -317,6 +317,21 @@ pub fn tools() -> Vec<ToolDef> {
         )),
         t("bookmark_set_page", "Set a bookmark's page", "Point a bookmark at another page. Undoable.")
             .with(schema(json!({ "doc": doc(), "path": path("The bookmark"), "page": { "type": "integer", "minimum": 1 } }), &["doc", "path", "page"])),
+        t(
+            "bookmark_set_style",
+            "Set a bookmark's style and colour",
+            "Colour a bookmark's title and make it bold or italic (ISO 32000-2 §12.3.3: /C and /F), as bookmark_list reports them. Give any of color ([r, g, b], each 0-1; [0, 0, 0] is the default black), bold and italic; what is left out stays as it is. Undoable.",
+        )
+        .with(schema(
+            json!({
+                "doc": doc(),
+                "path": path("The bookmark"),
+                "color": { "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 }, "minItems": 3, "maxItems": 3 },
+                "bold": { "type": "boolean" },
+                "italic": { "type": "boolean" }
+            }),
+            &["doc", "path"],
+        )),
         t(
             "bookmark_from_structure",
             "New bookmarks from structure",

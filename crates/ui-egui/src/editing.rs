@@ -1107,6 +1107,8 @@ impl PdfCraftApp {
             }
             A::Rename(path, title) => Edit::RenameBookmark { path, title },
             A::SetToCurrentPage(path) => Edit::SetBookmarkPage { path, page: current },
+            A::SetStyle(path, bold, italic) => Edit::SetBookmarkStyle { path, bold, italic },
+            A::SetColor(path, color) => Edit::SetBookmarkColor { path, color: Some(color) },
             A::Delete(path) => Edit::DeleteBookmark { path },
             A::MoveUp(path) => {
                 let at = path[path.len() - 1].saturating_sub(1);

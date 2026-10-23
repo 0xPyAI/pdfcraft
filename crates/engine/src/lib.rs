@@ -1129,6 +1129,10 @@ pub struct BookmarkRow {
     pub page: Option<usize>,
     /// Where on that page it goes ([`pdfcraft_render::DestView::Top`] when it doesn't say).
     pub view: pdfcraft_render::DestView,
+    /// The title's colour (`/C`), `None` for the default black, and its style (`/F`).
+    pub color: Option<[f32; 3]>,
+    pub italic: bool,
+    pub bold: bool,
 }
 
 /// One page of the bookmark list, in outline order.
@@ -1156,7 +1160,16 @@ fn outline_rows(items: &[pdfcraft_render::OutlineItem]) -> Vec<BookmarkRow> {
             top.1 += 1;
         }
         let path: Vec<usize> = levels.iter().map(|(_, listed)| listed.saturating_sub(1)).collect();
-        rows.push(BookmarkRow { path, title: item.title.clone(), open: item.open, page: item.page, view: item.view });
+        rows.push(BookmarkRow {
+            path,
+            title: item.title.clone(),
+            open: item.open,
+            page: item.page,
+            view: item.view,
+            color: item.color,
+            italic: item.italic,
+            bold: item.bold,
+        });
         if !item.children.is_empty() {
             levels.push((&item.children, 0));
         }
@@ -1415,6 +1428,17 @@ pub enum Edit {
     SetBookmarkPage {
         path: Vec<usize>,
         page: usize,
+    },
+    /// Colour a bookmark's title (`/C`); `None` or black is the default black.
+    SetBookmarkColor {
+        path: Vec<usize>,
+        color: Option<[f64; 3]>,
+    },
+    /// Make a bookmark's title bold or italic or not (`/F`); `None` keeps that one.
+    SetBookmarkStyle {
+        path: Vec<usize>,
+        bold: Option<bool>,
+        italic: Option<bool>,
     },
     /// Bookmarks for the tagged headings (H, H1–H6), nested by level under a new first
     /// "Untitled" bookmark (New Bookmarks from Structure).
@@ -1919,6 +1943,8 @@ pub const EDIT_LABELS: &[&str] = &[
     "Delete bookmark",
     "Move bookmark",
     "Set bookmark destination",
+    "Colour",
+    "Style",
     "New bookmarks from structure",
     "Number pages",
     "Measure distance",
@@ -2031,7 +2057,7 @@ pub const EDIT_LABELS: &[&str] = &[
 /// [`EDIT_LABELS`] and so translates the same way. A batch built in the interface itself arrives
 /// already worded in the interface's language.
 pub const BATCH_LABELS: &[&str] =
-    &["Set document title", "Mark differences", "Detect form fields", "Run JavaScript", "Recognize text", field_table::LABEL];
+    &["Set document title", "Mark differences", "Detect form fields", "Run JavaScript", "Recognize text", field_table::LABEL, "Style"];
 
 impl Edit {
     /// Label for the Edit menu and history ("Undo Rotate pages").
@@ -2062,6 +2088,9 @@ impl Edit {
             Edit::DeleteBookmark { .. } => Label::of("Delete bookmark"),
             Edit::MoveBookmark { .. } => Label::of("Move bookmark"),
             Edit::SetBookmarkPage { .. } => Label::of("Set bookmark destination"),
+            // The bookmark Style and Colour menus' own names, already said in every language.
+            Edit::SetBookmarkColor { .. } => Label::of("Colour"),
+            Edit::SetBookmarkStyle { .. } => Label::of("Style"),
             Edit::BookmarksFromStructure => Label::of("New bookmarks from structure"),
             Edit::NumberPages { .. } => Label::of("Number pages"),
             // What was measured is part of the wording too, for the same reason.
@@ -2229,6 +2258,8 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         | Edit::DeleteBookmark { .. }
         | Edit::MoveBookmark { .. }
         | Edit::SetBookmarkPage { .. }
+        | Edit::SetBookmarkColor { .. }
+        | Edit::SetBookmarkStyle { .. }
         | Edit::BookmarksFromStructure
         | Edit::NumberPages { .. } => {
             if p.assemble() {
@@ -2474,6 +2505,8 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
             pdfcraft_organize::move_bookmark(doc, from, to_parent, *index)?;
         }
         Edit::SetBookmarkPage { path, page } => pdfcraft_organize::set_bookmark_page(doc, path, *page)?,
+        Edit::SetBookmarkColor { path, color } => pdfcraft_organize::set_bookmark_color(doc, path, *color)?,
+        Edit::SetBookmarkStyle { path, bold, italic } => pdfcraft_organize::set_bookmark_style(doc, path, *bold, *italic)?,
         Edit::BookmarksFromStructure => {
             let entries: Vec<_> = pdfcraft_a11y::headings(doc)
                 .into_iter()
@@ -4858,7 +4891,7 @@ impl Session {
                         let numbers: Vec<Option<f32>> = numbers.iter().map(|n| n.map(|n| n as f32)).collect();
                         pdfcraft_render::DestView::from_operands(Some(&kind), &numbers)
                     });
-                    BookmarkRow { path: b.path, title: b.title, open: b.open, page: b.page, view }
+                    BookmarkRow { path: b.path, title: b.title, open: b.open, page: b.page, view, color: b.color, italic: b.italic, bold: b.bold }
                 })
                 .collect();
             return Some(BookmarkPage { rows, next: page.next, truncated: false });

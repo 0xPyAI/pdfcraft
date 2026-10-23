@@ -402,6 +402,12 @@ pub struct OutlineItem {
     pub view: DestView,
     pub children: Vec<OutlineItem>,
     pub open: bool,
+    /// The title's colour (`/C`, DeviceRGB, ISO 32000-2 §12.3.3 Table 151), or `None` for the
+    /// default black or a value that isn't three numbers.
+    pub color: Option<[f32; 3]>,
+    /// The title's style (`/F`, Table 152): bit 1 italic, bit 2 bold.
+    pub italic: bool,
+    pub bold: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1075,7 +1081,13 @@ impl<'a> Inspector<'a> {
             }
             let open = d.get(b"Count").ok().and_then(|c| c.as_i64().ok()).is_some_and(|c| c > 0);
             let title = self.text(d, b"Title").unwrap_or_default();
-            listed.push((depth, OutlineItem { title, page, view, children: Vec::new(), open }));
+            let color = match d.get(b"C").map(|o| self.resolve(o)) {
+                Ok(Object::Array(c)) => outline_color(c.iter().map(|v| self.resolve(v).as_float().ok())),
+                _ => None,
+            };
+            let flags = d.get(b"F").ok().and_then(|f| self.resolve(f).as_i64().ok()).unwrap_or(0);
+            let (italic, bold) = (flags & 1 != 0, flags & 2 != 0);
+            listed.push((depth, OutlineItem { title, page, view, children: Vec::new(), open, color, italic, bold }));
         }
         (nest_outline(listed), more)
     }
@@ -1811,6 +1823,18 @@ fn limited_pdf_string(bytes: &[u8], max_bytes: usize) -> Option<String> {
     }
     let text = text_string(bytes);
     (text.len() <= max_bytes).then_some(text)
+}
+
+/// A bookmark title's colour from its `/C` entries, each kept within 0–1 (ISO 32000-2 §12.3.3,
+/// Table 151: "An array of three numbers in the range 0.0 to 1.0, representing the components in
+/// the DeviceRGB colour space"). Black, the default, and anything that isn't three numbers give
+/// `None`.
+pub(crate) fn outline_color(values: impl Iterator<Item = Option<f32>>) -> Option<[f32; 3]> {
+    let v: Vec<Option<f32>> = values.take(4).collect();
+    let [Some(r), Some(g), Some(b)] = v.as_slice() else { return None };
+    // A number past the range, however large, is kept at its edge.
+    let rgb = [*r, *g, *b].map(|c| c.clamp(0.0, 1.0));
+    (rgb != [0.0; 3]).then_some(rgb)
 }
 
 /// Nests a pre-order list of `(depth, item)` into the outline tree.
@@ -3511,6 +3535,54 @@ trailer << /Root 1 0 R >>
     /// The titles of `items`, with children in brackets (`Parent[Child]`).
     fn shape(items: &[OutlineItem]) -> Vec<String> {
         items.iter().map(|o| if o.children.is_empty() { o.title.clone() } else { format!("{}[{}]", o.title, shape(&o.children).join(",")) }).collect()
+    }
+
+    /// #3193: a bookmark's colour and style (ISO 32000-2 §12.3.3, Tables 151 and 152). `/C` is
+    /// three numbers within 0–1 (one outside is kept at the edge); black, the default, and a `/C`
+    /// that isn't three numbers read as no colour. `/F` bit 1 is italic, bit 2 bold.
+    #[test]
+    fn outline_items_carry_their_colour_and_style() {
+        let titles = [
+            ("Plain", ""),
+            ("Red", "/C [1 0 0]"),
+            ("Italic", "/F 1"),
+            ("Bold", "/F 2"),
+            ("Both", "/C [0 0 1] /F 3"),
+            ("Black", "/C [0 0 0]"),
+            ("Bright", "/C [2 -1 0.5]"),
+            ("Short", "/C [1 0]"),
+            ("Long", "/C [1 0 0 0]"),
+            ("Named", "/C [1 /x 0]"),
+            ("Other bits", "/F 4"),
+        ];
+        let n = titles.len();
+        let items: Vec<String> = titles
+            .iter()
+            .enumerate()
+            .map(|(k, (title, extra))| {
+                let prev = if k == 0 { String::new() } else { format!(" /Prev {} 0 R", 4 + k) };
+                let next = if k + 1 == n { String::new() } else { format!(" /Next {} 0 R", 6 + k) };
+                format!("<< /Title ({title}) /Parent 4 0 R{prev}{next} /Dest [3 0 R /Fit] {extra} >>")
+            })
+            .collect();
+        let info = inspect(Arc::new(outline_file(&items)), None).expect("opens");
+        let got: Vec<(&str, Option<[f32; 3]>, bool, bool)> = info.outline.iter().map(|o| (o.title.as_str(), o.color, o.italic, o.bold)).collect();
+        assert_eq!(
+            got,
+            [
+                ("Plain", None, false, false),
+                ("Red", Some([1.0, 0.0, 0.0]), false, false),
+                ("Italic", None, true, false),
+                ("Bold", None, false, true),
+                ("Both", Some([0.0, 0.0, 1.0]), true, true),
+                ("Black", None, false, false),
+                ("Bright", Some([1.0, 0.0, 0.5]), false, false),
+                ("Short", None, false, false),
+                ("Long", None, false, false),
+                ("Named", None, false, false),
+                ("Other bits", None, false, false),
+            ]
+        );
     }
 
     #[test]
