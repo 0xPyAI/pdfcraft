@@ -357,10 +357,17 @@ fn localize_resources(doc: &mut Document, selected: &[usize]) -> Result<(), pdfc
 ///
 /// # Errors
 ///
-/// This operation is not transactional: an error may leave `doc` partially modified, with
-/// sensitive content still present. Call this on a working clone and replace the original only
-/// on success. On any error, discard the working clone; do not save or reuse it.
+/// On any error `doc` is left as it was: the redaction runs on a copy (cheap: unchanged objects
+/// are shared) that replaces `doc` only on success.
 pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, RedactError> {
+    let mut work = doc.clone();
+    let report = apply_to(&mut work, pages)?;
+    *doc = work;
+    Ok(report)
+}
+
+/// [`apply`] without the copy: an error can leave `doc` part redacted.
+fn apply_to(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, RedactError> {
     let (all_marks, unreadable) = marks_checked(doc);
     // A mark with no readable area is not applied, and applying the others would look complete:
     // refuse before anything changes. Only the pages being applied count.

@@ -725,6 +725,19 @@ fn withheld_covered_text_is_not_assembled() {
     assert_eq!(copied.as_deref(), Some("SECRET DATA 123"));
 }
 
+/// `/ActualText` is metadata the file's author controls: an empty or substitute replacement must
+/// not hide the glyphs a cover sits on.
+#[test]
+fn a_cover_over_text_with_empty_or_substitute_actual_text_is_found() {
+    for actual in ["()", "(nothing here)"] {
+        let content =
+            format!("/Span << /ActualText {actual} >> BDC\nBT /F1 24 Tf 100 700 Td (SECRET DATA 123) Tj ET\nEMC\n0 g\n100 688 220 32 re f\n");
+        let findings = audit_redactions(&open(one_page(content.as_bytes(), ""))).expect("audit must run");
+        assert_eq!(findings.len(), 1, "{actual}: {findings:?}");
+        assert!(findings[0].covered_text.contains("SECRET"), "{actual}: covered_text was {:?}", findings[0].covered_text);
+    }
+}
+
 #[test]
 fn repeated_stream_references_share_one_decode_budget() {
     use pdfcraft_cos::{Dict, Document, Object, Stream};
