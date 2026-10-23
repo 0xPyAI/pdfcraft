@@ -689,12 +689,23 @@ fn detach(doc: &mut Document, field: ObjRef) -> Result<(), FormError> {
     Ok(())
 }
 
-/// The first free "<base>N" name.
-fn free_name(existing: &[Field], base: &str) -> String {
+/// The first free "<base>N" name: not a field's, and not held by a node at the top of the field
+/// tree (`held`), such as a parent field left empty by a move, which isn't in `existing`.
+fn free_name(existing: &[Field], held: &[String], base: &str) -> String {
     (1..=u64::MAX)
         .map(|n| format!("{base}{n}"))
-        .find(|c| !existing.iter().any(|f| f.name == *c || f.name.starts_with(&format!("{c}."))))
+        .find(|c| !held.contains(c) && !existing.iter().any(|f| f.name == *c || f.name.starts_with(&format!("{c}."))))
         .unwrap_or_else(|| base.to_string())
+}
+
+/// The own names (`/T`) of the nodes in the form's `/Fields`, changing nothing.
+fn top_names(doc: &Document) -> Vec<String> {
+    let Some(root) = doc.root() else { return Vec::new() };
+    let Some(af) = doc.get(root).as_dict().and_then(|d| d.get(b"AcroForm").map(|o| doc.resolve(o))).and_then(|o| o.as_dict().cloned()) else {
+        return Vec::new();
+    };
+    let list = af.get(b"Fields").map(|o| doc.resolve(o)).and_then(|o| o.as_array().cloned()).unwrap_or_default();
+    list.iter().filter_map(|o| doc.resolve(o).as_dict().and_then(|d| d.get(b"T").cloned())).filter_map(|t| crate::text_of(&doc.resolve(&t))).collect()
 }
 
 fn widget_dict(page: ObjRef, rect: [f64; 4]) -> Dict {
@@ -731,7 +742,7 @@ pub fn add_field(doc: &mut Document, page: usize, rect: [f64; 4], kind: &NewFiel
     };
     let name = match name.map(str::trim) {
         Some(n) if !n.is_empty() => n.to_string(),
-        _ => free_name(&existing, kind.base_name()),
+        _ => free_name(&existing, &top_names(doc), kind.base_name()),
     };
     let parts = name_parts(&name)?;
     let radio_group = match kind {
@@ -1116,6 +1127,13 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
     }
     let mut new_name = name.to_string();
     if let Some(n) = props.name.as_deref().map(str::trim).filter(|n| *n != f.name) {
+        // A full name under the same parents only renames the field's own part (the editor
+        // shows nested fields by their full name): it isn't moved, so it keeps its place and
+        // goes on inheriting from its parents.
+        let n = match (n.rsplit_once('.'), f.name.rsplit_once('.')) {
+            (Some((parents, own)), Some((current, _))) if parents == current => own,
+            _ => n,
+        };
         if n.contains('.') {
             // A full name: the field moves under the parent fields it names (#2696).
             let parts = name_parts(n)?;

@@ -3229,6 +3229,37 @@ fn dotted_field_names_are_made_with_parent_fields() {
     assert!(set_props(&mut doc, "name", &FieldProps { name: Some("MASTER.street1".into()), ..FieldProps::default() }).is_err(), "taken");
 }
 
+/// Review on #2957: a parent left empty by a move keeps its name from the next default name
+/// (`Text1` after `Text1.x` moved away); and a full name that keeps the parents is a plain
+/// rename, so the field stays in its place among its parent's /Kids and keeps inheriting.
+#[test]
+fn empty_parents_and_same_parent_renames() {
+    let mut doc = fixture();
+    let text = NewField::Text { multiline: false };
+    let auto = |doc: &mut Document, y: f64| add_field(doc, 0, [50.0, y, 200.0, y + 20.0], &text, None);
+    let mut copy = doc.clone();
+    let first = auto(&mut copy, 100.0).unwrap();
+    add_field(&mut doc, 0, [50.0, 140.0, 200.0, 160.0], &text, Some(&format!("{first}.x"))).unwrap();
+    set_props(&mut doc, &format!("{first}.x"), &FieldProps { name: Some("other.x".into()), ..FieldProps::default() }).unwrap();
+    assert!(fields(&doc).iter().all(|f| !f.name.starts_with(&first)), "{first} is an empty parent now");
+    let next = auto(&mut doc, 100.0).expect("a default name the empty parent doesn't hold");
+    assert_ne!(next, first);
+
+    let all = fields(&doc);
+    let city = field(&all, "address.city").obj;
+    let address = doc.get(city).as_dict().and_then(|d| d.reference(b"Parent")).unwrap();
+    doc.update_dict(address, |d| d.set(b"V".to_vec(), Object::String(PdfString::literal(b"Springfield".to_vec())))).unwrap();
+    let kids = |doc: &Document| doc.get(address).as_dict().and_then(|d| d.get(b"Kids").and_then(|o| o.as_array().cloned())).unwrap();
+    let before = kids(&doc);
+    assert_eq!(
+        set_props(&mut doc, "address.city", &FieldProps { name: Some("address.town".into()), ..FieldProps::default() }).unwrap(),
+        "address.town"
+    );
+    assert_eq!(kids(&doc), before, "same place among the kids");
+    assert!(!doc.get(city).as_dict().unwrap().contains(b"V"), "still inherits its value rather than owning a copy");
+    assert_eq!(field(&fields(&doc), "address.town").value, ["Springfield"]);
+}
+
 /// Review on #2957: spaces in a typed name. The ends of the whole name are dropped, as Acrobat
 /// does when a field is renamed; a space beside a period stays in the part it belongs to (`a. b`
 /// is `b` with a leading space under `a`), as Acrobat keeps it and as ISO 32000-2 §12.7.4.2
