@@ -6434,6 +6434,35 @@ fn added_text_is_wrapped_once_per_write() {
     assert!(calls <= 4, "the text was wrapped {calls} times for 40 lines");
 }
 
+/// Character spacing on added text (#4245) is the PDF's `Tc`, kept in `/PCAdded` so the item
+/// reopens with it; an item written without it reads 0.
+#[test]
+fn added_text_character_spacing_is_drawn_and_reopens() {
+    let mut doc = fixture();
+    let plain = AddedText { rect: [72.0, 600.0, 400.0, 700.0], text: "Approved".into(), size: 10.0, ..AddedText::default() };
+    add_content(&mut doc, 0, &Content::Text(plain.clone())).unwrap();
+    add_content(&mut doc, 0, &Content::Text(AddedText { char_spacing: 2.5, ..plain })).unwrap();
+    let doc = reopen(&doc);
+    let spacings: Vec<f64> = list_added(&doc).iter().map(|a| if let Content::Text(t) = &a.content { t.char_spacing } else { f64::NAN }).collect();
+    assert_eq!(spacings, [0.0, 2.5]);
+    let page = streams(&doc, 0);
+    let tc: Vec<bool> = page.iter().filter(|s| s.contains("(Approved) Tj")).map(|s| s.contains("2.5 Tc")).collect();
+    assert_eq!(tc, [false, true], "{page:?}");
+}
+
+/// Spacing widens every measure the layout takes: the widest line and wrapping.
+#[test]
+fn added_text_character_spacing_widens_its_layout() {
+    let plain = AddedText { rect: [0.0, 0.0, 1000.0, 100.0], text: "Approved".into(), size: 10.0, ..AddedText::default() };
+    let spaced = AddedText { char_spacing: 3.0, ..plain.clone() };
+    // After each of the 8 letters, like `Tc`.
+    assert!((added::text_width(&spaced) - added::text_width(&plain) - 24.0).abs() < 1e-9);
+    let w = added::text_width(&plain);
+    let narrow = |t: &AddedText| AddedText { text: "Approved Approved".into(), rect: [0.0, 0.0, 2.0 * w + 5.0, 100.0], ..t.clone() };
+    assert_eq!(added::lines(&narrow(&plain)).len(), 1);
+    assert_eq!(added::lines(&narrow(&spaced)).len(), 2, "the spaced words no longer fit one line");
+}
+
 /// A field tree whose every node lists its child twice is pruned in work linear in its nodes, not
 /// in its paths, and a node listing itself is visited once.
 #[test]

@@ -560,18 +560,33 @@ pub(crate) fn editor(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, ad
             // The box is white in every theme, so the caret must not follow the theme (pale in dark mode) (#655).
             ui.visuals_mut().text_cursor.stroke.color = crate::edit_text_ui::caret_color_on(Color32::WHITE);
             let [cr, cg, cb] = t.style.color.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
+            // Character spacing shows as the page will draw it, scaled like the font.
+            let letter_spacing = (t.style.char_spacing * f64::from(zoom)) as f32;
+            let mut spaced = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
+                let format = egui::TextFormat {
+                    font_id: font.clone(),
+                    color: Color32::from_rgb(cr, cg, cb),
+                    extra_letter_spacing: letter_spacing,
+                    ..Default::default()
+                };
+                let mut job = egui::text::LayoutJob::single_section(text.as_str().to_owned(), format);
+                job.wrap.max_width = wrap_width;
+                ui.fonts_mut(|f| f.layout_job(job))
+            };
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                let resp = ui.add(
-                    egui::TextEdit::multiline(&mut t.text)
-                        .font(font)
-                        .desired_width(r.width().max(60.0))
-                        .desired_rows(1)
-                        .background_color(if background_ready { Color32::TRANSPARENT } else { Color32::WHITE })
-                        .text_color(Color32::from_rgb(cr, cg, cb))
-                        .hint_text(tl!("Type text"))
-                        .id_salt("added-text-edit"),
-                );
+                let mut edit = egui::TextEdit::multiline(&mut t.text)
+                    .font(font.clone())
+                    .desired_width(r.width().max(60.0))
+                    .desired_rows(1)
+                    .background_color(if background_ready { Color32::TRANSPARENT } else { Color32::WHITE })
+                    .text_color(Color32::from_rgb(cr, cg, cb))
+                    .hint_text(tl!("Type text"))
+                    .id_salt("added-text-edit");
+                if letter_spacing != 0.0 {
+                    edit = edit.layouter(&mut spaced);
+                }
+                let resp = ui.add(edit);
                 if t.focus {
                     resp.request_focus();
                     t.focus = false;
