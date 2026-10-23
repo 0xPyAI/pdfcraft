@@ -147,10 +147,11 @@ impl<'a> Walker<'a> {
             match op.op.as_slice() {
                 b"q" => stack.push(gs.clone()),
                 b"Q" => {
+                    // The current path is not graphics state (ISO 32000-2 §8.4.1): `re Q f` still
+                    // fills the rectangle, whose corners are already in user space.
                     if let Some(g) = stack.pop() {
                         *gs = g;
                     }
-                    path = Path::Empty;
                 }
                 b"cm" => {
                     let before = gs.ctm;
@@ -261,7 +262,7 @@ impl<'a> Walker<'a> {
         let resolved = self.doc.resolve(entry);
         let Object::Stream(stream) = &*resolved else { return Ok(()) };
         let dict = &stream.dict;
-        if dict.name(b"Subtype") != Some(b"Form") {
+        if crate::subtype(self.doc, dict)?.as_deref() != Some(b"Form") {
             return Ok(());
         }
         let matrix = dict
