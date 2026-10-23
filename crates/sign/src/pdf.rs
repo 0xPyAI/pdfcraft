@@ -1464,6 +1464,22 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
             list.push(what);
         }
     }
+    // An object the signed revision had and this one frees is a change too, and the loop above
+    // only sees objects that still exist. File plumbing (cross-reference and object streams) is
+    // rewritten by every save and is not a change.
+    let current: HashSet<u32> = doc.object_numbers().into_iter().collect();
+    for num in old.object_numbers().into_iter().filter(|n| !current.contains(n)) {
+        let r = ObjRef { num, generation: old.generation(num) };
+        let was = old.get(r);
+        if matches!(&*was, Object::Stream(s) if matches!(s.dict.name(b"Type"), Some(b"XRef" | b"ObjStm"))) {
+            continue;
+        }
+        let what =
+            if old_content.contains(&r) || signed_pages.contains(&r) || signed_resources.contains_key(&r) { kind::PAGE_CONTENT } else { kind::OTHER };
+        if !disallowed.contains(&what) {
+            disallowed.push(what);
+        }
+    }
     if disallowed.is_empty() { Modification::Allowed(allowed) } else { Modification::Disallowed(disallowed) }
 }
 
@@ -1804,6 +1820,11 @@ fn change_kind(doc: &Document, old: &Document, d: &Dict, before: Option<&Dict>) 
         _ => {}
     }
     match d.name(b"Subtype") {
+        // A signature widget that already held a signature is what the signature shows: moving
+        // it or swapping its appearance can hide the signed page under it.
+        Some(b"Widget") if before.is_some_and(|b| b.contains(b"V") && b.name(b"FT") == Some(b"Sig")) && before != Some(d) => {
+            return kind::PAGE_CONTENT;
+        }
         Some(b"Widget") => return if d.name(b"FT") == Some(b"Sig") && signature_ok { kind::SIGNATURE } else { kind::FORM_FILL },
         Some(b"Link") => return kind::LINKS,
         Some(_) if ty == Some(b"Annot") || d.contains(b"Rect") => return kind::COMMENTS,

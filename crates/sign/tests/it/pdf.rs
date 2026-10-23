@@ -2576,3 +2576,29 @@ fn a_timestamp_from_a_certificate_not_issued_for_time_stamping_is_not_trusted_ti
     assert_eq!(s.timestamp_time, None, "{:?}", s.details);
     assert!(s.details.iter().any(|d| d.message.contains("not issued for time stamping")), "{:?}", s.details);
 }
+
+/// A signed revision's objects can't be freed or its signature widget rewritten without the
+/// change being seen: the classifier used to look only at objects still present, and let a
+/// signature widget's geometry and appearance change count as a signature.
+#[test]
+fn freeing_a_signed_object_or_rewriting_the_signed_widget_is_a_page_content_change() {
+    let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    let trust = TrustStore { certs: vec![id.certificate.clone()] };
+    let check = |bytes: &[u8]| signatures(&open(bytes), bytes, &trust).into_iter().find(|s| s.signed).unwrap();
+    let signed = pdfcraft_sign::sign(&open(&fixture()), &id, &opts()).unwrap();
+    let freed = check(&edit_after(&signed, |doc| doc.free(pdfcraft_cos::ObjRef { num: 5, generation: 0 })));
+    assert_eq!(freed.status, Status::Invalid, "{:?}", freed.modification);
+    assert!(matches!(&freed.modification, Modification::Disallowed(k) if k.contains(&kind::PAGE_CONTENT)), "{:?}", freed.modification);
+    let widget = open(&signed)
+        .object_numbers()
+        .into_iter()
+        .map(|num| pdfcraft_cos::ObjRef { num, generation: 0 })
+        .find(|r| open(&signed).get(*r).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Widget") && d.contains(b"V")))
+        .unwrap();
+    let moved = check(&edit_after(&signed, |doc| {
+        doc.update_dict(widget, |d| d.set(b"Rect".to_vec(), Object::Array(vec![Object::Int(0), Object::Int(0), Object::Int(300), Object::Int(300)])))
+            .unwrap();
+    }));
+    assert_eq!(moved.status, Status::Invalid, "{:?}", moved.modification);
+    assert!(matches!(&moved.modification, Modification::Disallowed(k) if k.contains(&kind::PAGE_CONTENT)), "{:?}", moved.modification);
+}
