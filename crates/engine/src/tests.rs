@@ -2490,6 +2490,55 @@ fn redaction_marks_apply_for_good_and_undo() {
     assert!(matches!(s.apply(id, Edit::ApplyRedactions { pages: None }), Err(EditError::Redact(_))));
 }
 
+/// Marks removed before they are applied, all at once or one by one, are not saved, nor are
+/// replies to them: the file would otherwise record where they were, their overlay text and who
+/// made them, and the page is left as it was.
+#[test]
+fn removed_redaction_marks_are_not_saved() {
+    for clear in [true, false] {
+        let (mut s, id) = session_with(1);
+        let shape = Shape::Redact {
+            quads: vec![pdfcraft_annot::rect_quad([80.0, 140.0, 100.0, 180.0])],
+            overlay: "MARKED OVERLAY".into(),
+            look: Default::default(),
+        };
+        let mark = Edit::AddAnnotation(NewAnnotation {
+            page: 0,
+            style: Style::default_for(&shape),
+            shape,
+            contents: String::new(),
+            author: "Mark Author".into(),
+        });
+        s.apply(id, mark).unwrap();
+        let reply = Edit::ReplyToAnnotation { page: 0, index: 0, text: "REPLY TO THE MARK".into(), author: "Replier".into() };
+        s.apply(id, reply).unwrap();
+        let removal = if clear { Edit::ClearRedactions } else { Edit::DeleteAnnotation { page: 0, index: 0 } };
+        s.apply(id, removal).unwrap();
+        assert_eq!(s.get(id).unwrap().redaction_marks(), 0);
+        let saved = s.save_bytes(id).unwrap();
+        let holds = |s: &[u8]| saved.windows(s.len()).any(|w| w == s);
+        assert!(!holds(b"/Redact") && !holds(b"MARKED OVERLAY") && !holds(b"Mark Author"), "clear: {clear}");
+        assert!(!holds(b"REPLY TO THE MARK") && !holds(b"Replier"), "clear: {clear}");
+        let mut reopened = Session::new();
+        let back = reopened.open("saved.pdf", None, saved.clone(), None).unwrap();
+        assert_eq!(page_texts(&reopened, back), ["Page 1"]);
+        let page = pdfcraft_model::pages(&reopened.get(back).unwrap().editor.as_ref().unwrap().cos).swap_remove(0);
+        assert!(!page.dict.contains(b"Annots"), "clear: {clear}");
+
+        // Undo past that save brings the mark back, under the number the saved file left free.
+        s.mark_saved(id, saved, None).unwrap();
+        s.undo(id).unwrap();
+        let again = s.save_bytes(id).unwrap();
+        let mut reopened = Session::new();
+        let back = reopened.open("again.pdf", None, again.clone(), None).unwrap();
+        let d = reopened.get(back).unwrap();
+        assert!(d.info.warnings.is_empty() && d.editor.as_ref().unwrap().cos.repair_log().is_empty(), "{:?}", d.info.warnings);
+        assert_eq!(d.redaction_marks(), 1, "clear: {clear}");
+        let marks = pdfcraft_redact::marks(&d.editor.as_ref().unwrap().cos);
+        assert_eq!(marks.first().map(|m| m.overlay.as_str()), Some("MARKED OVERLAY"));
+    }
+}
+
 #[test]
 fn oversized_redaction_overlay_preserves_the_document_and_undo() {
     let (mut s, id) = session_with(1);
