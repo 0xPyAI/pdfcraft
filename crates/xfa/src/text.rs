@@ -3,6 +3,7 @@
 //! bundled here).
 
 use crate::model::{Font, HAlign, Para, Rect, RichText, Run};
+use pdfcraft_fonts::Std14;
 
 /// The standard-14 family a typeface maps to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -29,22 +30,27 @@ impl Family {
         }
     }
 
+    /// The standard-14 font this family draws in, as `bold` and `italic` ask.
+    pub fn std14(self, bold: bool, italic: bool) -> Std14 {
+        match (self, bold, italic) {
+            (Family::Helvetica, false, false) => Std14::Helvetica,
+            (Family::Helvetica, true, false) => Std14::HelveticaBold,
+            (Family::Helvetica, false, true) => Std14::HelveticaOblique,
+            (Family::Helvetica, true, true) => Std14::HelveticaBoldOblique,
+            (Family::Courier, false, false) => Std14::Courier,
+            (Family::Courier, true, false) => Std14::CourierBold,
+            (Family::Courier, false, true) => Std14::CourierOblique,
+            (Family::Courier, true, true) => Std14::CourierBoldOblique,
+            (Family::Times, false, false) => Std14::TimesRoman,
+            (Family::Times, true, false) => Std14::TimesBold,
+            (Family::Times, false, true) => Std14::TimesItalic,
+            (Family::Times, true, true) => Std14::TimesBoldItalic,
+        }
+    }
+
     /// The PDF base font name for a face.
     pub fn base_font(self, bold: bool, italic: bool) -> &'static str {
-        match (self, bold, italic) {
-            (Family::Helvetica, false, false) => "Helvetica",
-            (Family::Helvetica, true, false) => "Helvetica-Bold",
-            (Family::Helvetica, false, true) => "Helvetica-Oblique",
-            (Family::Helvetica, true, true) => "Helvetica-BoldOblique",
-            (Family::Courier, false, false) => "Courier",
-            (Family::Courier, true, false) => "Courier-Bold",
-            (Family::Courier, false, true) => "Courier-Oblique",
-            (Family::Courier, true, true) => "Courier-BoldOblique",
-            (Family::Times, false, false) => "Times-Roman",
-            (Family::Times, true, false) => "Times-Bold",
-            (Family::Times, false, true) => "Times-Italic",
-            (Family::Times, true, true) => "Times-BoldItalic",
-        }
+        self.std14(bold, italic).base_font()
     }
 
     /// The resource name used in content streams and `/DA` strings (Acrobat's conventions).
@@ -121,16 +127,12 @@ impl Face {
         self.family.resource_name(self.bold, self.italic)
     }
 
-    /// Advance of `s` at this face's size.
+    /// Advance of `s` at this face's size: the standard-14 font it is drawn in, at that font's
+    /// own widths (ISO 32000-2 Annex D) and encoded as it is written, then the horizontal scale.
     pub fn width(&self, s: &str) -> f64 {
         #[cfg(test)]
         MEASURED.with(|m| m.set(m.get().saturating_add(s.len() as u64)));
-        let designed = match self.family {
-            Family::Courier => s.chars().count() as f64 * 0.6 * self.size,
-            Family::Helvetica => pdfcraft_fonts::helvetica_width(s, self.size) * if self.bold { 1.04 } else { 1.0 },
-            Family::Times => pdfcraft_fonts::helvetica_width(s, self.size) * if self.bold { 0.96 } else { 0.92 },
-        };
-        designed * self.h_scale
+        self.family.std14(self.bold, self.italic).text_width(s, self.size) * self.h_scale
     }
 }
 
