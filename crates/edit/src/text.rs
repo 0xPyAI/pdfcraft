@@ -80,9 +80,10 @@ pub struct TextLine {
     /// Why the line can't be edited: its font's writing mode (its CMap's `WMode`) couldn't be read,
     /// so which way its glyphs advance is unknown. The line is listed as horizontal text.
     unreadable_mode: Option<String>,
-    /// The runs the line joins, in content order: each one's text and the end of its words in
-    /// `ink`. Empty when the line's text was put into another order (see [`TextLine::runs`]).
-    runs: Vec<(String, usize)>,
+    /// The runs the line joins, in content order: each one's text, the end of its words in
+    /// `ink`, and whether joining put a space before it. Empty when the line's text was put
+    /// into another order (see [`TextLine::runs`]).
+    runs: Vec<(String, usize, bool)>,
 }
 
 impl TextLine {
@@ -542,17 +543,17 @@ impl TextLine {
         (self.stream, self.ops.iter().min().copied().unwrap_or(0))
     }
 
-    /// The runs of text the line joins, in content order: each run's text as its glyphs show it
-    /// and the boxes of its words (a part of `ink`). Joining adds no space between runs, so a
-    /// run's text is not a word of `text` that can be found by position. None when the line's
-    /// text was reordered for reading (right-to-left or visual-order Indic text): then only the
-    /// line's text as a whole says what it reads.
-    pub fn runs(&self) -> impl Iterator<Item = (&str, &[[f64; 4]])> {
+    /// The runs of text the line joins, in content order: each run's text as its glyphs show it,
+    /// the boxes of its words (a part of `ink`), and whether joining put a space between it and
+    /// the run before (`text` has one there; runs closer together join with none, so one word
+    /// can span runs). None when the line's text was reordered for reading (right-to-left or
+    /// visual-order Indic text): then only the line's text as a whole says what it reads.
+    pub fn runs(&self) -> impl Iterator<Item = (&str, &[[f64; 4]], bool)> {
         let mut start = 0;
-        self.runs.iter().map(move |(text, end)| {
+        self.runs.iter().map(move |(text, end, spaced)| {
             let ink = self.ink.get(start..*end).unwrap_or_default();
             start = *end;
-            (text.as_str(), ink)
+            (text.as_str(), ink, *spaced)
         })
     }
 
@@ -1377,14 +1378,15 @@ fn text_lines_in(doc: &Document, p: &pdfcraft_model::Page, actual_text: bool) ->
         });
         if joins && let Some(l) = lines.last_mut() {
             let gap = last.map_or(0.0, |(_, pen)| pen.continues(&s, 0.0).1);
-            if gap - s.tracking > l.size * s.state.scale.abs() * 0.2 && !l.text.ends_with(' ') && !s.text.starts_with(' ') {
+            let spaced = gap - s.tracking > l.size * s.state.scale.abs() * 0.2 && !l.text.ends_with(' ') && !s.text.starts_with(' ');
+            if spaced {
                 l.text.push(' ');
             }
             l.text.push_str(&s.text);
             l.rect = [l.rect[0].min(s.rect[0]), l.rect[1].min(s.rect[1]), l.rect[2].max(s.rect[2]), l.rect[3].max(s.rect[3])];
             l.frame = union(l.frame, s.frame);
             l.ink.extend(s.ink.iter().copied());
-            l.runs.push((s.text.clone(), l.ink.len()));
+            l.runs.push((s.text.clone(), l.ink.len(), spaced));
             l.ops.push(s.op);
             l.ops.extend(s.extra_ops.iter().copied());
             l.decodable &= s.decodable;
@@ -1417,7 +1419,7 @@ fn text_lines_in(doc: &Document, p: &pdfcraft_model::Page, actual_text: bool) ->
                 actual_text: s.actual_text,
                 clips: s.state.render_mode >= 4,
                 unreadable_mode: s.state.unreadable.as_deref().map(str::to_owned),
-                runs: vec![(s.text.clone(), s.ink.len())],
+                runs: vec![(s.text.clone(), s.ink.len(), false)],
                 ops: std::iter::once(s.op).chain(s.extra_ops.iter().copied()).collect(),
                 origin: Origin {
                     tm: s.tm.0,
@@ -1487,14 +1489,15 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
     });
     if joins && let Some(l) = lines.last_mut() {
         let gap = last.map_or(0.0, |pen| pen.continues(&s, 0.0).1);
-        if gap - s.tracking > l.size * s.state.scale.abs() * 0.2 && !l.text.ends_with(' ') && !s.text.starts_with(' ') {
+        let spaced = gap - s.tracking > l.size * s.state.scale.abs() * 0.2 && !l.text.ends_with(' ') && !s.text.starts_with(' ');
+        if spaced {
             l.text.push(' ');
         }
         l.text.push_str(&s.text);
         l.rect = [l.rect[0].min(s.rect[0]), l.rect[1].min(s.rect[1]), l.rect[2].max(s.rect[2]), l.rect[3].max(s.rect[3])];
         l.frame = union(l.frame, s.frame);
         l.ink.extend(s.ink.iter().copied());
-        l.runs.push((s.text.clone(), l.ink.len()));
+        l.runs.push((s.text.clone(), l.ink.len(), spaced));
         l.ops.push(s.op);
         l.ops.extend(s.extra_ops.iter().copied());
         l.decodable &= s.decodable;
@@ -1526,7 +1529,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
             actual_text: s.actual_text,
             clips: s.state.render_mode >= 4,
             unreadable_mode: s.state.unreadable.as_deref().map(str::to_owned),
-            runs: vec![(s.text.clone(), s.ink.len())],
+            runs: vec![(s.text.clone(), s.ink.len(), false)],
             ops: std::iter::once(s.op).chain(s.extra_ops.iter().copied()).collect(),
             origin: Origin {
                 tm: s.tm.0,

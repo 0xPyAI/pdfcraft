@@ -649,30 +649,26 @@ fn later_text_on_the_line_does_not_clear_an_earlier_cover() {
 /// line painted beside it, which stay visible.
 #[test]
 fn covered_text_leaves_out_the_words_beside_the_cover() {
-    let content = b"0 g
-BT /F1 24 Tf 100 700 Td (SECRET) Tj ET
-98 688 94 32 re f
-BT /F1 24 Tf 200 700 Td (tail) Tj ET
-";
-    let findings = audit_redactions(&open(one_page(content, ""))).expect("audit must run");
-    assert_eq!(findings.iter().map(|f| f.covered_text.as_str()).collect::<Vec<_>>(), ["SECRET"]);
+    let covered = |content: &[u8]| {
+        let findings = audit_redactions(&open(one_page(content, ""))).expect("audit must run");
+        findings.into_iter().map(|f| f.covered_text).collect::<Vec<_>>()
+    };
+    assert_eq!(covered(b"0 g\nBT /F1 24 Tf 100 700 Td (SECRET) Tj ET\n98 688 94 32 re f\nBT /F1 24 Tf 200 700 Td (tail) Tj ET\n"), ["SECRET"]);
+    // A word shown in two runs with nothing between them stays one word (review on #4198).
+    assert_eq!(covered(b"0 g\nBT /F1 24 Tf 100 700 Td (SE) Tj (CRET) Tj ET\n98 688 94 32 re f\nBT /F1 24 Tf 200 700 Td (tail) Tj ET\n"), ["SECRET"]);
 
-    // The same for an unapplied redaction mark over the first run only; a mark over both runs
-    // reports both.
-    for (rect, covered) in [("[98 688 192 720]", "SECRET"), ("[98 688 260 720]", "SECRET tail")] {
+    // The same for an unapplied redaction mark over the first run only. A mark over both runs
+    // reports both, with the space the line has between them (`tail` is set apart here).
+    for (rect, expected) in [("[98 688 192 720]", "SECRET"), ("[98 688 310 720]", "SECRET tail")] {
         let mut b = Builder::new();
         b.add("<< /Type /Catalog /Pages 2 0 R >>");
         b.add("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
         b.add("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>");
-        b.add_stream(
-            b"BT /F1 24 Tf 100 700 Td (SECRET) Tj ET
-BT /F1 24 Tf 200 700 Td (tail) Tj ET
-",
-        );
+        b.add_stream(b"BT /F1 24 Tf 100 700 Td (SECRET) Tj ET\nBT /F1 24 Tf 250 700 Td (tail) Tj ET\n");
         b.add(FONT);
         b.add(&format!("<< /Type /Annot /Subtype /Redact /Rect {rect} >>"));
         let findings = audit_redactions(&open(b.build())).expect("audit must run");
-        assert_eq!(findings.iter().map(|f| (f.kind.clone(), f.covered_text.as_str())).collect::<Vec<_>>(), [(FindingKind::UnappliedMark, covered)]);
+        assert_eq!(findings.iter().map(|f| (f.kind.clone(), f.covered_text.as_str())).collect::<Vec<_>>(), [(FindingKind::UnappliedMark, expected)]);
     }
 }
 

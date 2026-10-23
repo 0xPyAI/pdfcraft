@@ -262,20 +262,29 @@ fn covers(cover: &[f64; 4], line: &TextLine) -> bool {
 
 /// Appends the text of `line` that `cover` lies on to `out`: the runs whose words it overlaps
 /// (#4164), so the words of the line painted beside the cover, which stay visible, are not
-/// reported as hidden. The whole line when its runs can't say: a single run, a line whose text
-/// was reordered for reading, or a cover that overlaps the line's box but none of its words.
+/// reported as hidden. Neighbouring runs are joined as the line joins them, so a word split
+/// across runs stays one word; runs with others left out between them are spaced. The whole
+/// line when its runs can't say: a single run, a line whose text was reordered for reading, or
+/// a cover that overlaps the line's box but none of its words.
 fn covered_words(cover: &[f64; 4], line: &TextLine, out: &mut String) {
     let overlaps = |w: &[f64; 4]| area(&[cover[0].max(w[0]), cover[1].max(w[1]), cover[2].min(w[2]), cover[3].min(w[3])]) > 0.0;
-    let mut runs = line.runs().filter(|(text, ink)| !text.trim().is_empty() && ink.iter().any(overlaps)).peekable();
-    if line.runs().nth(1).is_none() || runs.peek().is_none() {
-        out.push_str(line.text.trim());
-        return;
-    }
-    for (i, (text, _)) in runs.enumerate() {
-        if i > 0 {
-            out.push(' ');
+    let mut words = String::new();
+    let mut last = None;
+    for (i, (text, ink, spaced)) in line.runs().enumerate() {
+        if text.trim().is_empty() || !ink.iter().any(overlaps) {
+            continue;
         }
-        out.push_str(text.trim());
+        let apart = last.is_some_and(|l: usize| l.saturating_add(1) != i || spaced);
+        if apart && !words.ends_with(char::is_whitespace) && !text.starts_with(char::is_whitespace) {
+            words.push(' ');
+        }
+        words.push_str(text);
+        last = Some(i);
+    }
+    if line.runs().nth(1).is_none() || last.is_none() {
+        out.push_str(line.text.trim());
+    } else {
+        out.push_str(words.trim());
     }
 }
 
