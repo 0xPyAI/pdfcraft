@@ -6717,6 +6717,32 @@ fn a_lone_carriage_return_breaks_an_edited_paragraph() {
     assert_eq!(lines, ["one", "two"]);
 }
 
+/// On the styled rewrite path too, `\r\n` is one row break and a lone `\r` another, and no
+/// carriage return reaches the page: with no other formatting, and with a part set in red.
+#[test]
+fn carriage_returns_break_rows_on_the_styled_path() {
+    let draft = "one\r\ntwo\rthree";
+    let red = text::RangeStyle {
+        range: 0..3,
+        family: None,
+        resource: None,
+        size: None,
+        color: Some([1.0, 0.0, 0.0]),
+        underline: None,
+        char_spacing: None,
+        scale: None,
+    };
+    for style in [text::BlockStyle::default(), text::BlockStyle { ranges: vec![red], ..Default::default() }] {
+        let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Hello world) Tj ET");
+        text::rewrite_block(&mut doc, 0, 0, Some(draft), &style).unwrap();
+        let doc = reopen(&doc);
+        let content = page_content_bytes(&doc, 0);
+        assert!(!content.contains(&b'\r') && !content.windows(2).any(|w| w == b"\\r"), "{}", String::from_utf8_lossy(&content));
+        let lines: Vec<String> = text::text_lines(&doc, 0).unwrap().into_iter().map(|l| l.text).collect();
+        assert_eq!(lines, ["one", "two", "three"], "{style:?}");
+    }
+}
+
 /// A subset with no space glyph shows each space as a positioning gap one space wide, so a run
 /// of spaces still takes a run's width (#4199).
 #[test]

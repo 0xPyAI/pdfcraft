@@ -547,9 +547,18 @@ pub(super) fn rewrite_styled_block(
     let mut programs: HashMap<String, Option<std::sync::Arc<Vec<u8>>>> = HashMap::new();
     for (range, index) in styled_spans {
         let source = lines.get(index).unwrap_or(first);
-        for ch in draft.get(range).unwrap_or_default().chars() {
+        let start = range.start;
+        for (offset, ch) in draft.get(range).unwrap_or_default().char_indices() {
             if ch == '\n' {
                 chars.push((ch, index, source.font.clone()));
+                continue;
+            }
+            // A carriage return breaks the row too. Before `\n` the pair is one break, so the
+            // CR stays a `\r` the rows skip. Either way it keeps its place among the draft's
+            // characters, which rows are counted in.
+            if ch == '\r' {
+                let crlf = start.checked_add(offset).and_then(|at| draft.get(at.saturating_add(1)..)).is_some_and(|rest| rest.starts_with('\n'));
+                chars.push((if crlf { '\r' } else { '\n' }, index, source.font.clone()));
                 continue;
             }
             let s = ch.to_string();
@@ -735,6 +744,11 @@ pub(super) fn rewrite_styled_block(
     let mut at = 0;
     while at < chars.len() {
         let Some(item) = chars.get(at) else { break };
+        // The CR of a CRLF: the `\n` after it breaks the row.
+        if item.0 == '\r' {
+            at += 1;
+            continue;
+        }
         if item.0 == '\n' {
             row_ranges.push(row_start..row_start + row.len());
             rows.push(std::mem::take(&mut row));

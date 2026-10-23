@@ -2726,7 +2726,8 @@ fn rewrite_block_from(
         && (!style.ranges.is_empty()
             || style.resource.is_some()
             || (text.is_some_and(|draft| {
-                draft.contains('\n')
+                // A row break, `\n` or a carriage return, takes the path that keeps untouched rows.
+                draft.contains(['\n', '\r'])
                     || pdfcraft_fonts::source_shaping::required(draft)
                     || !pdfcraft_fonts::embedding::matching_faces(&b.base_font).is_empty()
             }) || registered_face
