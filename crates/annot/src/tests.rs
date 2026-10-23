@@ -1505,6 +1505,61 @@ fn typed_signature_uses_nonzero_winding_fill() {
     assert!(!ap.contains("f*"), "must not use even-odd fill (`f*`): {ap}");
 }
 
+/// Many page tree nodes sharing one `/Kids` array read it once, not once per node.
+#[test]
+fn page_walk_reads_a_shared_kids_array_once() {
+    let mut doc = fixture();
+    let root = ObjRef { num: 2, generation: 0 };
+    let (first, second) = (ObjRef { num: 3, generation: 0 }, ObjRef { num: 4, generation: 0 });
+    let shared = doc.add(Object::Array([Object::Ref(first), Object::Ref(second)].into_iter().cycle().take(2_000).collect()));
+    let nodes: Vec<Object> = (0..1_000)
+        .map(|_| {
+            let mut d = Dict::new();
+            d.set(b"Type".to_vec(), Object::name("Pages"));
+            d.set(b"Kids".to_vec(), Object::Ref(shared));
+            Object::Ref(doc.add(d))
+        })
+        .collect();
+    doc.update_dict(root, |d| d.set(b"Kids".to_vec(), Object::Array(nodes))).unwrap();
+    let mut walk = PageWalk::new(&doc, root);
+    let pages: Vec<ObjRef> = walk.by_ref().collect();
+    assert_eq!(pages, [first, second]);
+    assert!(walk.examined <= 10_000, "{} kids entries read", walk.examined);
+}
+
+/// Adding many links to a page extends its `/Annots` once, not once per link.
+#[test]
+fn many_links_extend_a_page_annotation_list_once() {
+    let mut doc = fixture();
+    let before = annots(&doc, page_refs(&doc).unwrap()[0]).len();
+    let n = 2_000;
+    let rects: Vec<[f64; 4]> = (0..n).map(|i| [10.0, i as f64 * 0.1, 50.0, i as f64 * 0.1 + 5.0]).collect();
+    ANNOTS_ENTRIES_COPIED.with(|c| c.set(0));
+    let added = links::add_many(&mut doc, &[(0, rects, "https://example.com".into())], &links::LinkStyle::default()).unwrap();
+    let copied = ANNOTS_ENTRIES_COPIED.with(std::cell::Cell::get);
+    assert_eq!(added, n);
+    assert_eq!(annots(&doc, page_refs(&doc).unwrap()[0]).len(), before + n);
+    assert!(copied <= 4 * n, "{copied} annotation entries copied for {n} links");
+}
+
+/// A batch with one bad entry adds nothing: no link objects are left behind unattached.
+#[test]
+fn a_link_batch_with_a_bad_entry_creates_no_objects() {
+    let mut doc = fixture();
+    let page = page_refs(&doc).unwrap()[0];
+    let before = (annots(&doc, page).len(), doc.scan_objects().count());
+    let good = [10.0, 10.0, 50.0, 20.0];
+    let style = links::LinkStyle::default();
+    for bad in [
+        vec![(0, vec![good], "https://example.com".to_string()), (0, vec![good, [f64::NAN, 0.0, 10.0, 10.0]], "https://example.com".into())],
+        vec![(0, vec![good], "https://example.com".to_string()), (0, vec![good], "  ".into())],
+        vec![(0, vec![good], "https://example.com".to_string()), (99, vec![good], "https://example.com".into())],
+    ] {
+        assert!(links::add_many(&mut doc, &bad, &style).is_err());
+        assert_eq!((annots(&doc, page).len(), doc.scan_objects().count()), before);
+    }
+}
+
 fn doc_of(objs: &[String]) -> Document {
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();

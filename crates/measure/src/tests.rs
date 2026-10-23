@@ -403,6 +403,31 @@ fn a_scale_ratio_converts_its_page_side_to_points() {
         assert!(Scale::ratio([0.0, 0.0], [1.0, 0.0], page, PageUnit::Mm, real, "mm", 2).is_err(), "{page} {real}");
     }
 }
+/// A content stream reads its `/XObject` resources once, not again (as a copy of a direct
+/// dictionary) for every `Do`.
+#[test]
+fn xobject_resources_are_read_once_per_stream() {
+    let d = fixture(&"/Missing Do\n".repeat(10_000), "", &[]);
+    snap::XOBJECT_DICT_READS.with(|c| c.set(0));
+    let paths = snap::geometry(&d, 0).unwrap();
+    assert!(paths.segments.is_empty());
+    let reads = snap::XOBJECT_DICT_READS.with(std::cell::Cell::get);
+    assert!(reads <= 1, "{reads} reads of the page's XObject resources");
+}
+/// Finding the scale under a point reads only well-formed viewport boxes, and only as many
+/// viewports as a page can be given, however many a file lists or however long their boxes.
+#[test]
+fn scale_lookup_reads_viewports_within_bounds() {
+    let vp = vec!["5 0 R"; 5_000].join(" ");
+    let long_box = vec!["0"; 2_000].join(" ");
+    let d = fixture("", &format!("/VP [{vp}]"), &["<< /Type /Viewport /BBox 6 0 R >>", &format!("[{long_box}]")]);
+    VIEWPORT_NUMBERS_READ.with(|c| c.set(0));
+    let scale = scale_at(&d, 0, [10.0, 10.0]).unwrap();
+    assert_eq!(scale.unit, "in");
+    let read = VIEWPORT_NUMBERS_READ.with(std::cell::Cell::get);
+    assert!(read <= 4 * 1024, "{read} viewport numbers read");
+}
+
 #[test]
 fn listing_skips_repeated_refs_and_caps_what_it_keeps() {
     let mut d = fixture("", "", &[]);
