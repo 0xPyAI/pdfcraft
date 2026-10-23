@@ -125,11 +125,22 @@ impl Edge {
     }
 }
 
-/// A box border: four edges (top, right, bottom, left) and a fill.
+/// One corner of a border: how far it rounds the box (`radius`), and whether the curve goes
+/// into the box (`inverted`) rather than around it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Corner {
+    pub presence: Presence,
+    pub radius: f64,
+    pub inverted: bool,
+}
+
+/// A box border: four edges (top, right, bottom, left), four corners (top-left, top-right,
+/// bottom-right, bottom-left) and a fill.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Border {
     pub presence: Presence,
     pub edges: [Edge; 4],
+    pub corners: [Corner; 4],
     pub fill: Option<Color>,
 }
 
@@ -143,6 +154,15 @@ impl Border {
 
     pub fn fill(&self) -> Option<Color> {
         if self.presence == Presence::Visible { self.fill } else { None }
+    }
+
+    /// How far each corner (top-left, top-right, bottom-right, bottom-left) rounds a box `w` by
+    /// `h`: its radius when the corner is shown, no more than half the box's shorter side, and 0
+    /// for a hidden corner or a hidden border.
+    pub fn radii(&self, w: f64, h: f64) -> [f64; 4] {
+        let most = (w.min(h) / 2.0).max(0.0);
+        let shown = self.presence == Presence::Visible;
+        self.corners.map(|c| if shown && c.presence == Presence::Visible && c.radius.is_finite() { c.radius.clamp(0.0, most) } else { 0.0 })
     }
 }
 
@@ -581,7 +601,7 @@ pub enum Value {
         slope_up: bool,
         edge: Edge,
     },
-    Rectangle(Border),
+    Rectangle(Box<Border>),
 }
 
 impl Value {
