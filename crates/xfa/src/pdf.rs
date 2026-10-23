@@ -586,6 +586,16 @@ impl Emitter<'_> {
         // The link the text before ended in, which a next piece of it on the line widens.
         let mut last_link: Option<LinkPiece> = None;
         for (i, item) in page.items.iter().enumerate() {
+            // A link's pieces join only across text and the underline drawn just before it: a fill,
+            // picture, field or a line that isn't level between them ends the link there.
+            let keeps_link = match item {
+                Item::Text(_) => true,
+                Item::Line { from, to, .. } => (from.1 - to.1).abs() < 0.01,
+                _ => false,
+            };
+            if !keeps_link {
+                last_link = None;
+            }
             match item {
                 Item::Fill { rect, color } => {
                     content.extend(format!("{} rg {} {} {} {} re f\n", rgb(*color), n(rect.x), n(h - rect.bottom()), n(rect.w), n(rect.h)).bytes());

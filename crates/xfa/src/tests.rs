@@ -469,6 +469,39 @@ fn links_in_rich_text_become_link_annotations_one_per_line() {
     assert!((r[2] - r[0] - width).abs() < 0.01, "over the whole address: {} against {width}", r[2] - r[0]);
 }
 
+/// Two pieces of one link side by side on a line join into one link, but a rule drawn between
+/// them keeps them apart, so the link never covers what lies between its pieces; an underline
+/// (a level line drawn with its text) doesn't.
+#[test]
+fn a_rule_between_two_pieces_of_a_link_keeps_them_apart() {
+    let piece = |name: &str, x: &str, underline: bool| {
+        let u = if underline { ";text-decoration:underline" } else { "" };
+        format!(
+            r#"<draw name="{name}" x="{x}" y="0in" w="0.4in" h="0.3in"><font typeface="Arial" size="10pt"/><value><exData contentType="text/html"><body xmlns="http://www.w3.org/1999/xhtml"><p style="margin:0{u}"><a href="https://example.com/form">Go</a></p></body></exData></value></draw>"#
+        )
+    };
+    let rule = r#"<draw name="rule" x="0.21in" y="0in" w="0in" h="0.3in"><value><line><edge/></line></value></draw>"#;
+    let form = |between: &str, underline: bool| {
+        format!(
+            r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"><subform name="form" layout="position">
+ <pageSet><pageArea name="page"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ {}{between}{}
+</subform></template></xdp:xdp>"##,
+            piece("first", "0in", underline),
+            piece("second", "0.25in", underline)
+        )
+    };
+    let links = |xdp: &str| {
+        let mut doc = Document::open(Arc::new(shell(xdp))).unwrap();
+        render_into(&mut doc).unwrap();
+        text_links(&doc).len()
+    };
+    assert_eq!(links(&form("", false)), 1, "side by side, the pieces join");
+    assert_eq!(links(&form("", true)), 1, "an underline doesn't part them");
+    assert_eq!(links(&form(rule, false)), 2, "a rule between them does");
+}
+
 /// Only web and email addresses become links. Scripts, files, data, relative paths and empty
 /// or overlong addresses stay plain text (still drawn), with one warning for the form.
 #[test]
