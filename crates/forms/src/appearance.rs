@@ -358,8 +358,8 @@ fn is_round(doc: &Document, wd: &Dict) -> bool {
 
 /// [`frame`] for a round check button: the `/MK /BG` background as a disc and the `/MK /BC`
 /// border as a circle, both centred in the `w` × `h` box and as wide as its shorter side. A
-/// dashed border stays dashed; any other style is drawn solid, and a border as wide as the
-/// circle fills it. Returns the border width.
+/// dashed border stays dashed and an underline stays an underline; any other style is drawn
+/// solid, and a border as wide as the circle fills it. Returns the border width.
 fn round_frame(doc: &Document, wd: &Dict, mk: Option<&Dict>, w: f64, h: f64) -> (String, f64) {
     let mut c = String::new();
     let (cx, cy, r) = (w / 2.0, h / 2.0, w.min(h).max(0.0) / 2.0);
@@ -368,14 +368,20 @@ fn round_frame(doc: &Document, wd: &Dict, mk: Option<&Dict>, w: f64, h: f64) -> 
     }
     let bs = wd.get(b"BS").map(|b| doc.resolve(b)).and_then(|b| b.as_dict().cloned());
     let bw = bs.as_ref().and_then(|b| b.get(b"W")).and_then(|x| doc.resolve(x).as_f64()).unwrap_or(1.0).max(0.0);
+    let style = bs.as_ref().and_then(|b| b.name(b"S").map(<[u8]>::to_vec)).unwrap_or_default();
     match color_array(doc, mk, b"BC") {
+        // An underline stays one: only the bottom edge, as for any widget.
+        Some(bc) if bw > 0.0 && style == b"U" => {
+            c.push_str(&format!("{}\n{} w\n0 {} m {} {} l S\n", stroke_op(&bc), n(bw), n(bw / 2.0), n(w), n(bw / 2.0)));
+            (c, bw)
+        }
         // A border as wide as the circle fills it: a disc in the border's colour.
         Some(bc) if bw > 0.0 && bw >= 2.0 * r => {
             c.push_str(&format!("{bc}\n{}f\n", circle_path(cx, cy, r)));
             (c, 2.0 * r)
         }
         Some(bc) if bw > 0.0 => {
-            let dashed = bs.as_ref().and_then(|b| b.name(b"S")) == Some(b"D");
+            let dashed = style == b"D";
             // The stroke is centred on the path: inset by half its width, it stays inside.
             let path = circle_path(cx, cy, r - bw / 2.0);
             c.push_str(&format!("{}\n{} w\n{}{path}S\n[] 0 d\n", stroke_op(&bc), n(bw), if dashed { "[3] 0 d\n" } else { "" }));
