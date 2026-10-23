@@ -207,11 +207,13 @@ fn write(doc: &mut Document, a: &FieldAction, pages: &[pdfcraft_cos::ObjRef]) ->
 }
 
 /// Replace field `name`'s actions (on every widget) with `actions`; triggers not listed lose
-/// theirs. `Other` actions are left as they are.
+/// theirs. `Other` actions, and actions that read the same as before, are left as they are (with
+/// their chain and the keys this module doesn't read); a script edited in place keeps its chain.
 pub fn set_field_actions(doc: &mut Document, name: &str, actions: &[(Trigger, FieldAction)]) -> Result<(), FormError> {
     let all = fields(doc);
     let f = all.iter().find(|f| f.name == name).ok_or_else(|| FormError::NoSuchField(name.into()))?.clone();
     let pages = crate::page_refs(doc);
+    let mut scripts = crate::script_budget();
     for w in &f.widgets {
         let wd = doc.get(w.obj).as_dict().cloned().unwrap_or_default();
         let mut aa = wd.get(b"AA").map(|a| doc.resolve(a)).and_then(|a| a.as_dict().cloned()).unwrap_or_default();
@@ -221,10 +223,27 @@ pub fn set_field_actions(doc: &mut Document, name: &str, actions: &[(Trigger, Fi
             if matches!(new, Some(FieldAction::Other(_))) {
                 continue;
             }
+            let old = match t.key() {
+                None => wd.get(b"A").cloned().or_else(|| aa.get(b"U").cloned()),
+                Some(k) => aa.get(k).cloned(),
+            };
+            let old_action = old.as_ref().and_then(|o| read(doc, o, &pages, &mut scripts));
+            if new.is_some() && new == old_action.as_ref() {
+                continue;
+            }
+            let next = match (new, &old_action) {
+                (Some(FieldAction::JavaScript(_)), Some(FieldAction::JavaScript(_))) => {
+                    old.and_then(|o| doc.resolve(&o).as_dict().and_then(|d| d.get(b"Next").cloned()))
+                }
+                _ => None,
+            };
             let obj = match new {
                 Some(a) => write(doc, a, &pages)?,
                 None => None,
             };
+            if let (Some(Object::Ref(r)), Some(next)) = (&obj, next) {
+                doc.update_dict(*r, |d| d.set(b"Next".to_vec(), next))?;
+            }
             match t.key() {
                 None => {
                     a_entry = obj;

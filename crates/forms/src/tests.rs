@@ -1908,6 +1908,47 @@ fn field_actions_round_trip_on_every_trigger() {
 }
 
 #[test]
+fn editing_one_script_keeps_the_other_actions_and_the_chain() {
+    let mut doc = fixture();
+    let go = field(&fields(&doc), "go").obj;
+    let action = |doc: &mut Document, entries: Vec<(&[u8], Object)>| {
+        let mut a = Dict::new();
+        for (k, v) in entries {
+            a.set(k.to_vec(), v);
+        }
+        doc.add(Object::Dict(a))
+    };
+    let next = action(&mut doc, vec![(b"S", Object::name("URI")), (b"URI", Object::String(PdfString::literal(b"https://example.org".to_vec())))]);
+    let up = action(
+        &mut doc,
+        vec![(b"S", Object::name("JavaScript")), (b"JS", Object::String(PdfString::text("app.alert(1);"))), (b"Next", Object::Ref(next))],
+    );
+    let blur = action(
+        &mut doc,
+        vec![(b"S", Object::name("JavaScript")), (b"JS", Object::String(PdfString::text("this.dirty = true;"))), (b"Foo", Object::Int(7))],
+    );
+    let mut aa = Dict::new();
+    aa.set(b"Bl".to_vec(), Object::Ref(blur));
+    doc.update_dict(go, |d| {
+        d.set(b"A".to_vec(), Object::Ref(up));
+        d.set(b"AA".to_vec(), Object::Dict(aa));
+    })
+    .unwrap();
+    let mut acts = field_actions(&doc, "go").unwrap();
+    assert_eq!(acts[0], (Trigger::MouseUp, FieldAction::JavaScript("app.alert(1);".into())));
+    acts[0].1 = FieldAction::JavaScript("app.alert(2);".into());
+    set_field_actions(&mut doc, "go", &acts).unwrap();
+    let w = doc.get(go).as_dict().cloned().unwrap();
+    // The action that did not change is the same object, with its keys this crate doesn't read.
+    let aa = w.get(b"AA").unwrap().as_dict().unwrap().clone();
+    assert_eq!(aa.get(b"Bl"), Some(&Object::Ref(blur)));
+    // The edited script keeps the actions chained after it.
+    let a = doc.resolve(w.get(b"A").unwrap()).as_dict().cloned().unwrap();
+    assert_eq!(a.get(b"Next"), Some(&Object::Ref(next)));
+    assert_eq!(field_actions(&doc, "go").unwrap()[0], (Trigger::MouseUp, FieldAction::JavaScript("app.alert(2);".into())));
+}
+
+#[test]
 fn push_buttons_read_hide_actions() {
     let mut doc = fixture();
     let go = field(&fields(&doc), "go").obj;

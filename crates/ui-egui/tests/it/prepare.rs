@@ -712,6 +712,68 @@ fn actions_tab_adds_and_removes_actions() {
     );
 }
 
+#[test]
+fn actions_tab_edits_the_script_of_an_existing_action() {
+    use pdfcraft_engine::{FieldAction, FieldTrigger};
+    let mut h = harness();
+    h.state_mut().execute("form.prepare");
+    h.run_steps(2);
+    let script = "if (event.value > 10) {\n  app.alert('Too many');\n}";
+    let actions = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().field_actions("city")
+    };
+    let open = |h: &mut Harness<'static, PdfCraftApp>| {
+        h.state_mut().open_field_props("city", 0);
+        h.run_steps(2);
+        h.get_by_label("Actions").click();
+        h.run_steps(2);
+    };
+    // A script on Mouse Up and a link on Blur, saved with the field.
+    open(&mut h);
+    for (trigger, kind, text) in [(FieldTrigger::MouseUp, 0, script), (FieldTrigger::OnBlur, 1, "https://example.org")] {
+        let d = h.state_mut().field_props.as_mut().unwrap();
+        d.new_action = pdfcraft_ui_egui::prepare::ActionDraft { trigger, kind, text: text.into() };
+        h.run_steps(3);
+        h.get_by_label("Add").click();
+        h.run_steps(2);
+    }
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    let saved = actions(&h);
+    // Edit shows the script exactly as stored; Discard leaves everything as it was.
+    open(&mut h);
+    h.get_all_by_label("Edit").last().unwrap().click();
+    h.run_steps(2);
+    h.get_by_label("Edit Action");
+    assert_eq!(h.state().field_props.as_ref().unwrap().new_action.text, script);
+    h.state_mut().field_props.as_mut().unwrap().new_action.text = "app.alert('changed');".into();
+    h.run_steps(2);
+    h.get_by_label("Discard").click();
+    h.run_steps(2);
+    h.get_by_label("Add an Action");
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    assert_eq!(actions(&h), saved);
+    // Update replaces that script only: same trigger, the link untouched.
+    open(&mut h);
+    h.get_all_by_label("Edit").last().unwrap().click();
+    h.run_steps(2);
+    h.state_mut().field_props.as_mut().unwrap().new_action.text = "app.alert('changed');".into();
+    h.run_steps(2);
+    h.get_by_label("Update").click();
+    h.run_steps(2);
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    assert_eq!(
+        actions(&h),
+        [
+            (FieldTrigger::MouseUp, FieldAction::JavaScript("app.alert('changed');".into())),
+            (FieldTrigger::OnBlur, FieldAction::Uri("https://example.org".into()))
+        ]
+    );
+}
+
 /// Text field table: pick the tool and drag out an area in the empty lower part of page 1, 200 by
 /// 120 points from (40, 240) as displayed. The table's window opens for it.
 fn draw_table(h: &mut Harness<'static, PdfCraftApp>) {

@@ -4956,8 +4956,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.prepare"]
 tools = ["form_actions", "form_set_actions"]
-evidence = ["crates/forms/src/tests.rs::field_actions_round_trip_on_every_trigger", "crates/automation/tests/it/automation.rs::field_actions_through_tools", "crates/ui-egui/tests/it/prepare.rs::actions_tab_adds_and_removes_actions"]
-notes = "Six triggers; Run a JavaScript, Open a web link, Reset a form, Execute a menu item, Go to a page view, Show/hide a field, Submit a form. Other action types are kept."
+evidence = ["crates/forms/src/tests.rs::field_actions_round_trip_on_every_trigger", "crates/automation/tests/it/automation.rs::field_actions_through_tools", "crates/ui-egui/tests/it/prepare.rs::actions_tab_adds_and_removes_actions", "crates/ui-egui/tests/it/prepare.rs::actions_tab_edits_the_script_of_an_existing_action", "crates/forms/src/tests.rs::editing_one_script_keeps_the_other_actions_and_the_chain"]
+notes = "Six triggers; Run a JavaScript, Open a web link, Reset a form, Execute a menu item, Go to a page view, Show/hide a field, Submit a form. Other action types are kept. Edit opens the script of an existing Run a JavaScript action; unchanged actions and the chain after an edited script are kept as they are. Edit for the other action types, and several actions per trigger, are missing."
 
 [[feature]]
 id = "form.props-format"
