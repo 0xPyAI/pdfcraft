@@ -402,8 +402,11 @@ fn cancelling_works_from_the_first_call_with_a_jpeg_drawn_many_times() {
     let jpeg = after_soi(&rgb_jpeg(&photo(w, h), w, h), &vec![0; 8_000_000]);
     let mut doc = Document::new_empty();
     let img = jpeg_image(&mut doc, w, h, "DeviceRGB", jpeg, Parms::None);
-    let content = format!("q {w} 0 0 {h} 0 0 cm /Im Do Q
-").repeat(64);
+    let content = format!(
+        "q {w} 0 0 {h} 0 0 cm /Im Do Q
+"
+    )
+    .repeat(64);
     one_page(&mut doc, w, h, &[("Im".to_string(), img)], &content);
     let mut stages = Vec::new();
     let result = optimize_with_progress(&mut doc, &Settings::default(), &mut |stage| {
