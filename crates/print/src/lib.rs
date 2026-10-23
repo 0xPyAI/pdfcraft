@@ -774,13 +774,16 @@ fn appearance_matrix(doc: &Document, form: &Dict, rect: [f64; 4]) -> Option<Matr
 }
 
 /// A Form XObject holding page `index` as it prints (user space; BBox = crop box).
+/// `pages` are the document's pages, listed once by the caller: listing them for each page
+/// printed would make printing quadratic in the page count.
 fn page_form(
     doc: &mut Document,
+    pages: &[pdfcraft_model::Page],
     index: usize,
     content: Content,
     promoted: &mut std::collections::HashMap<ObjRef, ObjRef>,
 ) -> Result<ObjRef, PrintError> {
-    let page = pdfcraft_model::pages(doc).swap_remove(index);
+    let page = pages.get(index).ok_or_else(|| PrintError::Invalid(format!("there is no page {}", index.saturating_add(1))))?;
     let crop = page.crop(doc);
     let mut res = page.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
     let mut body = if content == Content::FormFieldsOnly {
@@ -850,10 +853,24 @@ fn page_form(
     Ok(doc.add(Object::Stream(Stream::flate(d, &body))))
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Pages listed by [`source_pages`] on this thread.
+    static PAGES_LISTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The source document's pages, for printing.
+fn source_pages(doc: &Document) -> Vec<pdfcraft_model::Page> {
+    let pages = pdfcraft_model::pages(doc);
+    #[cfg(test)]
+    PAGES_LISTED.with(|c| c.set(c.get() + pages.len()));
+    pages
+}
+
 /// Build the print-ready PDF for `settings`. Encryption is not carried over (the file goes to a
 /// printer or is the user's own copy); callers must check the print permission first.
 pub fn impose(src: &Document, settings: &Settings) -> Result<Vec<u8>, PrintError> {
-    let pages = pdfcraft_model::pages(src);
+    let pages = source_pages(src);
     let sizes: Vec<(f64, f64)> = pages.iter().map(|p| p.display_size(src)).collect();
     let sheets = layout(&sizes, settings)?;
     let mut doc = src.clone();
@@ -870,7 +887,7 @@ pub fn impose(src: &Document, settings: &Settings) -> Result<Vec<u8>, PrintError
             let form = match forms.get(&pl.page) {
                 Some(f) => *f,
                 None => {
-                    let f = page_form(&mut doc, pl.page, settings.content, &mut promoted)?;
+                    let f = page_form(&mut doc, &pages, pl.page, settings.content, &mut promoted)?;
                     forms.insert(pl.page, f);
                     f
                 }

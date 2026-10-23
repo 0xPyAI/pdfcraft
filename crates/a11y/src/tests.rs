@@ -1307,3 +1307,20 @@ fn content_past_the_decode_budget_needs_a_manual_check() {
     assert_eq!(status(&report, Rule::ImageOnly), Status::Manual);
     assert_eq!(status(&report, Rule::TaggedContent), Status::Manual);
 }
+
+/// Marking a tag as an artifact replaces the page's content with what it decoded, so content past
+/// the page's decode budget is refused rather than dropped from the page.
+#[test]
+fn marking_a_tag_artifact_refuses_content_past_the_decode_budget() {
+    use pdfcraft_cos::{Dict, ObjRef, Object, Stream};
+    let mut doc = figures_doc();
+    let filler = doc.add(Stream::flate(Dict::new(), &vec![b' '; 1 << 20]));
+    let last = doc.add(Stream::from_raw(Dict::new(), b"0 0 5 5 re f".to_vec()));
+    let mut contents = vec![Object::Ref(ObjRef::new(4, 0))];
+    contents.extend(std::iter::repeat_n(Object::Ref(filler), 256));
+    contents.push(Object::Ref(last));
+    let contents = Object::Array(contents);
+    doc.update_dict(ObjRef::new(3, 0), |p| p.set(b"Contents".to_vec(), contents.clone())).unwrap();
+    assert_eq!(mark_tag_artifact(&mut doc, ObjRef::new(7, 0)), Err(ArtifactError::TooLarge));
+    assert_eq!(doc.get(ObjRef::new(3, 0)).as_dict().unwrap().get(b"Contents"), Some(&contents), "the page keeps its content");
+}

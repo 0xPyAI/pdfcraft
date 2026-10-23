@@ -12,6 +12,10 @@ pub const MAX_PAGE_DECODED: usize = 256 << 20;
 /// Form XObjects one page's content walk may enter, each entry counted again.
 pub const MAX_PAGE_FORMS: usize = 50_000;
 
+/// A stream decode within a byte bound, with the bytes its filter stages decoded: the data or
+/// the error, each with that count.
+type Decoder = fn(&Stream, usize) -> Result<(Vec<u8>, usize), (FilterError, usize)>;
+
 /// What one operation may still decode and enter across all the streams it reads.
 ///
 /// [`MAX_DECODED`](crate::MAX_DECODED) bounds one decode. It does not bound a page whose
@@ -53,45 +57,52 @@ impl DecodeBudget {
     /// `stream` decoded like [`Stream::decoded`], charged to the allowance. Fails, without
     /// decoding, once the allowance is spent.
     pub fn decode(&mut self, stream: &Stream) -> Result<Vec<u8>, CosError> {
-        self.charge(stream, usize::MAX, Stream::decoded_within_typed)
+        self.charge(stream, usize::MAX, Stream::decoded_within_counted)
     }
 
     /// Like [`DecodeBudget::decode`], for a stream with a tighter bound of its own: decoding
     /// past `max` bytes is an error that charges `max`, the work it took to find out.
     pub fn decode_within(&mut self, stream: &Stream, max: usize) -> Result<Vec<u8>, CosError> {
-        self.charge(stream, max, Stream::decoded_within_typed)
+        self.charge(stream, max, Stream::decoded_within_counted)
     }
 
     /// `stream` decoded like [`Stream::decoded_strict`] (any corruption is an error), charged to
     /// the allowance.
     pub fn decode_strict(&mut self, stream: &Stream) -> Result<Vec<u8>, CosError> {
-        self.charge(stream, usize::MAX, Stream::decoded_strict_within_typed)
+        self.charge(stream, usize::MAX, Stream::decoded_strict_within_counted)
     }
 
-    fn charge(&mut self, stream: &Stream, max: usize, decode: fn(&Stream, usize) -> Result<Vec<u8>, FilterError>) -> Result<Vec<u8>, CosError> {
+    /// Decodes `stream` within `max` and the allowance, charging what every filter stage
+    /// decoded: a stage's output counts even when a later stage shrinks it, and a corrupt stream
+    /// pays for the bytes decoded before the error, so referencing a stream again and again
+    /// spends the allowance by the work each decode does.
+    fn charge(&mut self, stream: &Stream, max: usize, decode: Decoder) -> Result<Vec<u8>, CosError> {
         if self.bytes == 0 && !stream.raw.is_empty() {
             return Err(CosError::Filter(FilterError::LimitExceeded(self.limit).to_string()));
         }
         if max < self.bytes {
             let result = decode(stream, max);
             let spent = match &result {
-                Ok(data) => data.len(),
-                Err(FilterError::LimitExceeded(_)) => max,
-                Err(_) => 0,
+                Ok((_, spent)) => *spent,
+                Err((FilterError::LimitExceeded(_), _)) => max,
+                Err((_, spent)) => *spent,
             };
             self.bytes = self.bytes.saturating_sub(spent);
-            return result.map_err(|e| CosError::Filter(e.to_string()));
+            return result.map(|(data, _)| data).map_err(|(e, _)| CosError::Filter(e.to_string()));
         }
         match decode(stream, self.bytes) {
-            Ok(data) => {
-                self.bytes = self.bytes.saturating_sub(data.len());
+            Ok((data, spent)) => {
+                self.bytes = self.bytes.saturating_sub(spent);
                 Ok(data)
             }
-            Err(FilterError::LimitExceeded(_)) => {
+            Err((FilterError::LimitExceeded(_), _)) => {
                 self.bytes = 0;
                 Err(CosError::Filter(FilterError::LimitExceeded(self.limit).to_string()))
             }
-            Err(e) => Err(CosError::Filter(e.to_string())),
+            Err((e, spent)) => {
+                self.bytes = self.bytes.saturating_sub(spent);
+                Err(CosError::Filter(e.to_string()))
+            }
         }
     }
 
@@ -168,5 +179,42 @@ mod tests {
         assert!(!budget.enter_form());
         assert!(budget.first_visit(bomb));
         assert!(!budget.first_visit(bomb));
+    }
+
+    /// A corrupt stream fails a strict decode after decoding part of it: each reference pays
+    /// for that part, so references to it can't decode without limit.
+    #[test]
+    fn failed_strict_decodes_charge_what_they_decoded() {
+        let whole = Stream::flate(Dict::new(), &vec![b' '; 1 << 20]);
+        let cut = whole.raw.len() / 2;
+        let corrupt = Stream::from_raw(whole.dict.clone(), whole.raw.get(..cut).unwrap_or_default().to_vec());
+        let partial = corrupt.decoded().map(|d| d.len()).unwrap_or(0);
+        assert!(partial > 0, "a cut flate stream decodes in part");
+        let mut budget = DecodeBudget::new(10 << 20, 1);
+        assert!(budget.decode_strict(&corrupt).is_err());
+        assert_eq!(budget.remaining(), (10 << 20) - partial);
+        let mut budget = DecodeBudget::new(10 << 20, 1);
+        assert!(budget.decode_within(&corrupt, 1 << 30).is_ok());
+        assert_eq!(budget.remaining(), (10 << 20) - partial);
+    }
+
+    /// A chain whose later stage shrinks the data pays for every stage's output: a Flate stage
+    /// that inflates to hex text, which ASCIIHex then halves, charges both.
+    #[test]
+    fn decodes_charge_every_stage_of_a_chain() {
+        let hex: Vec<u8> = std::iter::repeat_n(b"ab".as_slice(), 1 << 19).flatten().copied().collect();
+        let flate = Stream::flate(Dict::new(), &hex);
+        let mut dict = Dict::new();
+        dict.set(b"Filter".to_vec(), Object::Array(vec![Object::name("FlateDecode"), Object::name("ASCIIHexDecode")]));
+        let chained = Stream::from_raw(dict, flate.raw.to_vec());
+        assert_eq!(chained.decoded().map(|d| d.len()).ok(), Some(1 << 19));
+        let charged = (1 << 20) + (1 << 19);
+        let mut budget = DecodeBudget::new(10 << 20, 1);
+        assert_eq!(budget.decode(&chained).map(|d| d.len()).ok(), Some(1 << 19));
+        assert_eq!(budget.remaining(), (10 << 20) - charged);
+        assert!(budget.decode_within(&chained, 2 << 20).is_ok());
+        assert_eq!(budget.remaining(), (10 << 20) - 2 * charged);
+        assert!(budget.decode_strict(&chained).is_ok());
+        assert_eq!(budget.remaining(), (10 << 20) - 3 * charged);
     }
 }

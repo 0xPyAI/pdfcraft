@@ -193,6 +193,17 @@ fn custom_pages_per_sheet_never_overfill_the_grid() {
 }
 
 #[test]
+fn imposing_lists_the_pages_once() {
+    let n = 150;
+    let doc = fixture(n);
+    PAGES_LISTED.with(|c| c.set(0));
+    let out = impose(&doc, &settings((0..n).collect(), Layout::multiple(2))).unwrap();
+    let listed = PAGES_LISTED.with(|c| c.get());
+    assert!(listed <= 2 * n, "{listed} pages listed to print {n}");
+    assert_eq!(pdfcraft_model::pages(&Document::open(Arc::new(out)).unwrap()).len(), n / 2);
+}
+
+#[test]
 fn booklets_pair_pages_for_folding() {
     let sizes = vec![(200.0, 300.0); 6];
     let sheets = layout(&sizes, &settings((0..6).collect(), Layout::Booklet { subset: BookletSubset::BothSides, binding: Binding::Left })).unwrap();
