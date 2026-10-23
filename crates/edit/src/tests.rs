@@ -6356,6 +6356,24 @@ fn reading_keeps_dotted_leader_entries_whole_and_in_order() {
     );
 }
 
+/// Text set larger than the widest page PDF allows (14 400 pt) panicked when its paragraph was given
+/// a width: the width is clamped between the font size and 14 400 pt, and `f64::clamp` panics when
+/// its minimum is the larger. The width is now capped at 14 400 pt whatever the font size: from the
+/// file (`Tf`, or a small `Tf` scaled up by `Tm`) or asked for (the automation tools pass it through).
+#[test]
+fn width_on_a_paragraph_set_larger_than_a_page_is_capped_not_a_panic() {
+    let wide = text::BlockStyle { width: Some(200.0), ..Default::default() };
+    let huge = text::BlockStyle { size: Some(20_000.0), width: Some(200.0), ..Default::default() };
+    for (content, style) in [
+        ("BT /F2 20000 Tf 72 700 Td (ab) Tj ET", &wide),
+        ("BT /F2 1 Tf 20000 0 0 20000 72 700 Tm (ab) Tj ET", &wide),
+        ("BT /F2 12 Tf 72 700 Td (ab) Tj ET", &huge),
+    ] {
+        let mut doc = text_page(content);
+        text::rewrite_block(&mut doc, 0, 0, None, style).unwrap();
+    }
+}
+
 #[test]
 fn added_text_is_wrapped_once_per_write() {
     let mut doc = fixture();

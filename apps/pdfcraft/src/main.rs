@@ -1414,4 +1414,26 @@ mod tests {
         let class = entry.lines().find_map(|line| line.strip_prefix("StartupWMClass="));
         assert_eq!(class, Some(super::APP_ID));
     }
+
+    // Regression test for #246: `eprintln!` panics when standard error is a broken pipe (a GUI
+    // launch on Windows), and a panic inside the panic hook aborts the process. The start-up
+    // path and the hook must write to standard error without it.
+    #[test]
+    fn start_up_and_the_panic_hook_never_use_eprintln() {
+        let source = include_str!("main.rs");
+        // Everything before the top-level test module is product code.
+        let product = source.split("\n#[cfg(test)]\nmod tests {").next().unwrap_or(source);
+        assert!(product.len() < source.len(), "found the end of the product code");
+        let offenders: Vec<_> = product
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| !line.trim_start().starts_with("//") && line.contains("eprintln!"))
+            .map(|(n, line)| format!("main.rs:{}: {}", n + 1, line.trim()))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "`eprintln!` panics on a broken standard error pipe; use `log::warn!` or `write_fmt` on `stderr()` and ignore the error:\n{}",
+            offenders.join("\n")
+        );
+    }
 }

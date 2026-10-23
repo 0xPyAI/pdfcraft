@@ -4076,6 +4076,20 @@ fn form_javascript_validates_calculates_and_formats() {
     assert!(s.run_javascript(id, "1", None).is_err());
 }
 
+/// XFA forms check `xfa_installed` and `xfa_version` in a document script that runs before
+/// each of their scripts, and alert when either is missing.
+#[test]
+fn scripts_in_an_xfa_form_see_the_xfa_plugin_installed() {
+    let check = "typeof xfa_installed + ' ' + typeof xfa_version + ' ' + xfa_version";
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let xfa = s.open("form.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::template(3))), None).unwrap();
+    let o = s.run_javascript(xfa, check, None).unwrap();
+    assert_eq!((o.error, o.result.as_deref()), (None, Some("boolean number 3.5")));
+    let plain = s.open("order.pdf", None, Arc::new(scripted_form()), None).unwrap();
+    let o = s.run_javascript(plain, check, None).unwrap();
+    assert_eq!((o.error, o.result.as_deref()), (None, Some("undefined number 3.5")));
+}
+
 #[test]
 fn edit_history_does_not_replay_field_script_side_effects() {
     let mut s = Session::new().with_clock(|| 1_700_000_000);

@@ -587,7 +587,10 @@ pub fn list_cached(doc: &Document, bytes: &[u8], trust: &TrustStore, cache: &Dig
             .and_then(|(_, w)| nums(doc, w, b"Rect"))
             .filter(|r| r.len() == 4)
             .map(|r| [r[0].min(r[2]), r[1].min(r[3]), r[0].max(r[2]), r[1].max(r[3])]);
-        let visible = rect.is_some_and(|r| r[2] - r[0] > 0.5 && r[3] - r[1] > 0.5);
+        // Shown when it has a box, and its widget isn't Hidden (2) or NoView (32), as the forms
+        // crate reads a widget's flags.
+        let flags = widget.and_then(|(_, w)| w.get(b"F")).and_then(|o| doc.resolve(o).as_int()).unwrap_or(0);
+        let visible = rect.is_some_and(|r| r[2] - r[0] > 0.5 && r[3] - r[1] > 0.5) && flags & (2 | 32) == 0;
         let v = f.signature(doc);
         let mut info = SignatureInfo {
             field: f.name.clone(),
