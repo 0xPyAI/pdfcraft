@@ -990,6 +990,9 @@ mod formcalc {
         assert_eq!(calc("Round(PV(100, 0.01, 12), 2)"), "1125.51");
         assert_eq!(calc(r#"UnitValue("2in", "mm")"#), "50.8");
         assert_eq!(calc(r#"UnitType("2.5cm")"#), "cm");
+        assert_eq!(calc(r#"UnitValue("72points", "in")"#), "1");
+        assert_eq!(calc(r#"UnitValue("25.4millimeters", "inches")"#), "1");
+        assert_eq!(calc(r#"UnitValue("1in", "points")"#), "72");
         assert_eq!(calc(r#"Encode("a b&c", "url")"#), "a%20b%26c");
         assert_eq!(calc(r#"Decode("a%20b", "url")"#), "a b");
         assert!(go(r#"Get("http://example.com")"#, "form1[0].page1[0].total[0]", "calculate").error.unwrap().contains("network"));

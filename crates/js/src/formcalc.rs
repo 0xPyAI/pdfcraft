@@ -2522,10 +2522,10 @@ impl Interp<'_> {
                 let v = parse_num(&s).unwrap_or(0.0);
                 let unit: String = s.trim().chars().skip_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '+').collect();
                 let per_in = |u: &str| match u.trim().to_ascii_lowercase().as_str() {
-                    "mm" => 25.4,
-                    "cm" => 2.54,
-                    "pt" => 72.0,
-                    "pc" => 6.0,
+                    "mm" | "millimeter" | "millimeters" => 25.4,
+                    "cm" | "centimeter" | "centimeters" => 2.54,
+                    "pt" | "point" | "points" => 72.0,
+                    "pc" | "pica" => 6.0,
                     _ => 1.0,
                 };
                 let target = if to.trim().is_empty() { unit.clone() } else { to };
