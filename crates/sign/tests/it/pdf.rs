@@ -2602,3 +2602,19 @@ fn freeing_a_signed_object_or_rewriting_the_signed_widget_is_a_page_content_chan
     assert_eq!(moved.status, Status::Invalid, "{:?}", moved.modification);
     assert!(matches!(&moved.modification, Modification::Disallowed(k) if k.contains(&kind::PAGE_CONTENT)), "{:?}", moved.modification);
 }
+
+/// An existing signature field whose `/V` is null is unsigned: signing it rewrites its widget,
+/// and that is a signature, not a change to what an earlier signature shows.
+#[test]
+fn signing_a_field_with_a_null_value_after_another_signature_keeps_the_first_valid() {
+    let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    let trust = TrustStore { certs: vec![id.certificate.clone()] };
+    let first = pdfcraft_sign::sign(&open(&fixture()), &id, &opts()).unwrap();
+    let second = pdfcraft_sign::sign(&open(&first), &id, &SignOptions { field: Some("Approval".into()), ..opts() }).unwrap();
+    let all = signatures(&open(&second), &second, &trust);
+    assert!(
+        all.iter().filter(|s| s.signed).all(|s| s.status == Status::Valid),
+        "{:?}",
+        all.iter().map(|s| (&s.status, &s.modification)).collect::<Vec<_>>()
+    );
+}

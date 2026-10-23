@@ -1788,7 +1788,10 @@ fn change_kind(doc: &Document, old: &Document, d: &Dict, before: Option<&Dict>) 
     // A signature widget that already held a signature is what the signature shows: moving it or
     // swapping its appearance can hide the signed page under it. Judged by the signed revision,
     // so relabelling the widget now does not change that.
-    if before.is_some_and(|b| b.name(b"Subtype") == Some(b"Widget") && b.contains(b"V") && b.name(b"FT") == Some(b"Sig")) && before != Some(d) {
+    if before.is_some_and(|b| {
+        b.name(b"Subtype") == Some(b"Widget") && b.name(b"FT") == Some(b"Sig") && b.get(b"V").is_some_and(|v| old.resolve(v).as_dict().is_some())
+    }) && before != Some(d)
+    {
         return kind::PAGE_CONTENT;
     }
     match ty {
