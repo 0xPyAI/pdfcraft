@@ -80,6 +80,9 @@ pub struct TextLine {
     /// Why the line can't be edited: its font's writing mode (its CMap's `WMode`) couldn't be read,
     /// so which way its glyphs advance is unknown. The line is listed as horizontal text.
     unreadable_mode: Option<String>,
+    /// The runs the line joins, in content order: each one's text and the end of its words in
+    /// `ink`. Empty when the line's text was put into another order (see [`TextLine::runs`]).
+    runs: Vec<(String, usize)>,
 }
 
 impl TextLine {
@@ -537,6 +540,20 @@ impl TextLine {
     /// page content-stream index and `ops` are indices into the joined operator list.)
     pub fn first_paint_pos(&self) -> (usize, usize) {
         (self.stream, self.ops.iter().min().copied().unwrap_or(0))
+    }
+
+    /// The runs of text the line joins, in content order: each run's text as its glyphs show it
+    /// and the boxes of its words (a part of `ink`). Joining adds no space between runs, so a
+    /// run's text is not a word of `text` that can be found by position. None when the line's
+    /// text was reordered for reading (right-to-left or visual-order Indic text): then only the
+    /// line's text as a whole says what it reads.
+    pub fn runs(&self) -> impl Iterator<Item = (&str, &[[f64; 4]])> {
+        let mut start = 0;
+        self.runs.iter().map(move |(text, end)| {
+            let ink = self.ink.get(start..*end).unwrap_or_default();
+            start = *end;
+            (text.as_str(), ink)
+        })
     }
 
     fn rotation(&self) -> f64 {
@@ -1367,6 +1384,7 @@ fn text_lines_in(doc: &Document, p: &pdfcraft_model::Page, actual_text: bool) ->
             l.rect = [l.rect[0].min(s.rect[0]), l.rect[1].min(s.rect[1]), l.rect[2].max(s.rect[2]), l.rect[3].max(s.rect[3])];
             l.frame = union(l.frame, s.frame);
             l.ink.extend(s.ink.iter().copied());
+            l.runs.push((s.text.clone(), l.ink.len()));
             l.ops.push(s.op);
             l.ops.extend(s.extra_ops.iter().copied());
             l.decodable &= s.decodable;
@@ -1399,6 +1417,7 @@ fn text_lines_in(doc: &Document, p: &pdfcraft_model::Page, actual_text: bool) ->
                 actual_text: s.actual_text,
                 clips: s.state.render_mode >= 4,
                 unreadable_mode: s.state.unreadable.as_deref().map(str::to_owned),
+                runs: vec![(s.text.clone(), s.ink.len())],
                 ops: std::iter::once(s.op).chain(s.extra_ops.iter().copied()).collect(),
                 origin: Origin {
                     tm: s.tm.0,
@@ -1418,10 +1437,15 @@ fn text_lines_in(doc: &Document, p: &pdfcraft_model::Page, actual_text: bool) ->
     // Content streams draw right-to-left lines in visual order; the editor works in typing order.
     for l in lines.iter_mut().filter(|l| !l.logical_order) {
         // A visual-order Indic font draws pre-base vowel signs before their consonant.
+        let shown = l.text.clone();
         if l.visual_order && !l.actual_text {
             l.text = crate::indic::to_logical(&l.text);
         }
         l.text = crate::bidi::to_logical(&l.text);
+        // The runs hold the text in drawing order, which no longer reads as the line does.
+        if l.text != shown {
+            l.runs.clear();
+        }
     }
     // Lines of only spaces aren't editable text.
     lines.retain(|l| !l.text.trim().is_empty());
@@ -1470,6 +1494,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
         l.rect = [l.rect[0].min(s.rect[0]), l.rect[1].min(s.rect[1]), l.rect[2].max(s.rect[2]), l.rect[3].max(s.rect[3])];
         l.frame = union(l.frame, s.frame);
         l.ink.extend(s.ink.iter().copied());
+        l.runs.push((s.text.clone(), l.ink.len()));
         l.ops.push(s.op);
         l.ops.extend(s.extra_ops.iter().copied());
         l.decodable &= s.decodable;
@@ -1501,6 +1526,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
             actual_text: s.actual_text,
             clips: s.state.render_mode >= 4,
             unreadable_mode: s.state.unreadable.as_deref().map(str::to_owned),
+            runs: vec![(s.text.clone(), s.ink.len())],
             ops: std::iter::once(s.op).chain(s.extra_ops.iter().copied()).collect(),
             origin: Origin {
                 tm: s.tm.0,
@@ -1681,7 +1707,11 @@ fn reading_lines(doc: &Document, page: usize) -> Result<(Vec<TextLine>, bool), E
     let mut lines = w.lines;
     // A visual-order Indic font draws pre-base vowel signs before their consonant.
     for l in lines.iter_mut().filter(|l| l.visual_order && !l.actual_text) {
+        let shown = l.text.clone();
         l.text = crate::indic::to_logical(&l.text);
+        if l.text != shown {
+            l.runs.clear();
+        }
     }
     lines.retain(|l| !l.text.trim().is_empty());
     Ok((lines, w.budget.truncated))
