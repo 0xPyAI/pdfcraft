@@ -177,6 +177,17 @@ struct Measured {
     size: (f64, f64),
 }
 
+/// A point in the flow ([`Layouter::flow_mark`]): the page and content area, the height
+/// reached there, and how many items the page had then.
+#[derive(Clone, Copy, Debug)]
+struct FlowMark {
+    page: usize,
+    area: usize,
+    content: usize,
+    y: f64,
+    items: usize,
+}
+
 struct Cursor {
     area: usize,
     content: usize,
@@ -596,6 +607,42 @@ impl Layouter<'_> {
         }
     }
 
+    /// Where the flow is now ([`FlowMark`]); `None` before the first page.
+    fn flow_mark(&self) -> Option<FlowMark> {
+        let c = self.cur.as_ref()?;
+        Some(FlowMark { page: self.pages.len(), area: c.area, content: c.content, y: c.y, items: self.pages.last().map_or(0, |p| p.items.len()) })
+    }
+
+    /// Draw a flowed subform's border `b` (edges and fill) round what it took since `start`, `x`
+    /// and `w` wide, under the content drawn since: once its content is placed, its height is
+    /// known. A subform that didn't stay in one content area is drawn without its border, and the
+    /// layout says so.
+    fn draw_flowed_border(&mut self, b: &Border, start: Option<FlowMark>, x: f64, w: f64) -> Result<(), XfaError> {
+        let Some(s) = start else { return Ok(()) };
+        if b.fill().is_none() && b.visible_edges() == [false; 4] {
+            return Ok(());
+        }
+        let (_, end, _) = self.cursor();
+        let same_area = self.cur.as_ref().is_some_and(|c| c.area == s.area && c.content == s.content);
+        if self.pages.len() != s.page || !same_area {
+            self.warn_once("a bordered section that doesn't fit in one content area is drawn without its border");
+            return Ok(());
+        }
+        if end - s.y < 0.01 {
+            return Ok(());
+        }
+        let before = self.pages.last().map_or(0, |p| p.items.len());
+        self.draw_border(b, Rect::new(x, s.y, w, end - s.y))?;
+        // Moved back to where the subform started, so its content is drawn over them.
+        if let Some(p) = self.pages.last_mut() {
+            let added = p.items.len().saturating_sub(before);
+            if let Some(tail) = p.items.get_mut(s.items..) {
+                tail.rotate_right(added.min(tail.len()));
+            }
+        }
+        Ok(())
+    }
+
     /// Move the cursor down (margins and spacing: the area still counts as empty).
     fn advance(&mut self, dy: f64) {
         if let Some(c) = &mut self.cur {
@@ -794,6 +841,8 @@ impl Layouter<'_> {
                 continue;
             }
             let m = sf.common.margin;
+            // Where the subform starts: its border and fill go round what it takes from here.
+            let start = self.flow_mark();
             self.advance(m.top);
             let inner_x = x + m.left;
             let inner_w = (w - m.horizontal()).max(1.0);
@@ -818,6 +867,9 @@ impl Layouter<'_> {
                 }
             }
             self.advance(m.bottom);
+            if let Some(b) = &sf.common.border {
+                self.draw_flowed_border(b, start, x, w)?;
+            }
         }
         if sf.break_after_page {
             self.new_page()?;

@@ -2048,6 +2048,42 @@ fn a_multi_line_field_without_a_height_grows_to_hold_its_text() {
     assert!((notes.rect.h - 108.0).abs() < 0.01, "{:?}", notes.rect);
 }
 
+/// A flowed subform without a fixed height gets its border and fill round all it takes, margins
+/// included, drawn under its content; a flowed table too. One that doesn't fit in one content
+/// area keeps no border, and the layout says so.
+#[test]
+fn a_flowed_subform_is_drawn_with_its_border_under_its_content() {
+    let field = |name: &str| format!(r#"<field name="{name}" w="3in" h="0.5in"><ui><textEdit/></ui></field>"#);
+    let boxed = |inner: &str| {
+        format!(
+            r#"<subform name="box" layout="tb" w="7.5in"><border><edge thickness="1pt"/><fill><color value="230,230,230"/></fill></border><margin topInset="0.1in" bottomInset="0.2in"/>{inner}</subform>"#
+        )
+    };
+    let lay = |body: &str| {
+        layout_xml(&one_area_form(r#"layout="tb""#, &format!(r#"<subform name="body" layout="tb" w="7.5in">{body}</subform>"#))).unwrap()
+    };
+    // Two half-inch fields between a tenth and a fifth of an inch of margin: 1.3in from the top.
+    let form = lay(&boxed(&(field("a") + &field("b"))));
+    let items = &form.pages[0].items;
+    let fill = items.iter().position(|i| matches!(i, Item::Fill { .. })).expect("the subform's fill");
+    let Some(Item::Fill { rect, .. }) = items.get(fill) else { panic!("item {fill} is the fill") };
+    assert!((rect.y - 36.0).abs() < 0.01 && (rect.h - 1.3 * 72.0).abs() < 0.01 && (rect.w - 540.0).abs() < 0.01, "{rect:?}");
+    assert_eq!(items.iter().filter(|i| matches!(i, Item::Line { .. })).count(), 4, "its four edges");
+    let first_widget = items.iter().position(|i| matches!(i, Item::Widget(_))).unwrap();
+    assert!(fill < first_widget, "the fill is under the fields");
+    assert!(form.warnings.is_empty(), "{:?}", form.warnings);
+    // A flowed table's border too.
+    let table = r#"<subform name="grid" layout="table" columnWidths="2in 2in" w="4in"><border><edge/></border><subform name="row" layout="row"><draw name="c1" h="0.4in"><value><text>One</text></value></draw><draw name="c2" h="0.4in"><value><text>Two</text></value></draw></subform></subform>"#;
+    let form = lay(table);
+    assert_eq!(form.pages[0].items.iter().filter(|i| matches!(i, Item::Line { .. })).count(), 4, "{:?}", form.pages[0].items);
+    // Thirty fields don't fit one page: no border, and one warning.
+    let many: String = (0..30).map(|i| field(&format!("f{i}"))).collect();
+    let form = lay(&boxed(&many));
+    assert!(form.pages.len() >= 2);
+    assert!(form.pages.iter().all(|p| !p.items.iter().any(|i| matches!(i, Item::Fill { .. }))), "no fill drawn");
+    assert_eq!(form.warnings.iter().filter(|w| w.contains("bordered section")).count(), 1, "{:?}", form.warnings);
+}
+
 #[test]
 fn a_page_break_keeps_a_fields_border_with_the_field() {
     // 6in of heading, then a bordered 5in field: it doesn't fit the 10in area and moves to
