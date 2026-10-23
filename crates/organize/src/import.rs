@@ -58,6 +58,7 @@ const WIDGET_KEYS: &[&[u8]] = &[
     b"StructParents",
     b"OC",
     b"Tabs",
+    b"A",
 ];
 
 struct Copier<'a> {
@@ -435,7 +436,8 @@ fn import_pages_mapped(
                     {
                         let r = dst.add(Object::Null);
                         let c = copier.copy_value(dst, &resolved, Some(r))?;
-                        let Object::Dict(mut d) = c else { continue };
+                        let Object::Dict(d) = c else { continue };
+                        let (_, mut d) = field_and_widget(dst, &d);
                         d.set(b"Parent".to_vec(), Object::Ref(parent));
                         // The new widget is not a field root of its own.
                         copier.fields.retain(|f| *f != r);
@@ -864,14 +866,7 @@ fn add_kid(dst: &mut Document, field: ObjRef, kid: ObjRef) -> Result<(), Organiz
 /// field stays one.
 fn split_own_field(dst: &mut Document, fields: &mut [ObjRef], widget: ObjRef) {
     let Some(d) = dst.get(widget).as_dict().cloned() else { return };
-    let (mut field, mut child) = (Dict::new(), Dict::new());
-    for (k, v) in d.iter() {
-        if WIDGET_KEYS.contains(&k.as_slice()) {
-            child.set(k.clone(), v.clone());
-        } else {
-            field.set(k.clone(), v.clone());
-        }
-    }
+    let (mut field, mut child) = field_and_widget(dst, &d);
     let parent = dst.add(Object::Null);
     field.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(widget)]));
     child.set(b"Parent".to_vec(), Object::Ref(parent));
@@ -880,6 +875,37 @@ fn split_own_field(dst: &mut Document, fields: &mut [ObjRef], widget: ObjRef) {
     if let Some(entry) = fields.iter_mut().find(|f| **f == widget) {
         *entry = parent;
     }
+}
+
+/// A combined field/widget has two additional-action namespaces (ISO 32000-1 tables 194/196).
+/// Partition them as well as the ordinary entries, including when copying a later widget.
+fn field_and_widget(doc: &Document, d: &Dict) -> (Dict, Dict) {
+    let (mut field, mut child) = (Dict::new(), Dict::new());
+    for (k, v) in d.iter() {
+        if k.as_slice() == b"AA"
+            && let Some(actions) = doc.resolve(v).as_dict().cloned()
+        {
+            let (mut field_actions, mut widget_actions) = (Dict::new(), Dict::new());
+            for (trigger, action) in actions.iter() {
+                if [b"E".as_slice(), b"X", b"D", b"U", b"Fo", b"Bl", b"PO", b"PC", b"PV", b"PI"].contains(&trigger.as_slice()) {
+                    widget_actions.set(trigger.clone(), action.clone());
+                } else {
+                    field_actions.set(trigger.clone(), action.clone());
+                }
+            }
+            if field_actions.iter().next().is_some() {
+                field.set(k.clone(), Object::Dict(field_actions));
+            }
+            if widget_actions.iter().next().is_some() {
+                child.set(k.clone(), Object::Dict(widget_actions));
+            }
+        } else if WIDGET_KEYS.contains(&k.as_slice()) {
+            child.set(k.clone(), v.clone());
+        } else {
+            field.set(k.clone(), v.clone());
+        }
+    }
+    (field, child)
 }
 
 /// Add top-level fields to the destination's `/AcroForm /Fields` (creating the form if needed).

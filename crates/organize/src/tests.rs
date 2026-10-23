@@ -690,6 +690,9 @@ fn repeated_page_splits_a_combined_field_widget() {
     assert_ne!(w1, w2, "each copy of the page has its own widget");
     for (i, w) in [(0, w1), (1, w2)] {
         let d = out.get(w).as_dict().unwrap().clone();
+        for key in [b"T".as_slice(), b"V", b"FT"] {
+            assert!(!d.contains(key), "a widget inherits field entries: {key:?}");
+        }
         assert_eq!(d.reference(b"P"), Some(ps[i].obj), "/P names the page holding the widget");
         let parent = d.reference(b"Parent").expect("the widget has a parent field");
         let f = out.get(parent).as_dict().unwrap().clone();
@@ -709,6 +712,46 @@ fn repeated_page_splits_a_combined_field_widget() {
             .filter_map(|f| f.as_ref())
             .collect();
         assert_eq!(fields, [parent], "the parent is the one top-level field");
+    }
+}
+
+#[test]
+fn splitting_a_combined_widget_keeps_annotation_actions_and_field_triggers() {
+    let mut src = doc_a();
+    let page = pages(&src).unwrap()[1].obj;
+    let list = page_dict(&src, 1).get(b"Annots").and_then(|a| a.as_array()).cloned().unwrap();
+    let widget =
+        list.iter().filter_map(Object::as_ref).find(|r| src.get(*r).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Widget"))).unwrap();
+    let mut action = Dict::new();
+    action.set(b"S".to_vec(), Object::name("GoTo"));
+    action.set(b"D".to_vec(), Object::Array(vec![Object::Ref(page), Object::name("Fit")]));
+    let mut named = Dict::new();
+    named.set(b"S".to_vec(), Object::name("Named"));
+    named.set(b"N".to_vec(), Object::name("NextPage"));
+    let mut aa = Dict::new();
+    aa.set(b"E".to_vec(), Object::Dict(named.clone()));
+    aa.set(b"K".to_vec(), Object::Dict(named));
+    let aa = src.add(Object::Dict(aa));
+    src.update_dict(widget, |d| {
+        d.set(b"A".to_vec(), Object::Dict(action));
+        d.set(b"AA".to_vec(), Object::Ref(aa));
+    })
+    .unwrap();
+    let out = full_roundtrip(&extract_pages(&src, &[1, 1]).unwrap());
+    let ps = pages(&out).unwrap();
+    for i in 0..2 {
+        let w = annots(&out, i).into_iter().find(|d| d.name(b"Subtype") == Some(b"Widget")).unwrap();
+        let action = out.resolve(w.get(b"A").expect("the widget keeps its action"));
+        let dest = action.as_dict().unwrap().get(b"D").and_then(|a| a.as_array()).unwrap()[0].as_ref().unwrap();
+        assert!(ps.iter().any(|p| p.obj == dest), "the action targets a copied page");
+        let waa = out.resolve(w.get(b"AA").expect("widget triggers"));
+        assert!(waa.as_dict().unwrap().contains(b"E"));
+        assert!(!waa.as_dict().unwrap().contains(b"K"));
+        let parent = out.get(w.reference(b"Parent").unwrap()).as_dict().unwrap().clone();
+        assert!(!parent.contains(b"A"));
+        let faa = out.resolve(parent.get(b"AA").expect("field triggers"));
+        assert!(faa.as_dict().unwrap().contains(b"K"));
+        assert!(!faa.as_dict().unwrap().contains(b"E"));
     }
 }
 
