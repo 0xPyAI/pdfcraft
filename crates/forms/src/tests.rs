@@ -3228,3 +3228,35 @@ fn dotted_field_names_are_made_with_parent_fields() {
     assert!(add_field(&mut doc, 0, [300.0, 200.0, 450.0, 220.0], &text, Some(&deep)).is_err(), "too deep");
     assert!(set_props(&mut doc, "name", &FieldProps { name: Some("MASTER.street1".into()), ..FieldProps::default() }).is_err(), "taken");
 }
+
+/// Review on #2957: spaces in a typed name. The ends of the whole name are dropped, as Acrobat
+/// does when a field is renamed; a space beside a period stays in the part it belongs to (`a. b`
+/// is `b` with a leading space under `a`), as Acrobat keeps it and as ISO 32000-2 §12.7.4.2
+/// allows: only a period is barred from a partial name.
+#[test]
+fn a_typed_name_loses_its_ends_but_keeps_spaces_beside_periods() {
+    let mut doc = fixture();
+    let own_name = |doc: &Document, full: &str| {
+        let all = fields(doc);
+        doc.get(field(&all, full).obj).as_dict().and_then(|d| d.get(b"T").and_then(text_of))
+    };
+    let text = NewField::Text { multiline: false };
+    assert_eq!(add_field(&mut doc, 0, [50.0, 300.0, 200.0, 320.0], &text, Some(" plain ")).unwrap(), "plain");
+    assert_eq!(add_field(&mut doc, 0, [50.0, 260.0, 200.0, 280.0], &text, Some("a. b")).unwrap(), "a. b");
+    assert_eq!(add_field(&mut doc, 0, [50.0, 220.0, 200.0, 240.0], &text, Some("c .d")).unwrap(), "c .d");
+    assert_eq!(set_props(&mut doc, "zip", &FieldProps { name: Some(" e. f ".into()), ..FieldProps::default() }).unwrap(), "e. f");
+    let saved = reopen(&doc);
+    assert_eq!(own_name(&saved, "plain").as_deref(), Some("plain"));
+    assert_eq!(own_name(&saved, "a. b").as_deref(), Some(" b"));
+    assert_eq!(own_name(&saved, "c .d").as_deref(), Some("d"));
+    assert_eq!(own_name(&saved, "e. f").as_deref(), Some(" f"));
+    let parent = |full: &str| {
+        let all = fields(&saved);
+        let p = saved.get(field(&all, full).obj).as_dict().and_then(|d| d.reference(b"Parent")).unwrap();
+        saved.get(p).as_dict().and_then(|d| d.get(b"T").and_then(text_of))
+    };
+    assert_eq!(parent("c .d").as_deref(), Some("c "), "the space before the period is the parent's");
+    assert_eq!(parent("e. f").as_deref(), Some("e"));
+    // A part that is only spaces is still empty.
+    assert!(add_field(&mut doc, 0, [300.0, 300.0, 450.0, 320.0], &text, Some("g. .h")).is_err());
+}
