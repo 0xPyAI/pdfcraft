@@ -162,7 +162,9 @@ pub struct SaveOptions {
     /// Incremental saves: leave out what was added since the file was read and nothing refers to
     /// any more, such as a comment added and deleted again or a redaction mark added and cleared
     /// (written as free). Off by default, because a writer may add an object only it finds again
-    /// by scanning, as a standalone document timestamp is. Full saves always leave these out.
+    /// by scanning, as a standalone document timestamp is; such a writer frees the leftovers
+    /// before adding it, with [`Document::free_unlinked_additions`]. Full saves always leave
+    /// these out.
     pub drop_unlinked: bool,
 }
 
@@ -460,7 +462,7 @@ fn output_number(index: usize) -> Result<u32, CosError> {
 /// from the trailer and the file's changed objects through additions. An unchanged object of the
 /// file is not followed: a reference it holds to such a number already reads as null in the file
 /// (a damaged file's dangling reference), and it still does.
-fn unlinked_additions(doc: &Document) -> HashSet<u32> {
+pub(crate) fn unlinked_additions(doc: &Document) -> HashSet<u32> {
     let added = |num: u32| matches!(doc.xref_entry(num), None | Some(XrefEntry::Free { .. }));
     let mut pending: HashMap<u32, Arc<Object>> =
         doc.overlay_entries().filter_map(|(num, _, o)| Some((num, o?))).filter(|(num, _)| added(*num)).collect();

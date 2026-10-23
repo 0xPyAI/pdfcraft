@@ -274,6 +274,15 @@ fn incremental_save_leaves_out_additions_nothing_refers_to() {
     }
     assert!(!page(&back).contains(b"Annots"));
     assert_qpdf_clean(&saved);
+
+    // Freed beforehand, they are written the same way without the option, and what is added
+    // after that, nothing referring to it either (a document timestamp), is kept.
+    let mut freed = doc.clone();
+    freed.free_unlinked_additions();
+    assert_eq!(write_incremental(&freed, &SaveOptions::default()).unwrap(), saved, "the same objects, freed the same way");
+    freed.add(text("added after"));
+    let stamped = write_incremental(&freed, &SaveOptions::default()).unwrap();
+    assert!(stamped.windows(11).any(|w| w == b"added after") && !stamped.windows(12).any(|w| w == b"dropped leaf"));
 }
 
 #[test]

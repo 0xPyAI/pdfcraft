@@ -2490,6 +2490,28 @@ fn redaction_marks_apply_for_good_and_undo() {
     assert!(matches!(s.apply(id, Edit::ApplyRedactions { pages: None }), Err(EditError::Redact(_))));
 }
 
+/// What [`mark_with_reply`] writes that must not reach a file once the mark is removed.
+const MARK_TRACES: [&str; 5] = ["/Redact", "MARKED OVERLAY", "Mark Author", "REPLY TO THE MARK", "Replier"];
+
+/// A redaction mark on page 1 (the first annotation there) and a reply to it.
+fn mark_with_reply(s: &mut Session, id: DocId) {
+    let shape = Shape::Redact {
+        quads: vec![pdfcraft_annot::rect_quad([80.0, 140.0, 100.0, 180.0])],
+        overlay: "MARKED OVERLAY".into(),
+        look: Default::default(),
+    };
+    let mark = Edit::AddAnnotation(NewAnnotation {
+        page: 0,
+        style: Style::default_for(&shape),
+        shape,
+        contents: String::new(),
+        author: "Mark Author".into(),
+    });
+    s.apply(id, mark).unwrap();
+    let reply = Edit::ReplyToAnnotation { page: 0, index: 0, text: "REPLY TO THE MARK".into(), author: "Replier".into() };
+    s.apply(id, reply).unwrap();
+}
+
 /// Marks removed before they are applied, all at once or one by one, are not saved, nor are
 /// replies to them: the file would otherwise record where they were, their overlay text and who
 /// made them, and the page is left as it was.
@@ -2497,28 +2519,14 @@ fn redaction_marks_apply_for_good_and_undo() {
 fn removed_redaction_marks_are_not_saved() {
     for clear in [true, false] {
         let (mut s, id) = session_with(1);
-        let shape = Shape::Redact {
-            quads: vec![pdfcraft_annot::rect_quad([80.0, 140.0, 100.0, 180.0])],
-            overlay: "MARKED OVERLAY".into(),
-            look: Default::default(),
-        };
-        let mark = Edit::AddAnnotation(NewAnnotation {
-            page: 0,
-            style: Style::default_for(&shape),
-            shape,
-            contents: String::new(),
-            author: "Mark Author".into(),
-        });
-        s.apply(id, mark).unwrap();
-        let reply = Edit::ReplyToAnnotation { page: 0, index: 0, text: "REPLY TO THE MARK".into(), author: "Replier".into() };
-        s.apply(id, reply).unwrap();
+        mark_with_reply(&mut s, id);
         let removal = if clear { Edit::ClearRedactions } else { Edit::DeleteAnnotation { page: 0, index: 0 } };
         s.apply(id, removal).unwrap();
         assert_eq!(s.get(id).unwrap().redaction_marks(), 0);
         let saved = s.save_bytes(id).unwrap();
-        let holds = |s: &[u8]| saved.windows(s.len()).any(|w| w == s);
-        assert!(!holds(b"/Redact") && !holds(b"MARKED OVERLAY") && !holds(b"Mark Author"), "clear: {clear}");
-        assert!(!holds(b"REPLY TO THE MARK") && !holds(b"Replier"), "clear: {clear}");
+        for trace in MARK_TRACES {
+            assert!(!saved.windows(trace.len()).any(|w| w == trace.as_bytes()), "clear: {clear}, {trace:?}");
+        }
         let mut reopened = Session::new();
         let back = reopened.open("saved.pdf", None, saved.clone(), None).unwrap();
         assert_eq!(page_texts(&reopened, back), ["Page 1"]);
@@ -2536,6 +2544,27 @@ fn removed_redaction_marks_are_not_saved() {
         assert_eq!(d.redaction_marks(), 1, "clear: {clear}");
         let marks = pdfcraft_redact::marks(&d.editor.as_ref().unwrap().cos);
         assert_eq!(marks.first().map(|m| m.overlay.as_str()), Some("MARKED OVERLAY"));
+    }
+}
+
+/// Removed marks are not in a signed file either, nor in one with revocation evidence embedded:
+/// no later save could take them out of those.
+#[test]
+fn removed_redaction_marks_are_not_signed() {
+    let p12 = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12")).unwrap();
+    let digital_id = sign::pkcs12::open(&p12, "test").unwrap();
+    // After the test certificate's start date (2026-10-02).
+    let mut s = Session::new().with_clock(|| 1_800_000_000);
+    let id = s.open("fixture.pdf", None, Arc::new(fixture(1)), None).unwrap();
+    mark_with_reply(&mut s, id);
+    s.apply(id, Edit::ClearRedactions).unwrap();
+    let signed = s.sign(id, &digital_id, SignOptions { rect: None, ..SignOptions::default() }).unwrap();
+    let evidence = sign::dss::Evidence { certs: vec![digital_id.certificate.raw.clone()], ocsps: Vec::new(), crls: Vec::new() };
+    let ltv = s.embed_ltv(id, &evidence).unwrap();
+    for (what, out) in [("signed", signed), ("LTV", ltv)] {
+        for trace in MARK_TRACES {
+            assert!(!out.windows(trace.len()).any(|w| w == trace.as_bytes()), "{what}: {trace:?}");
+        }
     }
 }
 
