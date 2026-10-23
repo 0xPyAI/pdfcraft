@@ -2677,7 +2677,7 @@ fn a_space_at_the_end_of_a_line_does_not_count_when_fitting_it() {
     assert_eq!(baselines.len(), 1, "{spans:?}");
     // Nor do they add a blank line: the text measures as tall as without them.
     let face = text::Face::of(&Font { typeface: "Arial".into(), size: 10.0, ..Font::default() });
-    let height = |t: &str| text::measure_height(&text::plain(t), w, &Para::default(), &face, &|_| String::new());
+    let height = |t: &str| text::measure_height(&text::plain(t), w, &Para::default(), &face, &|_, _| String::new());
     assert_eq!(height("a. DATE   "), height("a. DATE"));
     // Text that is wider than the box still wraps.
     let spans = draw_spans(&one_draw("a. DATES ", w, "left"));
@@ -2695,4 +2695,140 @@ fn trailing_spaces_do_not_shift_centered_or_right_aligned_text() {
     // placed by its drawn width, whatever spaces follow it.
     assert!((left_edge("center", "TITLE   ") - (36.0 + (w - ink) / 2.0)).abs() < 1e-6);
     assert!((left_edge("right", "TITLE   ") - (36.0 + w - ink)).abs() < 1e-6);
+}
+
+/// A word longer than its line is broken by character in work linear in its length.
+#[test]
+fn a_long_word_breaks_in_linear_work() {
+    let face = text::Face::of(&Font { typeface: "Arial".into(), size: 1.0, ..Font::default() });
+    let word = "i".repeat(20_000);
+    text::MEASURED.with(|m| m.set(0));
+    let b = text::layout(&text::plain(&word), Rect::new(0.0, 0.0, 1000.0, 0.0), &Para::default(), &face, &|_, _| String::new());
+    let measured = text::MEASURED.with(|m| m.get());
+    assert!(b.spans.len() > 2, "{} lines", b.spans.len());
+    assert_eq!(b.spans.iter().map(|s| s.text.len()).sum::<usize>(), 20_000);
+    assert!(measured < 200_000, "{measured} bytes measured for a 20000-byte word");
+}
+
+/// Rich text that embeds one long field value many times lays out a bounded amount of it.
+#[test]
+fn embedded_field_values_expand_to_a_bounded_amount_of_text() {
+    let face = text::Face::of(&Font { typeface: "Arial".into(), size: 10.0, ..Font::default() });
+    let value = "word ".repeat(3_300);
+    let run = Run { embed: Some("f".into()), ..Run::default() };
+    let rich = RichText { paragraphs: vec![Paragraph { runs: vec![run; 100], h_align: None }] };
+    let b = text::layout(&rich, Rect::new(0.0, 0.0, 500.0, 0.0), &Para::default(), &face, &|_, _| value.clone());
+    let kept: usize = b.spans.iter().map(|s| s.text.len()).sum();
+    assert!(kept > 0);
+    assert!(kept <= text::MAX_EMBEDDED, "{kept} bytes of embedded text laid out");
+    assert!(text::natural_width(&rich, &Para::default(), &face, &|_, _| value.clone()) <= face.width(&value) * 70.0);
+}
+
+/// Once the embedded-text budget is nearly spent, a long value embedded again is copied out only
+/// as far as the budget reaches, not whole each time.
+#[test]
+fn embedded_values_are_copied_out_only_as_far_as_the_budget() {
+    let first: String = "xxxxxxx ".repeat(text::MAX_EMBEDDED / 8 + 1).chars().take(text::MAX_EMBEDDED - 1).collect();
+    let second = "\u{e9}".repeat(100_000);
+    let span = |id: &str| format!(r##"<span xfa:embed="#{id}" xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"/>"##);
+    let spans = format!("{}{}", span("a"), span("b").repeat(200));
+    let tpl = format!(
+        r#"<template><subform layout="tb">
+<field id="a" presence="hidden" w="1in" h="0.2in"><ui><textEdit/></ui><value><text>{first}</text></value></field>
+<field id="b" presence="hidden" w="1in" h="0.2in"><ui><textEdit/></ui><value><text>{second}</text></value></field>
+<draw w="7in" h="9in"><value><exData contentType="text/html"><body xmlns="http://www.w3.org/1999/xhtml"><p>{spans}</p></body></exData></value></draw>
+</subform></template>"#
+    );
+    crate::layout::EMBED_COPIED.with(|c| c.set(0));
+    layout_xml(&tpl).unwrap();
+    let copied = crate::layout::EMBED_COPIED.with(|c| c.get());
+    // The draw is measured at most seven times before it is laid out once.
+    assert!(copied <= 8 * text::MAX_EMBEDDED as u64 + 8 * 4 * 201, "{copied} bytes of embedded values copied");
+}
+
+/// Repeated subforms each carry their own copy of a long script: the live form holds a bounded
+/// amount of script text and says it left the rest out.
+#[test]
+fn repeated_script_events_hold_a_bounded_amount_of_script() {
+    let script = format!("var a = 1; //{}", "x".repeat(32 * 1024));
+    let xml = format!(
+        r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <subform name="outer" layout="tb"><occur min="1" max="-1" initial="50"/>
+  <subform name="inner" layout="tb"><occur min="1" max="-1" initial="50"/>
+   <field name="f" w="1in" h="0.3in"><ui><textEdit/></ui>
+    <event activity="initialize"><script contentType="application/x-javascript">{script}</script></event></field>
+  </subform>
+ </subform>
+</subform>
+</template></xdp:xdp>"##
+    );
+    let (tpl, _) = parse(&xml).unwrap();
+    let live = form_tree(&tpl, None, &Overrides::default());
+    assert!(!live.events.is_empty());
+    let held: usize = live.events.iter().map(|e| e.script.len()).sum();
+    assert!(held <= crate::script::MAX_EVENT_SCRIPT_BYTES, "{held} bytes of script held by {} events", live.events.len());
+    assert!(live.truncated, "{held} bytes, {} events", live.events.len());
+}
+
+/// Rows added one at a time (each op asking for one more instance) queue each instance node
+/// once, and removals in between don't let the queue grow without bound.
+#[test]
+fn added_instances_are_queued_once_each() {
+    use crate::data::{DataOp, ENSURED, write_data_ops};
+    let mut doc = Document::open(Arc::new(shell(&scripted_template()))).unwrap();
+    render_into(&mut doc).unwrap();
+    let table = som_to_path("form[0].page1[0].table[0]");
+    let ops: Vec<DataOp> = (1..=1000).map(|count| DataOp::Instances { parent: table.clone(), name: "row".into(), count }).collect();
+    ENSURED.with(|n| n.set(0));
+    let r = write_data_ops(&mut doc, &ops, None).unwrap();
+    assert!(r.written, "{r:?}");
+    assert_eq!(crate::data_of(&doc).unwrap().count(&table, "row"), 1000);
+    let queued = ENSURED.with(|n| n.get());
+    assert!(queued <= 2_000, "{queued} instance nodes queued for 1000 rows");
+    // Removals split the ops into separate passes; together they stay within the budget.
+    let ops: Vec<DataOp> = (0..300)
+        .flat_map(|_| {
+            [
+                DataOp::Instances { parent: table.clone(), name: "row".into(), count: 1000 },
+                DataOp::Remove(som_to_path("form[0].page1[0].table[0].row[999]")),
+            ]
+        })
+        .collect();
+    ENSURED.with(|n| n.set(0));
+    let r = write_data_ops(&mut doc, &ops, None).unwrap();
+    let queued = ENSURED.with(|n| n.get());
+    assert!(queued <= 200_000, "{queued} instance nodes queued");
+    assert!(r.warnings.iter().any(|w| w.contains("instances")), "{r:?}");
+}
+
+/// A namespace declared once and inherited by many imported elements is not copied into each
+/// past the import's byte budget.
+#[test]
+fn an_inherited_namespace_does_not_multiply_an_import() {
+    use crate::data::parse_data_file;
+    let uri = format!("urn:{}", "n".repeat(70_000));
+    let xml = format!("<form1 xmlns:p=\"{uri}\">{}</form1>", "<p:a/>".repeat(1_000));
+    fn ns_bytes(nodes: &[crate::data::ImportNode]) -> usize {
+        nodes.iter().map(|n| n.ns.as_ref().map_or(0, String::len) + ns_bytes(&n.children)).sum()
+    }
+    match parse_data_file(&xml, None) {
+        Ok(nodes) => assert!(ns_bytes(&nodes) <= crate::data::MAX_IMPORT_BYTES, "{} bytes of namespaces copied", ns_bytes(&nodes)),
+        Err(e) => assert!(matches!(e, XfaError::TooLarge(_)), "{e:?}"),
+    }
+}
+
+/// A long data name with a high index is not copied into every sibling created before it.
+#[test]
+fn long_names_repeated_by_an_index_are_capped() {
+    let doc = Document::open(Arc::new(static_shell("<form1/>"))).unwrap();
+    let fields = vec![FieldDatum {
+        obj: pdfcraft_cos::ObjRef::new(1000, 0),
+        name: format!("form1[0].{}[9999]", "n".repeat(2_000)),
+        data: FieldData::Text("v".into()),
+    }];
+    let data = build_data(&doc, &fields);
+    assert!(data.len() < 2_000_000, "{} bytes of data built", data.len());
 }
