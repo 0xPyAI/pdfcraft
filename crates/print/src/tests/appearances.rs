@@ -85,6 +85,8 @@ fn xobject(doc: &Document, owner: &Dict, name: &[u8]) -> ObjRef {
     objects.as_dict().unwrap().get(name).unwrap().as_ref().unwrap()
 }
 
+/// Printing keeps occupied page resource names and distinct annotation appearances intact,
+/// whether the page resources are direct or inherited from the page tree.
 #[test]
 fn annotation_appearances_do_not_replace_page_xobjects() {
     for inherited in [false, true] {
