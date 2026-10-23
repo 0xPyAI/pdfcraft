@@ -1126,6 +1126,35 @@ impl DocView {
         Some((*page, at))
     }
 
+    /// The user-space `[left, top]` at the window's top-left (where `/XYZ` puts its point), on the
+    /// page showing there: what a destination's null coordinate keeps (ISO 32000-2 §12.3.2.2).
+    /// Acrobat keeps the place this way across pages, so a CAD sheet's cross-reference opens the
+    /// next sheet where the reader was looking. A coordinate is `None` along a screen axis the
+    /// page fits, which keeps the layout's own placement (centred, or the page's top); the whole
+    /// place is `None` before the first frame has laid pages out.
+    fn place_at_corner(&self, info: &DocInfo) -> Option<[Option<f32>; 2]> {
+        let area = self.viewport_screen;
+        if !area.is_positive() {
+            return None;
+        }
+        let corner = area.min + vec2(SIDE, 0.0);
+        let (page, xf) = self
+            .screen_xforms
+            .iter()
+            .filter(|(_, xf)| xf.rect.is_positive())
+            .min_by(|a, b| a.1.rect.distance_sq_to_pos(corner).total_cmp(&b.1.rect.distance_sq_to_pos(corner)).then(a.0.cmp(&b.0)))?;
+        let p = info.pages.get(*page)?;
+        let (x, y) = xf.screen_to_view(corner.clamp(xf.rect.min, xf.rect.max));
+        // `max` drops a NaN size, so the bounds stay ordered and `clamp` can't panic.
+        let (x, y) = (x.clamp(0.0, p.width.max(0.0)), y.clamp(0.0, p.height.max(0.0)));
+        // The page counts with its side gutters, as the layout places it.
+        let wide = xf.rect.width() + 2.0 * SIDE > area.width();
+        let tall = xf.rect.height() > area.height();
+        // The view's x runs across the screen unless the view is turned a quarter.
+        let (keep_x, keep_y) = if xf.rot.is_multiple_of(180) { (wide, tall) } else { (tall, wide) };
+        Some(p.xyz_for_view(keep_x.then_some(x), keep_y.then_some(y)))
+    }
+
     /// A page's thumbnail texture, when rendered.
     pub(crate) fn thumb_id(&self, page: usize) -> Option<egui::TextureId> {
         self.thumbs.get(&page).map(|t| t.tex.id())
@@ -1328,10 +1357,16 @@ impl DocView {
     /// and zoomed as `dest` asks, as Acrobat does. `/XYZ` puts (left, top) at the window's
     /// top-left at its zoom (null or 0 keeps the zoom); `/Fit`, `/FitH` and `/FitV` switch to fit
     /// page, width and height with `top` or `left` at the window's edge; `/FitR` zooms so the
-    /// rectangle fits, centred. The `B` (content box) forms are read as the page. A null
-    /// coordinate keeps that scroll position (null `top` on a new page: its top), and a point
-    /// past the end of the document scrolls as far as it can.
+    /// rectangle fits, centred. The `B` (content box) forms are read as the page. A null `/XYZ`
+    /// coordinate keeps the reader's place: the same user-space point stays at the window's
+    /// top-left on the new page, as Acrobat does. A point past the end of the document scrolls
+    /// as far as it can.
     pub fn go_to_dest(&mut self, page: usize, dest: DestView, info: &DocInfo) {
+        // Read before the jump: it is where the reader is now.
+        let kept = match dest {
+            DestView::Xyz { left, top, .. } if left.is_none() || top.is_none() => self.place_at_corner(info),
+            _ => None,
+        };
         self.go_to_page(page);
         let page = self.current;
         self.goto_point = None;
@@ -1348,7 +1383,8 @@ impl DocView {
                     self.fit = Fit::None;
                     self.zoom_anchor = None;
                 }
-                let [fx, fy] = point(left, top);
+                let [kept_left, kept_top] = kept.unwrap_or([None, None]);
+                let [fx, fy] = point(left.or(kept_left), top.or(kept_top));
                 (fx, fy, corner)
             }
             DestView::Fit => {
@@ -6835,6 +6871,47 @@ trailer << /Root 1 0 R >>
         }
         assert_eq!(PageLayout::try_parse(" Two-Up "), Some(PageLayout::TwoUp));
         assert_eq!(PageLayout::try_parse("facing"), None);
+    }
+
+    #[test]
+    fn a_null_xyz_coordinate_keeps_the_readers_place_on_the_new_page() {
+        // CAD exports link each cross-reference as `/XYZ null null 0`. Acrobat keeps the
+        // point at the window's top-left (and the zoom) when following one to another sheet.
+        let info = pdfcraft_render::DocInfo {
+            pages: (0..3)
+                .map(|_| pdfcraft_render::PageInfo { width: 842.0, height: 595.0, label: String::new(), crop: [0.0, 0.0, 842.0, 595.0], rotation: 0 })
+                .collect(),
+            ..Default::default()
+        };
+        // Page 1 at 400 %, scrolled so its point 200 pt across and 125 pt down is at the corner
+        // where /XYZ puts its point.
+        let zoomed = |rot: u16, size: Vec2| {
+            let mut v = view(3, PageLayout::Single, true);
+            v.rotation = rot;
+            v.viewport_screen = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 600.0));
+            v.screen_xforms = vec![(0, PageXform { rect: Rect::from_min_size(pos2(SIDE - 800.0, -500.0), size), rot, pw: 842.0, ph: 595.0 })];
+            v
+        };
+        let near = |a: Option<f32>, b: f32| a.is_some_and(|a| (a - b).abs() < 1e-4);
+        let mut v = zoomed(0, vec2(4.0 * 842.0, 4.0 * 595.0));
+        v.go_to_dest(1, DestView::Xyz { left: None, top: None, zoom: None }, &info);
+        let (page, fx, fy, rel) = v.goto_point.expect("the place is kept");
+        assert_eq!((v.current, page, rel), (1, 1, vec2(SIDE, 0.0)));
+        assert!(near(fx, 200.0 / 842.0) && near(fy, 125.0 / 595.0), "{fx:?} {fy:?}");
+        // A coordinate the destination gives wins; only the null one is kept.
+        let mut v = zoomed(0, vec2(4.0 * 842.0, 4.0 * 595.0));
+        v.go_to_dest(2, DestView::Xyz { left: Some(421.0), top: None, zoom: Some(4.0) }, &info);
+        let (_, fx, fy, _) = v.goto_point.expect("the place is kept");
+        assert!(near(fx, 0.5) && near(fy, 125.0 / 595.0), "{fx:?} {fy:?}");
+        // With the view turned a quarter, the point under the corner is still the one kept.
+        let mut v = zoomed(90, vec2(4.0 * 595.0, 4.0 * 842.0));
+        v.go_to_dest(1, DestView::Xyz { left: None, top: None, zoom: None }, &info);
+        let (_, fx, fy, _) = v.goto_point.expect("the place is kept");
+        assert!(near(fx, 800.0 / (4.0 * 595.0)) && near(fy, 500.0 / (4.0 * 842.0)), "{fx:?} {fy:?}");
+        // A page that fits the window keeps the layout's placement: no point, as before.
+        let mut v = zoomed(0, vec2(800.0, 565.0));
+        v.go_to_dest(1, DestView::Xyz { left: None, top: None, zoom: None }, &info);
+        assert_eq!((v.current, v.goto, v.goto_point), (1, Some((1, 0.0)), None));
     }
 
     #[test]
