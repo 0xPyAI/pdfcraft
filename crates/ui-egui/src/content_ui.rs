@@ -563,14 +563,7 @@ pub(crate) fn editor(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, ad
             // Character spacing shows as the page will draw it, scaled like the font.
             let letter_spacing = (t.style.char_spacing * f64::from(zoom)) as f32;
             let mut spaced = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
-                let format = egui::TextFormat {
-                    font_id: font.clone(),
-                    color: Color32::from_rgb(cr, cg, cb),
-                    extra_letter_spacing: letter_spacing,
-                    ..Default::default()
-                };
-                let mut job = egui::text::LayoutJob::single_section(text.as_str().to_owned(), format);
-                job.wrap.max_width = wrap_width;
+                let job = spaced_job(text.as_str(), &font, Color32::from_rgb(cr, cg, cb), letter_spacing, wrap_width);
                 ui.fonts_mut(|f| f.layout_job(job))
             };
             ui.horizontal_top(|ui| {
@@ -942,6 +935,16 @@ pub(crate) fn image_panel(ui: &mut egui::Ui, t: &Tokens, img: &pdfcraft_engine::
     out
 }
 
+/// The editor's layout of added text with character spacing. The page puts the spacing after every
+/// character, the last of a line included (`latin_width`), while epaint puts it only between
+/// characters: the wrap width gives up one spacing so both break lines at the same place.
+fn spaced_job(text: &str, font: &egui::FontId, color: Color32, letter_spacing: f32, wrap_width: f32) -> egui::text::LayoutJob {
+    let format = egui::TextFormat { font_id: font.clone(), color, extra_letter_spacing: letter_spacing, ..Default::default() };
+    let mut job = egui::text::LayoutJob::single_section(text.to_owned(), format);
+    job.wrap.max_width = (wrap_width - letter_spacing).max(0.0);
+    job
+}
+
 #[cfg(test)]
 mod tests {
     use egui_kittest::kittest::Queryable;
@@ -989,5 +992,45 @@ mod tests {
         assert!(i.flip_h && !i.flip_v, "Flip horizontal mirrors left and right");
         let i = flipped("Flip vertical");
         assert!(i.flip_v && !i.flip_h, "Flip vertical mirrors top and bottom");
+    }
+
+    /// #4245: the page counts the spacing after a line's last character too, so a line that fits
+    /// only without it wraps in the saved text and must wrap in the editor.
+    #[test]
+    fn editor_wraps_where_the_saved_text_does_with_trailing_spacing() {
+        let rows = |wrap: f32| {
+            let mut n = 0;
+            let mut h = egui_kittest::Harness::new_ui_state(
+                move |ui, n: &mut usize| {
+                    let font = egui::FontId::proportional(14.0);
+                    let job = spaced_job("AAAA BBBB", &font, Color32::BLACK, 10.0, wrap);
+                    *n = ui.fonts_mut(|f| f.layout_job(job)).rows.len();
+                },
+                n,
+            );
+            h.run();
+            n = *h.state();
+            n
+        };
+        // The text's width without the trailing spacing, as epaint measures it.
+        let one_line = rows(f32::INFINITY);
+        assert_eq!(one_line, 1);
+        let width = {
+            let mut w = 0.0;
+            let mut h = egui_kittest::Harness::new_ui_state(
+                |ui, w: &mut f32| {
+                    let font = egui::FontId::proportional(14.0);
+                    let job = spaced_job("AAAA BBBB", &font, Color32::BLACK, 10.0, f32::INFINITY);
+                    *w = ui.fonts_mut(|f| f.layout_job(job)).rect.width();
+                },
+                w,
+            );
+            h.run();
+            w = *h.state();
+            w
+        };
+        // Page width = width + 10 (spacing after the last character) > width + 5: the page wraps.
+        assert_eq!(rows(width + 5.0), 2, "the saved text wraps here, so the editor must too");
+        assert_eq!(rows(width + 10.0), 1, "and keeps the line when the spacing fits");
     }
 }
