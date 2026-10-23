@@ -833,6 +833,15 @@ fn indexed_hival_resolves_indirect_values_and_stream_palettes() {
 }
 
 #[test]
+fn indexed_lookup_stream_has_a_size_cap() {
+    // A lookup table needs 256 × 4 bytes at most; a 1 MiB one is refused, not decoded whole.
+    let mut palette = vec![255, 0, 0, 0, 0, 255];
+    palette.resize(1 << 20, 0);
+    let (doc, image) = indexed_export_fixture(Object::Int(1), palette, true, false, 8, vec![0, 1, 0, 1]);
+    assert!(crate::extract::image_file(&doc, image).unwrap_err().contains("lookup table"));
+}
+
+#[test]
 fn indexed_hival_boundary_values_keep_valid_palette_entries() {
     let palette: Vec<u8> = (0..=255u8).flat_map(|i| [i, 255 - i, 17]).collect();
     for high in [0, 255] {
@@ -1180,4 +1189,20 @@ fn a_jpeg_with_an_exif_orientation_becomes_an_upright_page() {
     assert!((m1[2] - 60.0).abs() < 0.01 && (m1[3] - 20.0).abs() < 0.01, "{m1:?}");
     let img = image_of(&doc, 1);
     assert_eq!((img.int(b"Width"), img.int(b"Height")), (Some(60), Some(20)));
+}
+
+#[test]
+fn a_cyclic_indexed_colour_space_is_refused() {
+    let mut doc = from_images(&[("flat.png".into(), png_bytes(false))]).unwrap();
+    // 5 0 obj [/Indexed 5 0 R 255 <00>]: the base is the indexed space itself.
+    let cs = doc.add(Object::Null);
+    doc.set(cs, Object::Array(vec![Object::name("Indexed"), Object::Ref(cs), Object::Int(255), Object::String(PdfString::literal(vec![0]))]));
+    with_image(&mut doc, |_| {
+        let mut dict = image_dict(1, 1, "DeviceGray", 8);
+        dict.set(b"ColorSpace".to_vec(), Object::Ref(cs));
+        Stream::from_raw(dict, vec![0])
+    });
+    let out = extract_images(&doc, &[0], 0);
+    assert!(out.images.is_empty());
+    assert_eq!(out.skipped.len(), 1, "{:?}", out.skipped);
 }

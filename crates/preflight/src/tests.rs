@@ -417,3 +417,15 @@ fn oversized_xmp_is_refused_while_decoding() {
     assert_eq!(stream.decoded().unwrap().len(), xmp::MAX_XMP_BYTES + 1, "fixture must actually decompress");
     assert!(metadata(&doc).is_none(), "compressed metadata must be limited during decoding");
 }
+
+#[test]
+fn an_output_intent_profile_header_is_read_within_a_size_cap() {
+    let intent = "/OutputIntents [<< /S /GTS_PDFA1 /DestOutputProfile 2 0 R >>]";
+    for (size, n) in [(128, Some(4)), (MAX_ICC_PROFILE + 1, None)] {
+        let mut doc = build(&[&format!("<< /Type /Catalog {intent} >>"), "null"], "");
+        let mut profile = vec![0; size];
+        profile[16..20].copy_from_slice(b"CMYK");
+        doc.set(pdfcraft_cos::ObjRef::new(2, 0), Object::Stream(pdfcraft_cos::Stream::flate(Dict::new(), &profile)));
+        assert_eq!(pdfa_intent_profile(&doc), Some(n), "a {size}-byte profile");
+    }
+}
