@@ -779,10 +779,11 @@ fn link_target(href: &str) -> Option<&str> {
     ok.then_some(href)
 }
 
-/// Whether `after` (a web address past its `//`) names a host: what comes before the path, query
-/// or fragment, past any user name and before any port, isn't empty.
+/// Whether `after` (a web address past its `//`) names a host: what comes before the path (which a
+/// backslash starts too, as web addresses read it), query or fragment, past any user name and
+/// before any port, isn't empty.
 fn has_host(after: &str) -> bool {
-    let authority = after.split(['/', '?', '#']).next().unwrap_or_default();
+    let authority = after.split(['/', '\\', '?', '#']).next().unwrap_or_default();
     let host = authority.rsplit('@').next().unwrap_or_default();
     // An IPv6 host is bracketed and holds colons of its own.
     let host = if host.starts_with('[') { host } else { host.split(':').next().unwrap_or_default() };

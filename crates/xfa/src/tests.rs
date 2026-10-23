@@ -511,7 +511,7 @@ fn a_rule_between_two_pieces_of_a_link_keeps_them_apart() {
 fn links_to_anything_but_web_and_email_addresses_stay_plain_text() {
     let long = format!("https://example.com/{}", "a".repeat(2100));
     let body = format!(
-        r#"<a href="javascript:app.alert(1)">one</a> <a href="file:///etc/passwd">two</a> <a href="data:text/html,x">three</a> <a href="help.html">four</a> <a href="HTTPS:">five</a> <a href="{long}">six</a> <a href="MailTo:a@example.com">seven</a> <a href="https:///path">eight</a> <a href="https://user@:8080/x">nine</a> <a href="https://user@example.com:8443/x">ten</a>"#
+        r#"<a href="javascript:app.alert(1)">one</a> <a href="file:///etc/passwd">two</a> <a href="data:text/html,x">three</a> <a href="help.html">four</a> <a href="HTTPS:">five</a> <a href="{long}">six</a> <a href="MailTo:a@example.com">seven</a> <a href="https:///path">eight</a> <a href="https://user@:8080/x">nine</a> <a href="https://\example.com/path">nine and a half</a> <a href="https://user@example.com:8443/x">ten</a>"#
     );
     let mut doc = Document::open(Arc::new(shell(&rich_draw_form("7in", &body)))).unwrap();
     let report = render_into(&mut doc).unwrap();
