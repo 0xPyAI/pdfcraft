@@ -3132,3 +3132,43 @@ fn page_walk_skips_repeated_and_cyclic_kids_without_copying_attributes() {
     assert!(walk.next().is_none());
     assert_eq!(labels(&doc), ["Page 1", "Page 2", "Page 3"]);
 }
+
+/// One page whose /Contents names the same 1 MiB stream 300 times (a few kilobytes on disk).
+fn repeated_contents() -> Document {
+    use pdfcraft_cos::{Dict, Stream};
+    let mut doc = Document::new_empty();
+    let stream = doc.add(Stream::flate(Dict::new(), &vec![b' '; 1 << 20]));
+    let pages = doc.add(Object::Null);
+    let page: Dict = [
+        (b"Type".to_vec(), Object::Name(b"Page".to_vec())),
+        (b"Parent".to_vec(), Object::Ref(pages)),
+        (b"MediaBox".to_vec(), Object::Array([0, 0, 200, 300].map(Object::from).to_vec())),
+        (b"Contents".to_vec(), Object::Array(vec![Object::Ref(stream); 300])),
+    ]
+    .into_iter()
+    .collect();
+    let page = doc.add(page);
+    let tree: Dict = [
+        (b"Type".to_vec(), Object::Name(b"Pages".to_vec())),
+        (b"Kids".to_vec(), Object::Array(vec![Object::Ref(page)])),
+        (b"Count".to_vec(), Object::Int(1)),
+    ]
+    .into_iter()
+    .collect();
+    doc.set(pages, Object::Dict(tree));
+    let catalog: Dict = [(b"Type".to_vec(), Object::Name(b"Catalog".to_vec())), (b"Pages".to_vec(), Object::Ref(pages))].into_iter().collect();
+    let catalog = doc.add(catalog);
+    doc.trailer_mut().set(b"Root".to_vec(), Object::Ref(catalog));
+    doc
+}
+
+#[test]
+fn repeated_content_references_share_one_decode_budget() {
+    let src = repeated_contents();
+    let mut dst = Document::new_empty();
+    if let Ok((form, _)) = page_as_form(&mut dst, &src, 0) {
+        let Object::Stream(s) = &*dst.get(form) else { panic!("not a stream") };
+        let len = s.decoded().unwrap().len();
+        assert!(len <= pdfcraft_cos::MAX_PAGE_DECODED + 300, "{len} bytes");
+    }
+}

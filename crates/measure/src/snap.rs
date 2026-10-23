@@ -214,14 +214,14 @@ impl Walker<'_> {
                         self.geometry.truncated = true;
                         break;
                     }
-                    // An undecodable part is skipped; the rest of the page still snaps.
+                    // An undecodable part is skipped; the parts before it still snap.
                     match s.decoded_within(remaining) {
                         Ok(data) => {
                             joined.extend(data);
                             // A space, as the renderer joins pieces: a trailing comment runs on.
                             joined.push(b' ');
                         }
-                        Err(_) => self.geometry.unreadable = self.geometry.unreadable.saturating_add(1),
+                        Err(_) => self.decode_failed(remaining),
                     }
                 }
             }
@@ -236,10 +236,16 @@ impl Walker<'_> {
         match stream.decoded_within(remaining) {
             Ok(data) => self.ops(&data, resources, initial, depth),
             Err(_) => {
-                self.geometry.unreadable = self.geometry.unreadable.saturating_add(1);
+                self.decode_failed(remaining);
                 Ok(())
             }
         }
+    }
+    /// A tolerant decode fails on an unsupported filter or once it has produced `remaining` bytes,
+    /// so a failure uses up the byte budget: repeating a failing stream cannot repeat that work.
+    fn decode_failed(&mut self, remaining: usize) {
+        self.geometry.unreadable = self.geometry.unreadable.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(remaining);
     }
     fn ops(&mut self, data: &[u8], resources: &Dict, initial: Matrix, depth: usize) -> Result<()> {
         self.bytes = self.bytes.saturating_add(data.len());

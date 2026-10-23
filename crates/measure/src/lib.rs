@@ -448,10 +448,20 @@ pub struct Unsupported {
 pub struct Listing {
     pub measurements: Vec<Measurement>,
     pub unsupported: Vec<Unsupported>,
-    /// The annotation limit stopped enumeration early.
+    /// The annotation or retained-size limit stopped enumeration early.
     pub truncated: bool,
 }
 const MAX_ANNOTATIONS: usize = 100_000;
+/// Points and text one listing keeps, as counted by [`retained`]: about a thousand
+/// measurements of [`MAX_POINTS`] points each.
+const MAX_LISTED_BYTES: usize = 32 << 20;
+/// The bytes a listed measurement keeps in points and text.
+fn retained(m: &Measurement) -> usize {
+    let s = &m.scale;
+    [m.id.len(), m.author.len(), m.label.len(), s.unit.len(), s.area_unit.len(), s.ratio.len()]
+        .into_iter()
+        .fold(m.points.len().saturating_mul(std::mem::size_of::<Point>()), usize::saturating_add)
+}
 fn read_measurement(doc: &Document, d: &Dict, kind: Kind, page: usize, index: usize) -> Result<Measurement> {
     let scale = Scale::read(doc, d.get(b"Measure").ok_or_else(|| invalid("measurement has no scale"))?)?;
     let key = if kind == Kind::Distance { &b"L"[..] } else { b"Vertices" };
@@ -471,6 +481,8 @@ fn read_measurement(doc: &Document, d: &Dict, kind: Kind, page: usize, index: us
 pub fn list(doc: &Document) -> Listing {
     let mut out = Listing::default();
     let mut count = 0usize;
+    let mut kept = 0usize;
+    let mut seen = std::collections::HashSet::new();
     for (page, p) in pdfcraft_model::pages(doc).iter().enumerate() {
         let Some(o) = p.dict.get(b"Annots") else { continue };
         let o = doc.resolve(o);
@@ -481,6 +493,12 @@ pub fn list(doc: &Document) -> Listing {
                 out.truncated = true;
                 return out;
             }
+            // One annotation object under several entries or pages is one measurement.
+            if let Some(r) = a.as_ref()
+                && !seen.insert(r)
+            {
+                continue;
+            }
             let o = doc.resolve(a);
             let Some(d) = o.as_dict() else { continue };
             let kind = match d.name(b"IT") {
@@ -490,7 +508,14 @@ pub fn list(doc: &Document) -> Listing {
                 _ => continue,
             };
             match read_measurement(doc, d, kind, page, index) {
-                Ok(m) => out.measurements.push(m),
+                Ok(m) => {
+                    kept = kept.saturating_add(retained(&m));
+                    if kept > MAX_LISTED_BYTES {
+                        out.truncated = true;
+                        return out;
+                    }
+                    out.measurements.push(m);
+                }
                 Err(e) => out.unsupported.push(Unsupported { page, index, reason: e.to_string() }),
             }
         }
