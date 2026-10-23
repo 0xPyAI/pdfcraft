@@ -6500,6 +6500,33 @@ fn xfa_rich_text_max_length_is_reported_and_enforced_through_tools() {
     assert_eq!(family["value"], "éàöüñ");
 }
 
+/// A link in a dynamic XFA form's rich text is a link on the laid-out page, as link_list reports
+/// it, and stays one after a save and a fresh open.
+#[test]
+fn links_in_xfa_rich_text_are_listed_through_tools() {
+    let dir = workdir("xfa-links");
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"><subform name="form" layout="tb">
+ <pageSet><pageArea name="page"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <draw name="help" w="6in"><font typeface="Arial" size="10pt"/><value><exData contentType="text/html"><body xmlns="http://www.w3.org/1999/xhtml"><p>Questions? Email <a href="mailto:forms@example.com">forms@example.com</a>.</p></body></exData></value></draw>
+ <field name="name" w="3in" h="0.3in"><ui><textEdit/></ui></field>
+</subform></template></xdp:xdp>"##;
+    std::fs::write(dir.join("links.pdf"), pdfcraft_xfa::fixtures::shell(xdp)).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "links.pdf" }))["doc"].as_u64().unwrap();
+    let urls = |a: &mut Automation, doc: u64| -> Vec<String> {
+        let listed = ok(a, "link_list", json!({ "doc": doc }));
+        let links = listed["links"].as_array().cloned().unwrap_or_default();
+        links.iter().filter_map(|l| l["url"].as_str().map(str::to_string)).collect()
+    };
+    assert_eq!(urls(&mut a, doc), ["mailto:forms@example.com"]);
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "name": "Ada" } }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "saved.pdf" }));
+    ok(&mut a, "doc_close", json!({ "doc": doc }));
+    let doc = ok(&mut a, "doc_open", json!({ "path": "saved.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(urls(&mut a, doc), ["mailto:forms@example.com"], "one link after a save and a fresh open, not two");
+}
+
 #[test]
 fn dynamic_xfa_forms_open_render_fill_and_save_through_tools() {
     let dir = workdir("xfa");

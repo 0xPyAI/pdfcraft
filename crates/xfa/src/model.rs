@@ -633,6 +633,8 @@ pub struct Run {
     pub h_scale: Option<f64>,
     /// A floating field embedded in the text (`xfa:embed="#id"`), shown by its value.
     pub embed: Option<String>,
+    /// Where the text links to (`<a href="…">`), as the template writes it.
+    pub link: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

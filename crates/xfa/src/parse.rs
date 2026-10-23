@@ -201,7 +201,7 @@ fn parse_common(n: XmlNode) -> Common {
 }
 
 /// Rich text: XHTML `body > p > span…`. `br` starts a new paragraph; `xfa:embed` spans become
-/// embedded fields.
+/// embedded fields; the text of an `<a href>` keeps where it links to.
 fn parse_rich(body: XmlNode) -> RichText {
     #[derive(Clone, Default)]
     struct Style {
@@ -210,6 +210,8 @@ fn parse_rich(body: XmlNode) -> RichText {
         underline: Option<bool>,
         size: Option<f64>,
         h_scale: Option<f64>,
+        /// The `href` of the `<a>` the text is in.
+        link: Option<String>,
     }
     /// `base` with the CSS declarations in `css` applied: weight, style, underline, size and
     /// `xfa-font-horizontal-scale`. Anything else is ignored.
@@ -254,6 +256,7 @@ fn parse_rich(body: XmlNode) -> RichText {
                             size: style.size,
                             h_scale: style.h_scale,
                             embed: None,
+                            link: style.link.clone(),
                         },
                     );
                 }
@@ -285,6 +288,13 @@ fn parse_rich(body: XmlNode) -> RichText {
                         "b" => st.bold = Some(true),
                         "i" => st.italic = Some(true),
                         "u" => st.underline = Some(true),
+                        // A link's text keeps where it points; an `<a>` without one (a named
+                        // anchor) leaves the text as it was.
+                        "a" => {
+                            if let Some(href) = c.attribute("href").map(str::trim).filter(|h| !h.is_empty()) {
+                                st.link = Some(href.to_string());
+                            }
+                        }
                         _ => {}
                     }
                     let embed = c.attributes().find(|a| a.name() == "embed").map(|a| a.value().trim_start_matches('#').to_string());
@@ -300,6 +310,7 @@ fn parse_rich(body: XmlNode) -> RichText {
                                 size: st.size,
                                 h_scale: st.h_scale,
                                 embed: Some(e),
+                                link: st.link.clone(),
                             },
                         );
                     }

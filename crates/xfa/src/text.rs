@@ -153,6 +153,8 @@ pub struct Span {
     pub baseline: f64,
     pub text: String,
     pub face: Face,
+    /// Where the text links to (its run's `<a href>`), as the template writes it.
+    pub link: Option<String>,
 }
 
 /// A laid-out block of text.
@@ -168,6 +170,8 @@ struct Word {
     text: String,
     face: Face,
     width: f64,
+    /// The link of the run the word came from.
+    link: Option<String>,
 }
 
 /// The width of `w` without the spaces it ends with: what it takes at the end of a line, where
@@ -224,12 +228,12 @@ fn words(runs: &[Run], base: &Face, embed: &dyn Fn(&str, usize) -> String, embed
             cur.push(ch);
             if ch == ' ' {
                 let width = face.width(&cur);
-                out.push(Word { text: std::mem::take(&mut cur), face: face.clone(), width });
+                out.push(Word { text: std::mem::take(&mut cur), face: face.clone(), width, link: run.link.clone() });
             }
         }
         if !cur.is_empty() {
             let width = face.width(&cur);
-            out.push(Word { text: cur, face, width });
+            out.push(Word { text: cur, face, width, link: run.link.clone() });
         }
     }
     out
@@ -277,7 +281,7 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
                     if advance > avail - indent(line.first) && piece.len() > ch.len_utf8() {
                         piece.pop();
                         let width = w.face.width(&piece);
-                        line.words.push(Word { text: std::mem::take(&mut piece), face: w.face.clone(), width });
+                        line.words.push(Word { text: std::mem::take(&mut piece), face: w.face.clone(), width, link: w.link.clone() });
                         line.width += width;
                         line.size = line.size.max(w.face.size);
                         let done = std::mem::replace(&mut line, Line { words: Vec::new(), width: 0.0, size: base.size, first: false });
@@ -290,7 +294,7 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
                     let width = w.face.width(&piece);
                     line.size = line.size.max(w.face.size);
                     line.width += width;
-                    line.words.push(Word { text: piece, face: w.face.clone(), width });
+                    line.words.push(Word { text: piece, face: w.face.clone(), width, link: w.link.clone() });
                 }
                 first_in_para = false;
                 continue;
@@ -335,16 +339,17 @@ pub fn layout(rich: &RichText, rect: Rect, para: &Para, base: &Face, embed: &dyn
         };
         // Baseline: ascent sits about 0.8 of the size below the line top for these faces.
         let baseline = y + lh - (lh - line.size * 0.8).max(0.0) / 2.0 - line.size * 0.08;
+        // Words of one face and one link make one span, so a link's text is a span of its own.
         let mut run: Option<Span> = None;
         for w in line.words {
             match &mut run {
-                Some(s) if s.face == w.face => s.text.push_str(&w.text),
+                Some(s) if s.face == w.face && s.link == w.link => s.text.push_str(&w.text),
                 _ => {
                     if let Some(s) = run.take() {
                         x += s.face.width(&s.text);
                         spans.push(s);
                     }
-                    run = Some(Span { x, baseline, text: w.text, face: w.face });
+                    run = Some(Span { x, baseline, text: w.text, face: w.face, link: w.link });
                 }
             }
         }
