@@ -6620,17 +6620,18 @@ fn painted_shows(doc: &Document) -> Vec<Painted> {
 }
 
 /// A page with Helvetica as /F1, /GS1, an ExtGState that paints at 20 % opacity, /GS2, one that
-/// sets the line width to 4, and /GS3, another at 20 % opacity.
+/// sets the line width to 4, /GS3, another at 20 % opacity, and /GS4, at 20 % opacity and dashed.
 fn faint_page(content: &str) -> Document {
     build(&[
         "<< /Type /Catalog /Pages 2 0 R >>",
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> /ExtGState << /GS1 6 0 R /GS2 7 0 R /GS3 8 0 R >> >> >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> /ExtGState << /GS1 6 0 R /GS2 7 0 R /GS3 8 0 R /GS4 9 0 R >> >> >>",
         &format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
         "<< /Type /ExtGState /ca 0.2 >>",
         "<< /Type /ExtGState /LW 4 >>",
         "<< /Type /ExtGState /ca 0.2 >>",
+        "<< /Type /ExtGState /ca 0.2 /D [[6 3] 0] >>",
     ])
 }
 
@@ -6764,5 +6765,44 @@ fn a_rendering_mode_partway_through_a_line_starts_a_run_of_its_own() {
         assert_eq!(modes.first().map(|m| (m.0, m.1)), Some(("FAI", 0)), "{modes:?}: {joined}");
         let outline = ["1 0 0 RG".to_string()];
         assert!(modes.iter().skip(1).all(|m| (m.1, m.2, m.3) == (1, outline.as_slice(), 2.0)), "{modes:?}: {joined}");
+    }
+}
+
+/// Two ExtGStates at the same opacity paint text the same (see `Paint`), but one of them dashes
+/// its outline: a dashed outline after a solid one in the same text object joined its line and
+/// came back solid, drawn with the first run's selections. A different dash now starts a run.
+#[test]
+fn a_dash_partway_through_an_outlined_line_starts_a_run_of_its_own() {
+    let content = "BT /GS3 gs /F1 72 Tf 1 Tr 1 0 0 RG 2 w 40 400 Td (FAI) Tj /GS4 gs (NT) Tj ET
+";
+    for new in ["FAINT", "FAINTS"] {
+        let mut doc = faint_page(content);
+        assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].rows[0].len(), 2, "two runs on one row");
+        text::rewrite_block(&mut doc, 0, 0, Some(new), &BlockStyle::default()).unwrap();
+        let doc = reopen(&doc);
+        let shows = painted_shows(&doc);
+        let joined = streams(&doc, 0).join(
+            "
+",
+        );
+        assert_eq!(shows.iter().map(|s| s.text.as_str()).collect::<String>(), new, "{joined}");
+        let gs: Vec<_> = shows.iter().map(|s| (s.text.as_str(), s.gs.as_slice())).collect();
+        assert_eq!(gs.first(), Some(&("FAI", ["GS3".to_string()].as_slice())), "{gs:?}: {joined}");
+        assert!(gs.iter().skip(1).all(|(_, gs)| gs.last().is_some_and(|g| g == "GS4")), "{gs:?}: {joined}");
+    }
+}
+
+/// The dash and cap are compared as the operators set them too: `d` or `J` partway through an
+/// outlined line starts a run, and a malformed one (too long, not numbers, out of range) is ignored.
+#[test]
+fn a_dash_or_cap_operator_partway_through_an_outlined_line_starts_a_run() {
+    let long = format!("[{}] 0 d", "1 ".repeat(40));
+    for (change, runs) in [("[6 3] 0 d", 2), ("1 J", 2), (long.as_str(), 1), ("[(a) 3] 0 d", 1), ("[6 3] /x d", 1), ("7 J", 1), ("J", 1)] {
+        let content = format!("BT /F1 72 Tf 1 Tr 1 0 0 RG 2 w 40 400 Td (FAI) Tj {change} (NT) Tj ET\n");
+        let mut doc = faint_page(&content);
+        assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].rows[0].len(), runs, "{change}");
+        text::rewrite_block(&mut doc, 0, 0, Some("FAINTS"), &BlockStyle::default()).unwrap();
+        let shows = painted_shows(&reopen(&doc));
+        assert_eq!(shows.iter().map(|s| s.text.as_str()).collect::<String>(), "FAINTS", "{change}");
     }
 }

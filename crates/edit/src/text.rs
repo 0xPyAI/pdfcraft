@@ -228,6 +228,9 @@ struct TextState {
     stroke: Vec<Op>,
     line_width: Option<f64>,
     ext_gstate: Vec<Vec<u8>>,
+    /// The dash pattern and line cap in force (see [`Ts`]): compared, not restated.
+    dash: Dash,
+    line_cap: i64,
 }
 
 impl TextState {
@@ -244,6 +247,8 @@ impl TextState {
             stroke: ts.stroke.clone(),
             line_width: ts.line_width,
             ext_gstate: ts.ext_gstate.clone(),
+            dash: ts.dash.clone(),
+            line_cap: ts.line_cap,
         }
     }
 
@@ -669,6 +674,29 @@ struct Ts {
     line_width: Option<f64>,
     /// The ExtGState resources selected with `gs`, oldest first (see [`select_gs`]).
     ext_gstate: Vec<Vec<u8>>,
+    /// The dash pattern a `d` or an ExtGState's `/D` set (initially solid: `[] 0`).
+    dash: Dash,
+    /// The line cap a `J` or an ExtGState's `/LC` set (initially 0, butt).
+    line_cap: i64,
+}
+
+/// A dash pattern (ISO 32000-2 §8.4.3.6): the dash array and the phase.
+type Dash = (Vec<f64>, f64);
+
+/// The most dash array entries a pattern keeps; a longer one is ignored, as is a malformed one.
+const MAX_DASH: usize = 32;
+
+/// The dash pattern `array phase`, as `d` takes it and an ExtGState's `/D` holds it.
+fn dash_pattern(doc: &Document, array: Option<&Object>, phase: Option<&Object>) -> Option<Dash> {
+    let array = doc.resolve(array?);
+    let items = array.as_array().filter(|a| a.len() <= MAX_DASH)?;
+    let finite = |o: &Object| doc.resolve(o).as_f64().filter(|v| v.is_finite());
+    Some((items.iter().map(finite).collect::<Option<Vec<_>>>()?, finite(phase?)?))
+}
+
+/// A line cap style, as `J` takes it and an ExtGState's `/LC` holds it: 0, 1 or 2.
+fn line_cap(doc: &Document, cap: Option<&Object>) -> Option<i64> {
+    doc.resolve(cap?).as_int().filter(|c| (0..=2).contains(c))
 }
 
 /// The most `gs` selections a state remembers. Repeating a selection moves it to the end, so
@@ -1000,6 +1028,8 @@ impl Carry {
             stroke: Vec::new(),
             line_width: None,
             ext_gstate: Vec::new(),
+            dash: (Vec::new(), 0.0),
+            line_cap: 0,
         };
         Carry { ts, stack: Vec::new(), marked: Vec::new(), layers: Vec::new(), text_left: MAX_PAGE_TEXT }
     }
@@ -1119,6 +1149,8 @@ fn interpret(
                 ts.stroke.push(op.clone());
             }
             b"w" => ts.line_width = op.num(0).filter(|w| w.is_finite()).or(ts.line_width),
+            b"d" => ts.dash = dash_pattern(doc, op.operands.first(), op.operands.get(1)).unwrap_or_else(|| ts.dash.clone()),
+            b"J" => ts.line_cap = line_cap(doc, op.operands.first()).unwrap_or(ts.line_cap),
             b"Tf" => {
                 ts.size = op.num(1).unwrap_or(ts.size);
                 if let Some(name) = op.name(0) {
@@ -1155,6 +1187,12 @@ fn interpret(
                     // `/LW` sets the line width as `w` does (ISO 32000-2 §8.4.5).
                     let lw = params.get(b"LW").and_then(|w| doc.resolve(w).as_f64()).filter(|w| w.is_finite());
                     ts.line_width = lw.or(ts.line_width);
+                    let dash = params.get(b"D").map(|d| doc.resolve(d));
+                    let dash = dash.as_deref().and_then(Object::as_array);
+                    if let Some(d) = dash.and_then(|d| dash_pattern(doc, d.first(), d.get(1))) {
+                        ts.dash = d;
+                    }
+                    ts.line_cap = line_cap(doc, params.get(b"LC")).unwrap_or(ts.line_cap);
                 }
             }
             b"Do" => {
@@ -1911,21 +1949,19 @@ fn same_font(line: &TextLine, font: &[u8], base_font: &str, face: Option<&str>) 
 /// Whether a run painted with `ts` continues `line` as it is painted: a line is rewritten in the
 /// state of its first run, so a `Tr`, stroke colour or line width that changes partway starts
 /// another run (see [`TextState::paint_ops`]; the `gs` parameters are compared as [`Paint`]).
-/// The stroke colour and width only count for text that is stroked, so a rule drawn between two
-/// words doesn't split their line.
+/// The stroke colour, width, dash and cap only count for text that is stroked, so a rule drawn
+/// between two words doesn't split their line. They are compared as values, wherever they were
+/// set: two ExtGStates with the same settings under other names still continue a line.
 ///
 /// Only the visible modes (`Tr` 0–2) that `paint_ops` restates are compared: a line that goes on
 /// as invisible or clipping text stays one line, which the clipping refusal reads whole (#3447).
-///
-/// Known gap: two ExtGStates with the same transparency but another parameter that [`Paint`]
-/// doesn't compare (a dash `/D`, a line cap `/LC`) still join one line, which is then rewritten
-/// with the first run's selections. Comparing the names here would split lines #3310 keeps whole.
 fn same_paint(line: &TextLine, ts: &Ts) -> bool {
     let a = &line.origin.state;
     let visible = |m: i64| (0..=2).contains(&m);
     let same_mode = a.render_mode == ts.render_mode || !visible(a.render_mode) || !visible(ts.render_mode);
     let stroked = matches!((a.render_mode, ts.render_mode), (1 | 2, 1 | 2));
-    same_mode && (!stroked || (a.stroke == ts.stroke && a.line_width == ts.line_width))
+    let outline = a.stroke == ts.stroke && a.line_width == ts.line_width && a.dash == ts.dash && a.line_cap == ts.line_cap;
+    same_mode && (!stroked || outline)
 }
 
 /// Whether two `/BaseFont` names name the same font: a subset's six-letter tag and `+` prefix do
