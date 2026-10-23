@@ -716,6 +716,8 @@ fn num_text(n: f64) -> String {
 fn fixed(v: f64, decimals: usize) -> String {
     let k = 10f64.powi(decimals.min(20) as i32);
     let scaled = (v * k).round() / k;
+    // A small negative value rounds to -0.0, which would print as "-0".
+    let scaled = if scaled == 0.0 { 0.0 } else { scaled };
     format!("{:.decimals$}", if scaled.is_finite() { scaled } else { v })
 }
 
@@ -2626,6 +2628,14 @@ pub fn run_formcalc_within(script: &str, event: &XfaEvent, doc: &XfaDoc, root: X
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fixed_does_not_print_negative_zero() {
+        assert_eq!(fixed(-0.4, 0), "0");
+        assert_eq!(fixed(-0.004, 2), "0.00");
+        assert_eq!(fixed(-0.0, 0), "0");
+        assert_eq!(fixed(-1.5, 0), "-2");
+    }
 
     #[test]
     fn dates_round_trip_through_formcalc_day_numbers() {
