@@ -61,7 +61,7 @@ impl Document {
     }
 
     /// Edit ▸ Copy of an added image (`index` among `page`'s added items): its picture as a file
-    /// (extension, bytes), a JPEG as stored, otherwise a lossless PNG, for
+    /// (extension, bytes), a JPEG or JPEG 2000 file as stored, otherwise a lossless PNG, for
     /// [`Edit::PasteContent`](crate::Edit::PasteContent). Refused when the document doesn't allow
     /// copying.
     pub fn added_image_file(&self, page: usize, index: usize) -> Result<(&'static str, Vec<u8>), String> {
@@ -71,12 +71,21 @@ impl Document {
         let Some(pdfcraft_edit::Content::Image(img)) = item.map(|a| &a.content) else {
             return Err(format!("item {} on page {} is not an added image", index + 1, page + 1));
         };
-        pdfcraft_create::image_file(&editor.cos, img.image)
+        picture_file(&editor.cos, img.image)
     }
 }
 
-/// Whether image object `image` in `cos` is the picture `file` (as `image_file` writes it). The
-/// sizes are compared first, so an unrelated image is not re-encoded to find out.
+/// An added image's picture as a file: [`pdfcraft_create::image_file`], except that a JPEG 2000
+/// picture, which Add Image stores as the file it was given, is that file.
+fn picture_file(cos: &Cos, image: ObjRef) -> Result<(&'static str, Vec<u8>), String> {
+    match &*cos.get(image) {
+        Object::Stream(s) if s.dict.name(b"Subtype") == Some(b"Image") && s.dict.name(b"Filter") == Some(b"JPXDecode") => Ok(("jp2", s.raw.to_vec())),
+        _ => pdfcraft_create::image_file(cos, image),
+    }
+}
+
+/// Whether image object `image` in `cos` is the picture `file` (as [`picture_file`] writes it).
+/// The sizes are compared first, so an unrelated image is not re-encoded to find out.
 pub(crate) fn is_picture(cos: &Cos, image: ObjRef, file: &[u8]) -> bool {
     let size = |s: &pdfcraft_cos::Stream| Some((u32::try_from(s.dict.int(b"Width")?).ok()?, u32::try_from(s.dict.int(b"Height")?).ok()?));
     // The object at that number now, not one of an earlier generation of it.
@@ -84,11 +93,13 @@ pub(crate) fn is_picture(cos: &Cos, image: ObjRef, file: &[u8]) -> bool {
         return false;
     }
     let stored = match &*cos.get(image) {
+        // A JPEG 2000 picture is stored as its file.
+        Object::Stream(s) if s.dict.name(b"Subtype") == Some(b"Image") && s.dict.name(b"Filter") == Some(b"JPXDecode") => return s.raw[..] == *file,
         Object::Stream(s) if s.dict.name(b"Subtype") == Some(b"Image") => size(s),
         _ => return false,
     };
     let given = image::ImageReader::new(std::io::Cursor::new(file)).with_guessed_format().ok().and_then(|r| r.into_dimensions().ok());
-    stored.is_some() && stored == given && pdfcraft_create::image_file(cos, image).is_ok_and(|(_, data)| data == file)
+    stored.is_some() && stored == given && picture_file(cos, image).is_ok_and(|(_, data)| data == file)
 }
 
 /// The image object an added image in `cos` already draws picture `file` from, if any: where a

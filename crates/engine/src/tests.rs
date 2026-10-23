@@ -3237,6 +3237,45 @@ fn pasted_added_content_keeps_its_style_and_picture() {
     assert_eq!(s.get(id).unwrap().added().len(), 4, "a paste is one undo step");
 }
 
+/// An added JPEG 2000 picture is copied as the file it was added from: pasted into its own
+/// document it draws the same object, and into another one it is embedded once.
+#[test]
+fn an_added_jpeg_2000_image_is_copied_as_its_file() {
+    // A JP2 file (30 × 20, three components) with a stub codestream, as Add Image takes it.
+    let bx = |ty: &[u8], payload: &[u8]| [((payload.len() + 8) as u32).to_be_bytes().as_slice(), ty, payload].concat();
+    let ihdr = [20u32.to_be_bytes().as_slice(), &30u32.to_be_bytes(), &[0, 3, 7, 7, 0, 0]].concat();
+    let signature = [0, 0, 0, 0x0C, b'j', b'P', b' ', b' ', 0x0D, 0x0A, 0x87, 0x0A];
+    let file = [signature.as_slice(), &bx(b"ftyp", b"jp2 \0\0\0\0jp2 "), &bx(b"jp2h", &bx(b"ihdr", &ihdr)), &bx(b"jp2c", &[0xFF, 0x4F, 0xFF, 0x51])]
+        .concat();
+    let (mut s, id) = session_with(1);
+    s.apply(id, Edit::AddImage { page: 0, rect: Some([50.0, 100.0, 110.0, 140.0]), name: "photo.jp2".into(), bytes: Arc::new(file.clone()) })
+        .unwrap();
+    let (ext, copied) = s.get(id).unwrap().added_image_file(0, 0).unwrap();
+    assert_eq!((ext, &copied), ("jp2", &file), "the file as it was added");
+    let AddedContent::Image(img) = s.get(id).unwrap().added()[0].content.clone() else { panic!("an image was added") };
+    let copied = Arc::new(copied);
+    let file = Some(("Pasted image.jp2".to_string(), copied.clone()));
+    let pasted = AddedContent::Image(AddedImage { rect: [70.0, 80.0, 130.0, 120.0], ..img.clone() });
+    s.apply(id, Edit::PasteContent { page: 0, content: pasted.clone(), file: file.clone() }).unwrap();
+    assert!(matches!(&s.get(id).unwrap().added()[1].content, AddedContent::Image(i) if i.image == img.image), "the same picture object");
+    let other = s.open("other.pdf", None, Arc::new(fixture(1)), None).unwrap();
+    for _ in 0..2 {
+        s.apply(other, Edit::PasteContent { page: 0, content: pasted.clone(), file: file.clone() }).unwrap();
+    }
+    let d = s.get(other).unwrap();
+    let images: Vec<_> = d
+        .added()
+        .iter()
+        .filter_map(|a| match &a.content {
+            AddedContent::Image(i) => Some(i.image),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0], images[1], "embedded once");
+    assert_eq!(d.added_image_file(0, 0).unwrap().1, copied.as_slice());
+}
+
 #[test]
 fn added_images_rotate_flip_and_crop_as_drawn() {
     // A 20×10 image: left half red, right half blue.
