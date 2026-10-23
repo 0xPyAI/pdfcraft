@@ -2750,3 +2750,8 @@ theme	Appearance	स्वरूप
 	field names can't contain a period: {name}	फ़ील्ड के नामों में पूर्ण विराम (.) नहीं हो सकता: {name}
 	two cells would both be named {name}	दो सेल का नाम {name} हो जाएगा
 	a field named {name} already exists	{name} नाम का फ़ील्ड पहले से मौजूद है
+	Attach a file…	फ़ाइल संलग्न करें…
+	Attach {name}	{name} संलग्न करें
+	Attaching files is not available on the web yet	वेब पर अभी फ़ाइलें संलग्न करना उपलब्ध नहीं है
+	Delete attachment	अनुलग्नक हटाएँ
+	Delete attachment {key}	अनुलग्नक {key} हटाएँ
