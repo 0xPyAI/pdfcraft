@@ -18,7 +18,8 @@ pub struct LastView {
     pub path: String,
     /// 0-based.
     pub page: usize,
-    /// As settings name it: `fit-width`, `fit-page` or a percentage (`ViewDefaults::zoom_name`).
+    /// As settings name it: `fit-width`, `fit-page` or a percentage, kept to its fraction
+    /// (`62.5%`; read back by `ViewDefaults::with_zoom`).
     pub zoom: String,
     /// The page display token (`canvas::display_token`).
     pub display: String,
@@ -44,7 +45,11 @@ impl PdfCraftApp {
         let view = self.views.get(index)?;
         let path = self.session.get(view.id)?.path.as_deref()?;
         let shown = view.normal_display();
-        let zoom = ViewDefaults { fit: shown.fit, zoom: shown.zoom, ..ViewDefaults::default() }.zoom_name();
+        // A fixed zoom keeps its fraction (62.5%, not 63%): `zoom_name` rounds to whole percents.
+        let zoom = match shown.fit {
+            canvas::Fit::None => format!("{}%", shown.zoom * 100.0),
+            fit => ViewDefaults { fit, zoom: shown.zoom, ..ViewDefaults::default() }.zoom_name(),
+        };
         Some(LastView {
             path: absolute(path),
             page: view.current,

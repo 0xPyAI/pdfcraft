@@ -1652,6 +1652,26 @@ fn a_file_opened_again_shows_its_last_view() {
     assert_eq!((app.last_views[0].page, app.last_views[0].zoom.as_str()), (1, "fit-page"));
 }
 
+/// #1767: a fixed zoom with a fraction comes back as it was, not rounded to a whole percent.
+#[test]
+fn a_fractional_zoom_is_remembered_exactly() {
+    use pdfcraft_ui_egui::canvas::Fit;
+    let path = std::env::temp_dir().join(format!("pdfcraft-last-view-frac-{}.pdf", std::process::id())).to_string_lossy().into_owned();
+    let p = path.clone();
+    let mut h = harness(move |app| app.open_bytes("doc.pdf", Some(p), pages_fixture(3)).expect("opens"));
+    h.state_mut().views[0].set_zoom(0.625);
+    h.run_steps(3);
+    h.state_mut().close_tab(0);
+    assert_eq!(h.state().last_views[0].zoom, "62.5%");
+    let saved = h.state().persist();
+    let h = harness(move |app| {
+        app.restore(&saved);
+        app.open_bytes("doc.pdf", Some(path), pages_fixture(3)).expect("opens");
+    });
+    let v = &h.state().views[0];
+    assert_eq!((v.fit, v.zoom), (Fit::None, 0.625));
+}
+
 /// #1767 with full screen: the view remembered while presenting is the one full screen will go
 /// back to, and a file reopened in full screen presents one fitted page, then leaves full
 /// screen for the remembered view.
