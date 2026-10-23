@@ -38,7 +38,26 @@ const MAX_COPY_DEPTH: usize = 256;
 /// appearance, placement and page. Field state (name, value, flags, default appearance) moves to
 /// the new parent field, where the widgets inherit it.
 const WIDGET_KEYS: &[&[u8]] = &[
-    b"Type", b"Subtype", b"Rect", b"P", b"AP", b"AS", b"MK", b"BS", b"Border", b"C", b"CA", b"F", b"H", b"R", b"NM", b"M", b"StructParent", b"StructParents", b"OC", b"Tabs",
+    b"Type",
+    b"Subtype",
+    b"Rect",
+    b"P",
+    b"AP",
+    b"AS",
+    b"MK",
+    b"BS",
+    b"Border",
+    b"C",
+    b"CA",
+    b"F",
+    b"H",
+    b"R",
+    b"NM",
+    b"M",
+    b"StructParent",
+    b"StructParents",
+    b"OC",
+    b"Tabs",
 ];
 
 struct Copier<'a> {

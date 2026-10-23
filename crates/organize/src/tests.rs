@@ -681,7 +681,10 @@ fn repeated_page_splits_a_combined_field_widget() {
     let ps = pages(&out).unwrap();
     let widget = |i: usize| -> ObjRef {
         let list = page_dict(&out, i).get(b"Annots").map(|a| out.resolve(a).as_array().cloned().unwrap_or_default()).unwrap_or_default();
-        list.iter().filter_map(|a| a.as_ref()).find(|r| out.get(*r).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Widget"))).expect("a widget annotation")
+        list.iter()
+            .filter_map(|a| a.as_ref())
+            .find(|r| out.get(*r).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Widget")))
+            .expect("a widget annotation")
     };
     let (w1, w2) = (widget(0), widget(1));
     assert_ne!(w1, w2, "each copy of the page has its own widget");
@@ -692,7 +695,8 @@ fn repeated_page_splits_a_combined_field_widget() {
         let f = out.get(parent).as_dict().unwrap().clone();
         assert_eq!(f.get(b"T").and_then(|v| v.as_string()).map(|s| s.to_text()).as_deref(), Some("name"));
         assert_eq!(f.get(b"V").and_then(|v| v.as_string()).map(|s| s.to_text()).as_deref(), Some("Ada"));
-        let kids: Vec<ObjRef> = f.get(b"Kids").and_then(|k| out.resolve(k).as_array().cloned()).unwrap_or_default().iter().filter_map(|k| k.as_ref()).collect();
+        let kids: Vec<ObjRef> =
+            f.get(b"Kids").and_then(|k| out.resolve(k).as_array().cloned()).unwrap_or_default().iter().filter_map(|k| k.as_ref()).collect();
         assert!(kids.contains(&w1) && kids.contains(&w2), "one field holds both widgets: {kids:?}");
         let fields: Vec<ObjRef> = catalog(&out)
             .get(b"AcroForm")
@@ -747,7 +751,8 @@ fn form_fields_come_along_and_are_registered() {
     let field = out.resolve(&fields[0]).as_dict().cloned().unwrap();
     assert_eq!(field.get(b"V").and_then(|v| v.as_string()).map(|s| s.to_text()).as_deref(), Some("Ada"));
     // The widget child, not the field, names the page (#1810).
-    let kid = field.get(b"Kids").map(|k| out.resolve(k)).and_then(|k| k.as_array().cloned()).and_then(|k| k.first().and_then(|k| k.as_ref())).unwrap();
+    let kid =
+        field.get(b"Kids").map(|k| out.resolve(k)).and_then(|k| k.as_array().cloned()).and_then(|k| k.first().and_then(|k| k.as_ref())).unwrap();
     assert_eq!(out.get(kid).as_dict().unwrap().reference(b"P"), Some(pages(&out).unwrap()[0].obj));
 }
 
@@ -2600,11 +2605,7 @@ fn a_repeated_page_joins_the_renamed_field() {
         let list = page_dict(&dst, page).get(b"Annots").map(|a| dst.resolve(a)).and_then(|a| a.as_array().cloned()).unwrap();
         let widget = list.iter().find_map(|a| a.as_ref()).expect("a widget on the page");
         widgets.push(widget);
-        assert_eq!(
-            dst.get(widget).as_dict().unwrap().reference(b"Parent"),
-            renamed.as_ref(),
-            "page {page}'s widget belongs to the renamed field"
-        );
+        assert_eq!(dst.get(widget).as_dict().unwrap().reference(b"Parent"), renamed.as_ref(), "page {page}'s widget belongs to the renamed field");
     }
     assert_ne!(widgets[0], widgets[1], "each copy has its own widget");
 }
