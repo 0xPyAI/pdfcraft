@@ -611,6 +611,7 @@
 	Discard private data of other applications	تجاهل البيانات الخاصة بالتطبيقات الأخرى
 	Discard hidden text	تجاهل النص المخفي
 	Use Flate to encode streams that are not encoded	استخدام Flate لترميز التدفقات غير المرمَّزة
+	In streams that use LZW encoding, use Flate instead	في التدفقات التي تستخدم ترميز LZW، استخدام Flate بدلاً منه
 	Remove invalid links and bookmarks	إزالة الروابط والإشارات المرجعية غير الصالحة
 	Remove unreferenced named destinations	إزالة الوجهات المسماة غير المشار إليها
 	Compress document structure (object streams)	ضغط بنية المستند (تدفقات الكائنات)

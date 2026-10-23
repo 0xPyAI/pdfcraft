@@ -7589,8 +7589,8 @@ milestone = "M11"
 status = "partial"
 commands = ["optimize.advanced"]
 tools = ["doc_optimize"]
-evidence = ["crates/optimize/tests/optimize.rs::discards_and_clean_up"]
-notes = "unencoded streams; LZW not yet re-encoded"
+evidence = ["crates/optimize/tests/optimize.rs::discards_and_clean_up", "crates/optimize/tests/optimize.rs::lzw_streams_become_flate_and_decode_to_the_same_bytes", "crates/optimize/tests/optimize.rs::a_page_drawn_from_lzw_streams_renders_the_same_after_conversion"]
+notes = "Two Clean Up options, as in Acrobat: unencoded streams are Flate-compressed, and LZW streams (content and image XObjects; EarlyChange 0 and 1, with or without a predictor, LZW anywhere in a filter chain) are decoded and stored with Flate instead, keeping the predictor and the filters after the LZW one; LZW data that doesn't decode cleanly is left as it is. Not yet: LZW inline images inside content streams."
 
 [[feature]]
 id = "optimize.remove-invalid-links"

@@ -1268,6 +1268,7 @@ theme	Appearance	Giao diện
 	Update	Cập nhật
 	Use 72 DPI (one point per pixel)	Dùng 72 DPI (một điểm cho mỗi điểm ảnh)
 	Use Flate to encode streams that are not encoded	Dùng Flate để mã hóa các luồng chưa được mã hóa
+	In streams that use LZW encoding, use Flate instead	Dùng Flate thay cho LZW trong các luồng mã hóa LZW
 	Use a Digital ID from a file	Dùng Digital ID từ một tệp
 	Use custom DPI	Dùng DPI tùy chỉnh
 	Use each image's embedded DPI; use 72 DPI when it is absent.	Dùng DPI nhúng của từng hình ảnh; dùng 72 DPI khi không có.

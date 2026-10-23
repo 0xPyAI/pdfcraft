@@ -1226,6 +1226,7 @@ impl Automation {
             ("discard_tags", &mut settings.discard_tags),
             ("discard_print_settings", &mut settings.discard_print_settings),
             ("flate_unencoded", &mut settings.flate_unencoded),
+            ("lzw_to_flate", &mut settings.lzw_to_flate),
             ("remove_invalid_links", &mut settings.remove_invalid_links),
             ("remove_unreferenced_dests", &mut settings.remove_unreferenced_dests),
         ] {
@@ -1264,6 +1265,7 @@ impl Automation {
             "alternate_images": o.alternate_images,
             "tags_removed": o.tags_removed,
             "streams_compressed": o.streams_compressed,
+            "lzw_streams": o.lzw_streams,
             "invalid_links": o.invalid_links,
             "invalid_bookmarks": o.invalid_bookmarks,
             "unreferenced_dests": o.unreferenced_dests,

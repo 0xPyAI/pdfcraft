@@ -14,7 +14,7 @@
 //!   print settings.
 //! - **Clean up:** drop images and forms that pages list but never draw (such as a deleted
 //!   image); Flate-compress streams that have no filter; remove a redundant outer ASCII85 or
-//!   ASCIIHex layer from streams that have one.
+//!   ASCIIHex layer from streams that have one; store LZW-compressed streams with Flate instead.
 //!
 //! Metadata, attachments, comments, scripts, private data, hidden layers, bookmarks and form
 //! fields are discarded by `pdfcraft-redact`'s Remove Hidden Information, which the engine
@@ -30,7 +30,8 @@ mod unused;
 
 pub use audit::{SpaceCategory, SpaceUse, audit_space};
 
-use pdfcraft_cos::{Document, ObjRef, Object, Stream, serialize};
+use pdfcraft_cos::{Dict, Document, MAX_PAGE_DECODED, ObjRef, Object, Stream, serialize};
+use pdfcraft_filters::{Filter, Params};
 
 pub use images::effective_resolutions;
 
@@ -100,6 +101,8 @@ pub struct Settings {
     /// Flate-compress streams stored without a filter, and strip a redundant outer ASCII85 or
     /// ASCIIHex layer from streams that have one.
     pub flate_unencoded: bool,
+    /// Clean Up: decode LZW-compressed streams and store them with Flate instead.
+    pub lzw_to_flate: bool,
     /// Clean Up: remove links (and bookmark destinations) that point nowhere.
     pub remove_invalid_links: bool,
     /// Clean Up: remove named destinations nothing refers to.
@@ -118,6 +121,7 @@ impl Default for Settings {
             discard_tags: false,
             discard_print_settings: false,
             flate_unencoded: true,
+            lzw_to_flate: true,
             remove_invalid_links: true,
             remove_unreferenced_dests: true,
         }
@@ -178,6 +182,8 @@ pub struct Report {
     pub tags_removed: bool,
     pub print_settings: usize,
     pub streams_compressed: usize,
+    /// Streams whose LZW compression was replaced with Flate (Clean Up).
+    pub lzw_streams: usize,
     /// Links removed and bookmarks whose destination was cleared (Clean Up).
     pub invalid_links: usize,
     pub invalid_bookmarks: usize,
@@ -279,6 +285,19 @@ pub fn optimize_with_progress(doc: &mut Document, settings: &Settings, progress:
     if settings.remove_unreferenced_dests {
         report.unreferenced_dests = links::remove_unreferenced_dests(doc)?;
     }
+    // Before the unencoded-stream pass, which would otherwise take the ASCII layer off an
+    // `[/ASCII85Decode /LZWDecode]` stream first and count it twice.
+    if settings.lzw_to_flate {
+        for num in doc.object_numbers() {
+            let r = ObjRef { num, generation: doc.generation(num) };
+            let obj = doc.get(r);
+            let Object::Stream(s) = &*obj else { continue };
+            if let Some(replacement) = lzw_to_flate(s, MAX_LZW_DECODED) {
+                doc.set(r, Object::Stream(replacement));
+                report.lzw_streams += 1;
+            }
+        }
+    }
     if settings.flate_unencoded {
         for num in doc.object_numbers() {
             let r = ObjRef { num, generation: doc.generation(num) };
@@ -303,6 +322,94 @@ pub fn optimize_with_progress(doc: &mut Document, settings: &Settings, progress:
         }
     }
     Ok(report)
+}
+
+/// Largest decoded LZW stream converted, as for a page's content: the data and its check are
+/// held together, so a few hundred kilobytes of hostile LZW can't ask for gigabytes.
+const MAX_LZW_DECODED: usize = MAX_PAGE_DECODED;
+
+/// `s` with its LZW compression replaced by Flate (Acrobat's "In streams that use LZW encoding,
+/// use Flate instead"). The filters up to the last LZW one are decoded, strictly and with its
+/// predictor; the result is Flate-encoded under the same predictor, without `EarlyChange`, and
+/// the filters after it keep their encoded bytes. A stream that doesn't decode cleanly, or
+/// whose filters or parameters can't be read for certain, or that decodes past `max` bytes, is
+/// left as it is.
+fn lzw_to_flate(s: &Stream, max: usize) -> Option<Stream> {
+    // An external file's data isn't in `raw`; cross-reference and object streams are rewritten
+    // on save, so converting them would change nothing in the file.
+    if s.dict.contains(b"F") || matches!(s.dict.name(b"Type"), Some(b"XRef" | b"ObjStm")) {
+        return None;
+    }
+    let names: Vec<&[u8]> = match s.dict.get(b"Filter")? {
+        Object::Name(n) => vec![n.as_slice()],
+        Object::Array(a) => a.iter().map(Object::as_name).collect::<Option<_>>()?,
+        _ => return None,
+    };
+    // `/Crypt` was applied when the object was loaded, and dropping it would change how the
+    // stream is encrypted.
+    if names.contains(&&b"Crypt"[..]) {
+        return None;
+    }
+    let lzw = names.iter().rposition(|n| matches!(*n, b"LZWDecode" | b"LZW"))?;
+    // One entry per filter, each a dictionary or null; anything else (an indirect reference, an
+    // array of the wrong length) would be read as defaults, so the data might not decode as
+    // written.
+    let parms: Vec<Option<&Dict>> = match s.dict.get(b"DecodeParms") {
+        None | Some(Object::Null) => vec![None; names.len()],
+        Some(Object::Dict(d)) if names.len() == 1 => vec![Some(d)],
+        Some(Object::Array(a)) if a.len() == names.len() => a
+            .iter()
+            .map(|p| match p {
+                Object::Dict(d) => Some(Some(d)),
+                Object::Null => Some(None),
+                _ => None,
+            })
+            .collect::<Option<_>>()?,
+        _ => return None,
+    };
+    let chain = s.filters();
+    let stages = chain.get(..=lzw)?;
+    let (_, params) = stages.last()?;
+    let data = pdfcraft_filters::decode(stages, &s.raw, max).ok()?;
+    let flate = Params { early_change: 1, ..params.clone() };
+    let raw = pdfcraft_filters::encode(&Filter::Flate, &flate, &data).ok()?;
+    // The predictor's encoder must give back exactly what its decoder read (a short last row,
+    // unusual parameters), or the stream would change. The limit counts a PNG predictor's tag
+    // bytes too, at most one per row of at least one byte.
+    if pdfcraft_filters::decode(&[(Filter::Flate, flate)], &raw, data.len().saturating_mul(2).saturating_add(1)).ok()? != data {
+        return None;
+    }
+    // Without a predictor the other parameters say nothing to Flate.
+    let first = parms.get(lzw).copied().flatten().filter(|_| params.predictor > 1).map(|d| {
+        let mut d = d.clone();
+        d.remove(b"EarlyChange");
+        Object::Dict(d)
+    });
+    let rest_names = names.get(lzw + 1..)?;
+    let rest_parms = parms.get(lzw + 1..)?;
+    let mut dict = s.dict.clone();
+    dict.remove(b"Length");
+    if rest_names.is_empty() {
+        dict.set(b"Filter".to_vec(), Object::name("FlateDecode"));
+        match first {
+            Some(p) => dict.set(b"DecodeParms".to_vec(), p),
+            None => {
+                dict.remove(b"DecodeParms");
+            }
+        }
+    } else {
+        let filters = std::iter::once(Object::name("FlateDecode")).chain(rest_names.iter().map(|n| Object::Name(n.to_vec())));
+        dict.set(b"Filter".to_vec(), Object::Array(filters.collect()));
+        let parms: Vec<Object> = std::iter::once(first.unwrap_or(Object::Null))
+            .chain(rest_parms.iter().map(|p| p.map_or(Object::Null, |d| Object::Dict(d.clone()))))
+            .collect();
+        if parms.iter().all(|p| matches!(p, Object::Null)) {
+            dict.remove(b"DecodeParms");
+        } else {
+            dict.set(b"DecodeParms".to_vec(), Object::Array(parms));
+        }
+    }
+    Some(Stream::from_raw(dict, raw))
 }
 
 /// `s` without its outer ASCII85 or ASCIIHex layer (`[/ASCII85Decode /FlateDecode]` becomes
@@ -334,4 +441,21 @@ fn stored_len(s: &Stream) -> Option<usize> {
     let mut out = Vec::new();
     serialize(&Object::Dict(dict), &mut out);
     out.len().checked_add(s.raw.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_lzw_stream_that_decodes_past_the_limit_is_left_as_it_is() {
+        let data = b"0 0 m 612 792 l S\n".repeat(64);
+        let raw = pdfcraft_filters::encode(&Filter::Lzw, &Params::default(), &data).unwrap();
+        let mut dict = Dict::new();
+        dict.set(b"Filter".to_vec(), Object::name("LZWDecode"));
+        let s = Stream::from_raw(dict, raw);
+        assert!(lzw_to_flate(&s, data.len() - 1).is_none());
+        let converted = lzw_to_flate(&s, data.len()).unwrap();
+        assert_eq!(converted.decoded_strict().unwrap(), data);
+    }
 }

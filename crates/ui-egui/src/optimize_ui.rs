@@ -219,6 +219,7 @@ pub(crate) fn body(ui: &mut egui::Ui, d: &mut OptimizeDraft, t: &Tokens) -> (boo
         }
         OptimizeTab::CleanUp => {
             ui.add(widgets::checkbox(&mut s.flate_unencoded, tl!("Use Flate to encode streams that are not encoded")));
+            ui.add(widgets::checkbox(&mut s.lzw_to_flate, tl!("In streams that use LZW encoding, use Flate instead")));
             ui.add(widgets::checkbox(&mut s.remove_invalid_links, tl!("Remove invalid links and bookmarks")));
             ui.add(widgets::checkbox(&mut s.remove_unreferenced_dests, tl!("Remove unreferenced named destinations")));
             ui.add_enabled(false, widgets::checkbox(&mut true, tl!("Compress document structure (object streams)")));

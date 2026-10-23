@@ -574,6 +574,7 @@
 	Discard private data of other applications	Hylkää muiden sovellusten yksityiset tiedot
 	Discard hidden text	Hylkää piilotettu teksti
 	Use Flate to encode streams that are not encoded	Koodaa koodaamattomat virrat Flate-menetelmällä
+	In streams that use LZW encoding, use Flate instead	Koodaa LZW-koodatut virrat Flate-menetelmällä
 	Remove invalid links and bookmarks	Poista virheelliset linkit ja kirjanmerkit
 	Remove unreferenced named destinations	Poista viittaamattomat nimetyt kohteet
 	Compress document structure (object streams)	Pakkaa asiakirjan rakenne (objektivirrat)

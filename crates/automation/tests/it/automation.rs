@@ -5580,6 +5580,56 @@ fn optimizing_through_tools() {
     assert!(matches!(a.call("doc_optimize", &json!({ "doc": doc, "path": "x.pdf", "discard": ["everything"] })), Err(ToolError::InvalidArgs(_))));
 }
 
+/// `data` as LZW with one 9-bit literal code per byte (clear-table first, EOD last): valid for
+/// fewer than 250 bytes, before the code width grows.
+fn lzw_literals(data: &[u8]) -> Vec<u8> {
+    let codes: Vec<u16> = std::iter::once(256).chain(data.iter().map(|&b| u16::from(b))).chain([257]).collect();
+    let bits: Vec<bool> = codes.iter().flat_map(|c| (0..9).rev().map(move |i| c >> i & 1 == 1)).collect();
+    bits.chunks(8).map(|byte| byte.iter().enumerate().fold(0u8, |acc, (i, &b)| acc | (u8::from(b) << (7 - i)))).collect()
+}
+
+#[test]
+fn lzw_streams_are_stored_with_flate_through_tools() {
+    use pdfcraft_cos::{Dict, Document, Object, SaveOptions, Stream, write_full};
+    let dir = workdir("optimize-lzw");
+    let ops = b"0.2 0.4 0.8 rg 72 72 200 100 re f 0 0 1 RG 72 300 m 400 500 l S".to_vec();
+    let mut doc = Document::new_empty();
+    let pages = doc.get(doc.root().unwrap()).as_dict().unwrap().reference(b"Pages").unwrap();
+    let lzw = Stream::from_raw(Dict::from_iter([(b"Filter".to_vec(), Object::name("LZWDecode"))]), lzw_literals(&ops));
+    assert_eq!(lzw.decoded_strict().unwrap(), ops);
+    let content = doc.add(Object::Stream(lzw));
+    let page = doc.add(Object::Dict(Dict::from_iter([
+        (b"Type".to_vec(), Object::name("Page")),
+        (b"Parent".to_vec(), Object::Ref(pages)),
+        (b"MediaBox".to_vec(), Object::Array(vec![0.into(), 0.into(), 612.into(), 792.into()])),
+        (b"Contents".to_vec(), Object::Ref(content)),
+    ])));
+    doc.update_dict(pages, |d| {
+        d.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(page)]));
+        d.set(b"Count".to_vec(), Object::Int(1));
+    })
+    .unwrap();
+    std::fs::write(dir.join("lzw.pdf"), write_full(&doc, &SaveOptions::default()).unwrap()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "lzw.pdf" }))["doc"].as_u64().unwrap();
+    let filters = |name: &str| {
+        let saved = pdfcraft_cos::Document::open(std::sync::Arc::new(std::fs::read(dir.join(name)).unwrap())).unwrap();
+        let catalog = saved.get(saved.root().unwrap()).as_dict().cloned().unwrap();
+        let pages = saved.get(catalog.reference(b"Pages").unwrap()).as_dict().cloned().unwrap();
+        let page = saved.get(pages.get(b"Kids").and_then(|k| k.as_array()?.first()?.as_ref()).unwrap()).as_dict().cloned().unwrap();
+        match &*saved.get(page.reference(b"Contents").unwrap()) {
+            Object::Stream(s) => (s.dict.get(b"Filter").cloned(), s.decoded_strict().unwrap()),
+            _ => panic!("the page content is not a stream"),
+        }
+    };
+    let r = ok(&mut a, "doc_optimize", json!({ "doc": doc, "path": "flate.pdf" }));
+    assert_eq!(r["lzw_streams"].as_u64(), Some(1), "{r}");
+    assert_eq!(filters("flate.pdf"), (Some(Object::name("FlateDecode")), ops.clone()));
+    let off = ok(&mut a, "doc_optimize", json!({ "doc": doc, "path": "kept.pdf", "lzw_to_flate": false }));
+    assert_eq!(off["lzw_streams"].as_u64(), Some(0), "{off}");
+    assert_eq!(filters("kept.pdf"), (Some(Object::name("LZWDecode")), ops));
+}
+
 /// A one-page PDF whose page picture is drawn as `rows` grey images one pixel row high, 600 px
 /// wide on a 72 pt square (600 ppi), as some PDF printers write it.
 fn printed_in_strips(rows: usize) -> Vec<u8> {
