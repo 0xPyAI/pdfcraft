@@ -197,20 +197,52 @@ fn store_form_fonts(doc: &mut Document, af: &mut Dict, mut dr: Dict, fonts: Dict
 /// Not in a form a signature covers: there the file stays as the signer saw it, apart from the
 /// value itself.
 pub(crate) fn form_fonts_as_objects(doc: &mut Document, all: &[crate::Field]) -> Result<(), FormError> {
-    let signed = all.iter().any(|f| f.kind == crate::FieldKind::Signature && doc.get(f.obj).as_dict().is_some_and(|d| d.contains(b"V")));
+    let signed = all.iter().any(|f| f.kind == crate::FieldKind::Signature && holds_value(doc, f.obj));
     if signed {
         return Ok(());
     }
     let Some(root) = doc.root() else { return Ok(()) };
-    // A form dictionary that isn't an object of its own is left as it is.
-    let Some(r) = doc.get(root).as_dict().and_then(|c| c.reference(b"AcroForm")) else { return Ok(()) };
-    let Some(mut af) = doc.get(r).as_dict().cloned() else { return Ok(()) };
-    let (dr, mut fonts) = form_fonts(doc, &af);
-    if inline_fonts_as_objects(doc, &mut fonts) {
-        store_form_fonts(doc, &mut af, dr, fonts);
-        doc.set(r, Object::Dict(af));
+    let Some(entry) = doc.get(root).as_dict().and_then(|c| c.get(b"AcroForm").cloned()) else { return Ok(()) };
+    match entry {
+        Object::Ref(r) => {
+            let Some(mut af) = doc.get(r).as_dict().cloned() else { return Ok(()) };
+            let (dr, mut fonts) = form_fonts(doc, &af);
+            if inline_fonts_as_objects(doc, &mut fonts) {
+                store_form_fonts(doc, &mut af, dr, fonts);
+                doc.set(r, Object::Dict(af));
+            }
+        }
+        // A form dictionary written directly in the catalog (the catalog's /AcroForm need not be
+        // an indirect reference) is written back there.
+        Object::Dict(mut af) => {
+            let (dr, mut fonts) = form_fonts(doc, &af);
+            if inline_fonts_as_objects(doc, &mut fonts) {
+                store_form_fonts(doc, &mut af, dr, fonts);
+                doc.update_dict(root, |c| c.set(b"AcroForm".to_vec(), Object::Dict(af)))?;
+            }
+        }
+        _ => {}
     }
     Ok(())
+}
+
+/// Whether the field `r`, or the nearest ancestor that has one, holds a `/V` (the entry is
+/// inheritable, ISO 32000-2 §12.7.4). The `/Parent` chain is followed at most 64 deep, as deep
+/// as the field walk goes, so a cyclic chain ends.
+fn holds_value(doc: &Document, r: ObjRef) -> bool {
+    let mut at = r;
+    for _ in 0..=64 {
+        let obj = doc.get(at);
+        let Some(d) = obj.as_dict() else { return false };
+        if d.contains(b"V") {
+            return true;
+        }
+        match d.reference(b"Parent") {
+            Some(p) => at = p,
+            None => return false,
+        }
+    }
+    false
 }
 
 /// The Appearance tab: borders, colours and text.

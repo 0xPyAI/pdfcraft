@@ -3341,3 +3341,43 @@ fn filling_a_field_makes_inline_form_fonts_objects_unless_the_form_is_signed() {
     set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
     assert!(!doc.modified_objects().contains(&8), "/DR unchanged: {:?}", doc.modified_objects());
 }
+
+/// #3441 (review follow-up): a signature value held by a parent field signs its kid too (`/V` is
+/// inheritable, ISO 32000-2 Table 226), so the form still counts as signed and keeps its `/DR`.
+#[test]
+fn a_signature_value_on_a_parent_field_keeps_the_form_fonts_as_signed() {
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [5 0 R 8 0 R] >>".into(),
+        "<< /Fields [5 0 R 6 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> >> >> >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /DA (/Helv 12 Tf 0 g) /Rect [50 700 300 720] /P 3 0 R >>".into(),
+        "<< /FT /Sig /T (sig) /V 7 0 R /Kids [8 0 R] >>".into(),
+        "<< /Type /Sig /Filter /Adobe.PPKLite /Contents <00> >>".into(),
+        "<< /Type /Annot /Subtype /Widget /T (s1) /Parent 6 0 R /Rect [0 0 0 0] /P 3 0 R >>".into(),
+    ]);
+    let kid = pdfcraft_cos::ObjRef::new(8, 0);
+    assert!(fields(&doc).iter().any(|f| f.obj == kid && f.kind == FieldKind::Signature), "the kid is the signature field");
+    set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
+    let doc = reopen(&doc);
+    assert!(dr_fonts(&doc).get(b"Helv").is_some_and(|h| h.as_dict().is_some()), "an inherited signature value keeps /DR as it was");
+    assert_eq!(field(&fields(&doc), "name").value, ["Ada"]);
+}
+
+/// #3441 (review follow-up): a catalog that holds `/AcroForm` as a direct dictionary gets its
+/// inline `/DR` fonts converted too when a field is filled.
+#[test]
+fn filling_a_field_converts_inline_fonts_of_a_direct_form_dictionary() {
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> >> >> >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /DA (/Helv 12 Tf 0 g) /Rect [50 700 300 720] /P 3 0 R >>".into(),
+    ]);
+    set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
+    let doc = reopen(&doc);
+    let fonts = dr_fonts(&doc);
+    assert!(fonts.reference(b"Helv").is_some(), "Helv became an object: {fonts:?}");
+    assert_eq!(fonts.len(), 1, "nothing added: {fonts:?}");
+    assert_eq!(field(&fields(&doc), "name").value, ["Ada"]);
+}
