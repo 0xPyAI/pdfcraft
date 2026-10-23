@@ -22,6 +22,7 @@ fn duplex(value: &str, cut_stack: bool) -> Result<Option<spool::Duplex>> {
     })
 }
 
+/// An invalid-arguments error saying `m`.
 fn bad(m: impl Into<String>) -> ToolError {
     ToolError::InvalidArgs(m.into())
 }
@@ -75,6 +76,8 @@ fn spool_job(a: &Args, printer: &str, title: String, duplex: Option<spool::Duple
 }
 
 impl Automation {
+    /// `printers`: the system's printers, the default marked, and each one's two-sided support
+    /// where the spooler reports it.
     pub(crate) fn printers(&self) -> Result<Value> {
         let list: Vec<Value> = spool::printers()
             .into_iter()

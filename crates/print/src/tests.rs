@@ -661,6 +661,8 @@ fn architectural_sheets_preserve_full_scale() {
     assert!(fit[0].placed[0].matrix.0[0] < 1.0, "Fit adds margins and must not masquerade as full scale");
 }
 
+/// A sheet matches a preset either way round and rounded to whole points, but not half a point off;
+/// empty, negative, infinite, NaN and custom sizes match none.
 #[test]
 fn paper_matching_accepts_rounded_metric_sizes_but_not_custom_or_invalid_sizes() {
     for (i, (_, (w, h))) in PAPERS.iter().enumerate() {
@@ -702,7 +704,8 @@ fn every_paper_reaches_the_spooler_by_a_name_of_its_size() {
     assert_eq!((cups_media(PAPERS.len()), media_option(PAPERS.len())), (None, None));
     // The names themselves, spelled as PWG 5101.1 has them: a driverless printer may take only the
     // names it advertises, so one CUPS can merely parse (ARCH A was `arch_a_9x12in`) is not enough.
-    // ARCH E1 isn't in 5101.1; its name is the IANA registry's.
+    // ARCH E1 is 5101.1's `wide-format` size: `na_arch-e1_30x42in` was asked for once and never
+    // registered.
     let names: Vec<(&str, &str)> = PAPERS.iter().enumerate().map(|(i, (name, _))| (*name, cups_media(i).unwrap_or_default())).collect();
     assert_eq!(
         names,
@@ -718,7 +721,7 @@ fn every_paper_reaches_the_spooler_by_a_name_of_its_size() {
             ("ARCH B (12 x 18 in)", "na_arch-b_12x18in"),
             ("ARCH C (18 x 24 in)", "na_arch-c_18x24in"),
             ("ARCH D (24 x 36 in)", "na_arch-d_24x36in"),
-            ("ARCH E1 (30 x 42 in)", "na_arch-e1_30x42in"),
+            ("ARCH E1 (30 x 42 in)", "na_wide-format_30x42in"),
             ("ARCH E (36 x 48 in)", "na_arch-e_36x48in"),
             ("ANSI C (17 x 22 in)", "na_c_17x22in"),
             ("ANSI D (22 x 34 in)", "na_d_22x34in"),
@@ -732,9 +735,10 @@ fn every_paper_reaches_the_spooler_by_a_name_of_its_size() {
     );
 }
 
+/// #2734: the US #10 envelope (4.125 × 9.5 in) is offered, fed by its PPD name and laid out at
+/// its own size.
 #[test]
 fn us_number_10_envelope_is_offered_and_fed_by_name() {
-    // 4.125 × 9.5 in (#2734).
     let index = matching_paper((684.0, 297.0)).unwrap();
     assert_eq!(PAPERS[index].0, "US #10 Envelope (4.125 x 9.5 in)");
     assert_eq!(PAPERS[index].1, (297.0, 684.0));
