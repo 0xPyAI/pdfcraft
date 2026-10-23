@@ -566,6 +566,13 @@ fn apply_to(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Redac
             }
         }
         removed_everywhere.extend(removed.iter().copied());
+        // Pop-ups dropped with their parent below count too: a reply on another page may answer one.
+        for a in &annots {
+            let Some(r) = a.as_ref() else { continue };
+            if doc.get(r).as_dict().and_then(|d| d.get(b"Parent")).and_then(Object::as_ref).is_some_and(|p| removed.contains(&p)) {
+                removed_everywhere.insert(r);
+            }
+        }
         let kept: Vec<Object> = annots
             .into_iter()
             .filter(|a| {

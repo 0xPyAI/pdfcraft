@@ -1471,11 +1471,12 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
     for num in old.object_numbers().into_iter().filter(|n| !current.contains(n)) {
         let r = ObjRef { num, generation: old.generation(num) };
         let was = old.get(r);
-        if matches!(&*was, Object::Stream(s) if matches!(s.dict.name(b"Type"), Some(b"XRef" | b"ObjStm"))) {
+        let signed_role = old_content.contains(&r) || signed_pages.contains(&r) || signed_resources.contains_key(&r);
+        // A signed page's content or resource is judged by that role, whatever /Type its stream carried.
+        if !signed_role && matches!(&*was, Object::Stream(s) if matches!(s.dict.name(b"Type"), Some(b"XRef" | b"ObjStm"))) {
             continue;
         }
-        let what =
-            if old_content.contains(&r) || signed_pages.contains(&r) || signed_resources.contains_key(&r) { kind::PAGE_CONTENT } else { kind::OTHER };
+        let what = if signed_role { kind::PAGE_CONTENT } else { kind::OTHER };
         if !disallowed.contains(&what) {
             disallowed.push(what);
         }
@@ -1784,6 +1785,12 @@ fn change_kind(doc: &Document, old: &Document, d: &Dict, before: Option<&Dict>) 
     // A later revision cannot make an existing object a signature by relabelling it: a signature
     // change is only a brand-new object, or one that was already a signature object when signed.
     let signature_ok = before.is_none_or(is_signature_dict);
+    // A signature widget that already held a signature is what the signature shows: moving it or
+    // swapping its appearance can hide the signed page under it. Judged by the signed revision,
+    // so relabelling the widget now does not change that.
+    if before.is_some_and(|b| b.name(b"Subtype") == Some(b"Widget") && b.contains(b"V") && b.name(b"FT") == Some(b"Sig")) && before != Some(d) {
+        return kind::PAGE_CONTENT;
+    }
     match ty {
         // Only a new signature value or policy: rewriting a signed one is not a signature (#1788).
         Some(b"Sig" | b"DocTimeStamp" | b"SigRef" | b"TransformParams") if before.is_none() => return kind::SIGNATURE,
@@ -1820,11 +1827,6 @@ fn change_kind(doc: &Document, old: &Document, d: &Dict, before: Option<&Dict>) 
         _ => {}
     }
     match d.name(b"Subtype") {
-        // A signature widget that already held a signature is what the signature shows: moving
-        // it or swapping its appearance can hide the signed page under it.
-        Some(b"Widget") if before.is_some_and(|b| b.contains(b"V") && b.name(b"FT") == Some(b"Sig")) && before != Some(d) => {
-            return kind::PAGE_CONTENT;
-        }
         Some(b"Widget") => return if d.name(b"FT") == Some(b"Sig") && signature_ok { kind::SIGNATURE } else { kind::FORM_FILL },
         Some(b"Link") => return kind::LINKS,
         Some(_) if ty == Some(b"Annot") || d.contains(b"Rect") => return kind::COMMENTS,
