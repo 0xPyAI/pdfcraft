@@ -666,7 +666,7 @@ pub fn add_field(doc: &mut Document, page: usize, rect: [f64; 4], kind: &NewFiel
                 caption: None,
                 list: None,
             };
-            let ap = appearance::check_box_states(doc, &w, FieldKind::Radio, export);
+            let ap = appearance::check_box_states(doc, &w, FieldKind::Radio, export, "/ZaDb 0 Tf 0 g");
             doc.update_dict(widget, |d| d.set(b"AP".to_vec(), Object::Dict(ap)))?;
         }
         _ => {
@@ -709,7 +709,7 @@ fn redraw_widgets(doc: &mut Document, name: &str, only: Option<usize>) -> Result
             }
             FieldKind::CheckBox | FieldKind::Radio => {
                 let on = w.on_state.clone().unwrap_or_else(|| "Yes".into());
-                appearance::check_box_states(doc, w, f.kind, &on)
+                appearance::check_box_states(doc, w, f.kind, &on, &f.da)
             }
             FieldKind::PushButton => {
                 let (s, m) = button_appearance(doc, w, &f.da);

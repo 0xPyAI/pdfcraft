@@ -600,8 +600,10 @@ pub fn field_appearance_drawn(doc: &Document, f: &Field, w: &Widget, values: &[S
 
 /// On/Off appearances for a check box or radio button that has none (a check mark or a dot,
 /// drawn as paths, so no symbol font is needed).
+/// The mark is drawn in the colour of the widget's `/DA`, else of `f_da` (the field's): the
+/// Appearance tab's Text Color (#4261).
 /// The streams are added to `doc` as indirect objects (streams can't be direct objects).
-pub fn check_box_states(doc: &mut Document, w: &Widget, kind: FieldKind, on_name: &str) -> Dict {
+pub fn check_box_states(doc: &mut Document, w: &Widget, kind: FieldKind, on_name: &str, f_da: &str) -> Dict {
     let wobj = doc.get(w.obj);
     let wd = wobj.as_dict().cloned().unwrap_or_default();
     let (page_w, page_h) = ((w.rect[2] - w.rect[0]).max(1.0), (w.rect[3] - w.rect[1]).max(1.0));
@@ -609,6 +611,7 @@ pub fn check_box_states(doc: &mut Document, w: &Widget, kind: FieldKind, on_name
     let (width, height) = (place.layout_w, place.layout_h);
     let (frame_c, _) = frame(doc, &wd, width, height);
     let style = crate::author::CheckStyle::of_widget(doc, &wd, kind);
+    let da = parse_da(wd.get(b"DA").and_then(|o| doc.resolve(o).as_string().map(|s| s.to_text())).as_deref().unwrap_or(f_da));
     let mut form = |content: String| -> Object {
         let mut d = Dict::new();
         d.set(b"Type".to_vec(), Object::name("XObject"));
@@ -617,7 +620,7 @@ pub fn check_box_states(doc: &mut Document, w: &Widget, kind: FieldKind, on_name
         Object::Ref(doc.add(Object::Stream(Stream::flate(d, content.as_bytes()))))
     };
     let s = width.min(height);
-    let mark = check_mark(style, width / 2.0, height / 2.0, s);
+    let mark = check_mark(style, width / 2.0, height / 2.0, s, &da.color);
     let mut nd = Dict::new();
     nd.set(crate::name_bytes(on_name), form(format!("{frame_c}{mark}")));
     nd.set(b"Off".to_vec(), form(frame_c));
@@ -627,12 +630,13 @@ pub fn check_box_states(doc: &mut Document, w: &Widget, kind: FieldKind, on_name
 }
 
 /// The on-state mark for `style` (#94), centred on (`cx`, `cy`) in a box whose smaller side is
-/// `s`, drawn in black.
-fn check_mark(style: crate::author::CheckStyle, cx: f64, cy: f64, s: f64) -> String {
+/// `s`, drawn in the fill colour operation `color` (`0 g`, `0 0 1 rg`).
+fn check_mark(style: crate::author::CheckStyle, cx: f64, cy: f64, s: f64, color: &str) -> String {
     use crate::author::CheckStyle;
+    let (fill, stroke) = (color, stroke_op(color));
     // A filled polygon through `pts`.
     let polygon = |pts: &[(f64, f64)]| {
-        let mut c = String::from("0 g\n");
+        let mut c = format!("{fill}\n");
         for (i, (x, y)) in pts.iter().enumerate() {
             c.push_str(&format!("{} {} {} ", n(*x), n(*y), if i == 0 { "m" } else { "l" }));
         }
@@ -642,7 +646,7 @@ fn check_mark(style: crate::author::CheckStyle, cx: f64, cy: f64, s: f64) -> Str
     let line = n((s * 0.1).max(1.0));
     match style {
         CheckStyle::Check => format!(
-            "0 G\n{line} w 1 J 1 j\n{} {} m {} {} l {} {} l S\n",
+            "{stroke}\n{line} w 1 J 1 j\n{} {} m {} {} l {} {} l S\n",
             n(cx - s * 0.28),
             n(cy),
             n(cx - s * 0.08),
@@ -653,7 +657,7 @@ fn check_mark(style: crate::author::CheckStyle, cx: f64, cy: f64, s: f64) -> Str
         CheckStyle::Cross => {
             let d = s * 0.25;
             format!(
-                "0 G\n{line} w 1 J\n{} {} m {} {} l S\n{} {} m {} {} l S\n",
+                "{stroke}\n{line} w 1 J\n{} {} m {} {} l S\n{} {} m {} {} l S\n",
                 n(cx - d),
                 n(cy - d),
                 n(cx + d),
@@ -666,7 +670,7 @@ fn check_mark(style: crate::author::CheckStyle, cx: f64, cy: f64, s: f64) -> Str
         }
         CheckStyle::Square => {
             let d = s * 0.22;
-            format!("0 g\n{} {} {} {} re f\n", n(cx - d), n(cy - d), n(2.0 * d), n(2.0 * d))
+            format!("{fill}\n{} {} {} {} re f\n", n(cx - d), n(cy - d), n(2.0 * d), n(2.0 * d))
         }
         CheckStyle::Diamond => {
             let d = s * 0.3;
@@ -688,7 +692,7 @@ fn check_mark(style: crate::author::CheckStyle, cx: f64, cy: f64, s: f64) -> Str
             let r = s * 0.25;
             let k = 0.5523 * r;
             format!(
-                "0 g\n{} {} m {} {} {} {} {} {} c {} {} {} {} {} {} c {} {} {} {} {} {} c {} {} {} {} {} {} c f\n",
+                "{fill}\n{} {} m {} {} {} {} {} {} c {} {} {} {} {} {} c {} {} {} {} {} {} c {} {} {} {} {} {} c f\n",
                 n(cx + r),
                 n(cy),
                 n(cx + r),
