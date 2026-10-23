@@ -672,6 +672,17 @@ fn page_index(doc: &Document, p: ObjRef) -> Option<usize> {
     pdfcraft_annot::page_refs(doc).ok()?.iter().position(|r| *r == p)
 }
 
+/// A widget's `/MK /R` as a quarter turn (0, 90, 180 or 270); missing, malformed or not a
+/// multiple of 90 counts as 0, as `pdfcraft-forms` reads it for the fields it draws.
+fn mk_rotation(doc: &Document, widget: &Dict) -> i64 {
+    let r = widget
+        .get(b"MK")
+        .map(|mk| doc.resolve(mk))
+        .and_then(|mk| mk.as_dict().and_then(|mk| mk.get(b"R")).map(|r| doc.resolve(r)))
+        .and_then(|r| r.as_int().or_else(|| r.as_f64().filter(|v| v.is_finite() && v.abs() <= 1.0e6).map(|v| v.round() as i64)));
+    r.map(|r| r.rem_euclid(360)).filter(|q| matches!(q, 90 | 180 | 270)).unwrap_or(0)
+}
+
 /// Validate one signature dictionary.
 pub fn validate(doc: &Document, bytes: &[u8], trust: &TrustStore, field: &str) -> Option<SignatureInfo> {
     list(doc, bytes, trust).into_iter().find(|s| s.field == field)
@@ -2054,7 +2065,8 @@ fn sign_inner(
         .field
         .as_deref()
         .map(|n| sig_fields(&doc).into_iter().find(|f| f.name == n).ok_or_else(|| SignError::Pdf(format!("there is no signature field {n:?}"))));
-    let (widget, rect) = match existing {
+    // `turn`: how far the appearance is turned to read upright (`/MK /R`, counterclockwise).
+    let (widget, rect, turn) = match existing {
         Some(f) => {
             let f = f?;
             if f.signature(&doc).is_some() {
@@ -2067,7 +2079,9 @@ fn sign_inner(
             doc.update_dict(fr, |d| d.set(b"V".to_vec(), Object::Ref(sig)))?;
             let (wr, wd) = f.widgets.first().cloned().ok_or_else(|| SignError::Pdf("the field has no widget".into()))?;
             let rect = nums(&doc, &wd, b"Rect").filter(|r| r.len() == 4).map(|r| [r[0].min(r[2]), r[1].min(r[3]), r[0].max(r[2]), r[1].max(r[3])]);
-            (wr.unwrap_or(fr), rect.unwrap_or([0.0; 4]))
+            // The field's own rotation, as a form author set it: an existing field is not
+            // reoriented, so one without `/MK /R` is drawn as before.
+            (wr.unwrap_or(fr), rect.unwrap_or([0.0; 4]), mk_rotation(&doc, &wd))
         }
         None => {
             let page = *pages.get(opts.page).ok_or_else(|| SignError::Pdf(format!("page {} does not exist", opts.page + 1)))?;
@@ -2087,6 +2101,14 @@ fn sign_inner(
             w.set(b"P".to_vec(), Object::Ref(page));
             // Print + Locked.
             w.set(b"F".to_vec(), Object::Int(4 | 128));
+            // On a page shown turned, the signature reads upright as the page is displayed: the
+            // widget is turned back by the page's rotation (ISO 32000-2 §12.5.6.19, `/MK /R`).
+            let turn = pdfcraft_model::pages(&doc).get(opts.page).map_or(0, |p| p.rotation(&doc));
+            if turn != 0 {
+                let mut mk = Dict::new();
+                mk.set(b"R".to_vec(), Object::Int(turn));
+                w.set(b"MK".to_vec(), Object::Dict(mk));
+            }
             let wr = doc.add(Object::Dict(w));
             // Page /Annots (indirect arrays are updated in place).
             let pd = doc.get(page).as_dict().cloned().unwrap_or_default();
@@ -2122,7 +2144,7 @@ fn sign_inner(
                 // Inline (or new) AcroForms stay in the catalog.
                 None => doc.update_dict(root, |c| c.set(b"AcroForm".to_vec(), Object::Dict(af)))?,
             }
-            (wr, rect)
+            (wr, rect, turn)
         }
     };
     if opts.field.is_some() {
@@ -2136,7 +2158,7 @@ fn sign_inner(
         }
     }
     // The appearance.
-    let ap = appearance(&mut doc, rect, &name, &id.certificate, opts)?;
+    let ap = appearance(&mut doc, rect, turn, &name, &id.certificate, opts)?;
     let ap_ref = doc.add(Object::Stream(ap));
     let mut apd = Dict::new();
     apd.set(b"N".to_vec(), Object::Ref(ap_ref));
@@ -2264,9 +2286,15 @@ pub fn display_date(pdf: &str) -> String {
 /// draw: signing invisibly, or leaving that part out, still works. A graphic doesn't change this:
 /// the name it replaces on the left is still among the details. A label that is drawn
 /// ([`AppearanceLabels`], the caller's words) must be drawable in Helvetica, and is refused otherwise.
-fn appearance(doc: &mut Document, rect: [f64; 4], name: &str, cert: &Certificate, opts: &SignOptions) -> Result<Stream, SignError> {
+///
+/// `turn` is the widget's `/MK /R` (0, 90, 180 or 270; anything else counts as 0): the layout is
+/// drawn upright in the box as turned by it, and a `/Matrix` maps that box onto `rect`.
+fn appearance(doc: &mut Document, rect: [f64; 4], turn: i64, name: &str, cert: &Certificate, opts: &SignOptions) -> Result<Stream, SignError> {
     use pdfcraft_fonts::{first_undrawable, helvetica_width, inter_width, literal, undrawable_message, win_ansi, wrap, wrap_with};
-    let (w, h) = ((rect[2] - rect[0]).max(0.0), (rect[3] - rect[1]).max(0.0));
+    let turn = if matches!(turn, 90 | 180 | 270) { turn } else { 0 };
+    let (rw, rh) = ((rect[2] - rect[0]).max(0.0), (rect[3] - rect[1]).max(0.0));
+    // The upright layout box: a quarter turn swaps its sides.
+    let (w, h) = if turn % 180 == 0 { (rw, rh) } else { (rh, rw) };
     let a = &opts.appearance;
     let dn = cert.subject.display();
     let mut needs_unicode = false;
@@ -2412,6 +2440,16 @@ fn appearance(doc: &mut Document, rect: [f64; 4], name: &str, cert: &Certificate
     d.set(b"Type".to_vec(), Object::name("XObject"));
     d.set(b"Subtype".to_vec(), Object::name("Form"));
     d.set(b"BBox".to_vec(), Object::Array([0.0, 0.0, w, h].iter().map(|x| Object::Real(*x)).collect()));
+    if turn != 0 {
+        // Viewers fit the box, transformed by `/Matrix`, to the widget's `/Rect` (ISO 32000-2
+        // §12.5.5); this one lands on `rect` exactly, turned as `/MK /R` says.
+        let mut m = pdfcraft_model::view_matrix_for(turn, [rect[0], rect[1], rect[0] + rw, rect[1] + rh]);
+        if !m.iter().all(|x| x.is_finite()) {
+            // A caller's non-finite corner: the turn alone, which viewers fit to `/Rect` the same.
+            m = pdfcraft_model::view_matrix_for(turn, [0.0; 4]);
+        }
+        d.set(b"Matrix".to_vec(), Object::Array(m.iter().map(|x| Object::Real(*x)).collect()));
+    }
     let mut res = Dict::new();
     res.set(b"Font".to_vec(), Object::Dict(fonts));
     if let Some(im) = image {

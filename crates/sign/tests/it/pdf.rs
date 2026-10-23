@@ -28,6 +28,11 @@ fn fixture_with(catalog: &[u8], more: &[&[u8]]) -> Vec<u8> {
         b"<< /Type /Annot /Subtype /Widget /FT /Sig /T (Approval) /Rect [150 20 280 70] /P 3 0 R /F 4 >>",
     ];
     objs.extend_from_slice(more);
+    write_pdf(&objs)
+}
+
+/// A classic-xref PDF of `objs`, numbered from 1, with object 1 as the catalog.
+fn write_pdf(objs: &[&[u8]]) -> Vec<u8> {
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();
     for (i, o) in objs.iter().enumerate() {
@@ -363,6 +368,105 @@ fn visible_signatures_show_a_drawn_typed_or_image_graphic() {
     // An invisible signature has nothing to show: no image is embedded.
     let invisible = pdfcraft_sign::sign(&open(&fixture()), &id, &SignOptions { rect: None, graphic: Some(picture(false)), ..opts() }).unwrap();
     assert!(!invisible.windows(6).any(|w| w == b"/Image"));
+}
+
+/// [`fixture`]'s page and "Approval" widget with extra entries: `page` (a `/Rotate`, say) and
+/// `widget` (an `/MK`); `pages` goes on the page tree node, where `/Rotate` is inheritable.
+fn rotated_fixture(pages: &str, page: &str, widget: &str) -> Vec<u8> {
+    let pages = format!("<< /Type /Pages /Kids [3 0 R] /Count 1 {pages} >>");
+    let page = format!(
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] {page} >>"
+    );
+    let widget = format!("<< /Type /Annot /Subtype /Widget /FT /Sig /T (Approval) /Rect [150 20 280 70] /P 3 0 R /F 4 {widget} >>");
+    write_pdf(&[
+        b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [6 0 R] >> >>",
+        pages.as_bytes(),
+        page.as_bytes(),
+        b"<< /Length 44 >>\nstream\nBT /F1 14 Tf 20 250 Td (Contract text) Tj ET\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        widget.as_bytes(),
+    ])
+}
+
+/// The signature field `name`'s widget and its normal appearance's dictionary and content.
+fn widget_and_appearance(bytes: &[u8], name: &str) -> (pdfcraft_cos::Dict, pdfcraft_cos::Dict, String) {
+    let doc = open(bytes);
+    let catalog = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    let form = doc.resolve(catalog.get(b"AcroForm").unwrap()).as_dict().cloned().unwrap();
+    let fields = doc.resolve(form.get(b"Fields").unwrap()).as_array().cloned().unwrap();
+    let widget = fields
+        .iter()
+        .filter_map(|f| doc.resolve(f).as_dict().cloned())
+        .find(|f| matches!(f.get(b"T"), Some(Object::String(s)) if s.bytes == name.as_bytes()))
+        .unwrap();
+    let ap = doc.resolve(widget.get(b"AP").unwrap()).as_dict().cloned().unwrap();
+    let Object::Stream(s) = &*doc.resolve(ap.get(b"N").unwrap()) else { panic!("no normal appearance") };
+    (widget.clone(), s.dict.clone(), String::from_utf8_lossy(&s.decoded().unwrap()).into_owned())
+}
+
+fn numbers(d: &pdfcraft_cos::Dict, key: &[u8]) -> Option<Vec<f64>> {
+    d.get(key).and_then(|o| o.as_array()).map(|a| a.iter().filter_map(|n| n.as_f64()).collect())
+}
+
+/// On a page shown turned, a visible signature reads upright as displayed: its appearance is the
+/// one an unturned page gets in the box with the displayed proportions, turned back onto the
+/// widget by `/MK /R` and the matching `/Matrix`.
+#[test]
+fn visible_signatures_read_upright_on_rotated_pages() {
+    use pdfcraft_sign::Appearance;
+    let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    // 200 x 50 in user space: shown 50 wide and 200 tall on a page turned a quarter.
+    let rect = [20.0, 100.0, 220.0, 150.0];
+    let swapped = [20.0, 100.0, 70.0, 300.0];
+    let shown = Appearance { reason: true, location: true, ..Appearance::default() };
+    let sign = |bytes: &[u8], rect: [f64; 4]| {
+        let o = SignOptions { rect: Some(rect), graphic: Some(picture(false)), appearance: shown.clone(), ..opts() };
+        pdfcraft_sign::sign(&open(bytes), &id, &o).unwrap()
+    };
+    let upright = |rect: [f64; 4]| widget_and_appearance(&sign(&fixture(), rect), "Signature1");
+    for (pages, page, turn) in [
+        ("", "", 0),
+        ("", "/Rotate 90", 90),
+        ("", "/Rotate 180", 180),
+        ("", "/Rotate 270", 270),
+        ("", "/Rotate -90", 270),
+        // Inherited from the page tree.
+        ("/Rotate 270", "", 270),
+        // Not a quarter turn: drawn as unturned, as the page is.
+        ("", "/Rotate 45", 0),
+    ] {
+        let doc = rotated_fixture(pages, page, "");
+        let signed = sign(&doc, rect);
+        let s = signatures(&open(&signed), &signed, &TrustStore::default()).into_iter().find(|s| s.signed).unwrap();
+        assert_eq!((s.status, s.modification), (Status::Unknown, Modification::None), "{pages} {page}: {:?}", s.details);
+        let (widget, form, content) = widget_and_appearance(&signed, "Signature1");
+        let (_, expected_form, expected) = upright(if turn % 180 == 0 { rect } else { swapped });
+        assert_eq!(content, expected, "{pages} {page}: the layout is the upright box's");
+        assert_eq!(numbers(&form, b"BBox"), numbers(&expected_form, b"BBox"), "{pages} {page}");
+        let mk = widget.get(b"MK").and_then(|m| m.as_dict()).and_then(|m| m.int(b"R"));
+        let matrix = numbers(&form, b"Matrix");
+        if turn == 0 {
+            assert_eq!((mk, matrix), (None, None), "{pages} {page}: an unturned page's signature is unchanged");
+        } else {
+            assert_eq!(mk, Some(turn), "{pages} {page}");
+            assert_eq!(matrix, Some(pdfcraft_model::view_matrix_for(turn, rect).to_vec()), "{pages} {page}");
+        }
+    }
+    // An existing field keeps its own orientation: `/MK /R` turns it, whatever the page does.
+    let field = |bytes: &[u8]| {
+        let o = SignOptions { field: Some("Approval".into()), graphic: Some(picture(false)), appearance: shown.clone(), ..opts() };
+        widget_and_appearance(&pdfcraft_sign::sign(&open(bytes), &id, &o).unwrap(), "Approval")
+    };
+    let field_rect = [150.0, 20.0, 280.0, 70.0];
+    let (_, plain, plain_content) = field(&rotated_fixture("", "/Rotate 90", ""));
+    assert_eq!((numbers(&plain, b"Matrix"), numbers(&plain, b"BBox")), (None, Some(vec![0.0, 0.0, 130.0, 50.0])));
+    let (_, turned, turned_content) = field(&rotated_fixture("", "/Rotate 90", "/MK << /R 90 >>"));
+    assert_eq!(numbers(&turned, b"BBox"), Some(vec![0.0, 0.0, 50.0, 130.0]));
+    assert_eq!(numbers(&turned, b"Matrix"), Some(pdfcraft_model::view_matrix_for(90, field_rect).to_vec()));
+    assert_ne!(turned_content, plain_content);
+    // A malformed `/MK /R` counts as 0.
+    let (_, odd, _) = field(&rotated_fixture("", "", "/MK << /R (ninety) >>"));
+    assert_eq!(numbers(&odd, b"Matrix"), None);
 }
 
 #[test]
