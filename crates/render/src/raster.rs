@@ -220,6 +220,9 @@ pub struct RenderedPage {
 pub enum RenderWarning {
     /// Content was skipped after the per-page decoded-content budget was exhausted.
     ContentTruncated,
+    /// A colour could not be computed (a colour space that cannot be read, or a Separation or
+    /// DeviceN tint transform that cannot be evaluated) and was painted in a fallback colour.
+    ColourFallback,
 }
 
 /// Counters for work performed by a renderer or render pool.
@@ -402,12 +405,15 @@ fn warning_settings(settings: &InterpreterSettings, warnings: Arc<Mutex<Vec<Rend
     InterpreterSettings {
         warning_sink: Arc::new(move |warning| {
             // Nested forms, Type 3 glyphs and patterns are interpreted again and each reports the
-            // exhausted budget: once per page is enough.
-            if matches!(warning, InterpreterWarning::ContentTruncated) {
-                let mut warnings = lock(&target);
-                if !warnings.contains(&RenderWarning::ContentTruncated) {
-                    warnings.push(RenderWarning::ContentTruncated);
-                }
+            // exhausted budget, or the colours that fell back: once per page is enough.
+            let warning = match warning {
+                InterpreterWarning::ContentTruncated => RenderWarning::ContentTruncated,
+                InterpreterWarning::ColorFallback => RenderWarning::ColourFallback,
+                InterpreterWarning::UnsupportedFont | InterpreterWarning::ImageDecodeFailure => return,
+            };
+            let mut warnings = lock(&target);
+            if !warnings.contains(&warning) {
+                warnings.push(warning);
             }
         }),
         ..settings.clone()
@@ -8162,6 +8168,10 @@ trailer << /Root 1 0 R >>
 
     // #1201: /DefaultGray, /DefaultRGB and /DefaultCMYK (vendored hayro-interpret patch 38).
     mod default_colour_spaces;
+
+    // #4260: DeviceN colours with many inks, and tint transforms that cannot be evaluated
+    // (vendored hayro-syntax patch 26, hayro-interpret patch 55).
+    mod devicen_inks;
 
     /// #3109 / #3116: clipping-only text (`7 Tr`) installs a clip for subsequent painting
     /// but draws no pixels itself.
