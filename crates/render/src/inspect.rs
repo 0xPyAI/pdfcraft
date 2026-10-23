@@ -2940,6 +2940,39 @@ trailer << /Root 1 0 R >>
         }
     }
 
+    /// A reply finds its comment where the listing keeps it: on the first page of a page-shared
+    /// `/Annots` array, whether its `/IRT` names the comment or an object holding a reference to it.
+    #[test]
+    fn a_reply_finds_its_comment_through_a_reference_chain_and_a_shared_array() {
+        let pdf = "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n\
+             2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj\n\
+             3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots 7 0 R >> endobj\n\
+             4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots 7 0 R >> endobj\n\
+             5 0 obj 6 0 R endobj\n\
+             6 0 obj << /Type /Annot /Subtype /Text /Rect [0 0 1 1] /Contents (comment) >> endobj\n\
+             7 0 obj [5 0 R 8 0 R 9 0 R] endobj\n\
+             8 0 obj << /Type /Annot /Subtype /Text /Rect [0 0 1 1] /Contents (to the comment) /IRT 6 0 R >> endobj\n\
+             9 0 obj << /Type /Annot /Subtype /Text /Rect [0 0 1 1] /Contents (through the chain) /IRT 5 0 R >> endobj\n\
+             trailer << /Root 1 0 R >>\n%%EOF";
+        let mut doc = Document::load_mem(pdf.as_bytes()).expect("loads");
+        let mut saved = Vec::new();
+        doc.save_to(&mut saved).expect("saves");
+        let lazy = LazyStructure::new(Arc::new(saved), None).expect("opens");
+        let page = PageInfo { width: 200.0, height: 200.0, crop: [0.0, 0.0, 200.0, 200.0], rotation: 0, label: String::new() };
+        for reader in [&doc as &dyn Structure, &lazy] {
+            let mut info = DocInfo { pages: vec![page.clone(), page.clone()], ..Default::default() };
+            Inspector::new(reader).fill(&mut info);
+            let notes = &info.annotations;
+            assert_eq!(notes.len(), 3, "{notes:?}");
+            let comment = notes.iter().find(|a| a.contents.as_deref() == Some("comment")).expect("listed");
+            assert_eq!((comment.page, comment.index, comment.is_reply()), (0, 0, false));
+            for reply in ["to the comment", "through the chain"] {
+                let a = notes.iter().find(|a| a.contents.as_deref() == Some(reply)).expect("listed");
+                assert_eq!((a.page, a.parent), (0, Some((0, 0))), "{reply}");
+            }
+        }
+    }
+
     /// A conversion rejected as too long, or trimmed short or to nothing, still spends the raw
     /// length, so a string many entries share is converted only a few times.
     #[test]
