@@ -3284,6 +3284,12 @@ fn edit_tab_with_an_open_paragraph(h: &mut Harness<'static, PdfCraftApp>) {
     h.get_by_label("Edit").click();
     h.run_steps(3);
     assert_eq!((h.state().mode, h.state().quick_tool), (Mode::Edit, QuickTool::EditText));
+    open_the_first_line(h);
+}
+
+/// With Edit text & images on, opens the line "Page 1" in the paragraph editor and retypes it as
+/// "Chapter One", leaving the editor open.
+fn open_the_first_line(h: &mut Harness<'static, PdfCraftApp>) {
     let r = h.state().views[0].page_screen_rect(0).expect("on screen");
     let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - 158.0) / 300.0 * r.height());
     h.hover_at(at);
@@ -3321,14 +3327,19 @@ fn the_read_mode_command_applies_an_open_paragraph_and_puts_edit_text_down() {
     assert_edit_text_put_down_and_the_paragraph_applied(h.state());
 }
 
-/// The Edit panel's back arrow leaves Edit for All tools as the mode bar does: Edit text & images
-/// is put down and a paragraph still open in the editor is applied, instead of every paragraph
-/// keeping its box, and the editor staying open, under All tools.
+/// The Edit panel's back arrow (it has one when opened from All tools; the Edit tab is its own way
+/// back) leaves for All tools as the mode bar does: Edit text & images is put down and a paragraph
+/// still open in the editor is applied, instead of every paragraph keeping its box, and the editor
+/// staying open, under All tools.
 #[test]
 fn the_edit_panel_back_arrow_applies_an_open_paragraph_and_puts_edit_text_down() {
-    use pdfcraft_ui_egui::{LeftPanel, Mode};
+    use pdfcraft_ui_egui::{LeftPanel, Mode, QuickTool};
     let mut h = harness(1, |_| {});
-    edit_tab_with_an_open_paragraph(&mut h);
+    // All tools ▸ Edit a PDF ▸ Edit text & images: the Edit panel, under All tools.
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(3);
+    assert_eq!((h.state().mode, h.state().quick_tool), (Mode::AllTools, QuickTool::EditText));
+    open_the_first_line(&mut h);
     h.get_by_label("Back to all tools").click();
     h.run_steps(3);
     assert_eq!((h.state().mode, h.state().left), (Mode::AllTools, LeftPanel::AllTools));
