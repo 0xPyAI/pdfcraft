@@ -1888,6 +1888,34 @@ fn permissions_password_restricts_others_but_not_this_session() {
     assert!(s2.get(id3).unwrap().allows_security_change());
 }
 
+/// Converting to PDF/A takes the encryption off (PDF/A forbids it), so on an encrypted document
+/// it needs the same rights as removing security, not just the right to make changes (#3921).
+#[test]
+fn convert_to_pdfa_needs_the_owners_rights_on_an_encrypted_document() {
+    let pdfa = || Edit::ConvertPdfA { level: pdfcraft_preflight::Level::A2b };
+    let refused = Err(EditError::NotPermitted("removing the encryption, which PDF/A forbids"));
+    // Changes allowed; printing (bit 3) and copying (bit 5) withheld.
+    let bytes = protected("pw", "owner", !((1 << 2) | (1 << 4)));
+    let mut s = Session::new();
+    let id = s.open("x.pdf", None, bytes.clone(), Some("pw")).unwrap();
+    assert!(s.get(id).unwrap().allows_modification());
+    assert_eq!(s.apply(id, pdfa()), refused);
+    // Nor inside a batch.
+    let batch = Edit::Batch { label: "x".into(), edits: vec![Edit::RotatePages { pages: vec![0], degrees: 90 }, pdfa()] };
+    assert_eq!(s.apply(id, batch), refused);
+    // Nothing was applied: no undo step, and saving gives back the encrypted original.
+    assert!(s.get(id).unwrap().can_undo().is_none());
+    assert_eq!(s.save_bytes(id).unwrap().as_slice(), bytes.as_slice());
+    // The owner's password allows it, and the result is no longer encrypted.
+    let id2 = s.open("x.pdf", None, bytes, Some("owner")).unwrap();
+    s.apply(id2, pdfa()).unwrap();
+    let saved = s.save_bytes(id2).unwrap();
+    assert!(pdfcraft_cos::Document::open(saved).unwrap().trailer().get(b"Encrypt").is_none());
+    // An unencrypted document needs nothing more.
+    let (mut s, id) = session_with(1);
+    s.apply(id, pdfa()).unwrap();
+}
+
 #[test]
 fn combine_source_check_says_why_a_file_cannot_be_combined() {
     let (mut s, id) = session_with(1);
