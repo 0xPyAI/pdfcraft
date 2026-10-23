@@ -88,7 +88,13 @@ impl PdfCraftApp {
                 {
                     self.views[i].document_changed(&info);
                 }
-                let out = JsOutput { alerts: o.alerts, console: o.console, requests: o.requests, errors: o.error.into_iter().collect() };
+                let out = JsOutput {
+                    alerts: o.alerts,
+                    console: o.console,
+                    requests: o.requests,
+                    errors: o.error.into_iter().collect(),
+                    doc_errors: Vec::new(),
+                };
                 self.handle_js(id, out);
             }
             Err(e) => self.notify_fmt("{field}: {e}", &[("field", field), ("e", &e.to_string())]),
@@ -128,7 +134,7 @@ impl PdfCraftApp {
                     self.views[i].document_changed(&info);
                 }
                 let (error, result) = (o.error.clone(), o.result.clone());
-                let out = JsOutput { alerts: o.alerts, console: o.console, requests: o.requests, errors: Vec::new() };
+                let out = JsOutput { alerts: o.alerts, console: o.console, requests: o.requests, errors: Vec::new(), doc_errors: Vec::new() };
                 self.handle_js(id, out);
                 match error {
                     Some(e) => self.js_console.log.push(format!("Error: {e}")),

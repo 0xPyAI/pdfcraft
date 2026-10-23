@@ -19,6 +19,10 @@ pub struct JsOutput {
     pub requests: Vec<Request>,
     /// Script errors (as Acrobat's console shows them).
     pub errors: Vec<String>,
+    /// Which of `errors` are document scripts' (#3940), told apart by where they came from and
+    /// not by their text, which a field script's error can share: each is reported once, however
+    /// often the document scripts run again.
+    pub doc_errors: Vec<String>,
 }
 
 impl JsOutput {
@@ -34,7 +38,8 @@ impl JsOutput {
         // The document scripts run before every field script, so a failing one would repeat
         // once per calculation; it is reported once.
         for e in &o.doc_errors {
-            if !self.errors.contains(e) {
+            if !self.doc_errors.contains(e) {
+                self.doc_errors.push(e.clone());
                 self.errors.push(e.clone());
             }
         }
@@ -45,11 +50,17 @@ impl JsOutput {
         self.console.extend(other.console);
         self.requests.extend(other.requests);
         // As in `absorb`: a document script's error, already reported, is not repeated; a field
-        // script's errors are each their own.
+        // script's errors are each their own, even one worded like a document script's.
+        let mut docs = other.doc_errors;
         for e in other.errors {
-            if !(pdfcraft_js::is_doc_error(&e) && self.errors.contains(&e)) {
-                self.errors.push(e);
+            if let Some(k) = docs.iter().position(|d| *d == e) {
+                docs.swap_remove(k);
+                if self.doc_errors.contains(&e) {
+                    continue;
+                }
+                self.doc_errors.push(e.clone());
             }
+            self.errors.push(e);
         }
     }
 }
@@ -462,22 +473,29 @@ mod review_tests {
     }
 
     /// Review on #3985: merging two outputs reports a failing document script once, as one run
-    /// does, while each field script error stays.
+    /// does, while each field script error stays: told apart by where an error came from, so a
+    /// field script that throws a document script's very words is still reported.
     #[test]
     fn merged_output_reports_a_document_script_error_once() {
-        let run = |errors: &[&str]| JsOutput { errors: errors.iter().map(|e| e.to_string()).collect(), ..JsOutput::default() };
-        let mut out = run(&["document script 2: TypeError: not a callable function", "ReferenceError: x is not defined"]);
-        out.append(run(&["document script 2: TypeError: not a callable function", "ReferenceError: x is not defined"]));
-        assert_eq!(
-            out.errors,
-            ["document script 2: TypeError: not a callable function", "ReferenceError: x is not defined", "ReferenceError: x is not defined"]
-        );
-        // A field script's message that only looks like one (no script number) is still its own.
-        for look_alike in ["document script x: thrown by a field", "document script : thrown by a field"] {
-            out.append(run(&[look_alike]));
-            out.append(run(&[look_alike]));
-            assert_eq!(out.errors.iter().filter(|e| *e == look_alike).count(), 2, "{look_alike}");
-        }
+        let doc = "document script 2: TypeError: not a callable function";
+        let field = "ReferenceError: x is not defined";
+        let run = |error: &str| {
+            let mut out = JsOutput::default();
+            out.absorb(&Outcome { error: Some(error.into()), doc_errors: vec![doc.into()], ..Outcome::default() });
+            out
+        };
+        let mut out = run(field);
+        out.append(run(field));
+        assert_eq!(out.errors, [field, doc, field]);
+        // CodeRabbit on #3985: a field script that throws the document script's text.
+        out.append(run(doc));
+        assert_eq!(out.errors, [field, doc, field, doc]);
+        let alone = run(doc);
+        assert_eq!(alone.errors, [doc, doc], "the field's error and the document script's");
+        let count = |o: &JsOutput| o.errors.iter().filter(|e| *e == doc).count();
+        let mut merged = run(field);
+        merged.append(alone);
+        assert_eq!(count(&merged), 2, "the field's copy stays; the document script's is listed once");
     }
 
     #[test]
