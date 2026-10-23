@@ -3156,6 +3156,21 @@ fn added_text_and_images_render_and_stay_editable() {
 }
 
 #[test]
+fn a_batch_of_content_edits_refreshes_the_added_content_and_marks() {
+    let (mut s, id) = session_with(1);
+    let text = |t: &str, y: f64| AddedText { rect: [20.0, y, 180.0, y + 14.4], text: t.into(), ..AddedText::default() };
+    let edits = vec![Edit::AddText { page: 0, text: text("One", 200.0) }, Edit::AddText { page: 0, text: text("Two", 150.0) }];
+    s.apply(id, Edit::Batch { label: "Script".into(), edits }).unwrap();
+    assert_eq!(s.get(id).unwrap().added().len(), 2);
+    s.apply(id, Edit::Batch { label: "Script".into(), edits: vec![Edit::DeleteContent { page: 0, index: 0 }] }).unwrap();
+    assert_eq!(s.get(id).unwrap().added().len(), 1);
+    let watermark =
+        Edit::AddWatermark { pages: vec![0], settings: Watermark { text: "Draft".into(), ..Watermark::default() }, file: None, replace: false };
+    s.apply(id, Edit::Batch { label: "Script".into(), edits: vec![watermark] }).unwrap();
+    assert_eq!(s.get(id).unwrap().marks().len(), 1);
+}
+
+#[test]
 fn added_images_rotate_flip_and_crop_as_drawn() {
     // A 20×10 image: left half red, right half blue.
     let mut px = Vec::new();
