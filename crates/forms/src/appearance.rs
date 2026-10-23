@@ -72,6 +72,100 @@ pub fn auto_text_size_by(width: f64, height: f64, multiline: bool, line_width: i
     if tw.is_finite() && tw > width { (size * width / tw).max(4.0) } else { size }
 }
 
+/// How a text field's widget lays its value out in [`field_appearance_drawn`], for asking
+/// whether a value fits it ([`TextBox::fits`]): what a field that doesn't scroll (`DoNotScroll`,
+/// ISO 32000-2 Table 228) still takes. Built from the same pieces the appearance uses: the `/DA`
+/// font from the form's `/DR` (Helvetica where that font can't show the text), the room inside
+/// the border and the 2 pt padding, the `/DA` size (or the automatic size), and wrapping for a
+/// multi-line field; the two must change together.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextBox {
+    /// The `/DA` font from `/DR`, when it is one the appearance can draw with.
+    font: Option<FontText>,
+    /// Width and height inside the border and padding.
+    inner_w: f64,
+    inner_h: f64,
+    /// The `/DA` size; `None` for an automatic (`0 Tf`) size, which shrinks to fit.
+    size: Option<f64>,
+    multiline: bool,
+    password: bool,
+    /// A comb field: its cells, not its width, bound it (`/MaxLen`).
+    comb: bool,
+}
+
+/// The [`TextBox`] widget `w` of text field `f` lays its value out in.
+pub fn text_box(doc: &Document, f: &Field, w: &Widget) -> TextBox {
+    let wobj = doc.get(w.obj);
+    let wd = wobj.as_dict().cloned().unwrap_or_default();
+    let (page_w, page_h) = ((w.rect[2] - w.rect[0]).max(1.0), (w.rect[3] - w.rect[1]).max(1.0));
+    let place = placement(mk_rotation(doc, &wd), page_w, page_h);
+    let da = parse_da(wd.get(b"DA").and_then(|o| doc.resolve(o).as_string().map(|s| s.to_text())).as_deref().unwrap_or(&f.da));
+    let pad = 2.0 + border_width(doc, &wd);
+    let multiline = f.has(flags::MULTILINE);
+    TextBox {
+        font: dr_font(doc, &da.font).map(|(_, enc)| enc),
+        inner_w: (place.layout_w - 2.0 * pad).max(1.0),
+        inner_h: place.layout_h - 2.0 * pad,
+        size: (da.size > 0.0 && da.size.is_finite()).then_some(da.size),
+        multiline,
+        password: f.has(flags::PASSWORD),
+        comb: f.has(flags::COMB) && !multiline && !f.has(flags::PASSWORD) && f.max_len.is_some_and(|m| m > 0),
+    }
+}
+
+impl TextBox {
+    /// Whether `text` fits: on one line within the width, or, multi-line, wrapped within the
+    /// height, as the appearance draws it. An automatic size shrinks before text stops fitting,
+    /// so such a field is full only when the text no longer fits at its smallest size (4 pt). A
+    /// comb field always fits (its `/MaxLen` bounds it).
+    pub fn fits(&self, text: &str) -> bool {
+        if self.comb || text.is_empty() {
+            return true;
+        }
+        let shown: String = if self.password { "*".repeat(text.chars().count()) } else { text.to_string() };
+        // The font the appearance would choose for this text.
+        let can_show = |enc: &FontText| if self.multiline { shown.split(['\n', '\r']).all(|l| enc.can_encode(l)) } else { enc.can_encode(&shown) };
+        let font = self.font.as_ref().filter(|enc| can_show(enc)).unwrap_or(&FontText::WinAnsi);
+        let width_of = |t: &str, size: f64| font.width(t, size);
+        // The smallest an automatic size goes ([`auto_text_size_by`]).
+        let size = self.size.unwrap_or(4.0);
+        if self.multiline {
+            let lines = wrap_with(&shown, size, self.inner_w, width_of).len() as f64;
+            lines * size * 1.15 <= self.inner_h + 1e-6
+        } else {
+            // A line break in a single-line value is drawn as a space.
+            let line: String = shown.chars().map(|c| if matches!(c, '\n' | '\r') { ' ' } else { c }).collect();
+            width_of(&line, size) <= self.inner_w + 1e-6
+        }
+    }
+
+    /// An edit from `before` to `after` as a field that doesn't scroll takes it: all of it when
+    /// `after` fits, and otherwise as much of the text it inserted (typed or pasted) as still
+    /// fits, keeping what it removed removed. Returns the text and where the caret goes (in
+    /// characters, after what was kept of the insertion).
+    pub fn fitted_edit(&self, before: &str, after: &str) -> (String, usize) {
+        let (b, a): (Vec<char>, Vec<char>) = (before.chars().collect(), after.chars().collect());
+        // The edit replaced b[p..b.len() - q] with a[p..a.len() - q].
+        let p = b.iter().zip(&a).take_while(|(x, y)| x == y).count();
+        let most = b.len().min(a.len()).saturating_sub(p);
+        let q = b.iter().rev().zip(a.iter().rev()).take(most).take_while(|(x, y)| x == y).count();
+        // q <= a.len() - p, so these are in range; `get` keeps it so if that ever changes.
+        let end = a.len().saturating_sub(q);
+        let (prefix, inserted, suffix) = (a.get(..p).unwrap_or_default(), a.get(p..end).unwrap_or_default(), a.get(end..).unwrap_or_default());
+        let with = |k: usize| prefix.iter().chain(inserted.get(..k).unwrap_or_default()).chain(suffix).collect::<String>();
+        if self.fits(after) {
+            return (after.to_string(), p + inserted.len());
+        }
+        // The most of the insertion that fits: text only grows as it gets longer, so halve.
+        let (mut lo, mut hi) = (0, inserted.len());
+        while lo < hi {
+            let mid = lo + (hi - lo).div_ceil(2);
+            if self.fits(&with(mid)) { lo = mid } else { hi = mid - 1 }
+        }
+        (with(lo), p + lo)
+    }
+}
+
 /// `/MK /R` as a quadrant, or 0 when it is missing or not a multiple of 90.
 pub(crate) fn mk_rotation(doc: &Document, wd: &Dict) -> i64 {
     let Some(raw) = wd.get(b"MK") else { return 0 };

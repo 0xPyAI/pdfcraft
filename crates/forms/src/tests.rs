@@ -387,6 +387,91 @@ fn opt_export_values_select_button_states() {
     assert!(err.to_string().contains("options: Post, Pick-up"), "{err}");
 }
 
+/// What fits a text field is measured as its appearance draws it: in the field's own font (its
+/// `/DR` font, Helvetica where that can't show the text), inside the border and padding, at its
+/// size, wrapped for multi-line, at the smallest automatic size, as asterisks for a password,
+/// and without a limit for a comb field.
+#[test]
+fn a_text_field_says_what_fits_it_as_its_appearance_draws_it() {
+    // Each widget is 100 x 20 pt (multi-line: 100 x 40 pt) with no border: 96 pt inside the 2 pt
+    // padding (36 pt high for the multi-line one).
+    let tx = |name: &str, da: &str, ff: u32, extra: &str, top: i32, h: i32| {
+        format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /DA ({da}) /Ff {ff}{extra} /Rect [50 {} 150 {top}] /P 3 0 R >>", top - h)
+    };
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [7 0 R 8 0 R 9 0 R 10 0 R 11 0 R 12 0 R] >>".into(),
+        "<< /Fields [7 0 R 8 0 R 9 0 R 10 0 R 11 0 R 12 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R /Cour 6 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>".into(),
+        tx("one", "/Helv 12 Tf 0 g", 0, "", 780, 20),
+        tx("auto", "/Helv 0 Tf 0 g", 0, "", 750, 20),
+        tx("many", "/Helv 12 Tf 0 g", flags::MULTILINE, "", 720, 40),
+        tx("cour", "/Cour 12 Tf 0 g", 0, "", 670, 20),
+        tx("pin", "/Helv 12 Tf 0 g", flags::PASSWORD, "", 640, 20),
+        tx("comb", "/Helv 12 Tf 0 g", flags::COMB, " /MaxLen 5", 610, 20),
+    ];
+    let doc = document(&objs);
+    let all = fields(&doc);
+    let tb = |name: &str| {
+        let f = field(&all, name);
+        appearance::text_box(&doc, f, &f.widgets[0])
+    };
+    let helv = |s: &str, size: f64| pdfcraft_fonts::helvetica_width(s, size);
+    // Single line at 12 pt: as wide as the 96 pt inside, and no wider.
+    let fits_12: String = std::iter::repeat_n('W', (96.0 / helv("W", 12.0)) as usize).collect();
+    assert!(tb("one").fits(&fits_12) && !tb("one").fits(&format!("{fits_12}W")), "{}", fits_12.len());
+    // An automatic size shrinks first: full only when 4 pt no longer fits.
+    let fits_4: String = std::iter::repeat_n('W', (96.0 / helv("W", 4.0)) as usize).collect();
+    assert!(!tb("one").fits(&fits_4) && tb("auto").fits(&fits_4) && !tb("auto").fits(&format!("{fits_4}W")));
+    // Multi-line: lines of 12 x 1.15 pt each in 36 pt, so two lines fit and three don't.
+    assert!(tb("many").fits("one\ntwo") && !tb("many").fits("one\ntwo\nthree"));
+    let two_lines_of_words = "word ".repeat(((96.0 / helv("word ", 12.0)) as usize) * 2);
+    assert!(tb("many").fits(two_lines_of_words.trim_end()) && !tb("many").fits(&format!("{two_lines_of_words}word")));
+    // The field's own font: narrow i's that Helvetica fits are too wide in Courier (600/1000 em).
+    let i_s: String = std::iter::repeat_n('i', 14).collect();
+    assert!(tb("one").fits(&i_s) && !tb("cour").fits(&i_s), "Courier is 0.6 em a character: {}", 14.0 * 0.6 * 12.0);
+    // A password is drawn, so measured, as asterisks.
+    let thirty_i: String = std::iter::repeat_n('i', 30).collect();
+    assert!(tb("one").fits(&thirty_i) && !tb("pin").fits(&thirty_i), "{} pt of asterisks", helv(&"*".repeat(30), 12.0));
+    // A comb field's cells bound it, not its width.
+    assert!(tb("comb").fits(&"W".repeat(50)));
+}
+
+/// An edit to a field that doesn't scroll keeps as much of what it inserted as fits, wherever the
+/// caret was, and always keeps a deletion.
+#[test]
+fn an_edit_to_a_full_field_keeps_what_fits() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [5 0 R] >>".into(),
+        "<< /Fields [5 0 R] /DA (/Helv 12 Tf 0 g) >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (one) /DA (/Helv 12 Tf 0 g) /Rect [50 760 150 780] /P 3 0 R >>".into(),
+    ];
+    let doc = document(&objs);
+    let all = fields(&doc);
+    let f = field(&all, "one");
+    let tb = appearance::text_box(&doc, f, &f.widgets[0]);
+    // Typing in the middle of "Short": the X's go in until the field is full, the end stays.
+    let typed = format!("Sh{}ort", "X".repeat(40));
+    let (kept, caret) = tb.fitted_edit("Short", &typed);
+    let xs = kept.chars().filter(|c| *c == 'X').count();
+    assert!(kept.starts_with("ShX") && kept.ends_with("Xort") && xs < 40, "{kept}");
+    assert!(tb.fits(&kept) && !tb.fits(&format!("Sh{}ort", "X".repeat(xs + 1))), "as many as fit: {xs}");
+    assert_eq!(caret, 2 + xs, "the caret after the last X kept");
+    // What fits is kept whole.
+    assert_eq!(tb.fitted_edit("Short", "Shorter"), ("Shorter".to_string(), 7));
+    // A deletion is kept even from text that already overflows (set by a script, say).
+    let long = "W".repeat(20);
+    assert!(!tb.fits(&long));
+    assert_eq!(tb.fitted_edit(&long, &"W".repeat(19)), ("W".repeat(19), 19));
+    // Replacing a selection with too much keeps the removal and what fits of the replacement.
+    let (kept, _) = tb.fitted_edit("Short", &format!("S{}t", "W".repeat(30)));
+    assert!(kept.starts_with("SW") && kept.ends_with('t') && tb.fits(&kept), "{kept}");
+}
+
 /// Issue #1323: a text field without a format keeps a whitespace-only value as typed; only an
 /// empty value clears it.
 #[test]

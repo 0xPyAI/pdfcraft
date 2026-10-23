@@ -478,6 +478,7 @@ fn parse_field(n: XmlNode, warnings: &mut Vec<String>) -> Field {
         }
         _ => ChoiceList::default(),
     };
+    let multiline = ui_el.is_some_and(|e| e.attribute("multiLine").is_some_and(|m| m == "1" || m == "true"));
     let validate_el = child(n, "validate");
     let validate_message = validate_el
         .and_then(|v| child(v, "message"))
@@ -492,7 +493,8 @@ fn parse_field(n: XmlNode, warnings: &mut Vec<String>) -> Field {
         ui_margin: parse_margin(ui_el.and_then(|e| child(e, "margin"))),
         check_size: ui_el.and_then(|e| attr_measure(e, "size")).filter(|s| *s > 0.0),
         check_round: ui_el.is_some_and(|e| e.attribute("shape") == Some("round")),
-        multiline: ui_el.is_some_and(|e| e.attribute("multiLine").is_some_and(|m| m == "1" || m == "true")),
+        multiline,
+        no_scroll: ui_el.is_some_and(|e| e.attribute(if multiline { "vScrollPolicy" } else { "hScrollPolicy" }) == Some("off")),
         caption: parse_caption(child(n, "caption"), warnings),
         value: parse_value(value_el, warnings),
         items,
