@@ -74,9 +74,20 @@ struct ScanToRead {
 pub struct OcrRun {
     pub doc: DocId,
     pub progress: Arc<Mutex<OcrProgress>>,
-    /// Started by Edit on a scanned page, not asked for: it shows no progress, and says nothing when
-    /// it found no words (a page with text of its own is skipped, and Edit must not make noise).
-    pub automatic: bool,
+    /// Set for a run Edit started on a scanned page, not asked for: it shows no progress, says nothing
+    /// when it found no words (a page with text of its own is skipped, and Edit must not make noise),
+    /// and its result waits for Read mode and dialogs and is dropped if the document changed.
+    pub automatic: Option<AutoOcr>,
+}
+
+/// What an Edit-started run needs to know to refuse a result that no longer fits its document.
+#[derive(Clone, Copy, Debug)]
+pub struct AutoOcr {
+    /// The page it reads (0-based), when it was started.
+    pub page: usize,
+    /// The document's edit generation when it was started: a result is for those bytes only, and
+    /// any later change (a page deleted or moved, say) may put a different page at that index.
+    pub generation: u64,
 }
 
 pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) -> (bool, bool) {
@@ -250,6 +261,12 @@ impl PdfCraftApp {
 
     /// Recognize `pages` (0-based; empty = all) of document `id` in the background.
     fn start_ocr_pages(&mut self, id: DocId, pages: &[usize], settings: OcrSettings, automatic: bool) {
+        // What an automatic run's result must still fit when it arrives (see `AutoOcr`).
+        let auto = if automatic {
+            pages.first().map(|&page| AutoOcr { page, generation: self.session.get(id).map_or(0, |d| d.edit_generation()) })
+        } else {
+            None
+        };
         let Some(job) = self.session.ocr_job(id, pages, settings) else { return };
         let progress = Arc::new(Mutex::new(OcrProgress { total: job.pages.len(), ..Default::default() }));
         let p = progress.clone();
@@ -274,7 +291,7 @@ impl PdfCraftApp {
         }
         #[cfg(target_arch = "wasm32")]
         work();
-        self.ocr_run = Some(OcrRun { doc: id, progress, automatic });
+        self.ocr_run = Some(OcrRun { doc: id, progress, automatic: auto });
         self.poll_ocr();
     }
 
@@ -398,7 +415,8 @@ impl PdfCraftApp {
             }
         }
         let Some(run) = self.ocr_run.as_ref() else { return };
-        let (doc, progress, automatic) = (run.doc, run.progress.clone(), run.automatic);
+        let (doc, progress, auto) = (run.doc, run.progress.clone(), run.automatic);
+        let automatic = auto.is_some();
         let Ok(mut s) = progress.lock() else { return };
         // The result of a run Edit started waits while Read mode or a dialog is up: nothing may change
         // the document beneath them, and the run may have been started before they appeared. A run
@@ -426,6 +444,17 @@ impl PdfCraftApp {
         };
         drop(s);
         self.ocr_run = None;
+        // The result is for the bytes the run started from. If the document has changed since (a
+        // page deleted or moved, say) its page index may now name another page: drop it, and let
+        // the page in view be judged again.
+        if let Some(a) = auto
+            && self.session.get(doc).map(|d| d.edit_generation()) != Some(a.generation)
+        {
+            if let Some(view) = self.views.iter_mut().find(|v| v.id == doc) {
+                view.auto_ocr_tried.remove(&a.page);
+            }
+            return;
+        }
         let found = match result {
             Ok(f) => f,
             Err(e) => {
@@ -555,9 +584,10 @@ mod tests {
     fn the_result_of_an_automatic_run_waits_for_read_mode_and_dialogs() {
         let word = || pdfcraft_engine::ocr::PlacedWord { text: "scanned".into(), origin: [72.0, 700.0], across: [60.0, 0.0], up: [0.0, 12.0] };
         let finished = |app: &PdfCraftApp, automatic: bool| {
+            let generation = app.session.get(app.active_ids().unwrap().1).unwrap().edit_generation();
             let page = pdfcraft_engine::ocr::OcrPage { page: 0, words: vec![word()], already_on_page: 0, skipped: None };
             let progress = Arc::new(Mutex::new(OcrProgress { done: 1, total: 1, result: Some(Ok(vec![page])), cancel: false }));
-            OcrRun { doc: app.active_ids().unwrap().1, progress, automatic }
+            OcrRun { doc: app.active_ids().unwrap().1, progress, automatic: automatic.then_some(AutoOcr { page: 0, generation }) }
         };
         let label = |app: &PdfCraftApp| app.session.get(app.active_ids().unwrap().1).unwrap().can_undo().map(String::from);
 
@@ -581,5 +611,35 @@ mod tests {
         app.mode = Mode::Read;
         app.poll_ocr();
         assert_eq!(label(&app).as_deref(), Some("Recognize text"));
+    }
+    /// A run's result is for the document as it was when the run started. Once the document has
+    /// changed, a result of Edit's is dropped, not applied to whatever page now has its index, and
+    /// the page may be judged again.
+    #[test]
+    fn the_result_of_an_automatic_run_is_dropped_once_the_document_has_changed() {
+        let mut app = app_with(scan());
+        let id = app.active_ids().unwrap().1;
+        let generation = app.session.get(id).unwrap().edit_generation();
+        let page = pdfcraft_engine::ocr::OcrPage {
+            page: 0,
+            words: vec![pdfcraft_engine::ocr::PlacedWord { text: "scanned".into(), origin: [72.0, 700.0], across: [60.0, 0.0], up: [0.0, 12.0] }],
+            already_on_page: 0,
+            skipped: None,
+        };
+        let progress = Arc::new(Mutex::new(OcrProgress { done: 1, total: 1, result: Some(Ok(vec![page])), cancel: false }));
+        app.ocr_run = Some(OcrRun { doc: id, progress, automatic: Some(AutoOcr { page: 0, generation }) });
+        app.views[0].auto_ocr_tried.insert(0);
+        // The document changes while the run is out.
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(8, 8, image::Rgba([250, 250, 250, 255])))
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        app.session
+            .apply(id, Edit::AddImage { page: 0, rect: Some([10.0, 10.0, 50.0, 50.0]), name: "p.png".into(), bytes: Arc::new(png.into_inner()) })
+            .unwrap();
+        app.poll_ocr();
+        assert!(app.ocr_run.is_none(), "the run is over");
+        assert_eq!(app.session.get(id).unwrap().can_undo(), Some("Add image"), "its result was not applied");
+        assert!(!app.views[0].auto_ocr_tried.contains(&0), "the page may be judged again");
     }
 }
