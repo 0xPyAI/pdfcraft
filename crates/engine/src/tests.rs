@@ -7305,3 +7305,21 @@ fn a_date_typed_by_another_of_an_xfa_fields_edit_patterns_is_kept_in_its_first()
     let data = pdfcraft_xfa::parse_datasets(&pdfcraft_xfa::read_packets(&cos).unwrap().unwrap().xdp).expect("a datasets packet");
     assert_eq!(data.text_at(&pdfcraft_xfa::som_to_path("form[0].leave[0]")), Some("2026-11-08"));
 }
+
+/// A date the field's own scripts refuse is not tried again in another of an XFA date field's
+/// patterns: only a date its format refuses is, which happens before any script runs, so the
+/// scripts run once. This validate script counts its runs in `name` and accepts on its second.
+#[test]
+fn a_date_its_validate_script_refuses_is_not_tried_again() {
+    let mut s = Session::new();
+    let id = s
+        .open("dates.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::date_alternatives_template())), None)
+        .expect("opens");
+    let script = Some("var n = Number(getField('name').value || 0) + 1; getField('name').value = String(n); event.rc = n >= 2;".to_string());
+    s.apply(id, Edit::SetFieldScript { name: "leave".into(), event: "validate".into(), script }).unwrap();
+    let value = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).unwrap().value.clone();
+    // Its format reads 18OCT26, and so does its DDMMMYY pattern.
+    let refused = s.apply(id, Edit::SetFieldValue { name: "leave".into(), value: FieldValue::Text("18OCT26".into()) });
+    assert!(refused.is_err(), "the validate script refused it, once");
+    assert!(value(&s, "name").is_empty(), "nothing the refused run changed is kept: {:?}", value(&s, "name"));
+}
