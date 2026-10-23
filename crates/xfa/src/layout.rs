@@ -37,6 +37,11 @@ const MAX_IMAGE_BYTES: usize = 256 << 20;
 /// Placeholder for the page count in text laid out before the count is known.
 const PAGE_COUNT_MARK: char = '\u{E000}';
 
+/// How far below its baseline an underline is drawn, in the text's size: an underline is the
+/// level line pushed just before its span, this far below it (the PDF writer tells it apart from
+/// a rule by this).
+pub(crate) const UNDERLINE_DROP: f64 = 0.1;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Item {
     Fill { rect: Rect, color: [f64; 3] },
@@ -521,7 +526,7 @@ impl Layouter<'_> {
         for s in b.spans {
             if s.face.underline {
                 let w = s.face.width(&s.text);
-                let y = s.baseline + s.face.size * 0.1;
+                let y = s.baseline + s.face.size * UNDERLINE_DROP;
                 self.push(Item::Line { from: (s.x, y), to: (s.x + w, y), width: (s.face.size * 0.06).max(0.3), color: s.face.color, dashed: false })?;
             }
             if !s.text.trim().is_empty() {

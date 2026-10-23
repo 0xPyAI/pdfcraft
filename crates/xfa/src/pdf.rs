@@ -587,10 +587,13 @@ impl Emitter<'_> {
         let mut last_link: Option<LinkPiece> = None;
         for (i, item) in page.items.iter().enumerate() {
             // A link's pieces join only across text and the underline drawn just before it: a fill,
-            // picture, field or a line that isn't level between them ends the link there.
+            // picture, field or any other line (a rule) between them ends the link there.
             let keeps_link = match item {
                 Item::Text(_) => true,
-                Item::Line { from, to, .. } => (from.1 - to.1).abs() < 0.01,
+                Item::Line { from, to, .. } => matches!(page.items.get(i + 1), Some(Item::Text(s))
+                    if (from.1 - to.1).abs() < 0.01
+                        && (from.0 - s.x).abs() < 0.01
+                        && (from.1 - (s.baseline + s.face.size * crate::layout::UNDERLINE_DROP)).abs() < 0.01),
                 _ => false,
             };
             if !keeps_link {
@@ -772,8 +775,18 @@ fn link_target(href: &str) -> Option<&str> {
     }
     let (scheme, rest) = href.split_once(':')?;
     let web = scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https");
-    let ok = if web { rest.starts_with("//") && rest.len() > 2 } else { scheme.eq_ignore_ascii_case("mailto") && !rest.is_empty() };
+    let ok = if web { rest.strip_prefix("//").is_some_and(has_host) } else { scheme.eq_ignore_ascii_case("mailto") && !rest.is_empty() };
     ok.then_some(href)
+}
+
+/// Whether `after` (a web address past its `//`) names a host: what comes before the path, query
+/// or fragment, past any user name and before any port, isn't empty.
+fn has_host(after: &str) -> bool {
+    let authority = after.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority.rsplit('@').next().unwrap_or_default();
+    // An IPv6 host is bracketed and holds colons of its own.
+    let host = if host.starts_with('[') { host } else { host.split(':').next().unwrap_or_default() };
+    !host.is_empty()
 }
 
 /// Replace the document's pages with the laid-out form and add its fields to the AcroForm. The

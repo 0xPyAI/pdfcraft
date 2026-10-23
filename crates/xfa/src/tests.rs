@@ -481,6 +481,7 @@ fn a_rule_between_two_pieces_of_a_link_keeps_them_apart() {
         )
     };
     let rule = r#"<draw name="rule" x="0.21in" y="0in" w="0in" h="0.3in"><value><line><edge/></line></value></draw>"#;
+    let level_rule = r#"<draw name="dash" x="0.2in" y="0.1in" w="0.04in" h="0in"><value><line><edge/></line></value></draw>"#;
     let form = |between: &str, underline: bool| {
         format!(
             r##"<?xml version="1.0" encoding="UTF-8"?>
@@ -500,19 +501,21 @@ fn a_rule_between_two_pieces_of_a_link_keeps_them_apart() {
     assert_eq!(links(&form("", false)), 1, "side by side, the pieces join");
     assert_eq!(links(&form("", true)), 1, "an underline doesn't part them");
     assert_eq!(links(&form(rule, false)), 2, "a rule between them does");
+    assert_eq!(links(&form(level_rule, false)), 2, "and so does a level one, which isn't an underline");
 }
 
-/// Only web and email addresses become links. Scripts, files, data, relative paths and empty
-/// or overlong addresses stay plain text (still drawn), with one warning for the form.
+/// Only web and email addresses become links. Scripts, files, data, relative paths, web
+/// addresses without a host, and empty or overlong addresses stay plain text (still drawn), with
+/// one warning for the form.
 #[test]
 fn links_to_anything_but_web_and_email_addresses_stay_plain_text() {
     let long = format!("https://example.com/{}", "a".repeat(2100));
     let body = format!(
-        r#"<a href="javascript:app.alert(1)">one</a> <a href="file:///etc/passwd">two</a> <a href="data:text/html,x">three</a> <a href="help.html">four</a> <a href="HTTPS:">five</a> <a href="{long}">six</a> <a href="MailTo:a@example.com">seven</a>"#
+        r#"<a href="javascript:app.alert(1)">one</a> <a href="file:///etc/passwd">two</a> <a href="data:text/html,x">three</a> <a href="help.html">four</a> <a href="HTTPS:">five</a> <a href="{long}">six</a> <a href="MailTo:a@example.com">seven</a> <a href="https:///path">eight</a> <a href="https://user@:8080/x">nine</a> <a href="https://user@example.com:8443/x">ten</a>"#
     );
     let mut doc = Document::open(Arc::new(shell(&rich_draw_form("7in", &body)))).unwrap();
     let report = render_into(&mut doc).unwrap();
-    assert_eq!(text_links(&doc).into_iter().map(|(u, _)| u).collect::<Vec<_>>(), ["MailTo:a@example.com"]);
+    assert_eq!(text_links(&doc).into_iter().map(|(u, _)| u).collect::<Vec<_>>(), ["MailTo:a@example.com", "https://user@example.com:8443/x"]);
     let warned: Vec<&String> = report.warnings.iter().filter(|w| w.contains("link")).collect();
     assert_eq!(warned.len(), 1, "one warning for the form: {:?}", report.warnings);
     assert!(warned[0].contains("http, https") && warned[0].contains("mailto"), "{warned:?}");
