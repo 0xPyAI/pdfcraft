@@ -8,6 +8,10 @@ on:
   schedule:
     - cron: "17 3 * * *" # nightly fuzzing
 
+# The token is only used to check out the code: no job writes to the repository.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
