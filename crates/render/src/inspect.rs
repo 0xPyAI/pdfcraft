@@ -2356,6 +2356,7 @@ mod tests {
             intent: None,
             fill_sign: false,
             no_rotate: true,
+            points: Vec::new(),
         };
         let rect = note.rect.map(f64::from);
         for rotation in [0u16, 90, 180, 270, 45] {
