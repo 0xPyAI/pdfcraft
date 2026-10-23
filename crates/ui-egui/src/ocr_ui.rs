@@ -168,13 +168,18 @@ impl PdfCraftApp {
         let Some(job) = self.session.ocr_job(id, &pages, settings) else { return };
         let progress = Arc::new(Mutex::new(OcrProgress { total: job.pages.len(), ..Default::default() }));
         let p = progress.clone();
+        // A failure is written on the worker thread: in the UI's language.
+        let lang = crate::i18n::current();
         let work = move || {
-            let result = pdfcraft_engine::ocr::engine().map(|ocr| {
-                job.run(&ocr, |done, total| {
-                    let Ok(mut s) = p.lock() else { return false };
-                    s.done = done;
-                    s.total = total;
-                    !s.cancel
+            crate::i18n::set_current(lang);
+            let result = recognize_guarded(|| {
+                pdfcraft_engine::ocr::engine().map(|ocr| {
+                    job.run(&ocr, |done, total| {
+                        let Ok(mut s) = p.lock() else { return false };
+                        s.done = done;
+                        s.total = total;
+                        !s.cancel
+                    })
                 })
             });
             if let Ok(mut s) = p.lock() {
@@ -227,44 +232,15 @@ impl PdfCraftApp {
         let lang = crate::i18n::current();
         let work = move || {
             crate::i18n::set_current(lang);
-            let (mut ok, mut words, mut failed) = (0, 0, Vec::new());
-            match pdfcraft_engine::ocr::engine() {
-                Err(e) => failed.push(e),
-                Ok(ocr) => {
-                    for (i, (name, bytes)) in files.into_iter().enumerate() {
-                        if let Ok(mut s) = p.lock() {
-                            s.done = i;
-                        }
-                        let r = pdfcraft_engine::ocr::recognize_file(&name, Arc::new(bytes), None, settings.clone(), &ocr, |_, _| true);
-                        let saved = r.and_then(|r| {
-                            #[cfg(not(target_arch = "wasm32"))]
-                            crate::editing::write_atomically(&dir.join(&name).to_string_lossy(), &r.bytes).map_err(|e| e.to_string())?;
-                            #[cfg(target_arch = "wasm32")]
-                            crate::editing::download(&name, &r.bytes)?;
-                            Ok(r.words())
-                        });
-                        match saved {
-                            Ok(n) => {
-                                ok += 1;
-                                words += n;
-                            }
-                            Err(e) => failed.push(format!("{name}: {}", e)),
-                        }
-                    }
-                }
-            }
-            let done = if ok == 1 {
-                crate::i18n::fmt(tl!("Recognized {w} words in 1 file"), &[("w", &words.to_string())])
-            } else {
-                crate::i18n::fmt(tl!("Recognized {w} words in {n} files"), &[("w", &words.to_string()), ("n", &ok.to_string())])
-            };
-            let mut msg = done;
-            if !failed.is_empty() {
-                msg.push_str(&crate::i18n::fmt(tl!("; failed: {list}"), &[("list", &failed.join("; "))]));
-            }
+            // A panic in the recognizer still ends the batch with a summary (#3919).
+            #[cfg(not(target_arch = "wasm32"))]
+            let summary = pdfcraft_engine::guard(|| recognize_files(files, &settings, &p, &dir));
+            #[cfg(target_arch = "wasm32")]
+            let summary = pdfcraft_engine::guard(|| recognize_files(files, &settings, &p));
+            let summary = summary.unwrap_or_else(|panic| failed(&panic));
             if let Ok(mut s) = p.lock() {
                 s.done = s.total;
-                s.message = Some(msg);
+                s.message = Some(summary);
             }
         };
         #[cfg(not(target_arch = "wasm32"))]
@@ -278,7 +254,54 @@ impl PdfCraftApp {
         self.ocr_batch = Some(progress);
         self.poll_ocr();
     }
+}
 
+/// Recognize each file and write its searchable copy into `dir`; returns the summary to show.
+fn recognize_files(
+    files: Vec<(String, Vec<u8>)>,
+    settings: &OcrSettings,
+    p: &Mutex<BatchProgress>,
+    #[cfg(not(target_arch = "wasm32"))] dir: &std::path::Path,
+) -> String {
+    let (mut ok, mut words, mut failed) = (0, 0, Vec::new());
+    match pdfcraft_engine::ocr::engine() {
+        Err(e) => failed.push(e),
+        Ok(ocr) => {
+            for (i, (name, bytes)) in files.into_iter().enumerate() {
+                if let Ok(mut s) = p.lock() {
+                    s.done = i;
+                }
+                let r = pdfcraft_engine::ocr::recognize_file(&name, Arc::new(bytes), None, settings.clone(), &ocr, |_, _| true);
+                let saved = r.and_then(|r| {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    crate::editing::write_atomically(&dir.join(&name).to_string_lossy(), &r.bytes).map_err(|e| e.to_string())?;
+                    #[cfg(target_arch = "wasm32")]
+                    crate::editing::download(&name, &r.bytes)?;
+                    Ok(r.words())
+                });
+                match saved {
+                    Ok(n) => {
+                        ok += 1;
+                        words += n;
+                    }
+                    Err(e) => failed.push(format!("{name}: {}", e)),
+                }
+            }
+        }
+    }
+    let done = if ok == 1 {
+        crate::i18n::fmt(tl!("Recognized {w} words in 1 file"), &[("w", &words.to_string())])
+    } else {
+        crate::i18n::fmt(tl!("Recognized {w} words in {n} files"), &[("w", &words.to_string()), ("n", &ok.to_string())])
+    };
+    let mut msg = done;
+    if !failed.is_empty() {
+        msg.push_str(&crate::i18n::fmt(tl!("; failed: {list}"), &[("list", &failed.join("; "))]));
+    }
+    msg
+}
+
+impl PdfCraftApp {
     /// Stop a running recognition (the pages read so far are kept).
     pub fn cancel_ocr(&mut self) {
         if let Some(r) = &self.ocr_run
@@ -291,13 +314,13 @@ impl PdfCraftApp {
     /// Show progress; apply the result once the worker is done.
     pub(crate) fn poll_ocr(&mut self) {
         if let Some(b) = self.ocr_batch.clone() {
-            let msg = b.lock().ok().map(|mut s| s.message.take().ok_or((s.done, s.total)));
+            let msg = b.lock().map(|mut s| s.message.take().ok_or((s.done, s.total))).map_err(|e| e.to_string());
             match msg {
-                Some(Ok(m)) => {
+                Ok(Ok(m)) => {
                     self.ocr_batch = None;
                     self.notify(m);
                 }
-                Some(Err((done, total))) => {
+                Ok(Err((done, total))) => {
                     let m = crate::i18n::fmt(
                         tl!("Recognizing text… file {d} of {t}"),
                         &[("d", &(done + 1).min(total.max(1)).to_string()), ("t", &total.max(1).to_string())],
@@ -309,12 +332,25 @@ impl PdfCraftApp {
                         ctx.request_repaint_after(std::time::Duration::from_millis(200));
                     }
                 }
-                None => self.ocr_batch = None,
+                // The worker stopped while holding the lock: it will never report back (#3919).
+                Err(e) => {
+                    self.ocr_batch = None;
+                    self.notify(failed(&e));
+                }
             }
         }
         let Some(run) = self.ocr_run.as_ref() else { return };
         let (doc, progress) = (run.doc, run.progress.clone());
-        let Ok(mut s) = progress.lock() else { return };
+        let mut s = match progress.lock() {
+            Ok(s) => s,
+            Err(e) => {
+                // As above: without this the run never clears and refuses every later one.
+                let e = e.to_string();
+                self.ocr_run = None;
+                self.notify(failed(&e));
+                return;
+            }
+        };
         let Some(result) = s.result.take() else {
             let msg = crate::i18n::fmt(
                 tl!("Recognizing text… page {d} of {t}"),
@@ -365,5 +401,60 @@ impl PdfCraftApp {
             }
             Err(e) => self.notify_error(e),
         }
+    }
+}
+
+/// "Recognize text failed: {e}", in the current language.
+fn failed(e: &str) -> String {
+    crate::i18n::fmt(tl!("{label} failed: {e}"), &[("label", tl!("Recognize text")), ("e", e)])
+}
+
+/// `recognize`, with a panic in it (a damaged model, a page the recognizer can't take) turned into
+/// the run's error: the run has to end either way, or it refuses every later one (#3919).
+fn recognize_guarded<T>(recognize: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    pdfcraft_engine::guard(recognize).unwrap_or_else(|panic| Err(failed(&panic)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_panicking_recognizer_ends_the_run_with_an_error() {
+        let error = recognize_guarded(|| -> Result<(), String> { panic!("the model file is damaged") }).unwrap_err();
+        assert!(error.starts_with("Recognize text failed") && error.contains("the model file is damaged"), "{error}");
+        assert_eq!(recognize_guarded(|| Ok::<_, String>(7)), Ok(7));
+    }
+
+    /// Poison `m` the way a worker that panics while it holds the lock does.
+    fn poison<T: Send + 'static>(m: &Arc<Mutex<T>>) {
+        let worker = m.clone();
+        let _ = std::thread::spawn(move || {
+            let _held = worker.lock();
+            panic!("the worker died");
+        })
+        .join();
+        assert!(m.is_poisoned());
+    }
+
+    #[test]
+    fn a_run_whose_worker_died_ends_instead_of_waiting_forever() {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        let progress = Arc::new(Mutex::new(OcrProgress { total: 3, ..Default::default() }));
+        poison(&progress);
+        app.ocr_run = Some(OcrRun { doc: DocId(1), progress });
+        app.poll_ocr();
+        assert!(app.ocr_run.is_none(), "the next run isn't refused as already running");
+        let toast = app.toast.take().map(|t| t.0).unwrap_or_default();
+        assert!(toast.starts_with("Recognize text failed"), "{toast}");
+
+        let batch = Arc::new(Mutex::new(BatchProgress { total: 2, ..Default::default() }));
+        poison(&batch);
+        app.ocr_batch = Some(batch);
+        app.poll_ocr();
+        assert!(app.ocr_batch.is_none());
+        let toast = app.toast.take().map(|t| t.0).unwrap_or_default();
+        assert!(toast.starts_with("Recognize text failed"), "{toast}");
     }
 }
