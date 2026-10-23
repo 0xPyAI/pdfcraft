@@ -14,6 +14,8 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+use std::collections::{HashMap, HashSet};
+
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, Stream};
 
 pub mod appearance;
@@ -774,8 +776,9 @@ thread_local! {
     static ANNOTS_ENTRIES_COPIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// Replace a page's `/Annots`, writing into the shared array object when it is indirect.
-fn set_annots(doc: &mut Document, page: ObjRef, list: Vec<Object>) -> Result<(), AnnotError> {
+/// Replace a page's `/Annots`, writing into the shared array object when it is indirect. An empty
+/// list removes a direct `/Annots`.
+pub fn set_annots(doc: &mut Document, page: ObjRef, list: Vec<Object>) -> Result<(), pdfcraft_cos::CosError> {
     let existing = doc.get(page).as_dict().and_then(|d| d.reference(b"Annots"));
     match existing {
         Some(r) if doc.get(r).as_array().is_some() => doc.set(r, Object::Array(list)),
@@ -1647,36 +1650,35 @@ pub fn delete_annotation(doc: &mut Document, page: usize, index: usize) -> Resul
     if let Some(r) = target.as_ref() {
         unlocked(doc, r)?;
     }
-    let mut doomed: Vec<ObjRef> = target.as_ref().into_iter().collect();
-    // Replies (`/IRT`) and pop-ups (`/Parent`) of anything doomed, to a fixpoint.
-    loop {
-        let before = doomed.len();
-        for e in &list {
-            let Some(r) = e.as_ref() else { continue };
-            if doomed.contains(&r) {
-                continue;
-            }
-            let obj = doc.get(r);
-            let Some(d) = obj.as_dict() else { continue };
-            let points_at = |k: &[u8]| d.reference(k).is_some_and(|t| doomed.contains(&t));
-            if points_at(b"IRT") || points_at(b"Parent") {
-                doomed.push(r);
-            }
-        }
-        for r in doomed.clone() {
-            if let Some(pop) = doc.get(r).as_dict().and_then(|d| d.reference(b"Popup"))
-                && !doomed.contains(&pop)
-            {
-                doomed.push(pop);
-            }
-        }
-        if doomed.len() == before {
-            break;
-        }
-    }
+    let doomed = with_replies_and_popups(doc, &list, target.as_ref());
     let kept: Vec<Object> =
         list.into_iter().enumerate().filter(|(i, e)| *i != index && !e.as_ref().is_some_and(|r| doomed.contains(&r))).map(|(_, e)| e).collect();
-    set_annots(doc, p, kept)
+    Ok(set_annots(doc, p, kept)?)
+}
+
+/// `doomed` and what goes with it, as Acrobat deletes a comment: the entries of `list` (one or
+/// more pages' `/Annots`) that reply to (`/IRT`) or pop up for (`/Parent`) anything going, their
+/// own replies, and the pop-ups going annotations name (`/Popup`). Each annotation is visited
+/// once, so a long or cyclic chain costs no more than its length.
+pub fn with_replies_and_popups(doc: &Document, list: &[Object], doomed: impl IntoIterator<Item = ObjRef>) -> HashSet<ObjRef> {
+    let mut hanging: HashMap<ObjRef, Vec<ObjRef>> = HashMap::new();
+    for r in list.iter().filter_map(Object::as_ref) {
+        let obj = doc.get(r);
+        let Some(d) = obj.as_dict() else { continue };
+        for on in [d.reference(b"IRT"), d.reference(b"Parent")].into_iter().flatten() {
+            hanging.entry(on).or_default().push(r);
+        }
+    }
+    let mut going = HashSet::new();
+    let mut todo: Vec<ObjRef> = doomed.into_iter().collect();
+    while let Some(r) = todo.pop() {
+        if !going.insert(r) {
+            continue;
+        }
+        todo.extend(hanging.get(&r).into_iter().flatten());
+        todo.extend(doc.get(r).as_dict().and_then(|d| d.reference(b"Popup")));
+    }
+    going
 }
 
 /// Change a comment's text. Text boxes are redrawn to show it, and their rectangle follows the
