@@ -1022,3 +1022,120 @@ fn images_are_not_resampled_when_some_uses_could_not_be_measured() {
     let refs = pdfcraft_annot::page_refs(&doc).unwrap();
     assert_eq!(effective_resolutions(&doc, &refs)[&img], f64::INFINITY);
 }
+
+/// Each form entry counts against the page's form allowance, even for a form that decodes to
+/// nothing and so costs no decoded bytes.
+#[test]
+fn images_are_not_resampled_when_a_page_enters_more_forms_than_allowed() {
+    let mut doc = Document::new_empty();
+    let img = image(&mut doc, 1200, 1200, 3, false, None);
+    let empty = form(&mut doc, None, "");
+    let draws = "/E Do ".repeat(pdfcraft_cos::MAX_PAGE_FORMS + 1);
+    page(&mut doc, &[("E", empty), ("Im", img)], &format!("q 72 0 0 72 36 36 cm /Im Do Q {draws}"));
+    let refs = pdfcraft_annot::page_refs(&doc).unwrap();
+    assert_eq!(effective_resolutions(&doc, &refs)[&img], f64::INFINITY);
+}
+
+#[test]
+fn image_resolution_keeps_comments_across_content_pieces() {
+    for ending in ["", "\n", "\r", "\r\n"] {
+        let mut doc = Document::new_empty();
+        let visible = image(&mut doc, 20, 20, 3, false, None);
+        let hidden = image(&mut doc, 20, 20, 3, false, None);
+        let page = page(&mut doc, &[("Visible", visible), ("Hidden", hidden)], "");
+        let first = doc
+            .add(Object::Stream(Stream::from_raw(Dict::new(), format!("q 72 0 0 72 0 0 cm /Visible Do Q\n% trailing comment{ending}").into_bytes())));
+        let second = doc.add(Object::Stream(Stream::from_raw(Dict::new(), b"q 144 0 0 144 0 0 cm /Hidden Do Q\n".to_vec())));
+        doc.update_dict(page, |dict| {
+            dict.set(b"Contents".to_vec(), Object::Array(vec![Object::Ref(first), Object::Int(17), Object::Ref(second)]));
+        })
+        .unwrap();
+        let measured = effective_resolutions(&doc, &[page]);
+        assert_eq!(measured.get(&visible), Some(&20.0));
+        if ending.is_empty() {
+            assert_eq!(measured.len(), 1);
+            assert_eq!(measured.get(&hidden), None, "a comment must hide the next piece's first line");
+        } else {
+            assert_eq!(measured.len(), 2);
+            assert_eq!(measured.get(&hidden), Some(&10.0), "a real line ending exposes the image");
+        }
+    }
+}
+
+#[test]
+fn a_hostile_image_size_is_left_alone_not_multiplied_into_overflow() {
+    // /Width and /Height are file-controlled: 2^32 + 100 wraps to 100 when read as u32, while the
+    // real values overflow `w * h * n`. The image must be skipped, not sized by a wrapped product.
+    let mut doc = Document::new_empty();
+    let side = i64::from(u32::MAX) + 101;
+    let mut d = Dict::new();
+    d.set(b"Type".to_vec(), Object::name("XObject"));
+    d.set(b"Subtype".to_vec(), Object::name("Image"));
+    d.set(b"Width".to_vec(), Object::Int(side));
+    d.set(b"Height".to_vec(), Object::Int(side));
+    d.set(b"BitsPerComponent".to_vec(), Object::Int(8));
+    d.set(b"ColorSpace".to_vec(), Object::name("DeviceGray"));
+    let hostile = doc.add(Object::Stream(Stream::flate(d, &[7u8; 256])));
+    page(&mut doc, &[("Im", hostile)], "q 1 0 0 1 10 10 cm /Im Do Q");
+    let report = optimize(&mut doc, &Settings::default()).unwrap();
+    assert_eq!(report.images_resampled, 0, "{report:?}");
+    assert_eq!(stream(&doc, hostile).dict.int(b"Width"), Some(side), "the image is left as it was");
+}
+
+#[test]
+fn a_hostile_soft_mask_leaves_its_image_unchanged() {
+    let mut doc = Document::new_empty();
+    let mask = image(&mut doc, 400, 400, 1, false, None);
+    let mut hostile = stream(&doc, mask);
+    hostile.dict.set(b"Width".to_vec(), Object::Int(i64::from(u32::MAX) + 401));
+    doc.set(mask, Object::Stream(hostile.clone()));
+    let photo = image(&mut doc, 400, 400, 3, false, Some(mask));
+    let before = stream(&doc, photo);
+    page(&mut doc, &[("Photo", photo)], "q 72 0 0 72 10 10 cm /Photo Do Q");
+    let report = optimize(&mut doc, &Settings::default()).unwrap();
+    assert_eq!(report.images_resampled, 0, "{report:?}");
+    assert_eq!(stream(&doc, photo), before);
+    assert_eq!(stream(&doc, mask), hostile);
+}
+
+#[test]
+fn indirectly_referenced_destination_is_kept() {
+    // A link's /Dest can be an indirect reference to the name string, not the string itself. Reduce
+    // File Size read the name only from a direct string, so it deleted a destination the link still
+    // used, silently breaking the link.
+    let mut doc = Document::new_empty();
+    let p = page(&mut doc, &[], "BT ET");
+    let s = |t: &str| Object::String(pdfcraft_cos::PdfString::literal(t.as_bytes().to_vec()));
+    // A link whose /Dest is `ref -> "target"`, and an unused destination for contrast.
+    let name_ref = Object::Ref(doc.add(s("target")));
+    let mut link = Dict::new();
+    link.set(b"Type".to_vec(), Object::name("Annot"));
+    link.set(b"Subtype".to_vec(), Object::name("Link"));
+    link.set(b"Rect".to_vec(), Object::Array(vec![0.into(), 0.into(), 10.into(), 10.into()]));
+    link.set(b"Dest".to_vec(), name_ref);
+    let link = Object::Ref(doc.add(Object::Dict(link)));
+    doc.update_dict(p, |d| d.set(b"Annots".to_vec(), Object::Array(vec![link]))).unwrap();
+    let fit = Object::Array(vec![Object::Ref(p), Object::name("Fit")]);
+    let mut tree = Dict::new();
+    tree.set(b"Names".to_vec(), Object::Array(vec![s("target"), fit.clone(), s("unused"), fit]));
+    let tree = doc.add(Object::Dict(tree));
+    let mut names = Dict::new();
+    names.set(b"Dests".to_vec(), Object::Ref(tree));
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |c| c.set(b"Names".to_vec(), Object::Dict(names))).unwrap();
+    let report = optimize(&mut doc, &Settings::default()).unwrap();
+    // Only "unused" is removed; the indirectly-referenced "target" is kept.
+    assert_eq!(report.unreferenced_dests, 1);
+    let left = named_dest_keys(&doc);
+    assert!(left.contains(&b"target".to_vec()), "indirectly referenced destination was kept: {left:?}");
+    assert!(!left.contains(&b"unused".to_vec()));
+}
+
+/// The keys in the catalog's /Names /Dests name tree (one level, as the optimizer writes it).
+fn named_dest_keys(doc: &Document) -> Vec<Vec<u8>> {
+    let cat = doc.get(doc.root().unwrap()).as_dict().cloned().unwrap();
+    let names = doc.resolve(cat.get(b"Names").unwrap()).as_dict().cloned().unwrap();
+    let tree = doc.resolve(names.get(b"Dests").unwrap()).as_dict().cloned().unwrap();
+    let arr = doc.resolve(tree.get(b"Names").unwrap()).as_array().cloned().unwrap();
+    arr.chunks(2).filter_map(|c| doc.resolve(&c[0]).as_string().map(|s| s.bytes.clone())).collect()
+}
