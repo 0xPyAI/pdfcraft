@@ -6571,3 +6571,158 @@ fn a_flatten_refused_on_a_later_page_changes_nothing() {
     assert!(matches!(flatten(&mut doc, &[0, 1], true, false), Err(EditError::Invalid(_))));
     assert_eq!((*doc.get(first)).clone(), before, "the first page keeps its comment and content");
 }
+
+/// #4199, #3797: every space typed into a paragraph is saved, not folded into one.
+#[test]
+fn an_edited_paragraph_keeps_every_space_typed() {
+    for typed in ["Hello  world", "Hello     world   end", "  indented and trailing  "] {
+        let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Hello world) Tj ET");
+        assert_eq!(text::replace_block(&mut doc, 0, 0, typed).unwrap().substituted, None);
+        let doc = reopen(&doc);
+        let content = String::from_utf8_lossy(&page_content_bytes(&doc, 0)).into_owned();
+        assert!(content.contains(&format!("({typed}) Tj")), "{typed:?}: {content}");
+        assert_eq!(text::text_lines(&doc, 0).unwrap()[0].text, typed);
+    }
+}
+
+/// Spaces after a row's last word are kept but take no part in its alignment: a justified row
+/// still reaches the margin, and a centred or right-aligned one sits where it would without them.
+#[test]
+fn spaces_after_a_rows_last_word_do_not_move_its_alignment() {
+    let shown = |text: &str, align: added::Align| {
+        let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Hello world) Tj ET");
+        let style =
+            text::BlockStyle { family: Some((added::Family::Helvetica, false, false)), align: Some(align), width: Some(300.0), ..Default::default() };
+        text::rewrite_block(&mut doc, 0, 0, Some(text), &style).unwrap();
+        String::from_utf8_lossy(&page_content_bytes(&doc, 0)).into_owned()
+    };
+    for (plain, trailing, align) in [
+        ("aaa bbb ccc\nddd eee", "aaa bbb ccc  \nddd eee", added::Align::Justify),
+        ("Title", "Title   ", added::Align::Center),
+        ("Title", "Title   ", added::Align::Right),
+    ] {
+        let first = trailing.split('\n').next().unwrap();
+        let expected = shown(plain, align);
+        let actual = shown(trailing, align).replace(&format!("({first})"), &format!("({})", first.trim_end()));
+        assert_eq!(actual, expected, "{trailing:?} {align:?}");
+    }
+}
+
+/// A justified row runs from the paragraph's left edge to the margin. Word spacing reaches only
+/// the spaces between its words: the spaces before its first word and after its last are left
+/// out of a stretched row (as before #4199), so the reopened rows stay inside the paragraph and
+/// can be edited again in place.
+#[test]
+fn a_justified_row_keeps_its_indent_and_ends_at_the_margin() {
+    let style = text::BlockStyle {
+        family: Some((added::Family::Helvetica, false, false)),
+        align: Some(added::Align::Justify),
+        width: Some(300.0),
+        ..Default::default()
+    };
+    for typed in ["    Pack my box with five dozen jugs\nof liquor", "    Pack my box with five dozen jugs   \nof liquor"] {
+        let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Hello world) Tj ET");
+        text::rewrite_block(&mut doc, 0, 0, Some(typed), &style).unwrap();
+        let mut doc = reopen(&doc);
+        let lines = text::text_lines(&doc, 0).unwrap();
+        let first = lines.iter().find(|l| l.text.contains("Pack")).unwrap();
+        assert_eq!(first.text, "Pack my box with five dozen jugs", "{typed:?}");
+        assert!((first.rect[0] - 72.0).abs() < 0.5, "{typed:?}: {:?}", first.rect);
+        assert!(lines.iter().all(|l| l.rect[0] >= 72.0 - 0.5 && l.rect[2] <= 372.5), "{typed:?}: {lines:?}");
+        let blocks = text::text_blocks(&doc, 0).unwrap();
+        assert_eq!(blocks.len(), 1, "{typed:?}: {blocks:?}");
+        text::replace_block(&mut doc, 0, 0, "Edited again").unwrap();
+        let again = text::text_lines(&reopen(&doc), 0).unwrap();
+        assert!(again.iter().all(|l| l.rect[0] >= 0.0 && l.rect[2] <= 600.0), "{typed:?}: {again:?}");
+    }
+}
+
+/// A justified paragraph whose first row was typed with an indent is edited again through the
+/// styled path (a draft with a line break): its rows keep their scaling and stay one paragraph
+/// inside its width.
+#[test]
+fn a_justified_paragraph_with_an_indent_edits_again_at_its_own_scale() {
+    let style = text::BlockStyle {
+        family: Some((added::Family::Helvetica, false, false)),
+        align: Some(added::Align::Justify),
+        width: Some(300.0),
+        ..Default::default()
+    };
+    let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Hello world) Tj ET");
+    text::rewrite_block(&mut doc, 0, 0, Some("    aaa bbb ccc  \nddd"), &style).unwrap();
+    let mut doc = reopen(&doc);
+    let draft = text::text_blocks(&doc, 0).unwrap()[0].editor_text.replacen("ccc", "cc", 1);
+    assert!(draft.contains('\n'), "{draft:?}");
+    text::replace_block(&mut doc, 0, 0, &draft).unwrap();
+    let content = String::from_utf8_lossy(&page_content_bytes(&doc, 0)).into_owned();
+    let scales: Vec<&str> = content.lines().filter(|l| l.ends_with(" Tz")).collect();
+    assert!(scales.iter().all(|l| *l == "100 Tz"), "{scales:?}: {content}");
+    let doc = reopen(&doc);
+    let blocks = text::text_blocks(&doc, 0).unwrap();
+    assert_eq!(blocks.len(), 1, "{blocks:?}");
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert!(lines.iter().all(|l| l.rect[0] >= 72.0 - 0.5 && l.rect[2] <= 372.5), "{lines:?}");
+}
+
+/// A paragraph drawn at `0 Tz` has no width to justify into: nothing is divided by it. The
+/// writer writes a number that isn't finite as 0, so the test looks for the word spacing and
+/// the move a division by zero would add, rather than for `NaN`.
+#[test]
+fn justifying_text_at_zero_horizontal_scaling_divides_by_nothing() {
+    let mut doc = text_page("BT /F1 12 Tf 0 Tz 72 700 Td (Hello world) Tj ET");
+    let style = text::BlockStyle { family: Some((added::Family::Helvetica, false, false)), align: Some(added::Align::Justify), ..Default::default() };
+    text::rewrite_block(&mut doc, 0, 0, Some("    aaa bbb\nccc"), &style).unwrap();
+    let content = String::from_utf8_lossy(&page_content_bytes(&doc, 0)).into_owned();
+    let block = content.split("ET").next().unwrap();
+    assert_eq!(block.matches(" Tw").count(), 1, "only the paragraph's own 0 Tw: {content}");
+    let first_row = block.split(" Tm").nth(1).and_then(|rest| rest.split(" Tj").next()).unwrap();
+    assert!(!first_row.contains(" Td"), "no move before the first row: {content}");
+}
+
+/// The preview's box is the box of the rows Apply writes, measured to their last glyphs.
+#[test]
+fn a_drafts_box_is_the_box_apply_draws() {
+    let doc = text_page("BT /F1 12 Tf 14 TL 72 700 Td [(First) -2000 (row here )] TJ T* (Second row ) Tj ET");
+    let source = text::text_blocks(&doc, 0).unwrap().swap_remove(0);
+    let draft = source.editor_text.replacen("Second", "Third", 1);
+    let layout = text::text_edit_layout(&doc, 0, 0, &draft, &text::BlockStyle::default()).unwrap();
+    let mut applied = doc.clone();
+    text::replace_block(&mut applied, 0, 0, &draft).unwrap();
+    let boxed = text::text_lines(&applied, 0)
+        .unwrap()
+        .into_iter()
+        .map(|l| {
+            let end = l.ink.iter().map(|r| r[2]).fold(f64::NEG_INFINITY, f64::max);
+            [l.rect[0], l.rect[1], if end.is_finite() { end.min(l.rect[2]) } else { l.rect[2] }, l.rect[3]]
+        })
+        .reduce(|a, r| [a[0].min(r[0]), a[1].min(r[1]), a[2].max(r[2]), a[3].max(r[3])]);
+    let (d, b) = (layout.draft_rect.unwrap(), boxed.unwrap());
+    assert!(d.iter().zip(b).all(|(x, y)| (x - y).abs() < 0.01), "{draft:?}: preview {d:?}, applied {b:?}");
+}
+
+/// The draft's box is measured to its last glyph, not over the spaces typed after it.
+#[test]
+fn a_drafts_box_leaves_out_spaces_after_the_last_word() {
+    let doc = text_page("BT /F1 12 Tf 72 700 Td (Hello world) Tj ET");
+    let layout = |text: &str| text::text_edit_layout(&doc, 0, 0, text, &text::BlockStyle::default()).unwrap().draft_rect;
+    assert_eq!(layout("Hello there     "), layout("Hello there"));
+}
+
+/// A lone carriage return (an old Mac line ending) breaks the row, as `\n` and `\r\n` do.
+#[test]
+fn a_lone_carriage_return_breaks_an_edited_paragraph() {
+    let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Hello world) Tj ET");
+    text::replace_block(&mut doc, 0, 0, "one\rtwo").unwrap();
+    let lines: Vec<String> = text::text_lines(&reopen(&doc), 0).unwrap().into_iter().map(|l| l.text).collect();
+    assert_eq!(lines, ["one", "two"]);
+}
+
+/// A subset with no space glyph shows each space as a positioning gap one space wide, so a run
+/// of spaces still takes a run's width (#4199).
+#[test]
+fn a_run_of_spaces_in_a_subset_without_a_space_glyph_keeps_its_width() {
+    let mut doc = text_page("BT /F2 12 Tf 72 700 Td (ab) Tj /F1 12 Tf ( ) Tj /F2 12 Tf (ba) Tj ET");
+    assert_eq!(text::replace_block(&mut doc, 0, 0, "ab  ba   ab").unwrap().substituted, None);
+    let content = String::from_utf8_lossy(&page_content_bytes(&reopen(&doc), 0)).into_owned();
+    assert_eq!(content.matches("[-330] TJ").count(), 5, "{content}");
+}

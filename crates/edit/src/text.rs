@@ -204,7 +204,17 @@ fn layout_draft(
             *count -= 1;
             continue;
         }
-        rect = Some(rect.map_or(line.rect, |r| [r[0].min(line.rect[0]), r[1].min(line.rect[1]), r[2].max(line.rect[2]), r[3].max(line.rect[3])]));
+        // Spaces typed after a row's last word are drawn but show nothing, so an upright row is
+        // measured to the end of its last word: they don't make a draft overflow (#4199).
+        let mut r = line.rect;
+        if line.upright() && !line.ink.is_empty() {
+            if crate::bidi::rtl_base(&line.text) {
+                r[0] = r[0].max(line.ink.iter().map(|i| i[0]).fold(f64::INFINITY, f64::min));
+            } else {
+                r[2] = r[2].min(line.ink.iter().map(|i| i[2]).fold(f64::NEG_INFINITY, f64::max));
+            }
+        }
+        rect = Some(rect.map_or(r, |a| [a[0].min(r[0]), a[1].min(r[1]), a[2].max(r[2]), a[3].max(r[3])]));
     }
     let overflow = rect
         .is_some_and(|r| r[0] < source.rect[0] - 0.5 || r[1] < source.rect[1] - 0.5 || r[2] > source.rect[2] + 0.5 || r[3] > source.rect[3] + 0.5);
@@ -2565,20 +2575,28 @@ fn paragraph_separator(c: char) -> bool {
 
 /// Greedy word wrapping to `width` with `advance` giving a string's width. Each `\n` starts a
 /// new line. A row may also end inside a word of Chinese or Japanese text ([`crate::linebreak`]);
-/// those pieces join without a space.
+/// those pieces join without a space. Every white-space character is written as one space, so
+/// a run of spaces typed between, before or after words stays (#4199); only the spaces where a
+/// row wraps are dropped.
 fn wrap(text: &str, width: f64, advance: impl Fn(&str) -> f64) -> Vec<String> {
     let mut out = Vec::new();
     for row in text.split('\n') {
         let mut line = String::new();
         let start = out.len();
-        for word in row.split(paragraph_separator).filter(|word| !word.is_empty()) {
+        // The separators read since the last word: each one boundary between `split` pieces.
+        let mut gap = 0usize;
+        for (k, word) in row.split(paragraph_separator).enumerate() {
+            if k > 0 {
+                gap = gap.saturating_add(1);
+            }
+            if word.is_empty() {
+                continue;
+            }
+            let spaces = " ".repeat(std::mem::take(&mut gap));
             for (i, piece) in crate::linebreak::pieces(word).into_iter().enumerate() {
-                let candidate = match (line.is_empty(), i) {
-                    (true, _) => piece.to_string(),
-                    (false, 0) => format!("{line} {piece}"),
-                    (false, _) => format!("{line}{piece}"),
-                };
-                if !line.is_empty() && advance(&candidate) > width {
+                let candidate = if i == 0 { format!("{line}{spaces}{piece}") } else { format!("{line}{piece}") };
+                // A row holding only the spaces that indent it doesn't wrap before its first word.
+                if line.chars().any(|c| c != ' ') && advance(&candidate) > width {
                     out.push(std::mem::take(&mut line));
                     line = piece.to_string();
                 } else {
@@ -2586,6 +2604,7 @@ fn wrap(text: &str, width: f64, advance: impl Fn(&str) -> f64) -> Vec<String> {
                 }
             }
         }
+        line.push_str(&" ".repeat(gap));
         if !line.is_empty() || out.len() == start {
             out.push(line);
         }
@@ -2722,13 +2741,19 @@ fn rewrite_block_from(
     let streams = content_streams(doc, &p.dict)?;
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
     let ops = pieces.parse().ops;
-    // Explicit line breaks stay (#1443); within a line, runs of white space become one space.
-    let text = text
+    // Explicit line breaks stay (#1443), and so does each typed U+0020 space: a run of them is
+    // not folded into one (#4199, #3797). `\r\n` and a lone `\r` are breaks too; other white
+    // space is written as one space.
+    let text: String = text
         .unwrap_or(&b.text)
-        .split('\n')
-        .map(|row| row.split(paragraph_separator).filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" "))
-        .collect::<Vec<_>>()
-        .join("\n");
+        .replace("\r\n", "\n")
+        .chars()
+        .map(|c| match c {
+            '\r' => '\n',
+            c if c != '\n' && paragraph_separator(c) => ' ',
+            c => c,
+        })
+        .collect();
     // The characters to show, for choosing fonts: the breaks are moves, not glyphs.
     let flat = text.replace('\n', " ");
     let o = &first.origin;
@@ -2926,12 +2951,13 @@ fn rewrite_block_from(
     block_ops.extend(state.ops());
     block_ops.push(Op::new("Tm", tm.iter().map(|v| n(*v)).collect()));
     // Alignment: each line's offset from the left edge, in text space.
-    let offset = |line: &str| -> f64 {
-        let free = (width - advance(line)).max(0.0) / k;
+    // `visible` is the width the line is aligned on (see the loop below).
+    let offset = |visible: f64| -> f64 {
+        let free = (width - visible).max(0.0) / k;
         match align {
             Some(crate::added::Align::Center) => free / 2.0,
             // A right-to-left line anchored at its right edge may start left of the old box.
-            Some(crate::added::Align::Right) if anchored_right => (right_edge - advance(line)) / k,
+            Some(crate::added::Align::Right) if anchored_right => (right_edge - visible) / k,
             Some(crate::added::Align::Right) => free,
             // A justified right-to-left paragraph ends its last line at the right edge.
             Some(crate::added::Align::Justify) if rtl => free,
@@ -2951,11 +2977,29 @@ fn rewrite_block_from(
     let mut tw_set = 0.0;
     let mut underlines: Vec<(f64, f64, f64)> = Vec::new(); // (x0, x1, y) in text space
     for (i, line) in wrapped.iter().enumerate() {
-        let spaces = line.matches(' ').count();
-        let tw =
-            if justify && i + 1 < wrapped.len() && spaces > 0 { (width - advance(line)).max(0.0) / k / o_state.scale / spaces as f64 } else { 0.0 };
-        // A stretched line fills the width from the left edge.
-        let dx = if tw > 0.0 { 0.0 } else { offset(line) };
+        // A stretched (justified) line shows only its words, as before #4199: word spacing would
+        // reach the spaces before its first word and after its last, so they are left out, and
+        // the line fills the width from the left edge. Nothing to stretch over, or a paragraph
+        // drawn at `0 Tz`, isn't justified.
+        let body = line.trim_matches(' ');
+        let interior = body.matches(' ').count();
+        let tw = if justify && i + 1 < wrapped.len() && interior > 0 && o_state.scale.abs() > 1e-6 {
+            Some((width - advance(body)).max(0.0) / k / o_state.scale / interior as f64).filter(|tw| tw.is_finite())
+        } else {
+            None
+        }
+        .unwrap_or(0.0);
+        // Other lines show every space typed. A left-to-right one is aligned on its width up to
+        // its last word; a right-to-left one on its whole width, since the spaces typed after its
+        // last word are drawn on its left and the ones before its first on its right.
+        let (shown, visible) = if tw > 0.0 {
+            (body, advance(body))
+        } else if crate::bidi::rtl_base(line) {
+            (line.as_str(), advance(line))
+        } else {
+            (line.as_str(), advance(line.trim_end_matches(' ')))
+        };
+        let dx = if tw > 0.0 { 0.0 } else { offset(visible) };
         if i > 0 || dx != 0.0 {
             block_ops.push(Op::new("Td", vec![n(dx - x), n(if i > 0 { -lead } else { 0.0 })]));
         }
@@ -2967,7 +3011,7 @@ fn rewrite_block_from(
             tw_set = tw;
         }
         // Each wrapped line in typing order; drawn left to right (right-to-left runs reversed).
-        let visual = crate::bidi::to_visual(line);
+        let visual = crate::bidi::to_visual(shown);
         // Stretched without word spacing: shown up to and including each space, then moved on.
         let pieces = if stretch > 0.0 { visual.split_inclusive(' ').collect() } else { vec![visual.as_str()] };
         for piece in pieces {
@@ -2988,7 +3032,8 @@ fn rewrite_block_from(
             }
         }
         let tw = tw + stretch;
-        let w = (advance(line) + tw * spaces as f64 * o_state.scale * k) / k;
+        // Underlined to the line's last word, over its stretched gaps.
+        let w = (visible + tw * interior as f64 * o_state.scale * k) / k;
         underlines.push((dx, dx + w, -(i as f64) * lead - size * 0.12));
     }
     block_ops.push(Op::new("ET", vec![]));
@@ -3354,7 +3399,23 @@ mod tests {
         assert_eq!(wrap("A　　B C", 4.0, width), ["A　　B", "C"]);
         assert_eq!(wrap("A\u{a0}B C", 3.0, width), ["A B", "C"]);
         assert_eq!(wrap("A\u{2028}B C", 3.0, width), ["A B", "C"]);
-        assert_eq!(wrap(" \tA  B\r\nC ", 3.0, width), ["A B", "C"]);
+    }
+
+    /// #4199: a run of spaces stays a run, before, between and after words; the spaces where a
+    /// row wraps go, and each other white-space character is one space.
+    #[test]
+    fn paragraph_wrapping_keeps_every_space_typed() {
+        let width = |s: &str| s.chars().count() as f64;
+        assert_eq!(wrap("a  b   c", 20.0, width), ["a  b   c"]);
+        assert_eq!(wrap("  a b  ", 20.0, width), ["  a b  "]);
+        assert_eq!(wrap("a\t\tb", 20.0, width), ["a  b"]);
+        assert_eq!(wrap("aa  bb  cc", 6.0, width), ["aa  bb", "cc"]);
+        // An indent alone on a row doesn't wrap before its first word.
+        assert_eq!(wrap("    abc", 3.0, width), ["    abc"]);
+        // The rewrite turns `\r\n` and `\r` into `\n` before wrapping.
+        assert_eq!(wrap(" \tA  B\nC ", 3.0, width), ["  A", "B", "C "]);
+        assert_eq!(wrap("   ", 3.0, width), ["   "]);
+        assert_eq!(wrap("", 3.0, width), [""]);
     }
 
     #[test]
