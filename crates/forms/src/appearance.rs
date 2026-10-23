@@ -277,10 +277,14 @@ fn stroke_op(fill: &str) -> String {
     }
 }
 
-/// Background and border from `/MK` and `/BS`; returns (content, border width).
+/// Background and border from `/MK` and `/BS`; returns (content, border width). A round XFA
+/// check button's ([`is_round`]) are a circle inside the widget instead of its rectangle.
 fn frame(doc: &Document, wd: &Dict, w: f64, h: f64) -> (String, f64) {
     let mk = wd.get(b"MK").map(|m| doc.resolve(m)).and_then(|m| m.as_dict().cloned());
     let mut c = String::new();
+    if is_round(doc, wd) {
+        return round_frame(doc, wd, mk.as_ref(), w, h);
+    }
     if let Some(bg) = color_array(doc, mk.as_ref(), b"BG") {
         c.push_str(&format!("{bg}\n0 0 {} {} re f\n", n(w), n(h)));
     }
@@ -344,6 +348,71 @@ fn frame(doc: &Document, wd: &Dict, w: f64, h: f64) -> (String, f64) {
         return (c, bw);
     }
     (c, 0.0)
+}
+
+/// Whether `wd` is a check box or radio button PdfCraft laid out for a round XFA check button
+/// (`/PCXfaRound true`, written by the XFA layout).
+fn is_round(doc: &Document, wd: &Dict) -> bool {
+    matches!(wd.get(b"PCXfaRound").map(|o| doc.resolve(o)).as_deref(), Some(Object::Bool(true)))
+}
+
+/// [`frame`] for a round check button: the `/MK /BG` background as a disc and the `/MK /BC`
+/// border as a circle, both centred in the `w` × `h` box and as wide as its shorter side. A
+/// dashed border stays dashed; any other style is drawn solid. Returns the border width.
+fn round_frame(doc: &Document, wd: &Dict, mk: Option<&Dict>, w: f64, h: f64) -> (String, f64) {
+    let mut c = String::new();
+    let (cx, cy, r) = (w / 2.0, h / 2.0, w.min(h).max(0.0) / 2.0);
+    if let Some(bg) = color_array(doc, mk, b"BG") {
+        c.push_str(&format!("{bg}\n{}f\n", circle_path(cx, cy, r)));
+    }
+    let bs = wd.get(b"BS").map(|b| doc.resolve(b)).and_then(|b| b.as_dict().cloned());
+    let bw = bs.as_ref().and_then(|b| b.get(b"W")).and_then(|x| doc.resolve(x).as_f64()).unwrap_or(1.0).max(0.0);
+    match color_array(doc, mk, b"BC") {
+        Some(bc) if bw > 0.0 => {
+            let dashed = bs.as_ref().and_then(|b| b.name(b"S")) == Some(b"D");
+            // The stroke is centred on the path: inset by half its width, it stays inside.
+            let path = circle_path(cx, cy, (r - bw / 2.0).max(0.0));
+            c.push_str(&format!("{}\n{} w\n{}{path}S\n[] 0 d\n", stroke_op(&bc), n(bw), if dashed { "[3] 0 d\n" } else { "" }));
+            (c, bw)
+        }
+        _ => (c, 0.0),
+    }
+}
+
+/// A closed circle of radius `r` around (`cx`, `cy`) as four Bézier arcs, ending with a space
+/// so a paint operator can follow.
+fn circle_path(cx: f64, cy: f64, r: f64) -> String {
+    // The control-point distance for a quarter circle.
+    let k = 0.5523 * r;
+    format!(
+        "{} {} m {} {} {} {} {} {} c {} {} {} {} {} {} c {} {} {} {} {} {} c {} {} {} {} {} {} c ",
+        n(cx + r),
+        n(cy),
+        n(cx + r),
+        n(cy + k),
+        n(cx + k),
+        n(cy + r),
+        n(cx),
+        n(cy + r),
+        n(cx - k),
+        n(cy + r),
+        n(cx - r),
+        n(cy + k),
+        n(cx - r),
+        n(cy),
+        n(cx - r),
+        n(cy - k),
+        n(cx - k),
+        n(cy - r),
+        n(cx),
+        n(cy - r),
+        n(cx + k),
+        n(cy - r),
+        n(cx + r),
+        n(cy - k),
+        n(cx + r),
+        n(cy)
+    )
 }
 
 /// The width [`frame`] insets the content by: the `/BS` border width when the widget has a
