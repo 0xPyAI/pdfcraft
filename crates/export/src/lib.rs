@@ -517,17 +517,18 @@ fn docx_table(t: &Table) -> String {
     s.push_str("</w:tblGrid>");
     for row in &t.rows {
         s.push_str("<w:tr>");
+        let mut column = 0usize;
         for c in row {
             let span = if c.span > 1 { format!("<w:gridSpan w:val=\"{}\"/>", c.span) } else { String::new() };
-            let w: i64 = widths.iter().take(c.span.min(widths.len())).sum();
+            let w: i64 = widths.iter().skip(column).take(c.span).sum();
             s.push_str(&format!(
                 "<w:tc><w:tcPr><w:tcW w:w=\"{w}\" w:type=\"dxa\"/>{span}</w:tcPr><w:p>{}</w:p></w:tc>",
                 run_xml(&c.text, c.size, c.bold, c.italic, c.color)
             ));
+            column = column.saturating_add(c.span);
         }
         // Pad the grid so every row covers all columns (Word rejects short rows).
-        let used: usize = row.iter().map(|c| c.span).sum();
-        for _ in used..t.cols.len() {
+        for _ in column..t.cols.len() {
             s.push_str("<w:tc><w:tcPr><w:tcW w:w=\"0\" w:type=\"auto\"/></w:tcPr><w:p/></w:tc>");
         }
         s.push_str("</w:tr>");
@@ -1038,6 +1039,27 @@ mod tests {
         assert!(xml.contains("<w:tbl>"));
         assert!(!xml.contains("w:val=\"single\""), "text alignment is not evidence of a border: {xml}");
         assert!(xml.contains("<w:insideH w:val=\"nil\"/>"));
+    }
+
+    #[test]
+    fn word_table_cell_widths_follow_the_columns_they_span() {
+        let cell = |text: &str, span| Cell { text: text.into(), size: 11.0, bold: false, italic: false, color: [0.0; 3], span };
+        let table = Table {
+            rect: [0.0, 0.0, 300.0, 100.0],
+            cols: vec![0.0, 50.0, 150.0],
+            rows: vec![
+                vec![cell("First", 1), cell("Second", 1), cell("Third", 1)],
+                vec![cell("First", 1), cell("Last two", 2)],
+                vec![cell("First two", 2), cell("Third", 1)],
+                vec![cell("All", 3)],
+                vec![cell("First", 1)],
+            ],
+        };
+        let xml = docx_table(&table);
+        assert!(xml.contains("<w:gridCol w:w=\"1000\"/><w:gridCol w:w=\"2000\"/><w:gridCol w:w=\"3000\"/>"), "{xml}");
+        let widths: Vec<Vec<&str>> =
+            xml.split("<w:tr>").skip(1).map(|row| row.split("<w:tcW w:w=\"").skip(1).map(|cell| cell.split('"').next().unwrap()).collect()).collect();
+        assert_eq!(widths, vec![vec!["1000", "2000", "3000"], vec!["1000", "5000"], vec!["3000", "3000"], vec!["6000"], vec!["1000", "0", "0"]]);
     }
 
     #[test]
