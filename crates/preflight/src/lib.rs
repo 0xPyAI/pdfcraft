@@ -214,6 +214,9 @@ fn has_pdfa_intent(doc: &Document) -> bool {
     pdfa_intent_profile(doc).is_some()
 }
 
+/// Largest output-intent profile decoded to read its header; real ICC profiles stay well under it.
+const MAX_ICC_PROFILE: usize = 16 << 20;
+
 /// The PDF/A output intent's destination profile: `Some(n)` with the profile's number of colour
 /// components (`/N`, else the ICC header's data colour space; `None` when neither says), or
 /// `None` when the document has no PDF/A output intent.
@@ -229,7 +232,7 @@ fn pdfa_intent_profile(doc: &Document) -> Option<Option<i64>> {
         let Object::Stream(s) = &*profile else { return Some(None) };
         Some(s.dict.int(b"N").or_else(|| {
             // ICC.1 header: the data colour space is bytes 16–19.
-            match s.decoded().ok()?.get(16..20)? {
+            match s.decoded_within(MAX_ICC_PROFILE).ok()?.get(16..20)? {
                 b"GRAY" => Some(1),
                 b"RGB " => Some(3),
                 b"CMYK" => Some(4),

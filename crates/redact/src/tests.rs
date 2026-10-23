@@ -48,10 +48,11 @@ fn content(doc: &Document, page: usize) -> String {
 /// Glyphs (and inline images) of page `page` under `rects` (the verifier's count).
 fn under(doc: &mut Document, page: usize, rects: &[[f64; 4]]) -> usize {
     let p = pdfcraft_model::pages(doc).swap_remove(page);
-    let (_, data) = page_streams(doc, &p.dict, page).unwrap();
+    let mut budget = pdfcraft_cos::DecodeBudget::page();
+    let (_, data) = page_streams_within(doc, &p.dict, page, &mut budget).unwrap();
     let res = p.dict.get(b"Resources").and_then(|r| doc.resolve(r).as_dict().cloned()).unwrap_or_default();
     let mut rep = Report::default();
-    let mut scope = Scope::new(rects, Mode::Verify, &mut rep);
+    let mut scope = Scope::new(rects, Mode::Verify, &mut rep, budget);
     process(doc, &mut scope, &data, &res, pdfcraft_content::Matrix::IDENTITY).residue
 }
 
@@ -2478,6 +2479,23 @@ fn a_tj_surplus_arrays_undrawn_glyphs_are_not_seen_under_a_mark() {
     assert_eq!(under(&mut doc, 0, &[[10.0, 95.0, 45.0, 110.0]]), 7, "LASTARR's 7 glyphs, the one the page draws");
 }
 
+#[test]
+fn form_entries_share_one_budget_per_page() {
+    // 20 draws of a form that draws the next 20 times, four levels down: 160,000 glyphs from a
+    // few hundred bytes.
+    let draws = "/X Do ".repeat(20);
+    let mut objs = vec![stream("/Type /XObject /Subtype /Form /Resources << /Font << /F1 5 0 R >> >>", b"BT /F1 10 Tf 10 100 Td (A) Tj ET")];
+    for inner in 7..10 {
+        objs.push(stream(&format!("/Type /XObject /Subtype /Form /Resources << /XObject << /X {inner} 0 R >> >>"), draws.as_bytes()));
+    }
+    let mut doc = one_page(draws.as_bytes(), "/XObject << /X 10 0 R >>", objs);
+    let residue = under(&mut doc, 0, &[[0.0, 90.0, 50.0, 120.0]]);
+    assert!(residue > 0 && residue <= pdfcraft_cos::MAX_PAGE_FORMS, "{residue} glyphs counted");
+    // Applying refuses the page rather than leave forms past the budget unread.
+    mark(&mut doc, 0, &[[0.0, 90.0, 50.0, 120.0]], "");
+    assert!(apply(&mut doc, None).is_err());
+}
+
 /// A name tree whose levels each list the next level twice: a walk that follows every path
 /// visits 2^levels nodes.
 #[test]
@@ -2695,4 +2713,35 @@ fn repeated_name_tree_kids_count_towards_the_node_budget() {
     ]);
     let counts: std::collections::HashMap<Hidden, usize> = scan(&doc).into_iter().collect();
     assert_eq!(counts[&Hidden::Attachments], 1, "the walk went past its node budget to the last kid");
+}
+
+/// Content streams and the forms they draw spend one page allowance: 130 MiB of content and a
+/// 130 MiB form are each under it, together past it.
+#[test]
+fn content_and_forms_share_one_budget_per_page() {
+    use pdfcraft_cos::{Dict, Stream};
+    let mut doc = one_page(b"", "", vec![]);
+    let mut content = b"BT /F1 10 Tf 10 100 Td (SECRET) Tj ET /X Do\n%".to_vec();
+    content.resize(130 << 20, b'x');
+    let content = doc.add(Object::Stream(Stream::flate(Dict::new(), &content)));
+    let mut form = Dict::new();
+    form.set(b"Type".to_vec(), Object::name("XObject"));
+    form.set(b"Subtype".to_vec(), Object::name("Form"));
+    let mut body = b"%".to_vec();
+    body.resize(130 << 20, b'x');
+    let form = doc.add(Object::Stream(Stream::flate(form, &body)));
+    doc.update_dict(ObjRef::new(3, 0), |d| {
+        let mut xobjects = Dict::new();
+        xobjects.set(b"X".to_vec(), Object::Ref(form));
+        let mut fonts = Dict::new();
+        fonts.set(b"F1".to_vec(), Object::Ref(ObjRef::new(5, 0)));
+        let mut res = Dict::new();
+        res.set(b"Font".to_vec(), Object::Dict(fonts));
+        res.set(b"XObject".to_vec(), Object::Dict(xobjects));
+        d.set(b"Resources".to_vec(), Object::Dict(res));
+        d.set(b"Contents".to_vec(), Object::Ref(content));
+    })
+    .unwrap();
+    mark(&mut doc, 0, &[[0.0, 90.0, 50.0, 120.0]], "");
+    assert!(apply(&mut doc, None).is_err(), "the form past the page's allowance was read");
 }

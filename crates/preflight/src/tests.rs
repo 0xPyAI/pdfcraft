@@ -476,3 +476,15 @@ fn annotation_pages_are_found_in_one_pass() {
     let read = ANNOT_ENTRIES_READ.with(std::cell::Cell::get);
     assert!(read <= 2 * n, "{read} entries read for {n} annotations");
 }
+
+#[test]
+fn an_output_intent_profile_header_is_read_within_a_size_cap() {
+    let intent = "/OutputIntents [<< /S /GTS_PDFA1 /DestOutputProfile 2 0 R >>]";
+    for (size, n) in [(128, Some(4)), (MAX_ICC_PROFILE + 1, None)] {
+        let mut doc = build(&[&format!("<< /Type /Catalog {intent} >>"), "null"], "");
+        let mut profile = vec![0; size];
+        profile[16..20].copy_from_slice(b"CMYK");
+        doc.set(pdfcraft_cos::ObjRef::new(2, 0), Object::Stream(pdfcraft_cos::Stream::flate(Dict::new(), &profile)));
+        assert_eq!(pdfa_intent_profile(&doc), Some(n), "a {size}-byte profile");
+    }
+}

@@ -1559,3 +1559,66 @@ fn a_link_batch_with_a_bad_entry_creates_no_objects() {
         assert_eq!((annots(&doc, page).len(), doc.scan_objects().count()), before);
     }
 }
+
+fn doc_of(objs: &[String]) -> Document {
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    Document::open(Arc::new(out)).expect("opens")
+}
+
+#[test]
+fn link_listing_skips_repeated_refs_and_caps_web_address_text() {
+    // One link referenced 1000 times, and 300 small links sharing one 64 KiB address.
+    let annots = format!("{}{}", " 4 0 R".repeat(1000), "<< /Subtype /Link /Rect [0 0 1 1] /A 5 0 R >>".repeat(300));
+    let doc = doc_of(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>".into(),
+        format!("<< /Type /Page /Parent 2 0 R /Annots [{annots}] >>"),
+        "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A 5 0 R >>".into(),
+        "<< /S /URI /URI 6 0 R >>".into(),
+        format!("({})", "u".repeat(64 << 10)),
+    ]);
+    let all = links::list(&doc);
+    assert_eq!(all.iter().filter(|l| l.obj == Some(ObjRef::new(4, 0))).count(), 1);
+    assert_eq!(all.len(), 301, "every distinct link is still listed");
+    let kept: usize = all.iter().map(|l| if let links::LinkAction::Uri(u) = &l.action { u.len() } else { 0 }).sum();
+    assert!(kept <= links::MAX_URI_BYTES, "{kept} bytes of web addresses kept");
+    assert!(matches!(&all[0].action, links::LinkAction::Uri(u) if u.len() == 64 << 10));
+}
+
+#[test]
+fn web_address_cap_counts_the_text_kept_after_conversion() {
+    // 200 links sharing a 64 KiB address of invalid UTF-8: 12.5 MiB of bytes, each byte kept as a
+    // three-byte replacement character.
+    let annots = "<< /Subtype /Link /Rect [0 0 1 1] /A 4 0 R >>".repeat(200);
+    let doc = doc_of(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>".into(),
+        format!("<< /Type /Page /Parent 2 0 R /Annots [{annots}] >>"),
+        "<< /S /URI /URI 5 0 R >>".into(),
+        format!("<{}>", "FF".repeat(64 << 10)),
+    ]);
+    let all = links::list(&doc);
+    assert_eq!(all.len(), 200);
+    let kept: usize = all.iter().map(|l| if let links::LinkAction::Uri(u) = &l.action { u.len() } else { 0 }).sum();
+    assert!(kept <= links::MAX_URI_BYTES, "{kept} bytes of web addresses kept");
+    assert!(kept > 0);
+}
+
+#[test]
+fn cloud_outline_has_a_bump_budget() {
+    // 50 long edges would each ask for 10,000 bumps of radius 1.
+    let pts: Vec<(f64, f64)> = (0..50).map(|i| (f64::from(i) * std::f64::consts::TAU / 50.0).sin_cos()).map(|(s, c)| (1e7 * c, 1e7 * s)).collect();
+    let bumps = appearance::cloud_path(&pts, 1.0).lines().filter(|l| l.ends_with(" c")).count();
+    assert!((pts.len()..=appearance::MAX_CLOUD_BUMPS + 2 * pts.len()).contains(&bumps), "{bumps} bumps");
+}

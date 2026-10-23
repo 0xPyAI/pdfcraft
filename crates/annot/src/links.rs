@@ -78,11 +78,15 @@ pub struct LinkItem {
     pub style: LinkStyle,
 }
 
+/// Bytes of web-address text one listing keeps, counted after conversion to UTF-8; past it a link
+/// lists as [`LinkAction::Other`].
+pub(crate) const MAX_URI_BYTES: usize = 16 << 20;
+
 fn nums(doc: &Document, o: Option<&Object>) -> Vec<f64> {
     o.map(|o| doc.resolve(o)).and_then(|a| a.as_array().map(|a| a.iter().filter_map(|x| doc.resolve(x).as_f64()).collect())).unwrap_or_default()
 }
 
-fn action_of(doc: &Document, d: &Dict, pages: &[ObjRef]) -> LinkAction {
+fn action_of(doc: &Document, d: &Dict, pages: &[ObjRef], uri_budget: &mut usize) -> LinkAction {
     let dest_page = |dest: &Object| -> Option<usize> {
         let a = doc.resolve(dest);
         let first = a.as_array()?.first()?.clone();
@@ -97,9 +101,20 @@ fn action_of(doc: &Document, d: &Dict, pages: &[ObjRef]) -> LinkAction {
     }
     let Some(a) = d.get(b"A").map(|a| doc.resolve(a)).and_then(|a| a.as_dict().cloned()) else { return LinkAction::Other("no action".into()) };
     match a.name(b"S") {
-        Some(b"URI") => LinkAction::Uri(
-            a.get(b"URI").and_then(|u| doc.resolve(u).as_string().map(|s| String::from_utf8_lossy(&s.bytes).into_owned())).unwrap_or_default(),
-        ),
+        Some(b"URI") => {
+            let uri = a.get(b"URI").map(|u| doc.resolve(u));
+            let bytes = uri.as_ref().and_then(|u| u.as_string()).map_or(&[][..], |s| &s.bytes[..]);
+            // The raw length first, so an address already over the budget is never converted; then the
+            // converted text, which is up to three times longer where the bytes are not UTF-8.
+            let text = (bytes.len() <= *uri_budget).then(|| String::from_utf8_lossy(bytes));
+            match text.and_then(|t| Some((uri_budget.checked_sub(t.len())?, t))) {
+                Some((left, text)) => {
+                    *uri_budget = left;
+                    LinkAction::Uri(text.into_owned())
+                }
+                None => LinkAction::Other("web address too long".into()),
+            }
+        }
         Some(b"GoTo") => a.get(b"D").and_then(dest_page).map_or_else(|| LinkAction::Other("named destination".into()), LinkAction::Page),
         Some(s) => LinkAction::Other(String::from_utf8_lossy(s).into_owned()),
         None => LinkAction::Other("no action".into()),
@@ -133,8 +148,16 @@ fn style_of(doc: &Document, d: &Dict) -> LinkStyle {
 pub fn list(doc: &Document) -> Vec<LinkItem> {
     let Ok(pages) = page_refs(doc) else { return Vec::new() };
     let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut uri_budget = MAX_URI_BYTES;
     for (pi, p) in pages.iter().enumerate() {
         for (k, a) in annots(doc, *p).iter().enumerate() {
+            // One annotation object listed under several entries or pages is one link.
+            if let Some(r) = a.as_ref()
+                && !seen.insert(r)
+            {
+                continue;
+            }
             let Some(d) = doc.resolve(a).as_dict().cloned() else { continue };
             if d.name(b"Subtype") != Some(b"Link") {
                 continue;
@@ -148,7 +171,7 @@ pub fn list(doc: &Document) -> Vec<LinkItem> {
                 index: k,
                 obj: a.as_ref(),
                 rect: [r[0].min(r[2]), r[1].min(r[3]), r[0].max(r[2]), r[1].max(r[3])],
-                action: action_of(doc, &d, &pages),
+                action: action_of(doc, &d, &pages, &mut uri_budget),
                 style: style_of(doc, &d),
             });
         }
