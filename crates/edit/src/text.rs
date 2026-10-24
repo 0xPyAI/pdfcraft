@@ -2064,6 +2064,19 @@ fn type3_font(
             .map_err(|_| EditError::Invalid("replacement text has too many unique characters".into()))?;
         glyphs.push(Type3Glyph { code, ch, path, width });
     }
+    Ok(write_type3_glyphs(doc, fonts_res, face, hebrew, glyphs, per_font))
+}
+
+/// Write already validated outlines; callers can prepare every face before adding any objects.
+fn write_type3_glyphs(
+    doc: &mut Document,
+    fonts_res: &mut Dict,
+    face: &CraftFont,
+    hebrew: bool,
+    glyphs: Vec<Type3Glyph>,
+    per_font: usize,
+) -> Type3Fallback {
+    let per_font = per_font.clamp(1, MAX_TYPE3_GLYPHS);
     let mut codes = HashMap::with_capacity(glyphs.len());
     let mut widths = Vec::with_capacity(glyphs.len());
     let mut names = Vec::new();
@@ -2079,7 +2092,7 @@ fn type3_font(
         }
         names.push(add_type3_font(doc, fonts_res, face, hebrew, group));
     }
-    Ok(Type3Fallback { family: face.family, names, widths, codes })
+    Type3Fallback { family: face.family, names, widths, codes }
 }
 
 /// Adds one generated font whose codes 1 to `glyphs.len()` show `glyphs`, and returns its resource
@@ -2717,7 +2730,7 @@ fn rewrite_block_from(
                 && style.family.is_none()
                 && style.bold.is_none())
     {
-        return rewrite_styled_block(doc, page, &b, &lines, text, style);
+        return rewrite_styled_block(doc, page, &b, &lines, text, style, max_glyphs);
     }
     let streams = content_streams(doc, &p.dict)?;
     let pieces = Pieces::join(&streams.iter().map(|(_, d)| d.as_slice()).collect::<Vec<_>>());
