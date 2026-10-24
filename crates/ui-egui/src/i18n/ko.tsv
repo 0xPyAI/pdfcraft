@@ -2763,3 +2763,8 @@ theme	Appearance	모양
 
 # AI-assisted additions for restoring the last view (#1767) (2026-10-22); not reviewed by a native speaker.
 	Restore the last view (page, zoom and page display) when a document is opened again	문서를 다시 열 때 마지막 보기(페이지, 확대/축소, 페이지 표시) 복원
+	Attach a file…	파일 첨부…
+	Attach {name}	{name} 첨부
+	Attaching files is not available on the web yet	웹에서는 아직 파일을 첨부할 수 없습니다
+	Delete attachment	첨부 파일 삭제
+	Delete attachment {key}	첨부 파일 {key} 삭제

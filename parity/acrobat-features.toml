@@ -1555,15 +1555,15 @@ notes = "Keyboard, Edit-menu, page-context-menu and floating-selection Copy hono
 
 [[feature]]
 id = "view.select-all"
-title = "Select all text on a page"
+title = "Select all text"
 area = "B"
 tier = "P1"
 milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/it/viewer.rs::view_history_select_all_and_find_options"]
-notes = "⌘A on the current page"
+evidence = ["crates/ui-egui/tests/it/viewer.rs::view_history_select_all_and_find_options", "crates/ui-egui/src/canvas.rs::select_all_copies_the_whole_document_while_scrolling_continuously", "crates/ui-egui/src/canvas.rs::select_all_of_the_document_only_while_scrolling_through_several_pages"]
+notes = "⌘A: the current page one page at a time; the whole document scrolling continuously (#2639), copied whole"
 
 [[feature]]
 id = "view.copy-with-layout"
@@ -3384,11 +3384,11 @@ title = "Add file attachments"
 area = "D"
 tier = "P2"
 milestone = "M12"
-status = "planned"
-commands = []
-tools = []
-evidence = []
-notes = ""
+status = "shipped"
+commands = ["edit.attach"]
+tools = ["attachment_add"]
+evidence = ["crates/organize/src/tests.rs::attachments_are_added_listed_and_deleted", "crates/organize/src/tests.rs::attachments_added_in_the_app_survive_combine_and_more_can_be_attached", "crates/automation/tests/it/automation.rs::attaching_and_deleting_files_through_the_tools"]
+notes = "Edit ▸ Attach a file… (also the Attach a file… button in the Attachments panel and the Edit a PDF list): the file goes into /Names /EmbeddedFiles as a Filespec with a Flate-compressed EmbeddedFile stream (/Size, /ModDate, /Subtype from the extension); a name already taken gets \" (2)\"…; the panel opens on it. Undoable. Acrobat's Comment ▸ Attach File (a paper-clip comment on the page) is comment.attach-file-comment."
 
 [[feature]]
 id = "organize.attachments-delete"
@@ -3396,11 +3396,11 @@ title = "Delete attachments"
 area = "D"
 tier = "P2"
 milestone = "M12"
-status = "planned"
+status = "shipped"
 commands = []
-tools = []
-evidence = []
-notes = ""
+tools = ["attachment_delete"]
+evidence = ["crates/organize/src/tests.rs::attachments_are_added_listed_and_deleted", "crates/organize/src/tests.rs::attachments_added_in_the_app_survive_combine_and_more_can_be_attached", "crates/automation/tests/it/automation.rs::attaching_and_deleting_files_through_the_tools"]
+notes = "The trash button on a document-level row of the Attachments panel; the last one removed takes the /EmbeddedFiles tree with it. Undoable. A paper-clip comment is deleted as a comment."
 
 [[feature]]
 id = "organize.attachments-description"
@@ -3471,8 +3471,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["file.properties"]
 tools = ["doc_info"]
-evidence = ["crates/ui-egui/tests/it/editing.rs::document_properties_edit_is_one_undoable_step", "crates/ui-egui/tests/it/editing.rs::cancelling_properties_discards_the_draft"]
-notes = ""
+evidence = ["crates/ui-egui/tests/it/editing.rs::document_properties_edit_is_one_undoable_step", "crates/ui-egui/tests/it/editing.rs::cancelling_properties_discards_the_draft", "crates/organize/src/tests.rs::document_info_falls_back_to_the_xmp_packet", "crates/engine/src/tests.rs::document_information_stated_only_in_xmp_is_shown"]
+notes = "Title, Author, Subject and Keywords (and Creator, Producer in doc_info) come from /Info, else from the XMP packet (dc:title, dc:creator, dc:description, pdf:Keywords, xmp:CreatorTool, pdf:Producer) for files that state them only there; edits write both. Missing: a UTF-16 XMP packet isn't read, and /Info kept only in an older revision's trailer isn't looked up"
 
 [[feature]]
 id = "organize.edit-metadata"
@@ -6604,8 +6604,8 @@ milestone = "M10"
 status = "partial"
 commands = ["edit.edit_text"]
 tools = ["text_edit"]
-evidence = ["crates/engine/tests/it/ocr_edit.rs::editing_an_ocr_word_covers_the_scan_and_shows_the_new_text", "crates/engine/tests/it/ocr_edit.rs::an_explicit_colour_is_kept_for_the_new_text", "crates/engine/tests/it/ocr_edit.rs::ocr_words_group_into_phrases_that_edit_in_place", "crates/engine/tests/it/ocr_edit.rs::a_longer_ocr_phrase_grows_rightwards", "crates/engine/tests/it/ocr_edit.rs::a_rewritten_ocr_phrase_keeps_its_word_widths", "crates/ui-egui/tests/it/ocr.rs::an_ocr_word_opens_for_editing_and_stays_open"]
-notes = "On demand, per edit: in Edit text & images, recognised text (the invisible OCR layer over a scan) is grouped into phrases (words across a word space; a wider gap such as a table cell, and each scanned line, stay separate) and opens for editing on a click. Applying draws the new text visibly in the scan's sampled ink colour (or the chosen one) and first covers the old words with the paper colour sampled around them, so the scanned word no longer shows; the phrase keeps each word's position and width and grows rightwards instead of wrapping. Still missing: Acrobat's Recognize Text output that converts a whole page to editable text at once, matching the scanned typeface (the layer's Helvetica is used), and covering on a textured or patterned background (one flat colour is used)."
+evidence = ["crates/engine/tests/it/ocr_edit.rs::editing_an_ocr_word_covers_the_scan_and_shows_the_new_text", "crates/engine/tests/it/ocr_edit.rs::an_explicit_colour_is_kept_for_the_new_text", "crates/engine/tests/it/ocr_edit.rs::ocr_words_group_into_phrases_that_edit_in_place", "crates/engine/tests/it/ocr_edit.rs::a_longer_ocr_phrase_grows_rightwards", "crates/engine/tests/it/ocr_edit.rs::a_rewritten_ocr_phrase_keeps_its_word_widths", "crates/ui-egui/tests/it/ocr.rs::an_ocr_word_opens_for_editing_and_stays_open", "crates/ui-egui/tests/it/ocr.rs::editing_a_scanned_page_recognizes_its_text_first_and_only_once"]
+notes = "On demand, per edit: in Edit text & images, recognised text (the invisible OCR layer over a scan) is grouped into phrases (words across a word space; a wider gap such as a table cell, and each scanned line, stay separate) and opens for editing on a click. Applying draws the new text visibly in the scan's sampled ink colour (or the chosen one) and first covers the old words with the paper colour sampled around them, so the scanned word no longer shows; the phrase keeps each word's position and width and grows rightwards instead of wrapping. Turning Edit text & images on for a scanned page (an image covering at least half of a page that has no text of its own, once per page per window; comments and text boxes over it do not count as text, a page with real text and a background picture is left alone; one undoable \"Recognize text\" step) now recognizes its words first, as Acrobat's \"Converting scanned page to Editable Text and Images\" does (English only until more OCR languages exist, gap 7). Still missing: separating the photographs on the page from the lettering, matching the scanned typeface (the layer's Helvetica is used), and covering on a textured or patterned background (one flat colour is used)."
 
 [[feature]]
 id = "ocr.ocr-downsample"
@@ -7348,8 +7348,8 @@ milestone = "M11"
 status = "partial"
 commands = ["optimize.advanced"]
 tools = ["doc_optimize"]
-evidence = ["crates/optimize/tests/optimize.rs::images_are_measured_where_drawn_and_downsampled", "crates/optimize/tests/optimize.rs::settings_choose_what_happens"]
-notes = "JPEG (quality steps) and ZIP; no JPEG 2000"
+evidence = ["crates/optimize/tests/optimize.rs::images_are_measured_where_drawn_and_downsampled", "crates/optimize/tests/optimize.rs::settings_choose_what_happens", "crates/optimize/tests/jpeg_color_transform.rs::optimize_keeps_the_colours_of_an_rgb_jpeg_whatever_its_colour_transform"]
+notes = "JPEG (quality steps) and ZIP; a JPEG is decoded with its colour transform (Adobe marker, else /ColorTransform), and one whose marker and /ColorTransform disagree is left as it is; no JPEG 2000"
 
 [[feature]]
 id = "optimize.mono-compression"

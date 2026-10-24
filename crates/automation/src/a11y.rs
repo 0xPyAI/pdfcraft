@@ -606,11 +606,22 @@ impl Automation {
         for p in &paths {
             self.resolve_for(p, crate::file_access::Access::Read, true)?;
         }
+        // Two inputs that would write the same output file overwrite each other while both report
+        // success, so the whole batch is refused here: before the folder is created, anything is
+        // read, or the OCR engines load.
+        let targets: Vec<std::path::PathBuf> = paths.iter().map(|p| child(&folder, &input_file_name(p))).collect();
+        let shared = shared_file_names(&targets);
+        if !shared.is_empty() {
+            return Err(ToolError::InvalidArgs(format!(
+                "more than one input would write to the same output file, so each would replace the one before it. Colliding file names: {}. Give each input a different file name, or run them in separate batches with different folders.",
+                shared.join(", ")
+            )));
+        }
         std::fs::create_dir_all(&folder).map_err(|e| failed(e.to_string()))?;
         let ocr = pdfcraft_engine::ocr::engine().map_err(failed)?;
         let mut out = Vec::new();
         for p in paths {
-            let name = std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document.pdf".into());
+            let name = input_file_name(p);
             let result =
                 self.resolve(p, false).map_err(|e| e.to_string()).and_then(|src| crate::read_input_bytes(&src).map_err(|e| e.to_string())).and_then(
                     |bytes| pdfcraft_engine::ocr::recognize_file(&name, std::sync::Arc::new(bytes), None, settings.clone(), &ocr, |_, _| true),
@@ -657,6 +668,37 @@ impl Automation {
         let langs: Vec<Value> = ocr::LANGUAGES.iter().map(|(c, n)| json!({ "code": c, "name": n })).collect();
         Ok(json!({ "available": ocr::available(), "search_dirs": dirs, "languages": langs }))
     }
+}
+
+/// The file name an input is written under: its own file name, or `document.pdf` when it has none.
+fn input_file_name(path: &str) -> String {
+    std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document.pdf".into())
+}
+
+/// The output file names that two or more of `targets` share, each spelling listed once, in input
+/// order. Names are compared without regard to case on Windows and macOS and exactly elsewhere; on
+/// Windows a trailing dot or space is not part of the name (`scan.pdf.` is `scan.pdf`). Unicode
+/// normalization forms (NFC and NFD spellings of one name) are not compared, so such inputs are
+/// not caught. The folder is the same for every target, so only the names are compared.
+fn shared_file_names(targets: &[std::path::PathBuf]) -> Vec<String> {
+    let mut groups: std::collections::BTreeMap<String, (usize, Vec<String>)> = std::collections::BTreeMap::new();
+    for target in targets {
+        let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let key = if cfg!(windows) {
+            name.trim_end_matches(['.', ' ']).to_lowercase()
+        } else if cfg!(target_os = "macos") {
+            // Case only; NFC and NFD spellings of one name stay distinct here (a known limit).
+            name.to_lowercase()
+        } else {
+            name.clone()
+        };
+        let (count, spellings) = groups.entry(key).or_insert_with(|| (0, Vec::new()));
+        *count += 1;
+        if !spellings.contains(&name) {
+            spellings.push(name);
+        }
+    }
+    groups.into_values().filter(|(count, _)| *count > 1).flat_map(|(_, spellings)| spellings).collect()
 }
 
 /// A script's request to the viewer as the JSON that running a script reports; a side panel
@@ -1054,5 +1096,23 @@ mod review_html_tests {
         let html = review_html(&record).unwrap();
         assert!(html.contains("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;.pdf"));
         assert!(!html.contains("<script>"));
+    }
+}
+
+#[cfg(test)]
+mod shared_output_name_tests {
+    use super::*;
+
+    #[test]
+    fn shared_output_names_follow_the_default_filesystem() {
+        let targets = |names: &[&str]| -> Vec<std::path::PathBuf> { names.iter().map(|n| std::path::Path::new("out").join(n)).collect() };
+        // A spelling that repeats is one shared name, listed once.
+        assert_eq!(shared_file_names(&targets(&["a.pdf", "b.pdf", "a.pdf"])), vec!["a.pdf".to_string()]);
+        assert!(shared_file_names(&targets(&["a.pdf", "b.pdf"])).is_empty());
+        // Case is ignored on Windows and macOS only; a trailing dot is ignored on Windows only.
+        let case = shared_file_names(&targets(&["scan.pdf", "Scan.PDF"]));
+        let dot = shared_file_names(&targets(&["scan.pdf", "scan.pdf."]));
+        assert_eq!(case.len(), if cfg!(any(windows, target_os = "macos")) { 2 } else { 0 }, "{case:?}");
+        assert_eq!(dot.len(), if cfg!(windows) { 2 } else { 0 }, "{dot:?}");
     }
 }

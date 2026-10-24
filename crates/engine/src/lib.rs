@@ -46,7 +46,7 @@ pub use signature_scan::{PhotoRect, ScanError, SignaturePhoto, Turn};
 pub use stamp_preview::StampPreview;
 pub use text_preview::TextEditPreview;
 
-pub use pdfcraft_organize::{BoxSpec, FieldConflicts, PageBox, SplitBy, Transition, TransitionSpec, split_ranges};
+pub use pdfcraft_organize::{BoxSpec, FieldConflicts, PageBox, SplitBy, Transition, TransitionSpec, mime_for_name, split_ranges};
 
 /// One file produced by a split: (1-based first page, last page, PDF bytes).
 pub use pdfcraft_organize::LabelStyle;
@@ -279,6 +279,8 @@ fn uses_scripts(edit: &Edit) -> bool {
 fn scope_of(edit: &Edit) -> Scope {
     match edit {
         Edit::SetInfo { .. } => Scope::Metadata,
+        // The Attachments list is read from the whole document.
+        Edit::AddAttachment { .. } | Edit::DeleteAttachment { .. } => Scope::Full,
         // A file attachment also changes the Attachments list.
         Edit::AddAnnotation(a) if matches!(a.shape, Shape::Attachment { .. }) => Scope::Full,
         Edit::AddMeasurement(_)
@@ -969,6 +971,20 @@ fn same_pages(a: &[pdfcraft_render::PageInfo], b: &[pdfcraft_render::PageInfo]) 
         && a.iter().zip(b).all(|(x, y)| (x.width - y.width).abs() < 0.01 && (x.height - y.height).abs() < 0.01 && x.rotation == y.rotation)
 }
 
+/// Each document-information field of `info` with its value in `cos` (`/Info`, else XMP), read
+/// the way the full inspection reads them: NULs and spaces trimmed, empty is none.
+fn info_fields<'a>(info: &'a mut DocInfo, cos: &pdfcraft_cos::Document) -> [(&'a mut Option<String>, Option<String>); 6] {
+    let read = |key| pdfcraft_organize::info(cos, key).map(|v| v.trim_matches('\0').trim().to_string()).filter(|v| !v.is_empty());
+    [
+        (&mut info.title, read("Title")),
+        (&mut info.author, read("Author")),
+        (&mut info.subject, read("Subject")),
+        (&mut info.keywords, read("Keywords")),
+        (&mut info.creator, read("Creator")),
+        (&mut info.producer, read("Producer")),
+    ]
+}
+
 /// The copy PDFCraft displays when opening `bytes`: with appearances drawn, in memory only, for
 /// comments that have none and form fields the file leaves to the viewer. Render paths outside the app, such as the CLI, use this so their page
 /// images agree with the app and independent viewers. It never changes the source document, and an
@@ -1638,6 +1654,18 @@ pub enum Edit {
     },
     /// Document Properties ▸ Initial View (and the language and binding).
     SetInitialView(Box<InitialView>),
+    /// Edit ▸ Attach a file: a document-level attachment (`/Names /EmbeddedFiles`) under
+    /// `name`, made unique; `mime` is the embedded file's `/Subtype` when known.
+    AddAttachment {
+        name: String,
+        bytes: Vec<u8>,
+        description: Option<String>,
+        mime: Option<String>,
+    },
+    /// Remove the document-level attachment whose name-tree key is `key`.
+    DeleteAttachment {
+        key: String,
+    },
     /// Build a tagged structure tree for an untagged, text-only document.
     AutoTagText,
     /// Add alternate text: set (or clear, with `None`) a figure's alternate text. `figure` is
@@ -1971,6 +1999,8 @@ pub const EDIT_LABELS: &[&str] = &[
     "Insert pages from {name}",
     "Insert pages from {name} — 1 field renamed",
     "Insert pages from {name} — fields renamed",
+    "Attach {name}",
+    "Delete attachment {key}",
     "Add bookmark",
     "Rename bookmark",
     "Delete bookmark",
@@ -2169,6 +2199,8 @@ impl Edit {
             Edit::SetTabOrder { .. } | Edit::MoveInTabOrder { .. } => Label::of("Set tab order"),
             Edit::SetCalculationOrder { .. } => Label::of("Set calculation order"),
             Edit::SetInitialView(_) => Label::of("Change initial view"),
+            Edit::AddAttachment { name, .. } => Label::with("Attach {name}", name.as_str()),
+            Edit::DeleteAttachment { key } => Label::with("Delete attachment {key}", key.as_str()),
             Edit::AutoTagText => Label::of("Automatically tag text"),
             Edit::SetAltText { .. } => Label::of("Set alternate text"),
             Edit::AutoTagFormFields => Label::of("Tag form fields"),
@@ -2382,6 +2414,8 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
         | Edit::MoveInTabOrder { .. }
         | Edit::SetCalculationOrder { .. }
         | Edit::SetInitialView(_)
+        | Edit::AddAttachment { .. }
+        | Edit::DeleteAttachment { .. }
         | Edit::AutoTagText
         | Edit::SetAltText { .. }
         | Edit::AutoTagFormFields
@@ -2589,6 +2623,10 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         Edit::EraseInk { page, index, path, radius } => {
             pdfcraft_annot::erase_ink(doc, *page, *index, path, *radius, &cx.meta())?;
         }
+        Edit::AddAttachment { name, bytes, description, mime } => {
+            pdfcraft_organize::add_attachment(doc, name, bytes, description.as_deref(), mime.as_deref(), cx.date.as_deref())?;
+        }
+        Edit::DeleteAttachment { key } => pdfcraft_organize::delete_attachment(doc, key)?,
         Edit::ReplaceText { page, quads, text, author, strike, caret } => {
             // One `/NM` each: the caret replies to the strikeout, and XFDF names that reply by
             // the strikeout's `/NM` (#2666).
@@ -3796,7 +3834,7 @@ impl Session {
         name: String,
         path: Option<String>,
         bytes: Arc<Vec<u8>>,
-        info: DocInfo,
+        mut info: DocInfo,
         cos: Result<Result<pdfcraft_cos::Document, pdfcraft_cos::CosError>, Box<dyn std::any::Any + Send>>,
         render_password: Option<String>,
         password: Option<&str>,
@@ -3828,6 +3866,15 @@ impl Session {
         };
         let sig_cache = Arc::new(pdfcraft_sign::DigestCache::default());
         let signatures = editor.as_ref().map(|e| signatures_of(&e.cos, &bytes, trust, &sig_cache)).unwrap_or_default();
+        // The inspection reads only `/Info`; a file stating its title or author only in XMP still
+        // shows them (#2373).
+        if let Some(e) = &editor {
+            for (field, value) in info_fields(&mut info, &e.cos) {
+                if field.is_none() {
+                    *field = value;
+                }
+            }
+        }
         let display = display_bytes(editor.as_mut(), &bytes);
         let renderer = RenderPool::new(display.clone(), render_threads(), config.clone());
         let (form, adopted) = editor
@@ -4193,15 +4240,9 @@ impl Session {
             editor.cos.bytes().clone()
         };
         if scope == Scope::Metadata {
-            // Read the way the full inspection reads them (NULs and spaces trimmed, empty is
-            // none), so editing one entry doesn't change how the others display.
-            let info = |key| pdfcraft_organize::info(&editor.cos, key).map(|v| v.trim_matches('\0').trim().to_string()).filter(|v| !v.is_empty());
-            doc.info.title = info("Title");
-            doc.info.author = info("Author");
-            doc.info.subject = info("Subject");
-            doc.info.keywords = info("Keywords");
-            doc.info.creator = info("Creator");
-            doc.info.producer = info("Producer");
+            for (field, value) in info_fields(&mut doc.info, &editor.cos) {
+                *field = value;
+            }
             doc.info.custom = pdfcraft_organize::custom_info(&editor.cos);
             doc.info.file_size = bytes.len();
             #[cfg(test)]
@@ -4374,6 +4415,13 @@ impl Session {
             }
         }
         note_warnings(&mut info.warnings, &doc.xfa_warnings);
+        // As in `build_document`: the inspection reads only `/Info`, so fields stated only in XMP
+        // are filled in again after every full refresh.
+        for (field, value) in info_fields(&mut info, &editor.cos) {
+            if field.is_none() {
+                *field = value;
+            }
+        }
         doc.info = info;
         doc.fonts_stale = false;
         let mut form = pdfcraft_forms::fields(&editor.cos);

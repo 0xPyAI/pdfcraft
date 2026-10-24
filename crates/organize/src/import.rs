@@ -610,7 +610,7 @@ fn name_tree_lookup(src: &Document, node: &Object, key: &[u8], depth: u8, seen: 
 }
 
 /// All (key, value) pairs of a name tree, in order, each node read once.
-fn name_tree_entries(src: &Document, node: &Object, depth: u8, seen: &mut HashSet<ObjRef>, out: &mut Vec<(Vec<u8>, Object)>) {
+pub(crate) fn name_tree_entries(src: &Document, node: &Object, depth: u8, seen: &mut HashSet<ObjRef>, out: &mut Vec<(Vec<u8>, Object)>) {
     if depth > 32 || node.as_ref().is_some_and(|r| !seen.insert(r)) {
         return;
     }
@@ -975,12 +975,26 @@ fn register_fields(dst: &mut Document, fields: &[ObjRef]) -> Result<(), Organize
 
 /// A new document containing copies of `pages` from `src` (Extract Pages / Split).
 /// Document information (title, author…) is carried over, and so is the print standard the
-/// source declares (PDF/X: its output intents and identification, #263).
+/// source declares (PDF/X: its output intents and identification, #263), and the bookmarks that
+/// go to the copied pages.
 pub fn extract_pages(src: &Document, pages: &[usize]) -> Result<Document, OrganizeError> {
     let mut out = Document::new_empty();
     // One source: nothing to deduplicate. Its fields keep their names (a source with two
     // same-named field roots stays one field, as it was), so Extract and Split never rename.
     let imported = import_pages_mapped(&mut out, src, pages, 0, FieldConflicts::Merge)?;
+    // The bookmarks of these pages come along, mapped to the copies (#4020).
+    let outline = kept_bookmarks(source_outline(src, imported.page_map));
+    if !outline.is_empty() {
+        let root = crate::outline::container(&mut out, &[])?;
+        if let Some((first, last, _)) = write_outline_level(&mut out, root, &outline)? {
+            out.update_dict(root, |d| {
+                d.set(b"First".to_vec(), Object::Ref(first));
+                d.set(b"Last".to_vec(), Object::Ref(last));
+            })?;
+            let top = crate::outline::children(&out, root);
+            crate::outline::relink_and_recount(&mut out, root, &top)?;
+        }
+    }
     for key in crate::INFO_KEYS {
         if let Some(v) = crate::info(src, key) {
             crate::set_info(&mut out, key, &v)?;
@@ -1285,17 +1299,23 @@ fn collect_attachments(dst: &mut Document, src: &Document, out: &mut Vec<(Vec<u8
 }
 
 /// Write attachments as a flat, sorted `/EmbeddedFiles` name tree; duplicate names get " (2)"…
-fn set_attachments(dst: &mut Document, mut entries: Vec<(Vec<u8>, Object)>) -> Result<(), OrganizeError> {
+pub(crate) fn set_attachments(dst: &mut Document, mut entries: Vec<(Vec<u8>, Object)>) -> Result<(), OrganizeError> {
     if entries.is_empty() {
         return Ok(());
     }
+    // Names are compared and numbered as text: a key written as UTF-16 (a name with an accent
+    // or Chinese letters) must not get ASCII bytes appended to it.
     let mut seen = std::collections::HashSet::new();
     for (k, _) in entries.iter_mut() {
-        let base = k.clone();
+        let base = pdfcraft_cos::PdfString::literal(k.clone()).to_text();
+        let mut text = base.clone();
         let mut n = 2;
-        while !seen.insert(k.clone()) {
-            *k = [base.as_slice(), format!(" ({n})").as_bytes()].concat();
+        while !seen.insert(text.clone()) {
+            text = format!("{base} ({n})");
             n += 1;
+        }
+        if text != base {
+            *k = pdfcraft_cos::PdfString::text(&text).bytes;
         }
     }
     entries.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1308,6 +1328,14 @@ fn set_attachments(dst: &mut Document, mut entries: Vec<(Vec<u8>, Object)>) -> R
     tree.set(b"Names".to_vec(), Object::Array(names));
     let tree = dst.add(tree);
     let root = dst.root().ok_or(OrganizeError::NoPageTree)?;
+    // `/Names` may be an indirect dictionary (Acrobat writes it so): update it where it is, so
+    // its other trees (/Dests, /JavaScript…) stay.
+    if let Some(Object::Ref(names)) = dst.get(root).as_dict().and_then(|c| c.get(b"Names").cloned())
+        && dst.get(names).as_dict().is_some()
+    {
+        dst.update_dict(names, |n| n.set(b"EmbeddedFiles".to_vec(), Object::Ref(tree)))?;
+        return Ok(());
+    }
     dst.update_dict(root, |c| {
         let mut n = match c.get(b"Names") {
             Some(Object::Dict(d)) => d.clone(),
@@ -1350,6 +1378,18 @@ fn source_outline(src: &Document, pages: HashMap<ObjRef, ObjRef>) -> Vec<Outline
     let mapper = Copier::new(src, HashMap::new(), pages);
     let mut budget = 10_000usize;
     outline_level(&mapper, first, 0, &mut budget)
+}
+
+/// `nodes` without the bookmarks whose page was not copied (no destination left), unless a bookmark
+/// under them stays. [`outline_level`] already bounds the depth.
+fn kept_bookmarks(nodes: Vec<OutlineNode>) -> Vec<OutlineNode> {
+    nodes
+        .into_iter()
+        .filter_map(|mut n| {
+            n.children = kept_bookmarks(n.children);
+            (n.dest.is_some() || !n.children.is_empty()).then_some(n)
+        })
+        .collect()
 }
 
 /// One level of bookmarks from `first` (its siblings), each with its children. Cycle- and size-safe:

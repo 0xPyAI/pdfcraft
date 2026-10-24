@@ -837,6 +837,25 @@ impl Automation {
             "content_delete" => self.content_delete(&a)?,
             "content_copy" => self.content_copy(&a)?,
             "doc_print" => self.doc_print(&a)?,
+            "attachment_add" => {
+                let path = self.resolve(a.str("path")?, false)?;
+                let bytes = read_input(&path)?;
+                let name = match a.opt_str("name")? {
+                    Some(n) => n.to_string(),
+                    None => path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                };
+                let mime = pdfcraft_engine::mime_for_name(&name).map(str::to_string);
+                let description = a.opt_str("description")?.map(str::to_string);
+                // Only the document-level keys: an annotation attachment of the same name is not the new one.
+                let before = document_attachment_keys(self.doc(&a)?);
+                let out = self.apply(&a, Edit::AddAttachment { name, bytes, description, mime })?;
+                let key = document_attachment_keys(self.doc(&a)?).into_iter().find(|n| !before.contains(n)).unwrap_or_default();
+                json!({ "name": key, "document": out })
+            }
+            "attachment_delete" => {
+                let edit = Edit::DeleteAttachment { key: a.str("name")?.into() };
+                self.apply(&a, edit)?
+            }
             "doc_remove_hidden" => self.doc_remove_hidden(&a)?,
             "doc_audit_redactions" => self.doc_audit_redactions(&a)?,
             "fill_sign_add" => self.fill_sign_add(&a)?,
@@ -2487,6 +2506,18 @@ impl Args<'_> {
     }
 }
 
+/// The name-tree keys of a document's own attachments, leaving out the files attached to pages as comments.
+fn document_attachment_keys(doc: &Document) -> Vec<String> {
+    doc.info
+        .attachments
+        .iter()
+        .filter_map(|x| match &x.source {
+            pdfcraft_render::AttachmentSource::Document { key } => Some(key.clone()),
+            pdfcraft_render::AttachmentSource::Annotation { .. } => None,
+        })
+        .collect()
+}
+
 /// Bookmark rows in listing order as JSON: a row holds the rows that follow it on the page at the
 /// next level down in `children`, and paths and pages are 1-based.
 fn nest_rows(rows: &[pdfcraft_engine::BookmarkRow], pages: &[pdfcraft_render::PageInfo]) -> Vec<Value> {
@@ -3378,6 +3409,7 @@ mod tests {
             ("comment_add", json!({ "doc": id, "page": 1, "type": "attachment", "at": [72.0, 72.0], "path": huge_str })),
             ("stamp_custom", json!({ "doc": id, "page": 1, "at": [72.0, 72.0], "path": huge_str })),
             ("sign_trust", json!({ "paths": [huge_str] })),
+            ("attachment_add", json!({ "doc": id, "path": huge_str })),
         ] {
             let err = a.call(tool, &args).unwrap_err().to_string();
             assert!(err.contains("input exceeds 512 MiB"), "{tool}: {err}");

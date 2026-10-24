@@ -2763,3 +2763,8 @@ theme	Appearance	स्वरूप
 
 # AI-assisted additions for restoring the last view (#1767) (2026-10-22); not reviewed by a native speaker.
 	Restore the last view (page, zoom and page display) when a document is opened again	दस्तावेज़ फिर से खोलने पर पिछला दृश्य (पृष्ठ, ज़ूम और पृष्ठ प्रदर्शन) पुनर्स्थापित करें
+	Attach a file…	फ़ाइल संलग्न करें…
+	Attach {name}	{name} संलग्न करें
+	Attaching files is not available on the web yet	वेब पर अभी फ़ाइलें संलग्न करना उपलब्ध नहीं है
+	Delete attachment	अनुलग्नक हटाएँ
+	Delete attachment {key}	अनुलग्नक {key} हटाएँ
