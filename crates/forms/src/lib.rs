@@ -1294,6 +1294,127 @@ pub(crate) fn ask_viewers_to_redraw(doc: &mut Document) -> Result<(), FormError>
     Ok(())
 }
 
+/// Text fields with the Password flag (inherited or their own) whose value (`/V`, inherited or
+/// their own) is not empty and not their default value (`/DV`, which the form's author wrote and
+/// a save restores), or one of whose separate widgets carries a `/V`.
+fn password_fields(doc: &Document) -> Vec<Field> {
+    if !has_password_flag(doc) {
+        return Vec::new();
+    }
+    let on_widget = |f: &Field| f.widgets.iter().any(|w| w.obj != f.obj && doc.get(w.obj).as_dict().is_some_and(|d| d.get(b"V").is_some()));
+    let typed = |f: &Field| f.value.iter().any(|v| !v.is_empty()) && f.value.first() != f.default.first();
+    fields(doc).into_iter().filter(|f| f.kind == FieldKind::Text && f.has(flags::PASSWORD) && (typed(f) || on_widget(f))).collect()
+}
+
+/// Whether any field dictionary sets the Password flag (#3943 review). A field that inherits the
+/// flag has an ancestor that sets it, so that ancestor is found instead; a kid clearing the flag
+/// again only makes the answer cautious. It reads only `/Ff`, `/Kids` and `/Parent`, so a save
+/// or recovery snapshot of a form without such a field doesn't build every [`Field`]. Like
+/// [`fields`], it looks at the form's field tree and at the widgets on the pages, which may be
+/// missing from `/Fields`. Each dictionary is visited once and at most 32 levels deep.
+fn has_password_flag(doc: &Document) -> bool {
+    let sets_it = |r: ObjRef| doc.get(r).as_dict().and_then(|d| field_flags(doc, d)).is_some_and(|ff| ff & flags::PASSWORD != 0);
+    let top = acroform(doc).and_then(|af| af.get(b"Fields").map(|o| doc.resolve(o)).and_then(|o| o.as_array().cloned())).unwrap_or_default();
+    let mut stack: Vec<(Object, usize)> = top.into_iter().map(|o| (o, 0)).collect();
+    let mut seen = std::collections::HashSet::new();
+    while let Some((o, depth)) = stack.pop() {
+        let Object::Ref(r) = o else { continue };
+        if depth > 32 || !seen.insert(r) {
+            continue;
+        }
+        if sets_it(r) {
+            return true;
+        }
+        let kids = doc.get(r).as_dict().and_then(|d| d.get(b"Kids").map(|k| doc.resolve(k)).and_then(|k| k.as_array().cloned())).unwrap_or_default();
+        stack.extend(kids.into_iter().map(|k| (k, depth + 1)));
+    }
+    // Widgets on the pages, and the fields above them.
+    page_refs(doc).into_iter().any(|p| {
+        let annots =
+            doc.get(p).as_dict().and_then(|d| d.get(b"Annots").map(|a| doc.resolve(a)).and_then(|a| a.as_array().cloned())).unwrap_or_default();
+        annots.iter().filter_map(Object::as_ref).filter(|r| !seen.contains(r)).any(|r| field_chain(doc, r).into_iter().any(sets_it))
+    })
+}
+
+/// Whether any text field with the Password flag holds a value in `doc`.
+pub fn has_password_values(doc: &Document) -> bool {
+    !password_fields(doc).is_empty()
+}
+
+/// `r` and its field ancestors (`/Parent`), nearest first, at most 32 deep and without repeats.
+fn field_chain(doc: &Document, r: ObjRef) -> Vec<ObjRef> {
+    let mut chain = vec![r];
+    let mut cur = r;
+    while chain.len() < 32 {
+        let Some(Object::Ref(parent)) = doc.get(cur).as_dict().and_then(|d| d.get(b"Parent").cloned()) else { break };
+        if chain.contains(&parent) {
+            break;
+        }
+        chain.push(parent);
+        cur = parent;
+    }
+    chain
+}
+
+/// Remove the values of the text fields with the Password flag, for a copy of the document about
+/// to be written to a file (#3926). ISO 32000-2 §12.7.5.3, Table 231, Password flag, note: "it is
+/// imperative that PDF processors never store the value of the text field in the PDF file if
+/// this flag is set". As Acrobat saves such a field (#3943 review, black-box test): a field with
+/// a default value (`/DV`, which the form's author wrote) gets it back as its value, one without
+/// is left empty, and its appearance is drawn again from that value, so the masking characters
+/// no longer show how long the typed password was. `/DV` and the field's scripts stay.
+///
+/// A value can sit on the field, on one of its widgets, or on an ancestor it inherits from
+/// (`/V` is inheritable). Each is removed; an ancestor's only when every field inheriting from it
+/// is such a password field. Where an ancestor's value is shared with other fields and stays, the
+/// password field gets an empty value of its own so it no longer inherits it. Returns how many
+/// fields were cleared.
+pub fn clear_password_values(doc: &mut Document) -> Result<usize, FormError> {
+    let targets = password_fields(doc);
+    if targets.is_empty() {
+        return Ok(0);
+    }
+    let is_password = |f: &Field| f.kind == FieldKind::Text && f.has(flags::PASSWORD);
+    // Each field's ancestors, found once: only values change below, never `/Parent` (#3943
+    // review: walking them again for every ancestor of every target was quadratic).
+    let chains: Vec<(bool, Vec<ObjRef>)> = fields(doc).iter().map(|g| (is_password(g), field_chain(doc, g.obj))).collect();
+    for f in &targets {
+        let chain = field_chain(doc, f.obj);
+        for w in &f.widgets {
+            if w.obj != f.obj {
+                doc.update_dict(w.obj, |d| {
+                    d.remove(b"V");
+                })?;
+            }
+        }
+        doc.update_dict(f.obj, |d| {
+            d.remove(b"V");
+        })?;
+        let mut shared_value_kept = false;
+        for a in chain.iter().skip(1) {
+            if doc.get(*a).as_dict().is_none_or(|d| d.get(b"V").is_none()) {
+                continue;
+            }
+            let exclusive = chains.iter().filter(|(_, chain)| chain.contains(a)).all(|(password, _)| *password);
+            if exclusive {
+                doc.update_dict(*a, |d| {
+                    d.remove(b"V");
+                })?;
+            } else {
+                shared_value_kept = true;
+            }
+        }
+        let restored: Vec<String> = f.default.first().cloned().into_iter().collect();
+        match restored.first() {
+            Some(dv) => doc.update_dict(f.obj, |d| d.set(b"V".to_vec(), PdfString::text(dv)))?,
+            None if shared_value_kept => doc.update_dict(f.obj, |d| d.set(b"V".to_vec(), PdfString::text("")))?,
+            None => {}
+        }
+        redraw(doc, f, &restored, &mut NoScripts)?;
+    }
+    Ok(targets.len())
+}
+
 /// Whether the form asks viewers to draw its fields' appearances themselves (`/NeedAppearances`).
 pub fn need_appearances(doc: &Document) -> bool {
     acroform(doc).is_some_and(|af| matches!(af.get(b"NeedAppearances").map(|o| doc.resolve(o)).as_deref(), Some(Object::Bool(true))))

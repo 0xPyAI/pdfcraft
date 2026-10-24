@@ -2120,6 +2120,81 @@ fn form_fixture() -> Vec<u8> {
     out
 }
 
+/// Whether `needle` appears in `bytes`, or in any stream of the PDF they hold once decoded (so
+/// compressed object streams are searched too), as literal or hex string bytes.
+fn appears_in_pdf(bytes: &Arc<Vec<u8>>, needle: &str) -> bool {
+    let hex: String = needle.bytes().map(|b| format!("{b:02x}")).collect();
+    let forms = [needle.as_bytes().to_vec(), hex.clone().into_bytes(), hex.to_uppercase().into_bytes()];
+    let found = |hay: &[u8]| forms.iter().any(|f| hay.windows(f.len()).any(|w| w == f.as_slice()));
+    if found(bytes) {
+        return true;
+    }
+    let doc = pdfcraft_cos::Document::open(bytes.clone()).unwrap();
+    doc.object_numbers().into_iter().any(|num| match &*doc.get(pdfcraft_cos::ObjRef { num, generation: 0 }) {
+        pdfcraft_cos::Object::Stream(st) => st.decoded().is_ok_and(|d| found(&d)),
+        _ => false,
+    })
+}
+
+/// #3926: a value typed into a text field with the Password flag stays in the open document but
+/// is written to no file: Save, a full rewrite, Reduce File Size, a recovery snapshot, or a new
+/// file made from its pages (Extract, Split, Combine). ISO
+/// 32000-2 §12.7.5.3, Table 231, note to the Password flag: PDF processors should never store
+/// the value in the PDF file.
+#[test]
+fn password_field_values_are_kept_in_memory_but_written_to_no_file() {
+    let fixture = String::from_utf8(form_fixture()).unwrap().replace("/T (name)", "/T (name) /Ff 8192");
+    // Offsets shift by the inserted text; the parser rebuilds the cross-reference table.
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("form.pdf", None, Arc::new(fixture.into_bytes()), None).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "name".into(), value: FieldValue::Text("hunter2".into()) }).unwrap();
+    let field = s.get(id).unwrap().form.iter().find(|f| f.name == "name").cloned().unwrap();
+    assert!(field.has(pdfcraft_forms::flags::PASSWORD));
+    assert_eq!(field.value, vec!["hunter2".to_string()], "the open document keeps the value");
+    assert!(appears_in_pdf(&s.get(id).unwrap().bytes, "hunter2"), "the working bytes do hold it (the test can see it)");
+
+    let saved = s.save_bytes(id).unwrap();
+    assert!(!appears_in_pdf(&saved, "hunter2"), "Save");
+    // As Acrobat saves it (#3943 review): no default value, so an empty field whose appearance
+    // no longer shows how long the typed password was.
+    assert!(!appears_in_pdf(&saved, "*******"), "the typed length is not kept in the appearance");
+    assert!(!appears_in_pdf(&s.save_full_bytes(id).unwrap(), "hunter2"), "a full rewrite");
+    assert!(!appears_in_pdf(&s.reduced_bytes(id).unwrap().0, "hunter2"), "Reduce File Size");
+    let snaps = s.autosave_snapshots();
+    assert_eq!(snaps.len(), 1);
+    assert!(!appears_in_pdf(&snaps[0].bytes, "hunter2"), "the recovery snapshot");
+    // New files built from its pages too (#3943 review): Extract copies the fields of the pages it
+    // takes, and Split writes each part the same way.
+    let extracted = s.extract(id, &[0]).unwrap();
+    assert!(!appears_in_pdf(&extracted, "hunter2"), "Extract Pages");
+    assert!(!appears_in_pdf(&extracted, "*******"), "nor on the extracted page");
+    for (_, _, part) in s.split_by_size(id, 1).unwrap() {
+        assert!(!appears_in_pdf(&part, "hunter2"), "Split");
+    }
+    assert!(!appears_in_pdf(&s.combine(&[("form.pdf".into(), s.get(id).unwrap().bytes.clone())]).unwrap(), "hunter2"), "Combine");
+    // Reopened, the field is empty, as in any reader.
+    let mut t = Session::new();
+    let reopened = t.open("saved.pdf", None, saved, None).unwrap();
+    assert!(t.get(reopened).unwrap().form.iter().find(|f| f.name == "name").unwrap().value.iter().all(|v| v.is_empty()));
+}
+
+/// #3926 / #3943 review: signing writes the signed file from the same copy a save does, so a
+/// typed Password-field value is not signed into the file either.
+#[test]
+fn a_signed_file_carries_no_password_field_value() {
+    let p12 = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12")).unwrap();
+    let digital_id = sign::pkcs12::open(&p12, "test").unwrap();
+    let fixture = String::from_utf8(form_fixture()).unwrap().replace("/T (name)", "/T (name) /Ff 8192");
+    // After the test certificate's start date (2026-10-02).
+    let mut s = Session::new().with_clock(|| 1_800_000_000);
+    let id = s.open("form.pdf", None, Arc::new(fixture.into_bytes()), None).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "name".into(), value: FieldValue::Text("hunter2".into()) }).unwrap();
+    assert!(appears_in_pdf(&s.get(id).unwrap().bytes, "hunter2"), "the working bytes hold it");
+    let signed = s.sign(id, &digital_id, SignOptions { rect: None, ..SignOptions::default() }).unwrap();
+    assert!(!appears_in_pdf(&signed, "hunter2"), "the signed file");
+    assert!(!appears_in_pdf(&signed, "*******"), "nor the typed length");
+}
+
 /// A value its field's font can't draw is kept, and the edit that drew it reports it in
 /// `edit_notices` (the interface shows it, tools return it): not a later unrelated edit, not a
 /// failed one, and not a value that can be drawn. The form (an inline AcroForm here) asks other

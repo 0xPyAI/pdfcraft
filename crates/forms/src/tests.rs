@@ -3640,3 +3640,110 @@ fn filling_a_field_converts_inline_fonts_of_a_direct_form_dictionary() {
     assert_eq!(fonts.len(), 1, "nothing added: {fonts:?}");
     assert_eq!(field(&fields(&doc), "name").value, ["Ada"]);
 }
+
+/// #3926 / #3943 review: a password value can be inherited from an ancestor field or sit on a
+/// separate widget. Clearing removes both; an ancestor's value shared with a non-password field
+/// stays for that field, and the password field gets an empty value of its own instead.
+#[test]
+fn inherited_and_widget_password_values_are_cleared() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),                  // 1
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),  // 2
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R 9 0 R 11 0 R] >>".into(), // 3
+        "<< /Fields [5 0 R 8 0 R 10 0 R] /DA (/Helv 0 Tf 0 g) >>".into(),            // 4
+        "<< /T (acct) /FT /Tx /Ff 8192 /V (secret1) /Kids [6 0 R] >>".into(),        // 5 flag and value inherited
+        "<< /Type /Annot /Subtype /Widget /T (pin) /Parent 5 0 R /Rect [50 700 150 720] /P 3 0 R >>".into(), // 6
+        "<< /Type /Annot /Subtype /Widget /Parent 8 0 R /V (secret3) /Rect [50 650 150 670] /P 3 0 R >>".into(), // 7 value on the widget
+        "<< /FT /Tx /T (code) /Ff 8192 /Kids [7 0 R] >>".into(),                     // 8
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (pw) /Ff 8192 /Parent 10 0 R /Rect [50 600 150 620] /P 3 0 R >>".into(), // 9
+        "<< /T (grp) /V (shared2) /Kids [9 0 R 11 0 R] >>".into(),                   // 10 shared with a plain field
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (plain) /Parent 10 0 R /Rect [50 550 150 570] /P 3 0 R >>".into(), // 11
+    ];
+    let mut doc = document(&objs);
+    assert!(has_password_values(&doc));
+    let value = |doc: &Document, n: &str| fields(doc).into_iter().find(|f| f.name == n).map(|f| f.value).unwrap_or_default();
+    assert_eq!(value(&doc, "acct.pin"), ["secret1"], "inherited before");
+    assert_eq!(clear_password_values(&mut doc).unwrap(), 3);
+    assert!(!has_password_values(&doc));
+    for n in ["acct.pin", "code", "grp.pw"] {
+        assert!(value(&doc, n).iter().all(|v| v.is_empty()), "{n} cleared");
+    }
+    assert_eq!(value(&doc, "grp.plain"), ["shared2"], "the shared value stays for the plain field");
+    let has_v = |doc: &Document, n: u32| doc.get(pdfcraft_cos::ObjRef { num: n, generation: 0 }).as_dict().is_some_and(|d| d.get(b"V").is_some());
+    assert!(!has_v(&doc, 5), "an ancestor only password fields inherit from loses its value");
+    assert!(!has_v(&doc, 7), "a widget's value is removed");
+    assert!(has_v(&doc, 10), "a shared ancestor keeps its value");
+}
+
+/// #3943 review: a cleared password field saves as Acrobat saves it (black-box test). One with a
+/// default value gets it back, and its appearance shows as many masking characters as the
+/// default has, not as the typed password had; one without is left empty and draws none. The
+/// default value and the scripts stay, and a field already at its default needs no clearing.
+#[test]
+fn a_cleared_password_field_returns_to_its_default_value() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),                 // 1
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(), // 2
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R 8 0 R] >>".into(),       // 3
+        "<< /Fields [6 0 R 7 0 R 8 0 R] /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(), // 4
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(), // 5
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (pw) /Ff 8192 /DV (DEF-1) /V (NEWPASS-77777) /AA << /K << /S /JavaScript /JS (1;) >> >> /Rect [50 700 250 720] /P 3 0 R >>".into(), // 6
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (pw3) /Ff 8192 /V (PW3-TYPED-9) /Rect [50 650 250 670] /P 3 0 R >>".into(), // 7
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (blank) /Ff 8192 /V [()] /Rect [50 600 250 620] /P 3 0 R >>".into(), // 8 holds nothing (an empty string in an array)
+    ];
+    let mut doc = document(&objs);
+    assert_eq!(clear_password_values(&mut doc).unwrap(), 2);
+    let all = fields(&doc);
+    let (pw, pw3) = (field(&all, "pw"), field(&all, "pw3"));
+    assert_eq!(pw.value, ["DEF-1"], "back to its default");
+    assert_eq!(pw.default, ["DEF-1"], "the default stays");
+    assert!(pw.actions.scripts.keystroke.is_some(), "the scripts stay");
+    assert!(pw3.value.iter().all(|v| v.is_empty()), "no default: empty");
+    let shown = ap(&doc, &pw.widgets[0]);
+    assert!(shown.contains("(*****)") && !shown.contains("NEWPASS") && !shown.contains("******"), "{shown}");
+    let shown3 = ap(&doc, &pw3.widgets[0]);
+    assert!(!shown3.contains('*') && !shown3.contains("PW3"), "{shown3}");
+    assert!(!has_password_values(&doc), "a field at its default holds no typed password");
+    assert_eq!(clear_password_values(&mut doc).unwrap(), 0);
+}
+
+/// #3943 review: the quick check that skips forms without a Password field still sees one whose
+/// widget is only on the page, not listed in `/Fields`; one that inherits the flag from a parent
+/// that is not listed either; and one deeper in the field tree whose widget is on no page. Each
+/// is alone in its own document, so each path of the check is needed.
+#[test]
+fn a_password_field_missing_from_the_field_list_is_still_cleared() {
+    let form = |fields: &str, annots: &str, rest: &[&str]| {
+        let mut objs: Vec<String> = vec![
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+            format!("<< /Type /Page /Parent 2 0 R /Annots [{annots}] >>"),
+            format!("<< /Fields [{fields}] /DA (/Helv 0 Tf 0 g) >>"),
+        ];
+        objs.extend(rest.iter().map(|o| o.to_string()));
+        document(&objs)
+    };
+    let page_only =
+        form("", "5 0 R", &["<< /Type /Annot /Subtype /Widget /FT /Tx /T (pin) /Ff 8192 /V (secret5) /Rect [50 700 150 720] /P 3 0 R >>"]);
+    let inherited = form(
+        "",
+        "5 0 R",
+        &[
+            "<< /Type /Annot /Subtype /Widget /T (kid) /Parent 6 0 R /Rect [50 650 150 670] /P 3 0 R >>",
+            "<< /FT /Tx /T (acct) /Ff 8192 /V (secret6) /Kids [5 0 R] >>",
+        ],
+    );
+    let off_page = form(
+        "5 0 R",
+        "",
+        &[
+            "<< /T (grp) /Kids [6 0 R] >>",
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (hidden) /Ff 8192 /V (secret7) /Parent 5 0 R /Rect [0 0 0 0] >>",
+        ],
+    );
+    for (what, mut doc) in [("page only", page_only), ("inherited", inherited), ("on no page", off_page)] {
+        assert!(has_password_values(&doc), "{what}");
+        assert_eq!(clear_password_values(&mut doc).unwrap(), 1, "{what}");
+        assert!(fields(&doc).iter().all(|f| f.value.iter().all(|v| v.is_empty())), "{what}: {:?}", fields(&doc));
+    }
+}
