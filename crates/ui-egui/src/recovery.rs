@@ -435,12 +435,15 @@ mod idle_tests {
             std::fs::create_dir(&path).unwrap();
             Self(path)
         }
+
+        /// The folder.
         fn path(&self) -> &Path {
             &self.0
         }
     }
 
     impl Drop for TestDir {
+        /// Remove the folder and what the test left in it.
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
