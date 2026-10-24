@@ -170,18 +170,14 @@ impl JsRunner {
     /// A runner for `cos`: what scripts read about the document (pages, info, whether it is
     /// an XFA form) and its document-level scripts, read once.
     pub fn new(cos: &pdfcraft_cos::Document, file_name: &str) -> JsRunner {
-        let doc = pdfcraft_js::DocInfo {
-            file_name: file_name.to_string(),
-            num_pages: pdfcraft_model::pages(cos).len(),
-            page: 0,
-            info: info(cos),
-            xfa: pdfcraft_xfa::xfa_shape(cos).is_some(),
-        };
+        let xfa = pdfcraft_xfa::xfa_shape(cos).is_some();
+        let doc =
+            pdfcraft_js::DocInfo { file_name: file_name.to_string(), num_pages: pdfcraft_model::pages(cos).len(), page: 0, info: info(cos), xfa };
         // Once XFA owns the form, the PDF container's scripts belong to its fallback view.
         // Keep them in the file and in Document JavaScripts, but do not initialize an
         // AcroForm context with them: a viewer-compatibility alert would be misleading.
         // Packets alone are not enough: static XFA and an unlaid-out shell keep their scripts.
-        let xfa_active = pdfcraft_xfa::xfa_shape(cos).is_some() && pdfcraft_xfa::existing_layout(cos).is_some();
+        let xfa_active = xfa && pdfcraft_xfa::existing_layout(cos).is_some();
         let doc_scripts = if xfa_active { Vec::new() } else { pdfcraft_forms::document_scripts(cos) };
         JsRunner { doc, doc_scripts, output: JsOutput::default(), cos: cos.clone(), displays: std::collections::HashMap::new() }
     }
