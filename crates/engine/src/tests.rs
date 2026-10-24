@@ -4773,6 +4773,35 @@ fn measurement_edits_are_transactional_and_honour_annotation_permissions() {
     );
 }
 
+/// A round XFA check button opens drawn round: the appearance its laid-out widget gets draws a
+/// circle, the on state with its mark in it, while a square one keeps its box.
+#[test]
+fn round_xfa_check_buttons_open_drawn_round() {
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"><subform name="form" layout="tb">
+<field name="round" w="1in" h="0.3in"><ui><checkButton shape="round"/></ui><items><integer>1</integer><integer>0</integer></items></field>
+<field name="square" w="1in" h="0.3in"><ui><checkButton/></ui><items><integer>1</integer><integer>0</integer></items></field>
+</subform></template></xdp:xdp>"##;
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(xdp)), None).expect("opens");
+    let cos = s.get(id).unwrap().editor.as_ref().unwrap().cos.clone();
+    let all = pdfcraft_forms::fields(&cos);
+    // The decoded appearance of `name`'s widget in `state`.
+    let drawn = |name: &str, state: &[u8]| {
+        let w = all.iter().find(|f| f.name.ends_with(name)).unwrap_or_else(|| panic!("no field {name}")).widgets[0].obj;
+        let wd = cos.get(w).as_dict().cloned().unwrap();
+        let n = cos.resolve(wd.get(b"AP").unwrap().as_dict().unwrap().get(b"N").unwrap());
+        let r = n.as_dict().unwrap().reference(state).unwrap_or_else(|| panic!("{name} has no {} state", String::from_utf8_lossy(state)));
+        let pdfcraft_cos::Object::Stream(st) = &*cos.get(r) else { panic!("a stream") };
+        String::from_utf8_lossy(&st.decoded().unwrap()).into_owned()
+    };
+    for state in [&b"Off"[..], b"1"] {
+        let round = drawn("round", state);
+        assert!(round.contains(" c S") && !round.contains(" re S"), "the round one's border is a circle: {round}");
+        assert!(drawn("square", state).contains(" re S"), "the square one keeps its box");
+    }
+}
+
 #[test]
 fn a_dynamic_xfa_form_is_saved_without_the_usage_rights_its_layout_voided() {
     let xdp = pdfcraft_xfa::fixtures::template(3);

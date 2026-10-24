@@ -387,6 +387,58 @@ fn opt_export_values_select_button_states() {
     assert!(err.to_string().contains("options: Post, Pick-up"), "{err}");
 }
 
+/// A check box laid out for a round XFA check button (`/PCXfaRound true`) draws its background
+/// and border as a circle inside the widget, inset by half the border so the stroke stays in,
+/// or a disc when the border is as wide as the circle (an underline stays one); one without the
+/// key keeps its rectangle.
+#[test]
+fn a_round_xfa_check_button_draws_a_round_background_and_border() {
+    let widget = |name: &str, extra: &str| {
+        format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Btn /T ({name}) /Rect [50 700 70 720] /P 3 0 R /MK << /BG [0.8 0.85 1] /BC [1 0 0] >> /BS << /W 1 /S /S >>{extra} >>"
+        )
+    };
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [5 0 R 6 0 R 7 0 R 8 0 R 9 0 R] >>".into(),
+        "<< /Fields [5 0 R 6 0 R 7 0 R 8 0 R 9 0 R] >>".into(),
+        widget("round", " /PCXfaRound true"),
+        widget("square", ""),
+        widget("dashed", " /PCXfaRound true /BS << /W 2 /S /D >>").replace("/BS << /W 1 /S /S >>", ""),
+        widget("thick", " /PCXfaRound true /BS << /W 30 /S /S >>").replace("/BS << /W 1 /S /S >>", ""),
+        widget("underlined", " /PCXfaRound true /BS << /W 1 /S /U >>").replace("/BS << /W 1 /S /S >>", ""),
+    ];
+    let mut doc = document(&objs);
+    for name in ["round", "square", "dashed", "thick", "underlined"] {
+        redraw_field(&mut doc, name).unwrap();
+    }
+    // The Off state: only the frame.
+    let off = |name: &str| {
+        let all = fields(&doc);
+        let w = field(&all, name).widgets[0].obj;
+        let wd = doc.get(w).as_dict().cloned().unwrap();
+        let n = doc.resolve(wd.get(b"AP").unwrap().as_dict().unwrap().get(b"N").unwrap());
+        let r = n.as_dict().unwrap().reference(b"Off").expect("an Off appearance");
+        let Object::Stream(s) = &*doc.get(r) else { panic!("Off is a stream") };
+        String::from_utf8_lossy(&s.decoded().unwrap()).into_owned()
+    };
+    let round = off("round");
+    assert!(!round.contains(" re "), "no rectangle: {round}");
+    assert!(round.contains("0.8 0.85 1 rg\n20 10 m"), "the background is a disc as wide as the box: {round}");
+    assert!(round.contains("1 0 0 RG\n1 w\n19.5 10 m") && round.contains(" c S"), "the border is a circle inset by half its width: {round}");
+    let square = off("square");
+    assert!(square.contains("0 0 20 20 re f") && square.contains("re S"), "a square box keeps its rectangle: {square}");
+    let dashed = off("dashed");
+    assert!(dashed.contains("[3] 0 d\n19 10 m"), "a dashed round border stays dashed: {dashed}");
+    // A border wider than the 20pt circle fills it: a disc in the border's colour, no stroke.
+    let thick = off("thick");
+    assert!(thick.contains("1 0 0 rg\n20 10 m") && !thick.contains(" S\n"), "a border as wide as the circle is a disc: {thick}");
+    // An underline stays the bottom edge, under a round background.
+    let underlined = off("underlined");
+    assert!(underlined.contains("1 0 0 RG\n1 w\n0 0.5 m 20 0.5 l S"), "an underline stays an underline: {underlined}");
+}
+
 /// Issue #1323: a text field without a format keeps a whitespace-only value as typed; only an
 /// empty value clears it.
 #[test]

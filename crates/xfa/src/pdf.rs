@@ -166,6 +166,11 @@ pub struct Written {
 /// layer reads this key).
 pub const IMAGE_FIELD_KEY: &[u8] = b"PCXfaImage";
 
+/// On a check box or radio button generated for a round XFA check button (`shape="round"`): its
+/// background and border are drawn as a circle, not the widget's rectangle (the forms layer
+/// reads this key).
+pub const ROUND_KEY: &[u8] = b"PCXfaRound";
+
 /// On an image XObject written for a picture: the SHA-256 (hex) of the picture's bytes. A
 /// re-layout (after every script event) finds the XObjects on the pages it replaces by this,
 /// and reuses them instead of decoding and embedding the same picture again. Nothing is kept
@@ -250,6 +255,8 @@ impl Emitter<'_> {
         format!("/{} {} Tf {} rg", face.resource_name(), n(face.size), rgb(face.color)).into_bytes()
     }
 
+    /// Write laid-out widget `w` on `page` as an AcroForm widget annotation (and its field), with
+    /// its border, background and kind, and return the annotation's object.
     fn widget(&mut self, w: &Widget, page: &Page, page_ref: ObjRef) -> Result<Option<ObjRef>, XfaError> {
         let r = w.rect;
         let (x0, y0, x1, y1) = (r.x, page.height - r.bottom(), r.right(), page.height - r.y);
@@ -277,6 +284,9 @@ impl Emitter<'_> {
         bs.set(b"W".to_vec(), Object::Real(if w.border.shape == BorderShape::None { 0.0 } else { w.border.width.clamp(0.1, 12.0) }));
         bs.set(b"S".to_vec(), Object::name(if w.border.shape == BorderShape::Underline { "U" } else { "S" }));
         d.set(b"BS".to_vec(), Object::Dict(bs));
+        if matches!(w.kind, WidgetKind::CheckBox { round: true, .. } | WidgetKind::Radio { round: true, .. }) {
+            d.set(ROUND_KEY.to_vec(), Object::Bool(true));
+        }
         let mut ff: i64 = 0;
         if w.read_only {
             ff |= 1;

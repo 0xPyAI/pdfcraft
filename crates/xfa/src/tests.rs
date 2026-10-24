@@ -350,6 +350,52 @@ fn form_text_the_standard_fonts_cannot_draw_is_reported() {
     assert!(!render_into(&mut doc).unwrap().warnings.iter().any(|w| w.contains("standard fonts")));
 }
 
+/// A check box or radio button laid out from a round check button (`shape="round"`) carries
+/// `ROUND_KEY`, so the forms layer draws its background and border round; a square one (the
+/// default) doesn't.
+#[test]
+fn round_check_buttons_are_marked_for_a_round_appearance() {
+    let check = |name: &str, shape: &str, items: &str| {
+        format!(r#"<field name="{name}" w="1in" h="0.3in"><ui><checkButton{shape}/></ui><items>{items}</items></field>"#)
+    };
+    let on_off = "<integer>1</integer><integer>0</integer>";
+    let xdp = format!(
+        r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"><subform name="form" layout="tb">
+{}{}<exclGroup name="pick" layout="tb">{}{}</exclGroup>
+</subform></template></xdp:xdp>"##,
+        check("roundBox", r#" shape="round""#, on_off),
+        check("squareBox", "", on_off),
+        check("roundRadio", r#" shape="round""#, "<text>a</text>"),
+        check("squareRadio", r#" shape="square""#, "<text>b</text>"),
+    );
+    let mut doc = Document::open(Arc::new(shell(&xdp))).unwrap();
+    render_into(&mut doc).unwrap();
+    // Every widget among the form's fields and their kids (a radio group's buttons), by the
+    // last step of its SOM path.
+    let catalog = doc.get(doc.root().unwrap());
+    let acro = doc.resolve(catalog.as_dict().unwrap().get(b"AcroForm").unwrap());
+    let mut todo: Vec<_> =
+        doc.resolve(acro.as_dict().unwrap().get(b"Fields").unwrap()).as_array().unwrap().iter().filter_map(Object::as_ref).collect();
+    let mut round = std::collections::BTreeMap::new();
+    while let Some(r) = todo.pop() {
+        let node = doc.get(r);
+        let d = node.as_dict().unwrap();
+        if let Some(kids) = d.get(b"Kids").map(|k| doc.resolve(k)) {
+            todo.extend(kids.as_array().unwrap().iter().filter_map(Object::as_ref));
+            continue;
+        }
+        let som = d.get(SOM_KEY).and_then(Object::as_string).map(|s| s.to_text()).unwrap_or_default();
+        let name = som.rsplit('.').next().unwrap_or_default().split('[').next().unwrap_or_default().to_string();
+        round.insert(name, matches!(d.get(crate::pdf::ROUND_KEY), Some(Object::Bool(true))));
+    }
+    let expected: std::collections::BTreeMap<String, bool> = [("roundBox", true), ("squareBox", false), ("roundRadio", true), ("squareRadio", false)]
+        .into_iter()
+        .map(|(n, r)| (n.to_string(), r))
+        .collect();
+    assert_eq!(round, expected);
+}
+
 #[test]
 fn documents_without_xfa_are_not_touched() {
     let mut doc = Document::new_empty();
