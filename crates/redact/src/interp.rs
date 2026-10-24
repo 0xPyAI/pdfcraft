@@ -36,12 +36,6 @@ use pdfcraft_fonts::pdf::Metrics;
 /// visible.
 pub(crate) const MAX_DEPTH: usize = 50;
 
-/// How many forms one pass enters. The depth limit alone bounded the walk while it was 12: a form
-/// that draws the next level twice, or a cycle of two forms, costs 2^depth interpretations, which
-/// at 50 is a hang rather than a limit. Edit text's reader pairs its depth limit with the same
-/// budget, and this is that constant, so the two cannot drift apart. Running out is treated as a
-/// form that cannot be read: removed in Apply, counted as unreadable in Verify.
-
 // A form a reader still shows must be walkable here, or a redaction removes content that is
 // visible; the build says so rather than a test, so the two limits cannot drift apart.
 const _: () = assert!(MAX_DEPTH >= pdfcraft_edit::text::MAX_FORM_DEPTH);
