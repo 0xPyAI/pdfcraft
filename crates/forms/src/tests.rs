@@ -1270,7 +1270,7 @@ fn formats_validation_and_calculations_run_like_acrobat() {
     // Keystroke and validation errors use Acrobat's messages and change nothing.
     assert_eq!(
         set_value(&mut doc, "Qty", &FieldValue::Text("lots".into())),
-        Err(FormError::Invalid("The value entered does not match the format of the field [ Qty ]".into()))
+        Err(FormError::Format("The value entered does not match the format of the field [ Qty ]".into()))
     );
     assert_eq!(
         set_value(&mut doc, "Qty", &FieldValue::Text("120".into())),

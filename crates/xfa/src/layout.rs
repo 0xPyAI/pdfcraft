@@ -401,7 +401,7 @@ fn is_row(node: &Node) -> bool {
 }
 
 /// The Acrobat date pattern for an XFA picture clause such as `date{YYYY-MM-DD}`.
-fn date_pattern(picture: Option<&str>) -> String {
+pub(crate) fn date_pattern(picture: Option<&str>) -> String {
     picture.and_then(date_letters).unwrap_or_else(|| "yyyy-mm-dd".into())
 }
 

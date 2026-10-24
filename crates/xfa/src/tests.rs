@@ -2728,6 +2728,40 @@ fn trailing_spaces_do_not_shift_centered_or_right_aligned_text() {
     assert!((left_edge("right", "TITLE   ") - (36.0 + w - ink)).abs() < 1e-6);
 }
 
+/// `typed_date` rewrites a date typed by another of a field's edit-picture patterns in the first
+/// one, and leaves alone a date the first pattern reads, text no pattern reads, a field with one
+/// pattern and a field that isn't a date.
+#[test]
+fn a_date_typed_by_another_of_its_edit_pictures_patterns_is_written_in_the_first() {
+    let (tpl, _) = crate::parse(&crate::fixtures::date_alternatives_template()).unwrap();
+    let typed = |som: &str, text: &str| crate::typed_date(&tpl, som, text);
+    let leave = "form[0].leave[0]";
+    assert_eq!(typed(leave, "261018").as_deref(), Some("20261018"), "by yymmdd");
+    assert_eq!(typed(leave, "2026118").as_deref(), Some("20261108"), "by yyyymd");
+    assert_eq!(typed(leave, "26 10 18").as_deref(), Some("20261018"), "by yy mm dd");
+    assert_eq!(typed(leave, "20261018"), None, "the first pattern reads it: it stays as typed");
+    assert_eq!(typed(leave, "not a date"), None);
+    assert_eq!(typed(leave, "2618"), None, "no pattern has room for four digits");
+    assert_eq!(typed("form[0].born[0]", "181026"), None, "one pattern: nothing else to try");
+    assert_eq!(typed("form[0].name[0]", "261018"), None, "not a date field");
+}
+
+/// Only date clauses are other ways to type a date, and a date is rewritten only when the first
+/// pattern keeps it: a later `text{…}` clause is no date pattern, a year a two-digit first
+/// pattern can't hold leaves the text as typed instead of becoming another date, and a pattern
+/// whose date the first can't keep gives way to a later one whose date it can.
+#[test]
+fn a_typed_date_is_rewritten_only_by_date_clauses_into_a_first_pattern_that_keeps_it() {
+    let (tpl, _) = crate::parse(&crate::fixtures::date_alternatives_template()).unwrap();
+    let typed = |som: &str, text: &str| crate::typed_date(&tpl, som, text);
+    assert_eq!(typed("form[0].code[0]", "261018"), None, "text{{YYMMDD}} is not a date alternative");
+    let short = "form[0].short[0]";
+    assert_eq!(typed(short, "20261018").as_deref(), Some("261018"), "a year the first pattern keeps");
+    assert_eq!(typed(short, "19011018"), None, "1901 as 01 would read back as 2001");
+    // DDMMYYYY reads 20011203 as 1203-01-20, which YYMMDD can't keep; YYYYMMDD reads 2001-12-03.
+    assert_eq!(typed("form[0].pick[0]", "20011203").as_deref(), Some("011203"), "the next pattern that the first keeps");
+}
+
 /// A word longer than its line is broken by character in work linear in its length.
 #[test]
 fn a_long_word_breaks_in_linear_work() {
