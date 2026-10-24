@@ -2000,6 +2000,10 @@ action wizard	Start	Inicia
 	Perimeter	Perímetre
 	Area	Àrea
 	Drawing scale	Escala del dibuix
+	Scale	Escala
+	Common scales	Escales habituals
+	Enter a scale such as 1:50.	Introduïu una escala com 1:50.
+	Applying a scale switches units to m / mm.	En aplicar una escala, les unitats canvien a m / mm.
 	Snapping	Ajust
 	Export measurements	Exporta les mesures
 	Open a PDF to measure it.	Obre un PDF per mesurar-lo.

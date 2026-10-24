@@ -2040,6 +2040,10 @@
 	Perimeter	المحيط
 	Area	المساحة
 	Drawing scale	مقياس الرسم
+	Scale	المقياس
+	Common scales	مقاييس شائعة
+	Enter a scale such as 1:50.	أدخل مقياسًا مثل 1:50.
+	Applying a scale switches units to m / mm.	يؤدي تطبيق المقياس إلى تحويل الوحدات إلى م / مم.
 	Snapping	الانجذاب
 	Export measurements	تصدير القياسات
 	Open a PDF to measure it.	افتح ملف PDF لقياسه.

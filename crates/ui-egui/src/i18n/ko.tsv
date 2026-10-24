@@ -1961,6 +1961,10 @@
 	Perimeter	둘레
 	Area	면적
 	Drawing scale	도면 축척
+	Scale	축척
+	Common scales	자주 쓰는 축척
+	Enter a scale such as 1:50.	1:50과 같은 축척을 입력하세요.
+	Applying a scale switches units to m / mm.	축척을 적용하면 단위가 m / mm로 바뀝니다.
 	Snapping	스냅
 	Export measurements	측정값 내보내기
 	Open a PDF to measure it.	측정할 PDF를 여세요.

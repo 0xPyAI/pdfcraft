@@ -1365,6 +1365,58 @@ fn a_1_to_50_scale_in_millimetres_measures_a_10_mm_line_as_500_mm() {
 }
 
 #[test]
+fn a_plan_scale_picked_or_typed_applies_at_once() {
+    use pdfcraft_engine::measure::{self, Kind};
+    let (mut h, c) = harness_pages(1);
+    let doc = h.state().views[0].id;
+    ok(&mut h, &c, "ui.command", json!({"id":"measure.scale"}));
+    h.run_steps(3);
+    h.state_mut().views[0].measure.unit = "m".into();
+    h.run_steps(2);
+    // 60 mm of paper.
+    let line = [[20.0, 20.0], [20.0 + 60.0 / 25.4 * 72.0, 20.0]];
+    let read = |h: &Harness<'static, PdfCraftApp>| {
+        let scale = h.state().session.get(doc).unwrap().measurement_scale(0, line[0]).unwrap();
+        (measure::reading(Kind::Distance, &line, &scale).unwrap().label, scale.ratio)
+    };
+    // Picked from the common scales: no Apply click.
+    h.get_by(|n| n.role() == egui::accesskit::Role::ComboBox && n.value().is_some_and(|v| v == "Common scales")).click();
+    h.run_steps(2);
+    h.get_by_label("1:200").click_accesskit();
+    h.run_steps(3);
+    assert_eq!(read(&h), ("12.00 m".to_string(), "1 mm = 0.2 m".to_string()));
+    // Typed, in the other notations; leaving the field applies.
+    fn field<'a>(h: &'a Harness<'static, PdfCraftApp>) -> egui_kittest::Node<'a> {
+        h.get_by_role_and_label(egui::accesskit::Role::TextInput, "Scale")
+    }
+    for (typed, label) in [("1/50", "3.00 m"), ("1:100", "6.00 m")] {
+        field(&h).click();
+        h.run_steps(1);
+        h.state_mut().views[0].measure.ratio_text.clear();
+        field(&h).type_text(typed);
+        h.run_steps(2);
+        h.key_press(egui::Key::Enter);
+        h.run_steps(3);
+        assert_eq!(read(&h).0, label, "{typed}");
+    }
+    // Nonsense is refused with a message and leaves the page scale alone.
+    let before = read(&h);
+    field(&h).click();
+    h.run_steps(1);
+    h.state_mut().views[0].measure.ratio_text.clear();
+    field(&h).type_text("1:0");
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(read(&h), before);
+    assert!(h.state().views[0].measure.error.is_some());
+    // The scale is one undoable edit.
+    ok(&mut h, &c, "ui.command", json!({"id":"edit.undo"}));
+    h.run_steps(2);
+    assert_ne!(read(&h), before);
+}
+
+#[test]
 fn docking_pointer_group_float_close_restore_and_document_commands() {
     use pdfcraft_ui_egui::docking::Panel;
     let (mut h, c) = harness();

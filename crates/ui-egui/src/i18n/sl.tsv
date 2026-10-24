@@ -654,6 +654,10 @@
 	Draw your {what} below.	Spodaj narišite: {what}.
 	Drawing	Risba
 	Drawing scale	Merilo risbe
+	Scale	Merilo
+	Common scales	Pogosta merila
+	Enter a scale such as 1:50.	Vnesite merilo, na primer 1:50.
+	Applying a scale switches units to m / mm.	Z uporabo merila se enote preklopijo na m / mm.
 	Drop PDFs or folders here, or choose them.	Spustite datoteke PDF ali mape sem ali jih izberite.
 	Drop-down list	Spustni seznam
 	Dropdown Properties	Lastnosti spustnega seznama

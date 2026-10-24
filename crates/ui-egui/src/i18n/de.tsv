@@ -1976,6 +1976,10 @@
 	Perimeter	Umfang
 	Area	Fläche
 	Drawing scale	Zeichnungsmaßstab
+	Scale	Maßstab
+	Common scales	Gängige Maßstäbe
+	Enter a scale such as 1:50.	Geben Sie einen Maßstab wie 1:50 ein.
+	Applying a scale switches units to m / mm.	Beim Anwenden eines Maßstabs werden die Einheiten auf m / mm umgestellt.
 	Snapping	Einrasten
 	Export measurements	Messungen exportieren
 	Open a PDF to measure it.	Öffne ein PDF, um es zu messen.

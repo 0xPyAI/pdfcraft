@@ -1417,6 +1417,10 @@
 	Perimeter	Περίμετρος
 	Area	Εμβαδόν
 	Drawing scale	Κλίμακα σχεδίου
+	Scale	Κλίμακα
+	Common scales	Συνηθισμένες κλίμακες
+	Enter a scale such as 1:50.	Εισαγάγετε μια κλίμακα, όπως 1:50.
+	Applying a scale switches units to m / mm.	Η εφαρμογή κλίμακας αλλάζει τις μονάδες σε m / mm.
 	Snapping	Προσκόλληση
 	Export measurements	Εξαγωγή μετρήσεων
 	Open a PDF to measure it.	Ανοίξτε ένα PDF για να πραγματοποιήσετε μετρήσεις.

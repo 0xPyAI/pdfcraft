@@ -1452,6 +1452,10 @@
 	Draw freehand	Brėžti laisva ranka
 	Drawing	Brėžinys
 	Drawing scale	Brėžinio mastelis
+	Scale	Mastelis
+	Common scales	Dažni masteliai
+	Enter a scale such as 1:50.	Įveskite mastelį, pavyzdžiui, 1:50.
+	Applying a scale switches units to m / mm.	Pritaikius mastelį, vienetai pakeičiami į m / mm.
 	Drop-down list	Išskleidžiamasis sąrašas
 	Duplicate pages	Dubliuoti puslapius
 	Edit a PDF	Redaguoti PDF

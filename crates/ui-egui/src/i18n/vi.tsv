@@ -1441,6 +1441,10 @@ theme	Appearance	Giao diện
 	Draw freehand	Vẽ tự do
 	Drawing	Bản vẽ
 	Drawing scale	Tỷ lệ bản vẽ
+	Scale	Tỷ lệ
+	Common scales	Tỷ lệ thông dụng
+	Enter a scale such as 1:50.	Nhập một tỷ lệ như 1:50.
+	Applying a scale switches units to m / mm.	Áp dụng tỷ lệ sẽ chuyển đơn vị sang m / mm.
 	Drop-down list	Danh sách thả xuống
 	Duplicate pages	Nhân bản trang
 	Edit a PDF	Chỉnh sửa một PDF

@@ -2054,6 +2054,10 @@
 	Perimeter	周長
 	Area	面積
 	Drawing scale	図面の縮尺
+	Scale	縮尺
+	Common scales	よく使う縮尺
+	Enter a scale such as 1:50.	1:50 のように縮尺を入力してください。
+	Applying a scale switches units to m / mm.	縮尺を適用すると、単位が m / mm に切り替わります。
 	Snapping	スナップ
 	Export measurements	測定結果を書き出す
 	Open a PDF to measure it.	測定するPDFを開いてください。

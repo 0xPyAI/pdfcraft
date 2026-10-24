@@ -1984,6 +1984,10 @@
 	Perimeter	เส้นรอบรูป
 	Area	พื้นที่
 	Drawing scale	มาตราส่วนของแบบ
+	Scale	มาตราส่วน
+	Common scales	มาตราส่วนที่ใช้บ่อย
+	Enter a scale such as 1:50.	ป้อนมาตราส่วน เช่น 1:50
+	Applying a scale switches units to m / mm.	การใช้มาตราส่วนจะเปลี่ยนหน่วยเป็น m / mm
 	Snapping	การยึด
 	Export measurements	ส่งออกการวัด
 	Open a PDF to measure it.	เปิด PDF เพื่อวัดระยะ

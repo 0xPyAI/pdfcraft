@@ -2034,6 +2034,10 @@
 	Perimeter	Obwód
 	Area	Pole powierzchni
 	Drawing scale	Skala rysunku
+	Scale	Skala
+	Common scales	Popularne skale
+	Enter a scale such as 1:50.	Wpisz skalę, na przykład 1:50.
+	Applying a scale switches units to m / mm.	Zastosowanie skali zmienia jednostki na m / mm.
 	Snapping	Przyciąganie
 	Export measurements	Eksportuj pomiary
 	Open a PDF to measure it.	Otwórz PDF, aby wykonać pomiar.

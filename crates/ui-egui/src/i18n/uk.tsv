@@ -2038,6 +2038,10 @@
 	Perimeter	Периметр
 	Area	Площа
 	Drawing scale	Масштаб креслення
+	Scale	Масштаб
+	Common scales	Поширені масштаби
+	Enter a scale such as 1:50.	Введіть масштаб, наприклад 1:50.
+	Applying a scale switches units to m / mm.	Застосування масштабу перемикає одиниці на м / мм.
 	Snapping	Прив’язування
 	Export measurements	Експортувати вимірювання
 	Open a PDF to measure it.	Відкрийте PDF для вимірювання.

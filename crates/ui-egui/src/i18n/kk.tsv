@@ -1962,6 +1962,10 @@
 	Perimeter	Периметр
 	Area	Аудан
 	Drawing scale	Сызба масштабы
+	Scale	Масштаб
+	Common scales	Жиі қолданылатын масштабтар
+	Enter a scale such as 1:50.	1:50 сияқты масштабты енгізіңіз.
+	Applying a scale switches units to m / mm.	Масштабты қолдану өлшем бірліктерін m / mm етіп ауыстырады.
 	Snapping	Түйістіру
 	Export measurements	Өлшемдерді экспорттау
 	Open a PDF to measure it.	Өлшеу үшін PDF құжатын ашыңыз.

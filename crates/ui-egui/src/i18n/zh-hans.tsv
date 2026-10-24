@@ -1910,6 +1910,10 @@
 	Perimeter	周长
 	Area	面积
 	Drawing scale	图面比例
+	Scale	比例
+	Common scales	常用比例
+	Enter a scale such as 1:50.	请输入比例，例如 1:50。
+	Applying a scale switches units to m / mm.	应用比例会将单位切换为 m / mm。
 	Snapping	吸附
 	Export measurements	导出测量结果
 	Open a PDF to measure it.	打开 PDF 以进行测量。
