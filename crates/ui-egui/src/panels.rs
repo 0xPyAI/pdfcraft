@@ -157,7 +157,7 @@ fn tool_detail(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, g: &'static
     let (back, close) = panel_header(ui, t, g.label, Some(tl!("Back to all tools")));
     if back {
         app.left = LeftPanel::AllTools;
-        app.mode = crate::Mode::AllTools;
+        app.enter_mode(crate::Mode::AllTools);
     }
     if close {
         app.left_open = false;
@@ -302,7 +302,7 @@ fn edit_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, g: &'static 
     ui.horizontal(|ui| {
         if from_all_tools && icons::button(ui, "chevron-left", 26.0, false, tl!("Back to all tools")).clicked() {
             app.left = LeftPanel::AllTools;
-            app.mode = crate::Mode::AllTools;
+            app.enter_mode(crate::Mode::AllTools);
         }
         // "Edit" under the Edit tab, as Acrobat titles it; the tool's own name from All tools.
         let title = if from_all_tools { tl!(g.label) } else { tl!("Edit") };
