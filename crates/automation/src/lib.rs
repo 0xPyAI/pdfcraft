@@ -839,7 +839,7 @@ impl Automation {
             "doc_print" => self.doc_print(&a)?,
             "attachment_add" => {
                 let path = self.resolve(a.str("path")?, false)?;
-                let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+                let bytes = read_input(&path)?;
                 let name = match a.opt_str("name")? {
                     Some(n) => n.to_string(),
                     None => path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -3407,6 +3407,7 @@ mod tests {
             ("comment_add", json!({ "doc": id, "page": 1, "type": "attachment", "at": [72.0, 72.0], "path": huge_str })),
             ("stamp_custom", json!({ "doc": id, "page": 1, "at": [72.0, 72.0], "path": huge_str })),
             ("sign_trust", json!({ "paths": [huge_str] })),
+            ("attachment_add", json!({ "doc": id, "path": huge_str })),
         ] {
             let err = a.call(tool, &args).unwrap_err().to_string();
             assert!(err.contains("input exceeds 512 MiB"), "{tool}: {err}");
