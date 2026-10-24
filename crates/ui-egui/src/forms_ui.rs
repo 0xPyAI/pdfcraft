@@ -577,7 +577,7 @@ pub(crate) fn overlay(
         return None;
     };
     let rect = widget_rect(&xf, info, page, w.rect);
-    let zoom = xf.rect.width() / xf.pw.max(1.0);
+    let zoom = xf.zoom();
     let t = Tokens::get(ctx);
     let mut edit = None;
     let mut close = false;

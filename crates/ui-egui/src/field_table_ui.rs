@@ -410,7 +410,7 @@ pub(crate) fn paint_preview(painter: &egui::Painter, xf: &PageXform, page: usize
     if preview.page != page {
         return;
     }
-    let zoom = (xf.rect.width() / xf.pw.max(1.0)).clamp(0.5, 3.0);
+    let zoom = xf.zoom().clamp(0.5, 3.0);
     let font = theme::regular((9.0 * zoom).clamp(7.0, 13.0));
     let on_screen = |r: [f64; 4]| xf.view_rect([r[0] as f32, r[1] as f32, r[2] as f32, r[3] as f32]);
     let outline = on_screen(preview.laid.table.rect);
