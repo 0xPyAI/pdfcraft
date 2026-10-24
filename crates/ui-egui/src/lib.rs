@@ -2637,6 +2637,7 @@ impl PdfCraftApp {
         v["redact_prefs"] = self.redact_defaults.to_json();
         // Set outside json! above, which is at serde_json's macro recursion limit.
         v["hide_empty_highlight_hover"] = serde_json::Value::Bool(self.comment_prefs.hide_empty_highlight_hover);
+        v["comment_tool_pinned"] = serde_json::Value::Bool(self.comment_prefs.pinned);
         v["show_secured_notice"] = serde_json::Value::Bool(self.show_secured_notice);
         v["organize_zoom"] = serde_json::json!(self.organize_zoom);
         // Canonical names survive changes to the order of PAPERS and do not depend on UI language.
@@ -2768,6 +2769,9 @@ impl PdfCraftApp {
         }
         if let Some(hide) = v["hide_empty_highlight_hover"].as_bool() {
             self.comment_prefs.hide_empty_highlight_hover = hide;
+        }
+        if let Some(pinned) = v["comment_tool_pinned"].as_bool() {
+            self.comment_prefs.pinned = pinned;
         }
         // Per-tool comment styles (#340): each field goes through its clamping setter, so a
         // malformed or hostile entry is clamped or ignored rather than trusted.
@@ -3111,6 +3115,13 @@ impl PdfCraftApp {
                 };
             }
             ("author", _) => self.comment_prefs.author = value.to_string(),
+            ("comment-tool-pinned", _) => {
+                self.comment_prefs.pinned = match value {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err("comment-tool-pinned must be true or false".into()),
+                };
+            }
             ("hide-empty-highlight-hover", _) => {
                 self.comment_prefs.hide_empty_highlight_hover = match value {
                     "true" => true,

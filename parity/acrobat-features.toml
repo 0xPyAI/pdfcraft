@@ -3935,6 +3935,18 @@ evidence = ["crates/ui-egui/tests/it/comments.rs::make_current_properties_defaul
 notes = "colour, opacity and line width become the tool's defaults (canvas and Comments panel menus, and Acrobat's Make Properties Default box in Comment Properties, applied on OK with the edited look) and survive a restart: the per-tool styles are persisted with the settings and restored through their clamping setters (#340)"
 
 [[feature]]
+id = "comment.keep-tool-selected"
+title = "Keep annotation tools selected between uses and restarts"
+area = "E"
+tier = "P2"
+milestone = "M14"
+status = "shipped"
+commands = ["comment.line"]
+tools = []
+evidence = ["crates/ui-egui/tests/it/comment_pin.rs::pin_from_quick_bar_survives_restart_and_unpinning", "crates/ui-egui/tests/it/comment_pin.rs::legacy_settings_keep_the_default_and_other_preferences", "crates/ui-egui/tests/it/comment_pin.rs::malformed_pin_values_preserve_the_current_choice", "crates/ui-egui/tests/it/control.rs::comment_pin_is_reported_and_persistent"]
+notes = "The annotation quick bar's shared pin survives restarts as a boolean setting (#4253); unpinning is remembered too. Old settings default to one-shot use, and malformed values keep the current choice. UI-only preference, reachable through opt-in ui.set key=comment-tool-pinned and reported by ui.state.comment_tool_pinned. Startup uses Select; the shared pin applies when an annotation tool is picked. Independent per-tool pins and restoring the active tool are outside this preference."
+
+[[feature]]
 id = "comment.author-identity"
 title = "Author name from identity preferences"
 area = "E"

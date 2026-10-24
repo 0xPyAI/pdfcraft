@@ -29,6 +29,7 @@ mod camera;
 mod column_select;
 mod combine_grid;
 mod commands;
+mod comment_pin;
 mod comments;
 mod compare;
 mod content;
