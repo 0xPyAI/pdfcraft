@@ -190,6 +190,15 @@ pub fn interpret_page<'a>(
             if flags & (2 | 32) != 0 {
                 continue;
             }
+            // PdfCraft patch (56): Invisible (bit 1) hides an annotation of a type that isn't one
+            // of the standard ones (ISO 32000-2 Table 167), and a popup has no appearance of its
+            // own (§12.5.6.14): the viewer shows it as a window for its parent, not on the page.
+            let subtype = annot.get::<hayro_syntax::object::Name<'_>>(SUBTYPE);
+            if subtype.as_deref() == Some(b"Popup")
+                || (flags & 1 != 0 && !subtype.as_deref().is_some_and(is_standard_annotation_type))
+            {
+                continue;
+            }
             // PdfCraft patch: "Hide all comments" keeps widgets and links.
             if context.settings.hide_comments
                 && !matches!(annot.get::<hayro_syntax::object::Name<'_>>(SUBTYPE).as_deref(), Some(b"Widget" | b"Link"))
@@ -284,6 +293,42 @@ pub fn interpret_page<'a>(
         }
         device.end_annotations();
     }
+}
+
+/// PdfCraft patch (56): whether `subtype` is one of the standard annotation types of
+/// ISO 32000-2 Table 171.
+fn is_standard_annotation_type(subtype: &[u8]) -> bool {
+    matches!(
+        subtype,
+        b"Text"
+            | b"Link"
+            | b"FreeText"
+            | b"Line"
+            | b"Square"
+            | b"Circle"
+            | b"Polygon"
+            | b"PolyLine"
+            | b"Highlight"
+            | b"Underline"
+            | b"Squiggly"
+            | b"StrikeOut"
+            | b"Caret"
+            | b"Stamp"
+            | b"Ink"
+            | b"Popup"
+            | b"FileAttachment"
+            | b"Sound"
+            | b"Movie"
+            | b"Screen"
+            | b"Widget"
+            | b"PrinterMark"
+            | b"TrapNet"
+            | b"Watermark"
+            | b"3D"
+            | b"Redact"
+            | b"Projection"
+            | b"RichMedia"
+    )
 }
 
 /// PdfCraft patch: the normal appearance of a Highlight annotation that has none (ISO 32000-2

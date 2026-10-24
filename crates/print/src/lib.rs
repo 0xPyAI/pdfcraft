@@ -719,19 +719,57 @@ pub fn keep_printed(doc: &mut Document, content: Content) {
     }
 }
 
+/// The standard annotation types of ISO 32000-2 Table 171.
+const STANDARD_ANNOTATION_TYPES: [&[u8]; 28] = [
+    b"Text",
+    b"Link",
+    b"FreeText",
+    b"Line",
+    b"Square",
+    b"Circle",
+    b"Polygon",
+    b"PolyLine",
+    b"Highlight",
+    b"Underline",
+    b"Squiggly",
+    b"StrikeOut",
+    b"Caret",
+    b"Stamp",
+    b"Ink",
+    b"Popup",
+    b"FileAttachment",
+    b"Sound",
+    b"Movie",
+    b"Screen",
+    b"Widget",
+    b"PrinterMark",
+    b"TrapNet",
+    b"Watermark",
+    b"3D",
+    b"Redact",
+    b"Projection",
+    b"RichMedia",
+];
+
 /// Does annotation `d` print under `content`?
 fn prints(doc: &Document, d: &Dict, content: Content) -> bool {
+    const INVISIBLE: i64 = 1;
     const HIDDEN: i64 = 2;
     const PRINT: i64 = 4;
     let flags = d.get(b"F").and_then(|f| doc.resolve(f).as_int()).unwrap_or(0);
     if flags & PRINT == 0 || flags & HIDDEN != 0 {
         return false;
     }
-    let subtype = d.name(b"Subtype").unwrap_or(b"");
+    // `/Subtype` may be an indirect reference (ISO 32000-2 §7.3.10), so resolve it first.
+    let subtype_obj = d.get(b"Subtype").map(|s| doc.resolve(s));
+    let subtype = subtype_obj.as_deref().and_then(Object::as_name).unwrap_or(b"");
     match subtype {
         b"Widget" => true,
         b"Link" | b"Popup" => false,
         b"Stamp" => content != Content::Document && content != Content::FormFieldsOnly,
+        // ISO 32000-2 Table 167: an Invisible annotation of a type that isn't standard (Table
+        // 171) is not printed even with its Print flag set.
+        _ if flags & INVISIBLE != 0 && !STANDARD_ANNOTATION_TYPES.contains(&subtype) => false,
         _ => content == Content::DocumentAndMarkups,
     }
 }
