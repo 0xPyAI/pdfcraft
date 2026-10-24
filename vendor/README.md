@@ -92,3 +92,12 @@ are unchanged. Renderer regressions `japanese_substitute_missing_spaces_draw_no_
 and `japanese_substitute_spaces_keep_pdf_widths_and_unicode` use the synthetic
 MS-Mincho / UniJIS-UCS2-HW-H fixture with craft-fonts, including `/W` and `/DW`
 placement controls.
+
+Symbolic TrueType `cmap` order (#4156): in `hayro-interpret` `EmbeddedKind::map_code`, an
+embedded TrueType font whose Nonsymbolic flag is not set (the branch `is_non_symbolic()` does not
+take) looks a code up in its Windows (3, 0) or (3, 1) subtables before its Macintosh and Unicode
+ones, as ISO 32000-2 §9.6.5.4 prescribes for symbolic fonts; the
+(1, 0) subtable still serves codes the (3, x) ones leave out. The records were tried in the
+order the font lists them, platform ID first, so a wrong (1, 0) table (SAS 9.4's AMT fonts)
+drew "8" as "p" and "+" as "V". Covered by `raster::tests::symbolic_truetype_cmap`, whose font
+is built in memory.
