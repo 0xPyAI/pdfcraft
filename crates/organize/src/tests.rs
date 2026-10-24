@@ -1015,6 +1015,30 @@ fn splitting_a_combined_widget_keeps_annotation_actions_and_field_triggers() {
 }
 
 #[test]
+fn splitting_a_combined_widget_keeps_its_annotation_only_keys() {
+    let mut src = doc_a();
+    let list = page_dict(&src, 1).get(b"Annots").and_then(|a| a.as_array()).cloned().unwrap();
+    let widget =
+        list.iter().filter_map(Object::as_ref).find(|r| src.get(*r).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Widget"))).unwrap();
+    src.update_dict(widget, |d| {
+        d.set(b"Contents".to_vec(), Object::String(PdfString::text("alt text")));
+        d.set(b"BM".to_vec(), Object::name("Multiply"));
+        d.set(b"Lang".to_vec(), Object::String(PdfString::text("en-US")));
+        d.set(b"AF".to_vec(), Object::Array(Vec::new()));
+    })
+    .unwrap();
+    let out = full_roundtrip(&extract_pages(&src, &[1, 1]).unwrap());
+    for i in 0..2 {
+        let w = annots(&out, i).into_iter().find(|d| d.name(b"Subtype") == Some(b"Widget")).unwrap();
+        let parent = out.get(w.reference(b"Parent").unwrap()).as_dict().unwrap().clone();
+        for key in [b"Contents".as_slice(), b"BM", b"Lang", b"AF"] {
+            assert!(w.contains(key), "the widget keeps {key:?}");
+            assert!(!parent.contains(key), "the parent field does not take {key:?}");
+        }
+    }
+}
+
+#[test]
 fn repeated_page_gets_independent_annotations() {
     // A1 has a link, A2 a link and a form field, A3 a note with a popup; each is listed twice.
     let out = full_roundtrip(&extract_pages(&doc_a(), &[0, 0, 1, 1, 2, 2]).unwrap());

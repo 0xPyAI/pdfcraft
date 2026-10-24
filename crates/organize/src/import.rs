@@ -59,6 +59,10 @@ const WIDGET_KEYS: &[&[u8]] = &[
     b"OC",
     b"Tabs",
     b"A",
+    b"Contents",
+    b"BM",
+    b"Lang",
+    b"AF",
 ];
 
 struct Copier<'a> {
