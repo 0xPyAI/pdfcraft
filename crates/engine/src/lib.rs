@@ -971,6 +971,20 @@ fn same_pages(a: &[pdfcraft_render::PageInfo], b: &[pdfcraft_render::PageInfo]) 
         && a.iter().zip(b).all(|(x, y)| (x.width - y.width).abs() < 0.01 && (x.height - y.height).abs() < 0.01 && x.rotation == y.rotation)
 }
 
+/// Each document-information field of `info` with its value in `cos` (`/Info`, else XMP), read
+/// the way the full inspection reads them: NULs and spaces trimmed, empty is none.
+fn info_fields<'a>(info: &'a mut DocInfo, cos: &pdfcraft_cos::Document) -> [(&'a mut Option<String>, Option<String>); 6] {
+    let read = |key| pdfcraft_organize::info(cos, key).map(|v| v.trim_matches('\0').trim().to_string()).filter(|v| !v.is_empty());
+    [
+        (&mut info.title, read("Title")),
+        (&mut info.author, read("Author")),
+        (&mut info.subject, read("Subject")),
+        (&mut info.keywords, read("Keywords")),
+        (&mut info.creator, read("Creator")),
+        (&mut info.producer, read("Producer")),
+    ]
+}
+
 /// The copy PDFCraft displays when opening `bytes`: with appearances drawn, in memory only, for
 /// comments that have none and form fields the file leaves to the viewer. Render paths outside the app, such as the CLI, use this so their page
 /// images agree with the app and independent viewers. It never changes the source document, and an
@@ -3818,7 +3832,7 @@ impl Session {
         name: String,
         path: Option<String>,
         bytes: Arc<Vec<u8>>,
-        info: DocInfo,
+        mut info: DocInfo,
         cos: Result<Result<pdfcraft_cos::Document, pdfcraft_cos::CosError>, Box<dyn std::any::Any + Send>>,
         render_password: Option<String>,
         password: Option<&str>,
@@ -3850,6 +3864,15 @@ impl Session {
         };
         let sig_cache = Arc::new(pdfcraft_sign::DigestCache::default());
         let signatures = editor.as_ref().map(|e| signatures_of(&e.cos, &bytes, trust, &sig_cache)).unwrap_or_default();
+        // The inspection reads only `/Info`; a file stating its title or author only in XMP still
+        // shows them (#2373).
+        if let Some(e) = &editor {
+            for (field, value) in info_fields(&mut info, &e.cos) {
+                if field.is_none() {
+                    *field = value;
+                }
+            }
+        }
         let display = display_bytes(editor.as_mut(), &bytes);
         let renderer = RenderPool::new(display.clone(), render_threads(), config.clone());
         let (form, adopted) = editor
@@ -4215,15 +4238,9 @@ impl Session {
             editor.cos.bytes().clone()
         };
         if scope == Scope::Metadata {
-            // Read the way the full inspection reads them (NULs and spaces trimmed, empty is
-            // none), so editing one entry doesn't change how the others display.
-            let info = |key| pdfcraft_organize::info(&editor.cos, key).map(|v| v.trim_matches('\0').trim().to_string()).filter(|v| !v.is_empty());
-            doc.info.title = info("Title");
-            doc.info.author = info("Author");
-            doc.info.subject = info("Subject");
-            doc.info.keywords = info("Keywords");
-            doc.info.creator = info("Creator");
-            doc.info.producer = info("Producer");
+            for (field, value) in info_fields(&mut doc.info, &editor.cos) {
+                *field = value;
+            }
             doc.info.custom = pdfcraft_organize::custom_info(&editor.cos);
             doc.info.file_size = bytes.len();
             #[cfg(test)]

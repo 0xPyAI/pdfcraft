@@ -660,10 +660,16 @@ pub fn check_custom_key(name: &str) -> Result<(), OrganizeError> {
     Ok(())
 }
 
-/// Read a document-information entry as text.
+/// Read a document-information entry as text: `/Info`, else the XMP packet (Title, Author,
+/// Subject, Keywords, Creator and Producer, see `xmp`).
 pub fn info(doc: &Document, key: &str) -> Option<String> {
-    let info = doc.trailer().get(b"Info").map(|o| doc.resolve(o))?;
-    info.as_dict()?.get(key.as_bytes()).and_then(|v| doc.resolve(v).as_string().map(|s| s.to_text()))
+    let in_info = doc
+        .trailer()
+        .get(b"Info")
+        .map(|o| doc.resolve(o))
+        .and_then(|info| info.as_dict()?.get(key.as_bytes()).and_then(|v| doc.resolve(v).as_string().map(|s| s.to_text())));
+    // Files that state it only in their XMP packet (#2373).
+    in_info.filter(|v| !v.trim_matches('\0').trim().is_empty()).or_else(|| xmp::info_value(doc, key))
 }
 
 /// Set (or clear, with an empty value) a document-information entry.

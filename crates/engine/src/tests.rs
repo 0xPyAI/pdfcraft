@@ -533,6 +533,30 @@ impl RenderRequestFor {
     }
 }
 
+/// A file with its title and author only in XMP shows them in the document information and in
+/// Document Properties ▸ Description (#2373).
+#[test]
+fn document_information_stated_only_in_xmp_is_shown() {
+    let mut cos = pdfcraft_cos::Document::open(Arc::new(fixture(1))).unwrap();
+    let xmp = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\
+               <rdf:Description rdf:about=\"\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\
+               <dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">Quarterly report</rdf:li></rdf:Alt></dc:title>\
+               <dc:creator><rdf:Seq><rdf:li>Ada</rdf:li></rdf:Seq></dc:creator></rdf:Description></rdf:RDF></x:xmpmeta>";
+    let mut dict = pdfcraft_cos::Dict::new();
+    dict.set(b"Type".to_vec(), pdfcraft_cos::Object::name("Metadata"));
+    dict.set(b"Subtype".to_vec(), pdfcraft_cos::Object::name("XML"));
+    let m = cos.add(pdfcraft_cos::Object::Stream(pdfcraft_cos::Stream::from_raw(dict, xmp.as_bytes().to_vec())));
+    let root = cos.root().unwrap();
+    cos.update_dict(root, |c| c.set(b"Metadata".to_vec(), pdfcraft_cos::Object::Ref(m))).unwrap();
+    let bytes = pdfcraft_cos::write_full(&cos, &pdfcraft_cos::SaveOptions::default()).unwrap();
+    let mut s = Session::new();
+    let id = s.open("xmp.pdf", None, Arc::new(bytes), None).unwrap();
+    let doc = s.get(id).unwrap();
+    assert_eq!((doc.info.title.as_deref(), doc.info.author.as_deref(), doc.info.subject.as_deref()), (Some("Quarterly report"), Some("Ada"), None));
+    assert_eq!(doc.info_value("Title").as_deref(), Some("Quarterly report"));
+    assert_eq!(doc.info_value("Author").as_deref(), Some("Ada"));
+}
+
 #[test]
 fn edits_update_view_data_and_mark_dirty() {
     let (mut s, id) = session_with(3);
