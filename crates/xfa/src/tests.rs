@@ -2129,6 +2129,18 @@ fn a_flowed_subform_is_drawn_with_its_border_under_its_content() {
     let part = form.pages[1].items.iter().find_map(|i| if let Item::Fill { rect, .. } = i { Some(*rect) } else { None }).expect("the second part");
     assert!(part.y <= tall.y + 0.01 && part.bottom() >= tall.bottom() - 0.01, "the border holds the field: {part:?} {tall:?}");
     assert!(form.warnings.is_empty(), "{:?}", form.warnings);
+    // A section that starts near a page's bottom, where its first field doesn't fit: the field
+    // moves to the next page whole, and the border starts there with it, none left behind.
+    let spacer = r#"<field name="spacer" w="3in" h="684pt"><ui><textEdit/></ui></field>"#;
+    let form = lay(&format!("{spacer}{}", boxed(&(field("a") + &field("b")))));
+    assert_eq!(form.pages.len(), 2);
+    let fills = |page: usize| -> Vec<Rect> {
+        form.pages[page].items.iter().filter_map(|i| if let Item::Fill { rect, .. } = i { Some(*rect) } else { None }).collect()
+    };
+    assert!(fills(0).is_empty(), "no border left behind on page 1: {:?}", fills(0));
+    let moved = fills(1);
+    assert!(moved.len() == 1 && (moved[0].y - 36.0).abs() < 0.01 && (moved[0].h - (7.2 + 2.0 * 36.0 + 14.4)).abs() < 0.01, "{moved:?}");
+    assert!(form.warnings.is_empty(), "{:?}", form.warnings);
     // The same field first in the section, at the top of the page: after the section's own top
     // margin it runs past the bottom, so the section has no border round it, and says so.
     let form = lay(&boxed(r#"<field name="tall" w="3in" h="715pt"><ui><textEdit/></ui></field>"#));
