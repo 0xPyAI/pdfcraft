@@ -3489,7 +3489,6 @@ fn rendering_keeps_the_forms_own_font_objects() {
     assert!(fonts.as_dict().unwrap().reference(b"Helv").is_some(), "and the layout's fonts as objects");
 }
 
-
 /// Text is measured in the standard-14 face it is drawn in, at the widths ISO 32000-2 Annex D
 /// gives: bold and Times are no longer Helvetica scaled, and the horizontal scale still applies.
 #[test]
