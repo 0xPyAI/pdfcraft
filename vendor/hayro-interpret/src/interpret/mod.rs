@@ -157,6 +157,10 @@ pub enum InterpreterWarning {
     ImageDecodeFailure,
     /// PdfCraft patch (18): a page content stream was skipped after exhausting its safety budget.
     ContentTruncated,
+    /// PdfCraft patch (55): a colour could not be computed (a colour space that cannot be
+    /// read, or a Separation or DeviceN tint transform that cannot be evaluated) and was painted
+    /// in a fallback colour. Reported at most once per content stream.
+    ColorFallback,
 }
 
 /// interpret the contents of the page and render them into the device.
@@ -562,8 +566,13 @@ fn interpret_window<'a>(
             }
             TypedInstruction::ColorSpaceStroke(c) => {
                 // PdfCraft patch (38): see `named_color_space`.
+                // PdfCraft patch (55): a space that cannot be read is drawn in DeviceGray, as
+                // before, and the fallback is reported.
                 let cs = named_color_space(c.0, resources, &defaults, context)
-                    .unwrap_or(ColorSpace::device_gray());
+                    .unwrap_or_else(|| {
+                        crate::color::note_color_fallback();
+                        ColorSpace::device_gray()
+                    });
 
                 if !cs.is_pattern() {
                     context.get_mut().graphics_state.stroke_pattern = None;
@@ -573,8 +582,13 @@ fn interpret_window<'a>(
             }
             TypedInstruction::ColorSpaceNonStroke(c) => {
                 // PdfCraft patch (38): see `named_color_space`.
+                // PdfCraft patch (55): a space that cannot be read is drawn in DeviceGray, as
+                // before, and the fallback is reported.
                 let cs = named_color_space(c.0, resources, &defaults, context)
-                    .unwrap_or(ColorSpace::device_gray());
+                    .unwrap_or_else(|| {
+                        crate::color::note_color_fallback();
+                        ColorSpace::device_gray()
+                    });
 
                 if !cs.is_pattern() {
                     context.get_mut().graphics_state.non_stroke_pattern = None;
@@ -932,6 +946,10 @@ pub fn interpret<'a>(
     if crate::context::content_was_truncated() {
         (context.settings.warning_sink)(InterpreterWarning::ContentTruncated);
     }
+    // PdfCraft patch (55): and that a colour was painted in a fallback colour.
+    if crate::color::take_color_fallback() {
+        (context.settings.warning_sink)(InterpreterWarning::ColorFallback);
+    }
 }
 
 /// PdfCraft patch: the bytes of a window of page content. A window grows only while an instruction
@@ -989,5 +1007,9 @@ fn interpret_content<'a>(
     // PdfCraft patch (18): say that content was skipped, so a truncated page isn't a clean render.
     if cut || content.truncated() || crate::context::content_was_truncated() {
         (context.settings.warning_sink)(InterpreterWarning::ContentTruncated);
+    }
+    // PdfCraft patch (55): and that a colour was painted in a fallback colour.
+    if crate::color::take_color_fallback() {
+        (context.settings.warning_sink)(InterpreterWarning::ColorFallback);
     }
 }
