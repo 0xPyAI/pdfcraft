@@ -183,13 +183,7 @@ impl JsRunner {
         // Packets alone are not enough: static XFA and an unlaid-out shell keep their scripts.
         let xfa_active = pdfcraft_xfa::xfa_shape(cos).is_some() && pdfcraft_xfa::existing_layout(cos).is_some();
         let doc_scripts = if xfa_active { Vec::new() } else { pdfcraft_forms::document_scripts(cos) };
-        JsRunner {
-            doc,
-            doc_scripts,
-            output: JsOutput::default(),
-            cos: cos.clone(),
-            displays: std::collections::HashMap::new(),
-        }
+        JsRunner { doc, doc_scripts, output: JsOutput::default(), cos: cos.clone(), displays: std::collections::HashMap::new() }
     }
 }
 
