@@ -669,7 +669,9 @@ impl Automation {
         let id = self.doc(a)?.id;
         let o = self.session.run_javascript(id, a.str("script")?, a.opt_str("field")?).map_err(failed)?;
         let reqs: Vec<Value> = o.requests.iter().map(request_json).collect();
-        Ok(json!({ "alerts": o.alerts, "console": o.console, "requests": reqs, "error": o.error, "result": o.result }))
+        Ok(
+            json!({ "alerts": o.alerts, "console": o.console, "requests": reqs, "error": o.error, "document_errors": o.doc_errors, "result": o.result }),
+        )
     }
 
     pub(crate) fn js_document_scripts(&self, a: &Args) -> Result<Value> {

@@ -297,6 +297,61 @@ fn document_level_functions_are_available() {
     assert_eq!(o.value, "8");
 }
 
+/// #3940: a document script that throws after defining a helper (here calling an Acrobat method
+/// PdfCraft lacks) still leaves the helper, and the later scripts, to the field script.
+#[test]
+fn a_failing_document_script_does_not_stop_the_field_script() {
+    let docs = [
+        "function double(x) { return x * 2; }\nthis.getField('qty').buttonSetIcon(null);\nvar after = 1;".to_string(),
+        "function plus(x) { return x + 1; }".to_string(),
+        "this is not javascript".to_string(),
+    ];
+    let o = run(
+        "event.value = plus(double(getField('qty').value));",
+        &Event::field("Calculate", "total", ""),
+        &doc(),
+        &fields(),
+        &docs,
+        Limits::default(),
+    );
+    assert_eq!((o.error.as_deref(), o.value.as_str()), (None, "9"));
+    assert_eq!(o.doc_errors.len(), 2, "{:?}", o.doc_errors);
+    assert!(o.doc_errors[0].starts_with("document script 1: TypeError"), "{:?}", o.doc_errors);
+    assert!(o.doc_errors[1].starts_with("document script 3: SyntaxError"), "{:?}", o.doc_errors);
+    // The failing script stopped where it failed.
+    let o = run("event.value = typeof after;", &Event::field("Calculate", "total", ""), &doc(), &fields(), &docs, Limits::default());
+    assert_eq!(o.value, "undefined");
+    // Working document scripts report nothing.
+    assert!(go("event.value = 1;", &Event::field("Calculate", "total", "")).doc_errors.is_empty());
+}
+
+/// A document script refused before running (too long, or nested too deeply to run safely) is
+/// skipped like one that throws: never run, reported in its place, the rest still run.
+#[test]
+fn a_document_script_too_big_to_run_is_skipped_and_reported() {
+    let docs = [
+        "this.getField('qty').buttonSetIcon(null);".to_string(),
+        format!("var big = 1{};", "+1".repeat(MAX_SCRIPT_BYTES / 2)),
+        "function double(x) { return x * 2; }".to_string(),
+        format!("var deep = {}1{};", "(".repeat(10_000), ")".repeat(10_000)),
+    ];
+    let o = run(
+        "event.value = double(getField('qty').value) + typeof big;",
+        &Event::field("Calculate", "total", ""),
+        &doc(),
+        &fields(),
+        &docs,
+        Limits::default(),
+    );
+    assert_eq!((o.error.as_deref(), o.value.as_str()), (None, "8undefined"));
+    let places: Vec<&str> = o.doc_errors.iter().map(|e| e.split(':').next().unwrap_or_default()).collect();
+    assert_eq!(places, ["document script 1", "document script 2", "document script 4"], "{:?}", o.doc_errors);
+    assert!(o.doc_errors[1].contains("too long") && o.doc_errors[2].contains("nested too deeply"), "{:?}", o.doc_errors);
+    // The field script's own limits still refuse it outright.
+    let o = run(&format!("1{}", "+1".repeat(MAX_SCRIPT_BYTES)), &Event::field("Calculate", "total", ""), &doc(), &fields(), &docs, Limits::default());
+    assert!(o.error.is_some_and(|e| e.contains("too long")) && o.doc_errors.is_empty());
+}
+
 #[test]
 fn errors_and_runaway_scripts_are_contained() {
     let o = go("event.value = nosuch.thing;", &Event::field("Calculate", "total", "keep"));
@@ -336,9 +391,11 @@ fn deeply_nested_scripts_fail_instead_of_crashing() {
         let o = go(s, &Event::doc("Open"));
         assert!(o.error.is_some(), "{}…", &s[..20]);
     }
-    // A hostile document-level script is refused too, before the field script runs.
+    // A hostile document-level script is refused too: it never runs, and is reported, while
+    // the field script still does (#3940).
     let o = run("event.value = 'ran';", &Event::field("Calculate", "a", ""), &doc(), &fields(), &[hostile[0].clone()], Limits::default());
-    assert!(o.error.is_some());
+    assert_eq!((o.error, o.value.as_str()), (None, "ran"));
+    assert!(o.doc_errors.len() == 1 && o.doc_errors[0].contains("nested too deeply"), "{:?}", o.doc_errors);
 }
 
 #[test]

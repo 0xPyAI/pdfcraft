@@ -181,6 +181,9 @@ pub struct Outcome {
     pub requests: Vec<Request>,
     /// The script's error (syntax error, exception, or a limit reached), if it failed.
     pub error: Option<String>,
+    /// Errors in the document-level scripts that ran first. Each is a script of its own: one
+    /// that throws stops where it failed, and the others and the script itself still run (#3940).
+    pub doc_errors: Vec<String>,
     /// The script's completion value (what the console prints), unless undefined.
     pub result: Option<String>,
 }
@@ -1204,16 +1207,31 @@ pub fn run(script: &str, event: &Event, doc: &DocInfo, fields: &[FieldState], do
 /// script can observe uncommitted writes. Read-only calculations avoid copying the whole form.
 pub fn run_shared(script: &str, event: &Event, doc: &DocInfo, fields: Arc<Vec<FieldState>>, doc_scripts: &[String], limits: Limits) -> Outcome {
     let failed = |why: String| Outcome { rc: true, value: event.value.clone(), change: event.change.clone(), error: Some(why), ..Default::default() };
-    if let Some(why) = std::iter::once(script).chain(doc_scripts.iter().map(String::as_str)).find_map(refuse) {
+    if let Some(why) = refuse(script) {
         return failed(why);
     }
+    // A document script too long or too deeply nested to run safely is skipped and reported,
+    // as one that throws is; the others and the script still run (#3940).
+    let mut skipped = Vec::new();
+    let kept: Vec<(usize, &str)> = doc_scripts
+        .iter()
+        .enumerate()
+        .filter_map(|(i, d)| match refuse(d) {
+            Some(why) => {
+                skipped.push((i, why));
+                None
+            }
+            None => Some((i, d.as_str())),
+        })
+        .collect();
+    let (kept, skipped) = (&kept, &skipped);
     #[cfg(not(target_arch = "wasm32"))]
     {
         std::thread::scope(|scope| {
             let spawned = std::thread::Builder::new()
                 .name("pdfcraft-js".into())
                 .stack_size(SCRIPT_STACK)
-                .spawn_scoped(scope, || run_here(script, event, doc, fields, doc_scripts, limits));
+                .spawn_scoped(scope, || run_here(script, event, doc, fields, kept, skipped, limits));
             match spawned {
                 Ok(thread) => thread.join().unwrap_or_else(|_| failed("the script stopped with an internal error".into())),
                 Err(e) => failed(format!("the script engine could not start: {e}")),
@@ -1221,7 +1239,7 @@ pub fn run_shared(script: &str, event: &Event, doc: &DocInfo, fields: Arc<Vec<Fi
         })
     }
     #[cfg(target_arch = "wasm32")]
-    run_here(script, event, doc, fields, doc_scripts, limits)
+    run_here(script, event, doc, fields, kept, skipped, limits)
 }
 
 /// Host hooks that refuse to compile code from strings (`eval`, `Function` and its generator
@@ -1256,7 +1274,22 @@ impl HostHooks for CheckedCodeFromStrings {
     }
 }
 
-fn run_here(script: &str, event: &Event, doc: &DocInfo, fields: Arc<Vec<FieldState>>, doc_scripts: &[String], limits: Limits) -> Outcome {
+/// How [`Outcome::doc_errors`] names a failing document script: by its 1-based place.
+fn doc_error(index: usize, error: &dyn std::fmt::Display) -> String {
+    format!("document script {}: {error}", index.saturating_add(1))
+}
+
+/// `doc_scripts` are the document scripts to run with their places among all of them;
+/// `skipped` the ones refused before running, with the reason.
+fn run_here(
+    script: &str,
+    event: &Event,
+    doc: &DocInfo,
+    fields: Arc<Vec<FieldState>>,
+    doc_scripts: &[(usize, &str)],
+    skipped: &[(usize, String)],
+    limits: Limits,
+) -> Outcome {
     let mut ctx = match Context::builder().host_hooks(std::rc::Rc::new(NoCodeFromStrings)).build() {
         Ok(ctx) => ctx,
         Err(e) => {
@@ -1277,12 +1310,18 @@ fn run_here(script: &str, event: &Event, doc: &DocInfo, fields: Arc<Vec<FieldSta
         dropped: 0,
     }));
     let mut out = Outcome { rc: true, value: event.value.clone(), change: event.change.clone(), ..Default::default() };
+    let mut doc_errors: Vec<(usize, String)> = skipped.iter().map(|(i, why)| (*i, doc_error(*i, why))).collect();
     let result = (|| -> JsResult<()> {
         install(&mut ctx)?;
         let ev = event_object(&mut ctx, event);
         ctx.register_global_property(js_string!("event"), ev.clone(), Attribute::all())?;
-        for d in doc_scripts {
-            ctx.eval(Source::from_bytes(d))?;
+        // One document script that throws (calling a method PdfCraft lacks, say) must not keep
+        // every field script in the form from running: what it defined before the error, and
+        // the other scripts, stay available (#3940).
+        for &(i, d) in doc_scripts {
+            if let Err(e) = ctx.eval(Source::from_bytes(d)) {
+                doc_errors.push((i, doc_error(i, &e)));
+            }
         }
         let r = ctx.eval(Source::from_bytes(script))?;
         if !r.is_undefined() {
@@ -1299,6 +1338,8 @@ fn run_here(script: &str, event: &Event, doc: &DocInfo, fields: Arc<Vec<FieldSta
     if let Err(e) = result {
         out.error = Some(e.to_string());
     }
+    doc_errors.sort_by_key(|(i, _)| *i);
+    out.doc_errors = doc_errors.into_iter().map(|(_, e)| e).collect();
     if let Some(h) = ctx.remove_data::<Shared>() {
         let h = h.into_inner();
         out.changed = h.changed.iter().map(|i| h.fields[*i].clone()).collect();

@@ -5990,6 +5990,12 @@ fn javascript_through_tools() {
     assert_eq!(total["value"], "3750");
     let r = ok(&mut a, "js_run", json!({ "doc": doc, "script": "nope()" }));
     assert!(r["error"].as_str().unwrap().contains("nope"));
+    assert_eq!(r["document_errors"], json!([]));
+    // A document script that throws (#3940) is reported, and the others and the script still run.
+    ok(&mut a, "js_set_document_script", json!({ "doc": doc, "name": "zz", "script": "getField('Total').buttonSetIcon(null);" }));
+    let r = ok(&mut a, "js_run", json!({ "doc": doc, "script": "money(5)" }));
+    assert_eq!((r["error"].clone(), r["result"].clone()), (json!(null), json!("EUR 5,00")));
+    assert!(r["document_errors"][0].as_str().unwrap().starts_with("document script 2: TypeError"), "{r}");
     assert_eq!(ok(&mut a, "js_enabled", json!({ "enabled": false }))["enabled"], false);
     assert!(a.call("js_run", &json!({ "doc": doc, "script": "1" })).is_err());
 }

@@ -19,6 +19,10 @@ pub struct JsOutput {
     pub requests: Vec<Request>,
     /// Script errors (as Acrobat's console shows them).
     pub errors: Vec<String>,
+    /// Which of `errors` are document scripts' (#3940), told apart by where they came from and
+    /// not by their text, which a field script's error can share: each is reported once, however
+    /// often the document scripts run again.
+    pub doc_errors: Vec<String>,
 }
 
 impl JsOutput {
@@ -31,13 +35,33 @@ impl JsOutput {
         self.console.extend(o.console.iter().cloned());
         self.requests.extend(o.requests.iter().cloned());
         self.errors.extend(o.error.iter().cloned());
+        // The document scripts run before every field script, so a failing one would repeat
+        // once per calculation; it is reported once.
+        for e in &o.doc_errors {
+            if !self.doc_errors.contains(e) {
+                self.doc_errors.push(e.clone());
+                self.errors.push(e.clone());
+            }
+        }
     }
 
     pub(crate) fn append(&mut self, other: JsOutput) {
         self.alerts.extend(other.alerts);
         self.console.extend(other.console);
         self.requests.extend(other.requests);
-        self.errors.extend(other.errors);
+        // As in `absorb`: a document script's error, already reported, is not repeated; a field
+        // script's errors are each their own, even one worded like a document script's.
+        let mut docs = other.doc_errors;
+        for e in other.errors {
+            if let Some(k) = docs.iter().position(|d| *d == e) {
+                docs.swap_remove(k);
+                if self.doc_errors.contains(&e) {
+                    continue;
+                }
+                self.doc_errors.push(e.clone());
+            }
+            self.errors.push(e);
+        }
     }
 }
 
@@ -452,6 +476,32 @@ mod review_tests {
         assert_eq!(words.iter().map(|(w, _)| w.len()).collect::<Vec<_>>(), [n, 1]);
         let read = UNDERSCORE_CHARS_READ.with(std::cell::Cell::get);
         assert!(read <= 4 * n, "{read} characters read for {n} glyphs");
+    }
+
+    /// Review on #3985: merging two outputs reports a failing document script once, as one run
+    /// does, while each field script error stays: told apart by where an error came from, so a
+    /// field script that throws a document script's very words is still reported.
+    #[test]
+    fn merged_output_reports_a_document_script_error_once() {
+        let doc = "document script 2: TypeError: not a callable function";
+        let field = "ReferenceError: x is not defined";
+        let run = |error: &str| {
+            let mut out = JsOutput::default();
+            out.absorb(&Outcome { error: Some(error.into()), doc_errors: vec![doc.into()], ..Outcome::default() });
+            out
+        };
+        let mut out = run(field);
+        out.append(run(field));
+        assert_eq!(out.errors, [field, doc, field]);
+        // CodeRabbit on #3985: a field script that throws the document script's text.
+        out.append(run(doc));
+        assert_eq!(out.errors, [field, doc, field, doc]);
+        let alone = run(doc);
+        assert_eq!(alone.errors, [doc, doc], "the field's error and the document script's");
+        let count = |o: &JsOutput| o.errors.iter().filter(|e| *e == doc).count();
+        let mut merged = run(field);
+        merged.append(alone);
+        assert_eq!(count(&merged), 2, "the field's copy stays; the document script's is listed once");
     }
 
     #[test]
