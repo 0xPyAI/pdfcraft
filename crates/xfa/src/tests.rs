@@ -2096,6 +2096,13 @@ fn a_flowed_subform_is_drawn_with_its_border_under_its_content() {
     let f19 = form.pages[1].items.iter().find_map(|i| if let Item::Widget(w) = i { (w.name == "f19").then_some(w.rect) } else { None }).unwrap();
     assert!((f19.y - 43.2).abs() < 0.01, "the second part starts after the top margin: {}", f19.y);
     assert!(form.warnings.is_empty(), "{:?}", form.warnings);
+    // A bottom margin that would run past the content area stops at its edge: 39 quarter-inch
+    // fields end at 738, and 0.4in more would reach 766.8, past 756.
+    let quarter: String = (0..39).map(|i| format!(r#"<field name="q{i}" w="3in" h="0.25in"><ui><textEdit/></ui></field>"#)).collect();
+    let low = format!(r#"<subform name="box" layout="tb" w="7.5in"><border><edge/><fill/></border><margin bottomInset="0.4in"/>{quarter}</subform>"#);
+    let form = lay(&low);
+    let edge = form.pages[0].items.iter().find_map(|i| if let Item::Fill { rect, .. } = i { Some(rect.bottom()) } else { None }).unwrap();
+    assert!((edge - 756.0).abs() < 0.01, "the box ends at the content area's bottom: {edge}");
     // The margins come back without a border too.
     let bare = format!(r#"<subform name="box" layout="tb" w="7.5in"><margin topInset="0.1in" bottomInset="0.2in"/>{many}</subform>"#);
     let form = lay(&bare);

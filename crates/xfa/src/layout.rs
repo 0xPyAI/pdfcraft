@@ -691,7 +691,10 @@ impl Layouter<'_> {
         if b.fill().is_none() && b.visible_edges() == [false; 4] {
             return Ok(());
         }
-        let (_, end, _) = self.cursor();
+        let (area, end, _) = self.cursor();
+        // The bottom margin stays in the content area, as at a break; content that itself runs
+        // past it keeps the border round it.
+        let end = end.min(area.bottom()).max(end - f.margin.bottom);
         let page = self.pages.len().saturating_sub(1);
         if !self.on_area(&f.part) {
             f.lost = true;
