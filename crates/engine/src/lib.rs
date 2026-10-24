@@ -1999,6 +1999,8 @@ pub const EDIT_LABELS: &[&str] = &[
     "Insert pages from {name}",
     "Insert pages from {name} — 1 field renamed",
     "Insert pages from {name} — fields renamed",
+    "Attach {name}",
+    "Delete attachment {key}",
     "Add bookmark",
     "Rename bookmark",
     "Delete bookmark",
