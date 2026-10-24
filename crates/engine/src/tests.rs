@@ -7586,3 +7586,53 @@ fn a_page_truncated_for_forms_and_pictures_is_listed_once() {
     assert!(pages[0].images.is_empty(), "the picture is past the budget");
     assert_eq!(truncated, [0]);
 }
+
+/// ISO 32000-2 Tables 166 and 183, drawn on the page: a square without an appearance whose
+/// `/Border [0 0 3 [6 3]]` names its width before a dash array is stroked 3 pt wide and dashed
+/// (it was 1 pt and solid), and a caret with `/Sy /P` shows a ¶ to its right.
+#[test]
+fn legacy_border_dashes_and_the_caret_paragraph_symbol_are_drawn() {
+    let original = Arc::new(pdf_with_annots(&[
+        b"<< /Type /Annot /Subtype /Square /Rect [20 180 120 280] /Border [0 0 3 [6 3]] /C [1 0 0] >>",
+        b"<< /Type /Annot /Subtype /Caret /Rect [20 20 80 80] /Sy /P /C [0 0 1] >>",
+    ]));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("noap.pdf", None, original, None).expect("opens");
+    let p = shown(&s, id, 0);
+    let px = |x: u32, y: u32| p.rgba[((y * p.width + x) * 4) as usize..][..4].to_vec();
+    // y down: the bottom edge's stroke is centred 1.5 pt inside /Rect, on row 118.
+    let row: Vec<Vec<u8>> = (24..116).map(|x| px(x, 118)).collect();
+    let red = row.iter().filter(|c| c[0] > 200 && c[1] < 80).count();
+    let white = row.iter().filter(|c| c[1] > 200).count();
+    assert!(red > 40 && white > 15, "3 pt and dashed: {red} red, {white} white");
+    // The ¶ sits in the right part of the caret's /Rect, where the caret no longer reaches.
+    let blue = (250..270).flat_map(|y| (68..80).map(move |x| (x, y))).filter(|&(x, y)| {
+        let c = px(x, y);
+        c[2] > 150 && c[0] < 100
+    });
+    assert!(blue.count() > 20, "the pilcrow is drawn beside the caret");
+}
+
+/// A one-page 200 × 300 document whose page lists `annots` (objects 4, 5, …).
+fn pdf_with_annots(annots: &[&[u8]]) -> Vec<u8> {
+    let list: String = (0..annots.len()).map(|i| format!("{} 0 R ", i + 4)).collect();
+    let page = format!("<< /Type /Page /Parent 2 0 R /Annots [{list}] >>");
+    let mut objs: Vec<&[u8]> =
+        vec![b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>", page.as_bytes()];
+    objs.extend_from_slice(annots);
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        bytes.extend_from_slice(o);
+        bytes.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    bytes
+}

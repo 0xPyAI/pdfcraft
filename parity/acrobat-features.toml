@@ -3572,8 +3572,8 @@ milestone = "M5"
 status = "partial"
 commands = []
 tools = ["comment_add"]
-evidence = ["crates/annot/src/tests.rs::every_tool_creates_a_drawable_comment", "crates/engine/src/tests.rs::highlight_multiplies_over_text", "crates/annot/src/tests.rs::polygons_clouds_connected_lines_callouts_and_carets_are_drawn"]
-notes = "appearances for every type PdfCraft creates (highlight multiplies; clouds, callouts, stamps, polygons, carets); rich text not yet"
+evidence = ["crates/annot/src/tests.rs::every_tool_creates_a_drawable_comment", "crates/engine/src/tests.rs::highlight_multiplies_over_text", "crates/annot/src/tests.rs::polygons_clouds_connected_lines_callouts_and_carets_are_drawn", "crates/annot/src/tests.rs::legacy_border_width_and_dash_are_drawn", "crates/annot/src/tests.rs::ink_draws_its_border_style_dashes", "crates/annot/src/tests.rs::a_caret_with_a_paragraph_symbol_draws_the_pilcrow", "crates/engine/src/tests.rs::legacy_border_dashes_and_the_caret_paragraph_symbol_are_drawn"]
+notes = "appearances for every type PdfCraft creates (highlight multiplies; clouds, callouts, stamps, polygons, carets). Comments other files carry without an appearance are drawn from their dictionaries the same way, including a legacy /Border width and dash array (ISO 32000-2 Table 166), dashed ink (/BS, Table 182) and a caret's ¶ for /Sy /P (Table 183). Not yet: rich text, beveled, inset and underline border styles, sound icons"
 
 [[feature]]
 id = "comment.sticky-note"
