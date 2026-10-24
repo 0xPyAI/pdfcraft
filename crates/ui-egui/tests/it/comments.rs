@@ -1391,6 +1391,47 @@ fn page_groups_collapse_and_expand() {
     assert!(shown(&h, "First page note") && shown(&h, "Second page note"), "every page is open again");
 }
 
+/// Flatten comments is in the page's right-click menu and in the Comments panel's "…" menu: the
+/// comments go into the page, one undo step brings them back.
+#[test]
+fn flatten_comments_from_the_page_menu_and_the_panel_menu() {
+    let mut h = harness(|app| {
+        app.set_option("panel", "comments").unwrap();
+        app.set_option("quick", "select").unwrap();
+    });
+    let shape = pdfcraft_engine::Shape::Rectangle { rect: [20.0, 20.0, 80.0, 60.0] };
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
+        page: 0,
+        style: pdfcraft_engine::Style::default_for(&shape),
+        shape,
+        contents: "Reviewed".into(),
+        author: "Tester".into(),
+    }));
+    h.state_mut().views[0].comments.selected = None;
+    settle(&mut h);
+    assert_eq!(comments(&h).len(), 1);
+
+    // Right-click on the page, away from the comment.
+    let p = at(&h, 200.0, 150.0);
+    h.hover_at(p);
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: true, modifiers: Default::default() });
+    h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: false, modifiers: Default::default() });
+    h.run_steps(3);
+    h.get_by_label("Flatten comments").click();
+    h.run_steps(4);
+    assert!(comments(&h).is_empty(), "the comment went into the page");
+    h.state_mut().undo();
+    h.run_steps(3);
+    assert_eq!(comments(&h).len(), 1, "one undo step brings it back");
+
+    h.get_by_label("More options").click();
+    h.run_steps(2);
+    h.get_by_label("Flatten comments").click();
+    h.run_steps(4);
+    assert!(comments(&h).is_empty(), "the panel's menu flattens too");
+}
+
 #[test]
 fn comments_take_checkmarks_lock_hide_and_summarize() {
     let mut h = harness(|app| {
