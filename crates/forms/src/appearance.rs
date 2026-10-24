@@ -156,13 +156,41 @@ impl TextBox {
         if self.fits(after) {
             return (after.to_string(), p + inserted.len());
         }
-        // The most of the insertion that fits: text only grows as it gets longer, so halve.
-        let (mut lo, mut hi) = (0, inserted.len());
-        while lo < hi {
-            let mid = lo + (hi - lo).div_ceil(2);
-            if self.fits(&with(mid)) { lo = mid } else { hi = mid - 1 }
+        // The longest of the insertion's first `from..=to` characters that fits, halving: in one
+        // font a longer text is never narrower. `None` when even `from` doesn't fit.
+        let longest = |from: usize, to: usize| -> Option<usize> {
+            if from > to || !self.fits(&with(from)) {
+                return None;
+            }
+            let (mut lo, mut hi) = (from, to);
+            while lo < hi {
+                let mid = lo + (hi - lo).div_ceil(2);
+                if self.fits(&with(mid)) { lo = mid } else { hi = mid - 1 }
+            }
+            Some(lo)
+        };
+        // The font can change once, from the form's own to Helvetica, at the first inserted
+        // character the form's font can't show: each side of that point is searched on its own.
+        let n = inserted.len();
+        let kept = match self.font_switch(prefix, inserted, suffix) {
+            Some(t) => longest(0, t.saturating_sub(1)).into_iter().chain(longest(t, n)).max(),
+            None => longest(0, n),
         }
-        (with(lo), p + lo)
+        .unwrap_or(0);
+        (with(kept), p + kept)
+    }
+
+    /// Where an insertion changes the font [`Self::fits`] measures in: how much of `inserted`
+    /// (between `prefix` and `suffix`) first includes a character the form's own font can't show,
+    /// when everything around it can be shown in that font. `None` when the font never changes.
+    fn font_switch(&self, prefix: &[char], inserted: &[char], suffix: &[char]) -> Option<usize> {
+        let enc = self.font.as_ref().filter(|_| !self.password)?;
+        // As `fits` decides: a multi-line value is checked line by line, its breaks aside.
+        let shows = |c: &char| (self.multiline && matches!(c, '\n' | '\r')) || enc.can_encode(&c.to_string());
+        if !prefix.iter().chain(suffix).all(shows) {
+            return None;
+        }
+        inserted.iter().position(|c| !shows(c)).map(|i| i + 1)
     }
 }
 

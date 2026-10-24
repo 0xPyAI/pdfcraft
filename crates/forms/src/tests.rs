@@ -472,6 +472,34 @@ fn an_edit_to_a_full_field_keeps_what_fits() {
     assert!(kept.starts_with("SW") && kept.ends_with('t') && tb.fits(&kept), "{kept}");
 }
 
+/// When the field's own font can't show a character of a paste, the text from there on is drawn
+/// in Helvetica, which can be narrower: the longest part that fits may come after that point, and
+/// is still the one kept.
+#[test]
+fn an_edit_keeps_the_longest_part_that_fits_across_a_change_of_font() {
+    // A subset font holding only A, 1 em wide: 12 pt an A at 12 pt, against Helvetica's 8 pt.
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R] >>".into(),
+        "<< /Fields [6 0 R] /DA (/Wide 12 Tf 0 g) /DR << /Font << /Wide 5 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /ABCDEF+Wide /FirstChar 65 /LastChar 65 /Widths [1000] /Encoding /WinAnsiEncoding >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (one) /DA (/Wide 12 Tf 0 g) /Rect [50 760 150 780] /P 3 0 R >>".into(),
+    ];
+    let doc = document(&objs);
+    let all = fields(&doc);
+    let f = field(&all, "one");
+    let tb = appearance::text_box(&doc, f, &f.widgets[0]);
+    // 96 pt inside: 8 A's in the subset font, or 11 characters (8.004 pt each) once a B brings
+    // Helvetica in.
+    assert!(tb.fits(&"A".repeat(8)) && !tb.fits(&"A".repeat(9)));
+    let pasted = format!("{}B{}", "A".repeat(10), "A".repeat(30));
+    let (kept, caret) = tb.fitted_edit("", &pasted);
+    assert_eq!(kept, format!("{}B", "A".repeat(10)), "the 11 characters that fit in Helvetica, not the 8 before the B");
+    assert!(!tb.fits(&format!("{}BA", "A".repeat(10))), "and no more");
+    assert_eq!(caret, 11);
+}
+
 /// Issue #1323: a text field without a format keeps a whitespace-only value as typed; only an
 /// empty value clears it.
 #[test]
