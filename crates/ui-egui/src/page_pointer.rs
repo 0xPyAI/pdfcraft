@@ -275,7 +275,7 @@ mod tests {
     ];
 
     /// egui's raw pointer state: where the pointer is, and which buttons are down or went down.
-    const RAW_READS: [&str; 15] = [
+    const RAW_READS: [&str; 21] = [
         "hover_pos()",
         "interact_pos()",
         "latest_pos()",
@@ -291,6 +291,13 @@ mod tests {
         "any_pressed()",
         "any_released()",
         "any_click()",
+        // These take the button, so they match up to the parenthesis.
+        "button_down(",
+        "button_pressed(",
+        "button_released(",
+        "button_clicked(",
+        "button_double_clicked(",
+        "button_triple_clicked(",
     ];
 
     /// Functions in the page modules that are not page input and read egui's pointer state
