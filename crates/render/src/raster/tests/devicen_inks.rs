@@ -1,7 +1,7 @@
 //! #4260: a DeviceN colour with more inks than the content parser held operands for, and a
 //! colour whose tint transform cannot be evaluated (ISO 32000-2 §8.6.6.5).
 //!
-//! The content parser kept at most ten operands per operator (vendored hayro-syntax patch 26):
+//! The content parser kept at most ten operands per operator (vendored hayro-syntax patch 28):
 //! the eleventh operand of a twelve-ink `scn` ended the whole content stream, so the page came
 //! out blank with no error. A tint transform that cannot be evaluated painted the alternate
 //! space's initial colour without a word (vendored hayro-interpret patch 55): it now says so.

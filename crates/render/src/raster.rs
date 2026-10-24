@@ -8170,7 +8170,7 @@ trailer << /Root 1 0 R >>
     mod default_colour_spaces;
 
     // #4260: DeviceN colours with many inks, and tint transforms that cannot be evaluated
-    // (vendored hayro-syntax patch 26, hayro-interpret patch 55).
+    // (vendored hayro-syntax patch 28, hayro-interpret patch 55).
     mod devicen_inks;
 
     /// #3109 / #3116: clipping-only text (`7 Tr`) installs a clip for subsequent painting

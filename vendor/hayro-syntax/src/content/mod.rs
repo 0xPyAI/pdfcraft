@@ -50,10 +50,10 @@ use smallvec::SmallVec;
 // 6 operands are used for example for ctm or cubic curves,
 // but anything above should be pretty rare (only for example for
 // DeviceN color spaces, or invalid PDF files). So we settle on 10.
-// PdfCraft patch (26): this is now only how many operands are held inline; see `MAX_OPERANDS`.
+// PdfCraft patch (28): this is now only how many operands are held inline; see `MAX_OPERANDS`.
 const OPERANDS_THRESHOLD: usize = 10;
 
-/// PdfCraft patch (26): the most operands one instruction keeps. The stack held ten, and the
+/// PdfCraft patch (28): the most operands one instruction keeps. The stack held ten, and the
 /// eleventh operand of an instruction ended the whole content stream, so a DeviceN colour of
 /// eleven or more inks (ISO 32000-2 §8.6.6.5 allows "an arbitrary number of colour
 /// components") blanked the rest of the page (#4260). An `SCN`/`scn` for the largest DeviceN
@@ -445,7 +445,7 @@ impl<'a> UntypedIter<'a> {
 
                 self.operator = Some(operator);
                 self.committed = self.reader.offset();
-                // PdfCraft patch (26): operands in reading order, if some were dropped.
+                // PdfCraft patch (28): operands in reading order, if some were dropped.
                 self.stack.settle();
                 return Some(Instruction {
                     operands: &self.stack,
@@ -605,12 +605,12 @@ impl<'b, 'a> Instruction<'b, 'a> {
 pub struct Stack<'a> {
     // TODO: Explore using an object pool to avoid repeatedly
     // allocating/deallocating objects.
-    // PdfCraft patch (26): up to `MAX_OPERANDS` operands, the first `OPERANDS_THRESHOLD` inline.
+    // PdfCraft patch (28): up to `MAX_OPERANDS` operands, the first `OPERANDS_THRESHOLD` inline.
     data: SmallVec<[Object<'a>; OPERANDS_THRESHOLD]>,
-    /// PdfCraft patch (26): once `data` is full, the slot of its oldest operand, which the next
+    /// PdfCraft patch (28): once `data` is full, the slot of its oldest operand, which the next
     /// operand replaces. Always 0 while the stack is not full, and after `settle`.
     oldest: usize,
-    /// PdfCraft patch (26): whether operands were dropped since the stack was last settled.
+    /// PdfCraft patch (28): whether operands were dropped since the stack was last settled.
     dropped: bool,
 }
 
@@ -630,7 +630,7 @@ impl<'a> Stack<'a> {
         }
     }
 
-    /// PdfCraft patch (26): push an operand, dropping the oldest once `MAX_OPERANDS` are held
+    /// PdfCraft patch (28): push an operand, dropping the oldest once `MAX_OPERANDS` are held
     /// (see `MAX_OPERANDS`). Never fails: it used to, and the failure ended the content stream.
     fn push(&mut self, operand: Object<'a>) -> Option<()> {
         if self.data.len() < MAX_OPERANDS {
@@ -646,7 +646,7 @@ impl<'a> Stack<'a> {
         Some(())
     }
 
-    /// PdfCraft patch (26): put the operands back in the order they were read, oldest first,
+    /// PdfCraft patch (28): put the operands back in the order they were read, oldest first,
     /// after `push` dropped some. Called before the instruction is handed out.
     fn settle(&mut self) {
         if self.dropped {
@@ -703,7 +703,7 @@ impl Debug for Stack<'_> {
 
 impl Clone for Stack<'_> {
     fn clone(&self) -> Self {
-        // PdfCraft patch (26): a plain copy (pushing each operand again could no longer fail).
+        // PdfCraft patch (28): a plain copy (pushing each operand again could no longer fail).
         Self {
             data: self.data.clone(),
             oldest: self.oldest,
