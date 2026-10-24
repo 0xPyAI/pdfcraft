@@ -2129,6 +2129,11 @@ fn a_flowed_subform_is_drawn_with_its_border_under_its_content() {
     let part = form.pages[1].items.iter().find_map(|i| if let Item::Fill { rect, .. } = i { Some(*rect) } else { None }).expect("the second part");
     assert!(part.y <= tall.y + 0.01 && part.bottom() >= tall.bottom() - 0.01, "the border holds the field: {part:?} {tall:?}");
     assert!(form.warnings.is_empty(), "{:?}", form.warnings);
+    // The same field first in the section, at the top of the page: after the section's own top
+    // margin it runs past the bottom, so the section has no border round it, and says so.
+    let form = lay(&boxed(r#"<field name="tall" w="3in" h="715pt"><ui><textEdit/></ui></field>"#));
+    assert!(form.pages.iter().all(|p| !p.items.iter().any(|i| matches!(i, Item::Fill { .. }))), "no fill drawn");
+    assert_eq!(form.warnings.iter().filter(|w| w.contains("bordered section")).count(), 1, "{:?}", form.warnings);
 }
 
 /// A flowed table a page break cuts between its rows gets a closed border round its part on
@@ -2162,6 +2167,67 @@ fn a_flowed_table_cut_between_its_rows_keeps_its_border_on_each_page() {
     assert!((second[0].y - 36.0).abs() < 0.01 && (second[0].bottom() - (36.0 + 7.2 + 9.0 * 21.6 + 14.4)).abs() < 0.01, "{:?}", second[0]);
     let head = form.pages[1].items.iter().find_map(|i| if let Item::Text(t) = i { (t.text == "Head").then_some(t.baseline) } else { None });
     assert!(head.is_some_and(|b| b > 43.2 && b < 64.8), "the leader starts the second part after its top margin: {head:?}");
+    assert!(form.warnings.is_empty(), "{:?}", form.warnings);
+}
+
+/// A flowed table's overflow leader and the row that moved are given room together on the new
+/// page; a leader and row too tall for any page, and a first row taller than its page, cost the
+/// table its border, with the warning, rather than a border round what runs off the page.
+#[test]
+fn a_tables_leader_and_oversized_rows_fit_its_border_or_lose_it() {
+    let row = |name: &str, h: &str| {
+        format!(r#"<subform name="{name}" layout="row"><draw name="{name}a" h="{h}"><value><text>{name}</text></value></draw></subform>"#)
+    };
+    let table = |rows: &str| {
+        format!(
+            r#"<subform name="body" layout="tb" w="7.5in"><subform name="grid" layout="table" columnWidths="3in" w="3in"><border><edge/><fill/></border><margin topInset="0.1in"/><overflow leader="head"/>{}{rows}</subform></subform>"#,
+            row("head", "0.3in")
+        )
+    };
+    let lay = |rows: &str| layout_xml(&one_area_form(r#"layout="tb""#, &table(rows))).unwrap();
+    let fills = |form: &Form, page: usize| -> Vec<Rect> {
+        form.pages[page].items.iter().filter_map(|i| if let Item::Fill { rect, .. } = i { Some(*rect) } else { None }).collect()
+    };
+    let small: String = (0..10).map(|i| row(&format!("r{i}"), "0.3in")).collect();
+    // A 695pt row after ten small ones moves; it and the 21.6pt leader leave 3.4pt of the 720pt
+    // page for the top margin, so the row ends at the content area's bottom, in the border.
+    let form = lay(&(small.clone() + &row("big", "695pt")));
+    assert_eq!(form.pages.len(), 2);
+    let part = fills(&form, 1);
+    assert!(part.len() == 1 && (part[0].y - 36.0).abs() < 0.01 && (part[0].bottom() - 756.0).abs() < 0.01, "{part:?}");
+    assert!(form.warnings.is_empty(), "{:?}", form.warnings);
+    // 710pt and the leader don't fit any page: no border, one warning.
+    let form = lay(&(small + &row("big", "710pt")));
+    assert!(form.pages.iter().enumerate().all(|(p, _)| fills(&form, p).is_empty()), "no fill drawn");
+    assert_eq!(form.warnings.iter().filter(|w| w.contains("bordered section")).count(), 1, "{:?}", form.warnings);
+    // A first row taller than the page: no border round it, one warning.
+    let form = lay(&row("tall", "800pt"));
+    assert!(fills(&form, 0).is_empty(), "{:?}", fills(&form, 0));
+    assert_eq!(form.warnings.iter().filter(|w| w.contains("bordered section")).count(), 1, "{:?}", form.warnings);
+}
+
+/// A child's own page break (breakBefore, breakAfter) breaks the flowed subform around it as a
+/// break between children does: a closed part on each page, no warning.
+#[test]
+fn a_childs_page_break_keeps_the_border_around_it_on_each_page() {
+    let field = |name: &str| format!(r#"<field name="{name}" w="3in" h="0.5in"><ui><textEdit/></ui></field>"#);
+    let body = format!(
+        r#"<subform name="body" layout="tb" w="7.5in"><subform name="box" layout="tb" w="7.5in"><border><edge/><fill/></border><margin topInset="0.1in" bottomInset="0.2in"/>{}<subform name="s1" layout="tb"><breakBefore targetType="pageArea"/>{}</subform><subform name="s2" layout="tb"><breakAfter targetType="pageArea"/>{}</subform>{}</subform></subform>"#,
+        field("a"),
+        field("b"),
+        field("c"),
+        field("d")
+    );
+    let form = layout_xml(&one_area_form(r#"layout="tb""#, &body)).unwrap();
+    assert_eq!(form.pages.len(), 3, "a, then b and c, then d");
+    for (page, fields) in [(0, 1.0), (1, 2.0), (2, 1.0)] {
+        let fills: Vec<Rect> =
+            form.pages[page].items.iter().filter_map(|i| if let Item::Fill { rect, .. } = i { Some(*rect) } else { None }).collect();
+        let lines = form.pages[page].items.iter().filter(|i| matches!(i, Item::Line { .. })).count();
+        assert_eq!((fills.len(), lines), (1, 4), "page {}: one closed part", page + 1);
+        // The top margin, its fields, the bottom margin.
+        assert!((fills[0].y - 36.0).abs() < 0.01 && (fills[0].h - (7.2 + fields * 36.0 + 14.4)).abs() < 0.01, "page {}: {:?}", page + 1, fills[0]);
+    }
     assert!(form.warnings.is_empty(), "{:?}", form.warnings);
 }
 

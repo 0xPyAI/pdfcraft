@@ -200,8 +200,9 @@ struct Frame {
     border: Option<Border>,
     part: FlowMark,
     parts: Vec<(usize, usize, Rect)>,
-    /// The flow left a part's content area other than at a break between children (an item cut
-    /// across pages, a table's own break): the border is left out.
+    /// Something inside didn't fit its content area: an item cut across areas, or one placed past
+    /// the area's bottom (a table row taller than an area, an overflow leader and the row after it
+    /// that don't fit together). The border is left out ([`Layouter::finish_frame`]).
     lost: bool,
 }
 
@@ -650,10 +651,11 @@ impl Layouter<'_> {
     /// another viewer breaks such a section on a synthetic form: each one's part here ends after
     /// its content and its bottom margin (the innermost first, each inside the next), the flow
     /// moves to the next content area, and each starts a new part there after its top margin
-    /// (the outermost first). The top margins take only what the `need` points of the child that
-    /// comes next leave of the new area: a child that fits a fresh area but not after the margins
-    /// would otherwise run past its bottom, out of its border.
-    fn break_frames(&mut self, need: f64) -> Result<(), XfaError> {
+    /// (the outermost first). The top margins take only what the `need` points of what comes next
+    /// leave of the new area: a child that fits a fresh area but not after the margins would
+    /// otherwise run past its bottom, out of its border. `to_page` moves to a new page instead (a
+    /// child's own page break), which breaks the subforms around it the same way.
+    fn break_frames(&mut self, need: f64, to_page: bool) -> Result<(), XfaError> {
         let (rect, mut y, _) = self.cursor();
         let page = self.pages.len().saturating_sub(1);
         let here: Vec<bool> = self.frames.iter().map(|f| self.on_area(&f.part)).collect();
@@ -666,7 +668,11 @@ impl Layouter<'_> {
                 f.parts.push((page, f.part.items, Rect::new(f.x, f.part.y, f.w, y - f.part.y)));
             }
         }
-        self.next_area()?;
+        if to_page {
+            self.new_page()?;
+        } else {
+            self.next_area()?;
+        }
         let (rect, y, _) = self.cursor();
         let mut room = (rect.bottom() - y - need).max(0.0);
         for i in 0..self.frames.len() {
@@ -683,17 +689,16 @@ impl Layouter<'_> {
 
     /// Close flowed subform `f` once its content is placed: its last part ends where the flow
     /// is, and its border (edges and fill) is drawn round each part, closed on every side, under
-    /// that part's content. One whose flow left a content area other than at a break between its
-    /// children (an item of its own cut across pages) is drawn without its border, and the layout
-    /// says so.
+    /// that part's content. One holding something that didn't fit its content area ([`Frame::lost`])
+    /// is drawn without its border, and the layout says so.
     fn finish_frame(&mut self, mut f: Frame) -> Result<(), XfaError> {
         let Some(b) = f.border.take() else { return Ok(()) };
         if b.fill().is_none() && b.visible_edges() == [false; 4] {
             return Ok(());
         }
         let (area, end, _) = self.cursor();
-        // The bottom margin stays in the content area, as at a break; content that itself runs
-        // past it keeps the border round it.
+        // The bottom margin stays in the content area, as at a break; content that itself ran
+        // past it has already cost the section its border ([`Self::overflowed`]).
         let end = end.min(area.bottom()).max(end - f.margin.bottom);
         let page = self.pages.len().saturating_sub(1);
         if !self.on_area(&f.part) {
@@ -702,7 +707,7 @@ impl Layouter<'_> {
             f.parts.push((page, f.part.items, Rect::new(f.x, f.part.y, f.w, end - f.part.y)));
         }
         if f.lost {
-            self.warn_once("a bordered section whose own item a page break cuts is drawn without its border");
+            self.warn_once("a bordered section holding an item that doesn't fit on its page is drawn without its border");
             return Ok(());
         }
         // The last part first: a part's place on its page stays where it was found.
@@ -744,19 +749,33 @@ impl Layouter<'_> {
             c.y += dy.max(0.0);
             c.placed = true;
         }
+        let (_, y, _) = self.cursor();
+        self.overflowed(y);
     }
 
-    /// Make room for `h`: stay, or move to the next content area / page. Returns whether a
-    /// break happened. Something that fits a fresh area breaks the flowed subforms it is in with
-    /// it ([`Self::break_frames`]), a table's rows included; one taller than an area just moves
-    /// on, and those subforms are drawn without their border ([`Self::finish_frame`]).
-    fn make_room(&mut self, h: f64) -> Result<bool, XfaError> {
+    /// Something was placed down to `bottom`: past the content area's bottom, the flowed subforms
+    /// it is inside can't hold it in a part, and are drawn without their border.
+    fn overflowed(&mut self, bottom: f64) {
+        let (rect, _, _) = self.cursor();
+        if bottom > rect.bottom() + 0.01 {
+            for f in &mut self.frames {
+                f.lost = true;
+            }
+        }
+    }
+
+    /// Make room for `h`, with `after` more drawn before it should it move (a table's overflow
+    /// leader): stay, or move to the next content area / page. Returns whether a break happened.
+    /// Something that fits a fresh area breaks the flowed subforms it is in with it
+    /// ([`Self::break_frames`]), a table's rows included; one taller than an area just moves on,
+    /// and those subforms are drawn without their border ([`Self::finish_frame`]).
+    fn make_room(&mut self, h: f64, after: f64) -> Result<bool, XfaError> {
         let (rect, y, placed) = self.cursor();
         if y + h <= rect.bottom() + 0.01 || !placed {
             return Ok(false);
         }
         if h <= rect.h + 0.01 {
-            self.break_frames(h)?;
+            self.break_frames(h + after, false)?;
         } else {
             self.next_area()?;
         }
@@ -769,7 +788,7 @@ impl Layouter<'_> {
     fn flow_block(&mut self, node: &Node, x: f64, (w, h): (f64, f64), ctx: &Ctx, depth: usize, sib: usize) -> Result<(), XfaError> {
         let (rect, y, _) = self.cursor();
         if y + h > rect.bottom() + 0.01 && h <= rect.h + 0.01 {
-            self.make_room(h)?;
+            self.make_room(h, 0.0)?;
         }
         let (rect, y, _) = self.cursor();
         let first = self.pages.last().map_or(0, |p| p.items.len());
@@ -888,6 +907,7 @@ impl Layouter<'_> {
                     c.y = (end - shift).min(c.rect.bottom()).max(c.y);
                     c.placed = true;
                 }
+                self.overflowed(end - shift);
                 return Ok(());
             }
             rest = below;
@@ -914,7 +934,7 @@ impl Layouter<'_> {
         let Node::Subform(sf) = node else { return Ok(()) };
         self.check_measures()?;
         if sf.break_before_page && self.page_has_flow() {
-            self.new_page()?;
+            self.break_frames(0.0, true)?;
         }
         // Data adds instances of a repeating subform (rows added in another viewer).
         let instances = self.instances(node, &ctx.som);
@@ -972,7 +992,7 @@ impl Layouter<'_> {
             }
         }
         if sf.break_after_page {
-            self.new_page()?;
+            self.break_frames(0.0, true)?;
         }
         Ok(())
     }
@@ -989,6 +1009,12 @@ impl Layouter<'_> {
         let cols = self.columns(sf, inner_w);
         let leader =
             sf.overflow_leader.as_ref().and_then(|name| sf.children.iter().position(|c| c.common().name.as_deref() == Some(name) && is_row(c)));
+        // The overflow leader starts each part after the first, before the row that moved.
+        let lead = leader.and_then(|li| match sf.children.get(li) {
+            Some(Node::Subform(l)) => Some((li, l.as_ref())),
+            _ => None,
+        });
+        let lead_h = lead.map_or(0.0, |(_, l)| self.row_height(l, &cols, inner_w, ctx, depth + 1));
         let sibs = SomIndices::of(&sf.children);
         for (ci, child) in sf.children.iter().enumerate() {
             if !child.common().presence.occupies() {
@@ -1003,15 +1029,13 @@ impl Layouter<'_> {
                 self.warn_truncated(child, &ctx.som, instances);
                 for inst in 0..instances {
                     let h = self.row_height(row, &cols, inner_w, ctx, depth + 1);
-                    if self.make_room(h)?
-                        && let Some(li) = leader
-                        && li != ci
-                        && let Some(Node::Subform(l)) = sf.children.get(li)
+                    let led = lead.filter(|(li, _)| *li != ci);
+                    if self.make_room(h, led.map_or(0.0, |_| lead_h))?
+                        && let Some((li, l)) = led
                     {
-                        let lh = self.row_height(l, &cols, inner_w, ctx, depth + 1);
                         let (_, y, _) = self.cursor();
-                        self.draw_row(l, &cols, Rect::new(x, y, inner_w, lh), ctx, depth + 1, sibs.at(li))?;
-                        self.place(lh);
+                        self.draw_row(l, &cols, Rect::new(x, y, inner_w, lead_h), ctx, depth + 1, sibs.at(li))?;
+                        self.place(lead_h);
                     }
                     let (_, y, _) = self.cursor();
                     self.draw_row(row, &cols, Rect::new(x, y, inner_w, h), ctx, depth + 1, csib + inst)?;
