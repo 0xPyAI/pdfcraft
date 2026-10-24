@@ -1612,7 +1612,6 @@ impl PdfCraftApp {
         self.dialog_epoch
     }
 
-    /// Save an attachment to disk, or open a PDF attachment in a new tab.
     /// Edit ▸ Attach a file…: choose a file, then attach it to the active document and show
     /// the Attachments panel with it.
     pub fn attach_file_dialog(&mut self) {
@@ -1646,6 +1645,7 @@ impl PdfCraftApp {
         }
     }
 
+    /// Save an attachment to disk, or open a PDF attachment in a new tab.
     pub fn attachment_action(&mut self, doc: DocId, index: usize, open: bool) {
         let Some(d) = self.session.get(doc) else { return };
         let Some(att) = d.info.attachments.get(index).cloned() else { return };
