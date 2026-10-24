@@ -4396,6 +4396,24 @@ fn content_index_out_of_range_is_an_error_not_a_panic() {
     assert_eq!(ok(&mut a, "content_list", json!({ "doc": doc }))["count"], 1);
 }
 
+/// Character spacing on added text (#4245): set when adding or restyling, listed back, and refused
+/// out of range or on images.
+#[test]
+fn added_text_takes_character_spacing() {
+    let dir = workdir("content-char-spacing");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "page_add_text", json!({ "doc": doc, "page": 1, "text": "Spaced", "at": [20, 20], "char_spacing": 2 }));
+    assert_eq!(ok(&mut a, "content_list", json!({ "doc": doc }))["items"][0]["char_spacing"], 2.0);
+    ok(&mut a, "content_update", json!({ "doc": doc, "page": 1, "index": 1, "char_spacing": -0.5 }));
+    assert_eq!(ok(&mut a, "content_list", json!({ "doc": doc }))["items"][0]["char_spacing"], -0.5);
+    for bad in [json!(1000), json!(-1000), json!("wide")] {
+        let args = json!({ "doc": doc, "page": 1, "index": 1, "char_spacing": bad });
+        assert!(matches!(a.call("content_update", &args), Err(ToolError::InvalidArgs(_))), "{bad}");
+    }
+    assert_eq!(ok(&mut a, "content_list", json!({ "doc": doc }))["items"][0]["char_spacing"], -0.5);
+}
+
 fn added_rotation_image(dir: &Path) {
     let mut png = Vec::new();
     let mut enc = png::Encoder::new(&mut png, 2, 1);

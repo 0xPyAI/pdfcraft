@@ -2,7 +2,7 @@
 //! move/resize/retype/restyle it, delete it. Geometry is in points from the top-left of the
 //! displayed page (y down), like every other tool.
 
-use pdfcraft_engine::{AddedContent, AddedText, Edit, FontFamily, TextAlign};
+use pdfcraft_engine::{ADDED_CHAR_SPACING_LIMIT, AddedContent, AddedText, Edit, FontFamily, TextAlign};
 use serde_json::{Value, json};
 
 use crate::comments::parse_color;
@@ -61,6 +61,12 @@ fn style(a: &Args, t: &mut AddedText) -> Result<()> {
             other => return Err(bad(format!("unknown align {other:?}"))),
         };
     }
+    if let Some(c) = a.opt_num("char_spacing")? {
+        if !(-ADDED_CHAR_SPACING_LIMIT..=ADDED_CHAR_SPACING_LIMIT).contains(&c) {
+            return Err(bad(format!("char_spacing must be between -{ADDED_CHAR_SPACING_LIMIT} and {ADDED_CHAR_SPACING_LIMIT} points")));
+        }
+        t.char_spacing = c;
+    }
     Ok(())
 }
 
@@ -85,6 +91,7 @@ impl Automation {
                         v["size"] = json!(t.size);
                         v["bold"] = json!(t.bold);
                         v["italic"] = json!(t.italic);
+                        v["char_spacing"] = json!(t.char_spacing);
                     }
                     AddedContent::Image(_) => v["type"] = json!("image"),
                 }
@@ -164,8 +171,8 @@ impl Automation {
                 if a.get("text").is_some() {
                     return Err(bad("images have no text"));
                 }
-                if ["font", "size", "bold", "italic", "color", "align"].iter().any(|k| a.get(k).is_some()) {
-                    return Err(bad("font, size, bold, italic, color and align apply to text"));
+                if ["font", "size", "bold", "italic", "color", "align", "char_spacing"].iter().any(|k| a.get(k).is_some()) {
+                    return Err(bad("font, size, bold, italic, color, align and char_spacing apply to text"));
                 }
                 if let Some(deg) = a.opt_int("rotate")? {
                     if deg.rem_euclid(90) != 0 {

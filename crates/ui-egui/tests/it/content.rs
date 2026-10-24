@@ -763,6 +763,27 @@ fn the_text_editor_aligns_a_narrow_box_to_its_own_edge() {
     );
 }
 
+/// Added text takes character spacing from Format text (#4245), typed like a paragraph's; its
+/// line spacing and horizontal scale stay disabled until added text has them.
+#[test]
+fn format_text_sets_character_spacing_for_added_text() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    let mut h = harness();
+    assert!(h.state_mut().execute("edit.text"));
+    h.run_steps(3);
+    let disabled = |h: &Harness<'static, PdfCraftApp>, label: &str| h.get_by_role_and_label(Role::SpinButton, label).accesskit_node().is_disabled();
+    assert!(disabled(&h, "Horizontal scale"), "added text has no scale yet");
+    assert!(!disabled(&h, "Character spacing"), "added text takes character spacing");
+    h.get_by_role_and_label(Role::SpinButton, "Character spacing").click();
+    h.run_steps(2);
+    h.event(egui::Event::Text("2.5".into()));
+    h.run_steps(1);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(h.state().text_style.char_spacing, 2.5);
+}
+
 /// Where a mode bar tab is, by its label.
 fn mode_tab(h: &Harness<'static, PdfCraftApp>, label: &str) -> egui::Rect {
     h.get_all_by_role_and_label(egui::accesskit::Role::Button, label).map(|n| n.rect()).find(|r| r.bottom() < 120.0).expect("a mode tab")
