@@ -707,6 +707,56 @@ fn a_sticky_note_on_a_turned_page_is_picked_where_it_is_drawn() {
     assert_eq!(h.state().views[0].comments.selected, Some((0, 0)));
 }
 
+/// The composer leaves with its comment when the page scrolls it out of the document, and comes
+/// back with the draft (#4021). It used to be pushed back into the window, over the mode bar and
+/// the toolbar, while its comment was out of sight.
+#[test]
+fn the_composer_hides_while_its_comment_is_scrolled_away() {
+    let mut h = harness(|app| app.set_option("quick", "note").unwrap());
+    click_pt(&mut h, (250.0, 180.0));
+    field(&h, "Add a comment").type_text("Draft");
+    h.run_steps(2);
+    let editors = |h: &Harness<'static, PdfCraftApp>| -> Vec<egui::Rect> {
+        h.query_all_by(|n| n.role() == egui::accesskit::Role::MultilineTextInput).map(|n| n.rect()).collect()
+    };
+    let viewport = h.state().views[0].viewport_rect();
+    assert!(editors(&h).iter().any(|r| viewport.contains(r.center())), "the composer opens in the document");
+    // The page scrolled up: it still shows, the comment near its top doesn't.
+    h.state_mut().views[0].goto = Some((0, 0.4));
+    h.run_steps(4);
+    assert!(h.state().views[0].page_screen_rect(0).is_some_and(|r| r.bottom() > viewport.top()), "page 1 still shows");
+    assert!(at(&h, 250.0, 180.0).y < viewport.top(), "the comment is scrolled away");
+    let shown = editors(&h);
+    assert!(shown.is_empty(), "the composer stays with its comment, not over the toolbar: {shown:?} (document {viewport:?})");
+    // Back again, the draft is still there.
+    h.state_mut().views[0].goto = Some((0, 0.0));
+    h.run_steps(4);
+    assert!(editors(&h).iter().any(|r| viewport.contains(r.center())), "the composer is back");
+    assert_eq!(h.state().views[0].comments.composer.as_ref().map(|c| c.text.as_str()), Some("Draft"));
+}
+
+/// With its whole page scrolled off the screen the composer keeps its draft, and the editor takes
+/// the keyboard again when the page comes back (#4021).
+#[test]
+fn the_composer_takes_the_keyboard_back_after_its_page_was_off_screen() {
+    let mut h = harness(|app| app.set_option("quick", "note").unwrap());
+    click_pt(&mut h, (250.0, 180.0));
+    field(&h, "Add a comment").type_text("Draft");
+    h.run_steps(2);
+    let editor_focused =
+        |h: &Harness<'static, PdfCraftApp>| h.query_all_by(|n| n.role() == egui::accesskit::Role::MultilineTextInput).any(|n| n.is_focused());
+    assert!(editor_focused(&h), "the new note's editor has the keyboard");
+    let viewport = h.state().views[0].viewport_rect();
+    h.state_mut().views[0].goto = Some((1, 0.6));
+    h.run_steps(4);
+    assert!(h.state().views[0].page_screen_rect(0).is_none_or(|r| r.bottom() < viewport.top()), "page 1 is off the screen");
+    assert!(!editor_focused(&h), "nothing to type into while the page is away");
+    h.state_mut().views[0].goto = Some((0, 0.0));
+    h.run_steps(4);
+    assert_eq!(h.state().views[0].comments.composer.as_ref().map(|c| c.text.as_str()), Some("Draft"));
+    assert!(editor_focused(&h), "the editor has the keyboard again");
+}
+
 /// The rectangle of the comment whose text starts with `text`.
 fn rect_of(h: &Harness<'static, PdfCraftApp>, text: &str) -> [f32; 4] {
     let c = comments(h);

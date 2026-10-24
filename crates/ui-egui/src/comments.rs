@@ -1571,11 +1571,15 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
     let c = view.comments.composer.as_ref()?;
     let page = c.page;
     let Some(xf) = view.page_xform(page) else {
-        // Scrolled away: keep the draft until the page is back.
+        // Scrolled away: keep the draft until the page is back, and give it the keyboard then.
+        if let Some(c) = view.comments.composer.as_mut() {
+            c.focus = true;
+        }
         return None;
     };
     let cx = PageCx { page, xf: &xf, info, tool: QuickTool::Select, prefs, allowed: true, hidden: false, redact_mark: ([0.89, 0.13, 0.13], 1.0) };
     let anchor = cx.to_screen(c.at);
+    let viewport = view.viewport_rect();
     let t = Tokens::get(ctx);
     let mut post = false;
     let mut cancel = false;
@@ -1588,8 +1592,15 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
         ComposerKind::Replace => "Replacement text",
         ComposerKind::Edit(_) => "Edit comment",
     };
+    // Its comment scrolled out of the document: keep the draft until it is back, rather than
+    // pushing the card into the window over the mode bar and toolbar (#4021).
+    if !viewport.contains(anchor) {
+        c.focus = true;
+        return None;
+    }
     let pos = pos2(anchor.x + 12.0, anchor.y);
-    egui::Area::new(egui::Id::new(("comment-composer", view.id.0))).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
+    let area = egui::Area::new(egui::Id::new(("comment-composer", view.id.0))).order(egui::Order::Foreground).constrain_to(viewport);
+    area.fixed_pos(pos).show(ctx, |ui| {
         egui::Frame::popup(ui.style()).inner_margin(egui::Margin::same(12)).corner_radius(CornerRadius::same(8)).show(ui, |ui| {
             ui.set_width(260.0);
             ui.horizontal(|ui| {
