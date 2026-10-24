@@ -165,6 +165,9 @@ pub fn render_into(doc: &mut Document) -> Result<Report, XfaError> {
     let written = pdf::write_form(doc, &form)?;
     let mut warnings = form.warnings;
     warnings.extend(written.warnings);
+    if written.usage_rights {
+        warnings.push(crate::pdf::USAGE_RIGHTS_REMOVED.into());
+    }
     warnings.dedup();
     Ok(Report { pages: written.pages, fields: written.fields, template_bytes: packets.xdp.len(), warnings })
 }
