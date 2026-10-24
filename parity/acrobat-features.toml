@@ -1555,15 +1555,15 @@ notes = "Keyboard, Edit-menu, page-context-menu and floating-selection Copy hono
 
 [[feature]]
 id = "view.select-all"
-title = "Select all text on a page"
+title = "Select all text"
 area = "B"
 tier = "P1"
 milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/it/viewer.rs::view_history_select_all_and_find_options"]
-notes = "⌘A on the current page"
+evidence = ["crates/ui-egui/tests/it/viewer.rs::view_history_select_all_and_find_options", "crates/ui-egui/src/canvas.rs::select_all_copies_the_whole_document_while_scrolling_continuously", "crates/ui-egui/src/canvas.rs::select_all_of_the_document_only_while_scrolling_through_several_pages"]
+notes = "⌘A: the current page one page at a time; the whole document scrolling continuously (#2639), copied whole"
 
 [[feature]]
 id = "view.copy-with-layout"
