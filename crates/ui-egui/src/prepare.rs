@@ -560,7 +560,8 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform,
                 egui::StrokeKind::Inside,
             );
             // The name tag: white text on black, clipped to the field.
-            let label = f.name.rsplit('.').next().unwrap_or(&f.name);
+            // The full name, as Acrobat shows it: MASTER.first, not first (#2696).
+            let label = f.name.as_str();
             let font = theme::regular((9.0 * zoom).clamp(7.0, 13.0));
             let galley = painter.layout_no_wrap(label.to_string(), font, Color32::WHITE);
             let size = galley.size() + vec2(6.0, 2.0);
@@ -887,7 +888,8 @@ impl FieldDraft {
             kind: f.kind,
             widget,
             tab: FieldTab::General,
-            name: f.name.rsplit('.').next().unwrap_or(&f.name).to_string(),
+            // The full name: a dotted name moves the field under those parent fields (#2696).
+            name: f.name.clone(),
             tooltip: f.tooltip.clone().unwrap_or_default(),
             caption: f.widgets.get(widget).and_then(|w| w.caption.clone()).unwrap_or_default(),
             read_only: f.read_only(),

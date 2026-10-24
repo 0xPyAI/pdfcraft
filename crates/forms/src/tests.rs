@@ -1345,6 +1345,32 @@ fn renaming_a_field_renames_it_in_the_calculations_that_read_it() {
     assert_eq!((field(&all, "sum").value.clone(), field(&all, "product").value.clone()), (vec!["12".to_string()], vec!["20".to_string()]));
 }
 
+/// A dotted name moves the field under new parent fields (#2696), and the calculations that read
+/// it follow it to its full new name, as they follow a plain rename.
+#[test]
+fn a_dotted_rename_moves_the_field_and_its_calculations_follow() {
+    use crate::af::{CalcOp, Calculate};
+    let mut doc = one_page();
+    let text = NewField::Text { multiline: false };
+    for (i, name) in ["a", "b", "sum", "script"].into_iter().enumerate() {
+        let y = 700.0 - 40.0 * i as f64;
+        add_field(&mut doc, 0, [50.0, y, 250.0, y + 20.0], &text, Some(name)).unwrap();
+    }
+    let calculate =
+        FieldProps { calculate: Some(Calculate::Simple { op: CalcOp::Sum, fields: vec!["a".into(), "b".into()] }), ..FieldProps::default() };
+    set_props(&mut doc, "sum", &calculate).unwrap();
+    set_field_script(&mut doc, "script", "calculate", Some("event.value = getField(\"a\").value;")).unwrap();
+    set_props(&mut doc, "a", &FieldProps { name: Some("Group.a".into()), ..FieldProps::default() }).unwrap();
+    let mut doc = reopen(&doc);
+    let all = fields(&doc);
+    assert!(all.iter().any(|f| f.name == "Group.a") && all.iter().all(|f| f.name != "a"));
+    assert_eq!(field(&all, "sum").actions.calculate, Calculate::Simple { op: CalcOp::Sum, fields: vec!["Group.a".into(), "b".into()] });
+    assert_eq!(field(&all, "script").actions.scripts.calculate.as_deref(), Some("event.value = getField(\"Group.a\").value;"));
+    set_value(&mut doc, "Group.a", &FieldValue::Text("10".into())).unwrap();
+    set_value(&mut doc, "b", &FieldValue::Text("2".into())).unwrap();
+    assert_eq!(field(&fields(&doc), "sum").value, ["12"]);
+}
+
 /// The rename reaches a script stored as a stream, an indirect action and the only widget's
 /// actions; it leaves a script that isn't UTF-8 as it is, and a name another field still has.
 #[test]
@@ -3096,4 +3122,213 @@ fn a_skipped_field_leaves_its_widget_to_the_next() {
     let all = fields(&doc);
     let widgets: Vec<(&str, usize)> = all.iter().map(|f| (f.name.as_str(), f.widgets.len())).collect();
     assert_eq!(widgets, [("b", 1)]);
+}
+
+/// #2696: a dotted name is a full name. `MASTER.first` is a field `first` under a parent field
+/// `MASTER` (a partial name can't contain a period, ISO 32000-2 §12.7.4.2); a second `MASTER.`
+/// name joins that parent; renaming to a dotted name moves the field, keeping what it inherited;
+/// and a name that would make one field both hold a value and hold fields is refused.
+#[test]
+fn dotted_field_names_are_made_with_parent_fields() {
+    let mut doc = fixture();
+    let top = |doc: &Document| {
+        let root = doc.root().unwrap();
+        let af = doc.get(root).as_dict().and_then(|d| d.reference(b"AcroForm")).unwrap();
+        doc.get(af).as_dict().and_then(|d| d.get(b"Fields").and_then(|o| o.as_array().map(|a| a.len()))).unwrap()
+    };
+    let own_name = |doc: &Document, f: &Field| doc.get(f.obj).as_dict().and_then(|d| d.get(b"T").and_then(text_of));
+    let parent_of = |doc: &Document, f: &Field| doc.get(f.obj).as_dict().and_then(|d| d.reference(b"Parent")).unwrap();
+    let text = NewField::Text { multiline: false };
+    let before = top(&doc);
+    assert_eq!(add_field(&mut doc, 0, [50.0, 300.0, 200.0, 320.0], &text, Some("MASTER.account_firstname")).unwrap(), "MASTER.account_firstname");
+    add_field(&mut doc, 0, [50.0, 260.0, 200.0, 280.0], &text, Some("MASTER.street1")).unwrap();
+    assert_eq!(top(&doc), before + 1, "one parent field at the top");
+    let saved = reopen(&doc);
+    let all = fields(&saved);
+    let (a, b) = (field(&all, "MASTER.account_firstname"), field(&all, "MASTER.street1"));
+    assert_eq!(own_name(&saved, b).as_deref(), Some("street1"), "the field's own name has no period");
+    let master = parent_of(&saved, a);
+    assert_eq!(parent_of(&saved, b), master, "both under one MASTER");
+    assert_eq!(saved.get(master).as_dict().and_then(|d| d.get(b"T").and_then(text_of)).as_deref(), Some("MASTER"));
+
+    // Renaming to a dotted name moves the field: zip joins the existing address parent.
+    assert_eq!(set_props(&mut doc, "zip", &FieldProps { name: Some("address.zip".into()), ..FieldProps::default() }).unwrap(), "address.zip");
+    assert_eq!(top(&doc), before, "zip left the top");
+    let all = fields(&doc);
+    let (zip, city) = (field(&all, "address.zip"), field(&all, "address.city"));
+    assert_eq!(parent_of(&doc, zip), parent_of(&doc, city));
+    assert_eq!(zip.max_len, Some(5), "its own settings move with it");
+
+    // What a moved field inherited stays; what a new field would inherit from a parent it
+    // joins doesn't apply to it.
+    let address = parent_of(&doc, city);
+    doc.update_dict(address, |d| {
+        d.set(b"Ff".to_vec(), Object::Int(flags::READ_ONLY as i64));
+        d.set(b"V".to_vec(), Object::String(PdfString::literal(b"Springfield".to_vec())));
+    })
+    .unwrap();
+    let city = field(&fields(&doc), "address.city").clone();
+    assert!(city.read_only() && city.value == ["Springfield"]);
+    set_props(&mut doc, "address.city", &FieldProps { name: Some("billing.city".into()), ..FieldProps::default() }).unwrap();
+    let moved = field(&fields(&doc), "billing.city").clone();
+    assert!(moved.read_only() && moved.value == ["Springfield"], "the moved field keeps what it inherited");
+    // A parent's value, reset value or length limit would pass to a new field under it (review
+    // on #2957), and a field can't turn them off: such a parent takes no new field.
+    let street = |doc: &mut Document| add_field(doc, 0, [300.0, 300.0, 450.0, 320.0], &text, Some("address.street"));
+    for (key, value) in [
+        (&b"V"[..], Object::String(PdfString::literal(b"x".to_vec()))),
+        (b"DV", Object::String(PdfString::literal(b"x".to_vec()))),
+        (b"MaxLen", Object::Int(3)),
+    ] {
+        doc.update_dict(address, |d| {
+            for k in [&b"V"[..], b"DV", b"MaxLen"] {
+                d.remove(k);
+            }
+            d.set(key.to_vec(), value);
+        })
+        .unwrap();
+        let mut copy = doc.clone();
+        assert!(street(&mut copy).is_err(), "address holds /{}", String::from_utf8_lossy(key));
+    }
+    doc.update_dict(address, |d| {
+        d.remove(b"MaxLen");
+    })
+    .unwrap();
+    street(&mut doc).unwrap();
+    let new = field(&fields(&doc), "address.street").clone();
+    assert!(!new.read_only(), "a new field doesn't take its parent's flags");
+    assert!(new.value.iter().all(|v| v.is_empty()) && new.max_len.is_none(), "nor a value or length limit: {:?} {:?}", new.value, new.max_len);
+
+    // A parent left empty by a move isn't a terminal field, but its name is still taken.
+    add_field(&mut doc, 0, [300.0, 340.0, 450.0, 360.0], &text, Some("box.only")).unwrap();
+    set_props(&mut doc, "box.only", &FieldProps { name: Some("elsewhere.only".into()), ..FieldProps::default() }).unwrap();
+    assert!(fields(&doc).iter().all(|f| !f.name.starts_with("box")), "box holds no field now");
+    let mut copy = doc.clone();
+    assert!(add_field(&mut copy, 0, [300.0, 380.0, 450.0, 400.0], &text, Some("box")).is_err(), "a new field named box");
+    let mut copy = doc.clone();
+    assert!(set_props(&mut copy, "name", &FieldProps { name: Some("box".into()), ..FieldProps::default() }).is_err(), "a rename to box");
+    // Under it, the name is free: the empty parent takes a field again.
+    add_field(&mut doc, 0, [300.0, 380.0, 450.0, 400.0], &text, Some("box.again")).unwrap();
+    // Only a whole path that exists can be taken: under box.sub, made new, "again" is free.
+    add_field(&mut doc, 0, [300.0, 420.0, 450.0, 440.0], &text, Some("box.sub.again")).unwrap();
+    // A field holding its own value may join a parent holding one; and the parents a new path
+    // makes are new, even where an existing field has the name of a later part.
+    doc.update_dict(address, |d| d.set(b"V".to_vec(), Object::String(PdfString::literal(b"x".to_vec())))).unwrap();
+    set_props(&mut doc, "billing.city", &FieldProps { name: Some("address.city".into()), ..FieldProps::default() }).unwrap();
+    assert_eq!(field(&fields(&doc), "address.city").value, ["Springfield"]);
+    add_field(&mut doc, 0, [300.0, 460.0, 450.0, 480.0], &text, Some("nope.address.x")).unwrap();
+    // Renaming the last part: to its own name is no change; to an empty parent's name beside it
+    // is taken.
+    assert_eq!(set_props(&mut doc, "address.city", &FieldProps { name: Some("city".into()), ..FieldProps::default() }).unwrap(), "address.city");
+    doc.update_dict(address, |d| {
+        d.remove(b"V");
+    })
+    .unwrap();
+    add_field(&mut doc, 0, [300.0, 500.0, 450.0, 520.0], &text, Some("address.grp.x")).unwrap();
+    set_props(&mut doc, "address.grp.x", &FieldProps { name: Some("elsewhere.x".into()), ..FieldProps::default() }).unwrap();
+    assert!(
+        set_props(&mut doc.clone(), "address.city", &FieldProps { name: Some("grp".into()), ..FieldProps::default() }).is_err(),
+        "address.grp is taken"
+    );
+    // A move the destination refuses leaves the field where it was (review on #2957): it was
+    // taken out of the tree before the destination was checked, and stayed out.
+    doc.update_dict(address, |d| d.set(b"MaxLen".to_vec(), Object::Int(3))).unwrap();
+    let at_top = top(&doc);
+    assert!(set_props(&mut doc, "name", &FieldProps { name: Some("address.name".into()), ..FieldProps::default() }).is_err());
+    assert_eq!(top(&doc), at_top, "name is still in the form's /Fields");
+    // Nor is what it inherits copied onto it first (review on #2957): src.f inherits /V from src.
+    add_field(&mut doc, 0, [300.0, 540.0, 450.0, 560.0], &text, Some("src.f")).unwrap();
+    let f = field(&fields(&doc), "src.f").obj;
+    let src = doc.get(f).as_dict().and_then(|d| d.reference(b"Parent")).unwrap();
+    doc.update_dict(src, |d| d.set(b"V".to_vec(), Object::String(PdfString::literal(b"inh".to_vec())))).unwrap();
+    assert!(set_props(&mut doc, "src.f", &FieldProps { name: Some("address.f".into()), ..FieldProps::default() }).is_err());
+    assert!(!doc.get(f).as_dict().unwrap().contains(b"V"), "src.f still only inherits its value");
+    // What it inherits counts as its own where it goes: with /V on address and no /MaxLen,
+    // src.f moves, keeping its value.
+    doc.update_dict(address, |d| {
+        d.remove(b"MaxLen");
+        d.set(b"V".to_vec(), Object::String(PdfString::literal(b"x".to_vec())));
+    })
+    .unwrap();
+    set_props(&mut doc, "src.f", &FieldProps { name: Some("address.f".into()), ..FieldProps::default() }).unwrap();
+    assert_eq!(field(&fields(&doc), "address.f").value, ["inh"]);
+    doc.update_dict(address, |d| {
+        d.remove(b"V");
+    })
+    .unwrap();
+    doc.update_dict(address, |d| {
+        d.remove(b"MaxLen");
+    })
+    .unwrap();
+
+    for bad in ["MASTER", "MASTER.street1.x", "MASTER..x", ".x", "x.", "MASTER. "] {
+        assert!(add_field(&mut doc, 0, [300.0, 200.0, 450.0, 220.0], &text, Some(bad)).is_err(), "{bad:?}");
+        assert!(set_props(&mut doc, "name", &FieldProps { name: Some(bad.into()), ..FieldProps::default() }).is_err(), "{bad:?}");
+    }
+    let deep = vec!["p"; 33].join(".");
+    assert!(add_field(&mut doc, 0, [300.0, 200.0, 450.0, 220.0], &text, Some(&deep)).is_err(), "too deep");
+    assert!(set_props(&mut doc, "name", &FieldProps { name: Some("MASTER.street1".into()), ..FieldProps::default() }).is_err(), "taken");
+}
+
+/// Review on #2957: a parent left empty by a move keeps its name from the next default name
+/// (`Text1` after `Text1.x` moved away); and a full name that keeps the parents is a plain
+/// rename, so the field stays in its place among its parent's /Kids and keeps inheriting.
+#[test]
+fn empty_parents_and_same_parent_renames() {
+    let mut doc = fixture();
+    let text = NewField::Text { multiline: false };
+    let auto = |doc: &mut Document, y: f64| add_field(doc, 0, [50.0, y, 200.0, y + 20.0], &text, None);
+    let mut copy = doc.clone();
+    let first = auto(&mut copy, 100.0).unwrap();
+    add_field(&mut doc, 0, [50.0, 140.0, 200.0, 160.0], &text, Some(&format!("{first}.x"))).unwrap();
+    set_props(&mut doc, &format!("{first}.x"), &FieldProps { name: Some("other.x".into()), ..FieldProps::default() }).unwrap();
+    assert!(fields(&doc).iter().all(|f| !f.name.starts_with(&first)), "{first} is an empty parent now");
+    let next = auto(&mut doc, 100.0).expect("a default name the empty parent doesn't hold");
+    assert_ne!(next, first);
+
+    let all = fields(&doc);
+    let city = field(&all, "address.city").obj;
+    let address = doc.get(city).as_dict().and_then(|d| d.reference(b"Parent")).unwrap();
+    doc.update_dict(address, |d| d.set(b"V".to_vec(), Object::String(PdfString::literal(b"Springfield".to_vec())))).unwrap();
+    let kids = |doc: &Document| doc.get(address).as_dict().and_then(|d| d.get(b"Kids").and_then(|o| o.as_array().cloned())).unwrap();
+    let before = kids(&doc);
+    assert_eq!(
+        set_props(&mut doc, "address.city", &FieldProps { name: Some("address.town".into()), ..FieldProps::default() }).unwrap(),
+        "address.town"
+    );
+    assert_eq!(kids(&doc), before, "same place among the kids");
+    assert!(!doc.get(city).as_dict().unwrap().contains(b"V"), "still inherits its value rather than owning a copy");
+    assert_eq!(field(&fields(&doc), "address.town").value, ["Springfield"]);
+}
+
+/// Review on #2957: spaces in a typed name. The ends of the whole name are dropped, as Acrobat
+/// does when a field is renamed; a space beside a period stays in the part it belongs to (`a. b`
+/// is `b` with a leading space under `a`), as Acrobat keeps it and as ISO 32000-2 §12.7.4.2
+/// allows: only a period is barred from a partial name.
+#[test]
+fn a_typed_name_loses_its_ends_but_keeps_spaces_beside_periods() {
+    let mut doc = fixture();
+    let own_name = |doc: &Document, full: &str| {
+        let all = fields(doc);
+        doc.get(field(&all, full).obj).as_dict().and_then(|d| d.get(b"T").and_then(text_of))
+    };
+    let text = NewField::Text { multiline: false };
+    assert_eq!(add_field(&mut doc, 0, [50.0, 300.0, 200.0, 320.0], &text, Some(" plain ")).unwrap(), "plain");
+    assert_eq!(add_field(&mut doc, 0, [50.0, 260.0, 200.0, 280.0], &text, Some("a. b")).unwrap(), "a. b");
+    assert_eq!(add_field(&mut doc, 0, [50.0, 220.0, 200.0, 240.0], &text, Some("c .d")).unwrap(), "c .d");
+    assert_eq!(set_props(&mut doc, "zip", &FieldProps { name: Some(" e. f ".into()), ..FieldProps::default() }).unwrap(), "e. f");
+    let saved = reopen(&doc);
+    assert_eq!(own_name(&saved, "plain").as_deref(), Some("plain"));
+    assert_eq!(own_name(&saved, "a. b").as_deref(), Some(" b"));
+    assert_eq!(own_name(&saved, "c .d").as_deref(), Some("d"));
+    assert_eq!(own_name(&saved, "e. f").as_deref(), Some(" f"));
+    let parent = |full: &str| {
+        let all = fields(&saved);
+        let p = saved.get(field(&all, full).obj).as_dict().and_then(|d| d.reference(b"Parent")).unwrap();
+        saved.get(p).as_dict().and_then(|d| d.get(b"T").and_then(text_of))
+    };
+    assert_eq!(parent("c .d").as_deref(), Some("c "), "the space before the period is the parent's");
+    assert_eq!(parent("e. f").as_deref(), Some("e"));
+    // A part that is only spaces is still empty.
+    assert!(add_field(&mut doc, 0, [300.0, 300.0, 450.0, 320.0], &text, Some("g. .h")).is_err());
 }

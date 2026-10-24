@@ -1360,8 +1360,10 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
             && let Some(i) = app.active
         {
             // Keep the (possibly renamed) field selected.
-            let prefix = d.field.rsplit_once('.').map(|(p, _)| format!("{p}.")).unwrap_or_default();
-            let name = format!("{prefix}{}", d.name.trim());
+            // A dotted name is the full name; a plain one renames the field within its parent.
+            let typed = d.name.trim();
+            let prefix = d.field.rsplit_once('.').filter(|_| !typed.contains('.')).map(|(p, _)| format!("{p}.")).unwrap_or_default();
+            let name = format!("{prefix}{typed}");
             if let (Some(before), Some(after)) = (before, form(app)) {
                 let n = pdfcraft_engine::form_calculations_changed(&before, &after).iter().filter(|f| **f != name).count();
                 if n > 0 {
