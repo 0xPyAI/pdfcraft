@@ -843,9 +843,10 @@ fn standard_stamp(name: &[u8]) -> Option<(&'static str, Rgb)> {
 const PLACEHOLDER_GREY: Rgb = [0.45, 0.45, 0.45];
 
 /// The display appearance of a rubber stamp another program wrote without one: the stamp its
-/// `/Name` names (Draft when there is none, Table 184's default), or for any other name a thin
-/// grey frame with both diagonals, so the stamp stays visible and can be selected. The name is
-/// never drawn as text.
+/// `/Name` names (Draft when there is none, Table 184's default) in its `/C` colour or the
+/// stamp's own, or for any other name a thin grey frame with both diagonals, so the stamp stays
+/// visible and can be selected. The frame is grey whatever the `/C`: it stands in for a stamp
+/// that cannot be drawn, so it takes none of that stamp's colour. The name is never drawn as text.
 ///
 /// For display only ([`crate::with_missing_appearances`]): [`build`] declines these stamps, so
 /// edits (restyling, flattening) never write this drawing into the file. `None` for any other
@@ -884,7 +885,8 @@ pub(crate) fn display_stamp(d: &Dict) -> Option<Stream> {
     }
     c.push_str(&format!(
         "{}1 w\n{} {} {} {} re\n{} {} m {} {} l\n{} {} m {} {} l\nS\n",
-        rg_stroke(stroke.unwrap_or(PLACEHOLDER_GREY)),
+        // Grey whatever the `/C`: the placeholder is not the stamp, so it takes none of its colour.
+        rg_stroke(PLACEHOLDER_GREY),
         n(a0),
         n(b0),
         n(a1 - a0),

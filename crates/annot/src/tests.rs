@@ -1064,6 +1064,9 @@ fn a_stamp_without_an_appearance_draws_the_stamp_it_names() {
     }
     // `/C` colours the stamp, as it does PdfCraft's own.
     assert!(drawn(&stamp_dict("/Name /Final /C [1 0 1]")).contains("1 0 1 RG"));
+    // The placeholder stays grey whatever the `/C`: it is not the stamp, so it takes none of its colour.
+    let placeholder = drawn(&stamp_dict("/Name /MyCustomStamp /C [1 0 0]"));
+    assert!(placeholder.contains("0.45 0.45 0.45 RG") && !placeholder.contains("1 0 0 RG"), "{placeholder}");
     // A stamp's own artwork is never replaced, and the drawing is for display only: edits
     // (restyling, flattening) still find nothing they may write.
     assert!(appearance::display_stamp(&stamp_dict("/Name /Draft /AP << /N 9 0 R >>")).is_none());
