@@ -2530,3 +2530,4 @@ animation effects	Off	Ki
 
 # Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
 	Today	Ma
+@plural	{n} reply|{n} replies	{n} válasz|{n} válasz

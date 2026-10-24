@@ -630,7 +630,7 @@ impl PageCx<'_> {
 
     /// Top-level comments on this page, in paint order.
     fn comments(&self) -> impl Iterator<Item = &Annotation> {
-        self.info.annotations.iter().filter(move |a| !self.hidden && a.page == self.page && a.in_reply_to.is_none() && a.subtype != "Popup")
+        self.info.annotations.iter().filter(move |a| !self.hidden && a.page == self.page && a.is_comment() && a.subtype != "Popup")
     }
 
     /// Where a comment is on screen: one rectangle, or one per marked line for text markup.
@@ -1934,7 +1934,7 @@ pub(crate) fn context_menu(
     can_modify: bool,
 ) -> Option<CanvasAction> {
     let mut action = None;
-    let selected = view.comments.selected.and_then(|(p, i)| info.annotations.iter().find(|a| a.page == p && a.index == i && a.in_reply_to.is_none()));
+    let selected = view.comments.selected.and_then(|(p, i)| info.annotations.iter().find(|a| a.page == p && a.index == i && !a.is_reply()));
     match selected {
         Some(a) => {
             let (page, index) = (a.page, a.index);
@@ -1979,7 +1979,7 @@ pub(crate) fn context_menu(
                     }
                 });
             });
-            let thread: Vec<&pdfcraft_render::Annotation> = info.annotations.iter().filter(|r| a.name.is_some() && r.in_reply_to == a.name).collect();
+            let thread: Vec<&pdfcraft_render::Annotation> = info.annotations.iter().filter(|r| r.replies_to(a)).collect();
             let marked = crate::comments_panel::is_marked(&thread);
             if ui.add_enabled(allowed, egui::Button::new(tl!(if marked { "Remove checkmark" } else { "Mark with checkmark" }))).clicked() {
                 action = Some(CanvasAction::Edit(Box::new(Edit::MarkAnnotation { page, index, marked: !marked, author: prefs.author.clone() })));
@@ -2305,6 +2305,8 @@ mod tests {
             modified: None,
             name: None,
             in_reply_to: None,
+            parent: None,
+            grouped: false,
             rect: [40.0, 20.0, 70.0, 40.0],
             color: None,
             index: 0,
@@ -2543,6 +2545,8 @@ mod tests {
                 modified: None,
                 name: None,
                 in_reply_to: None,
+                parent: None,
+                grouped: false,
                 rect: [10.0, 10.0, 50.0, 50.0],
                 color: None,
                 index: 0,

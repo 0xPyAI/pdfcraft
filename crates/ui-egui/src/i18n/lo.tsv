@@ -2439,3 +2439,4 @@ animation effects	Off	ປິດ
 
 # Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
 	Today	ມື້ນີ້
+@plural	{n} reply|{n} replies	ການຕອບກັບ {n} ລາຍການ
