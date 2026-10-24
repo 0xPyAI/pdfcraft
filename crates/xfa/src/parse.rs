@@ -146,7 +146,23 @@ fn parse_border(n: Option<XmlNode>) -> Option<Border> {
         3 => [e(0), e(1), e(2), e(1)],
         _ => [e(0), e(1), e(2), e(3)],
     };
-    Some(Border { presence: Presence::parse(n.attribute("presence")), edges: four, fill: parse_fill(child(n, "fill")) })
+    Some(Border { presence: Presence::parse(n.attribute("presence")), edges: four, corners: parse_corners(n), fill: parse_fill(child(n, "fill")) })
+}
+
+/// The `<corner>` children of a border or rectangle, top-left, top-right, bottom-right then
+/// bottom-left: one applies to all four, and a corner not given is the last one given. Without
+/// any, the corners are square.
+fn parse_corners(n: XmlNode) -> [Corner; 4] {
+    let given: Vec<Corner> = children(n, "corner")
+        .take(4)
+        .map(|c| Corner {
+            presence: Presence::parse(c.attribute("presence")),
+            radius: attr_measure(c, "radius").filter(|r| r.is_finite()).unwrap_or(0.0).max(0.0),
+            inverted: c.attribute("inverted") == Some("1"),
+        })
+        .collect();
+    let Some(last) = given.last().copied() else { return [Corner::default(); 4] };
+    std::array::from_fn(|i| given.get(i).copied().unwrap_or(last))
 }
 
 /// `<font>`: typeface, size, weight, posture, underline, fill color and horizontal scale.
@@ -389,7 +405,7 @@ fn parse_value(n: Option<XmlNode>, warnings: &mut Vec<String>) -> Value {
             "rectangle" => {
                 let mut b = parse_border(Some(c)).unwrap_or_default();
                 b.fill = parse_fill(child(c, "fill"));
-                return Value::Rectangle(b);
+                return Value::Rectangle(Box::new(b));
             }
             "date" | "time" | "dateTime" | "integer" | "decimal" | "float" | "boolean" => return Value::Text(text_of(c)),
             _ => {}
