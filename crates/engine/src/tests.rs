@@ -4360,6 +4360,62 @@ fn recognize_text_reads_a_picture_on_a_page_that_has_text() {
     assert_eq!((count(&s, "invoice"), count(&s, "brown")), (1, 1));
 }
 
+/// Edit reads a scan that only has comments on it, not a page with real text and a picture
+/// (`native_text_only`): a text box over the picture is not the page's text, page content is.
+#[test]
+fn native_text_only_ignores_comments_but_not_page_text() {
+    if !ocr::available() {
+        eprintln!("skipped: OCR models not installed");
+        return;
+    }
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let text = s.create_from_text("t", "The quick brown fox jumps over the lazy dog.").unwrap();
+    let id = s.open("text.pdf", None, text, None).unwrap();
+    let png = export::Exporter::new(s.get(id).unwrap()).png(0, 150.0).unwrap();
+    let scan = s.create_from_images(&[("scan.png".into(), png)]).unwrap();
+    let comment_only = |s: &mut Session| {
+        let id = s.open("scan.pdf", None, scan.clone(), None).unwrap();
+        let (w, h) = {
+            let p = &s.get(id).unwrap().info.pages[0];
+            (p.width as f64, p.height as f64)
+        };
+        let shape = pdfcraft_annot::Shape::TextBox { rect: [w * 0.1, h * 0.75, w * 0.9, h * 0.85], font_size: 18.0 };
+        s.apply(
+            id,
+            Edit::AddAnnotation(NewAnnotation {
+                page: 0,
+                style: pdfcraft_annot::Style::default_for(&shape),
+                shape,
+                contents: "Invoice reference 4711".into(),
+                author: "Test".into(),
+            }),
+        )
+        .unwrap();
+        id
+    };
+    let native = ocr::OcrSettings { native_text_only: true, ..Default::default() };
+
+    // A comment over the picture: the default run counts it as text and skips the page, the
+    // native-text run reads the picture.
+    let id = comment_only(&mut s);
+    let skipped = s.recognize_text(id, &[], ocr::OcrSettings::default()).unwrap();
+    assert!(skipped[0].skipped.is_some(), "a comment is text for the default run");
+    let found = s.recognize_text(id, &[], native.clone()).unwrap();
+    assert_eq!(found[0].skipped, None, "{:?}", found[0]);
+    assert!(found[0].text().to_lowercase().contains("brown"), "{:?}", found[0]);
+
+    // Page content over the picture is the page's own text: skipped, whatever the setting.
+    let id = comment_only(&mut s);
+    let (w, h) = {
+        let p = &s.get(id).unwrap().info.pages[0];
+        (p.width as f64, p.height as f64)
+    };
+    let note = AddedText { rect: [w * 0.1, h * 0.6, w * 0.9, h * 0.7], text: "Page text".into(), size: 18.0, ..Default::default() };
+    s.apply(id, Edit::AddText { page: 0, text: note }).unwrap();
+    let skipped = s.recognize_text(id, &[], native).unwrap();
+    assert!(skipped[0].skipped.is_some(), "{:?}", skipped[0]);
+}
+
 /// A form whose scripts are custom JavaScript: total = price × qty (calculate, through a
 /// document-level function), shown with a custom format; qty is validated; a button script.
 fn scripted_form() -> Vec<u8> {
