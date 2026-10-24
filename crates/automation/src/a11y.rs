@@ -676,10 +676,10 @@ fn input_file_name(path: &str) -> String {
 }
 
 /// The output file names that two or more of `targets` share, each spelling listed once, in input
-/// order. Names are compared the way the default filesystem compares them: without regard to case
-/// on Windows and macOS and exactly elsewhere; on Windows a trailing dot or space is not part of
-/// the name (`scan.pdf.` is `scan.pdf`). The folder is the same for every target, so only the
-/// names are compared.
+/// order. Names are compared without regard to case on Windows and macOS and exactly elsewhere; on
+/// Windows a trailing dot or space is not part of the name (`scan.pdf.` is `scan.pdf`). Unicode
+/// normalization forms (NFC and NFD spellings of one name) are not compared, so such inputs are
+/// not caught. The folder is the same for every target, so only the names are compared.
 fn shared_file_names(targets: &[std::path::PathBuf]) -> Vec<String> {
     let mut groups: std::collections::BTreeMap<String, (usize, Vec<String>)> = std::collections::BTreeMap::new();
     for target in targets {
@@ -687,6 +687,7 @@ fn shared_file_names(targets: &[std::path::PathBuf]) -> Vec<String> {
         let key = if cfg!(windows) {
             name.trim_end_matches(['.', ' ']).to_lowercase()
         } else if cfg!(target_os = "macos") {
+            // Case only; NFC and NFD spellings of one name stay distinct here (a known limit).
             name.to_lowercase()
         } else {
             name.clone()

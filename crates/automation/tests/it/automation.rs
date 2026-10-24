@@ -6230,9 +6230,9 @@ fn ocr_recognize_files_refuses_inputs_that_share_a_file_name() {
     assert!(!dir.join("out").exists(), "nothing was started: the output folder was not created");
 }
 
-/// File names are compared the way the default filesystem compares them: without regard to case
-/// on Windows and macOS (`scan.pdf` and `Scan.PDF` are one file there), and exactly elsewhere,
-/// where they are two files and the batch is not refused.
+/// File names are compared without regard to case on Windows and macOS (`scan.pdf` and `Scan.PDF`
+/// are one file there), and exactly elsewhere, where they are two files and the batch is not
+/// refused.
 #[test]
 fn ocr_recognize_files_compares_names_the_way_the_filesystem_does() {
     let dir = workdir("ocr-files-case");
