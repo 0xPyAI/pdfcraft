@@ -6,4 +6,5 @@ mod jbig2_invariants;
 mod named_form_properties;
 mod search;
 mod substitute_widths;
+mod type3_text_clip;
 mod tiling_cell_placement;
