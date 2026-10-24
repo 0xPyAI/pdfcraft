@@ -2285,6 +2285,88 @@ fn split_before_selected_pages() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[test]
+fn split_from_organize_grid_context_menu() {
+    let dir = temp_path("split-org-ctx");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut h = organize(4);
+    h.state_mut().export_dir_override = Some(dir.to_string_lossy().into_owned());
+    h.get_by_label("Page 3").click_button(egui::PointerButton::Secondary);
+    h.run_steps(2);
+    h.get_all_by_label("Split document…").last().unwrap().click();
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, Some(pdfcraft_ui_egui::Dialog::Split));
+    assert_eq!(h.state().split_draft.mode, pdfcraft_ui_egui::SplitMode::Selection);
+    h.get_by_label_contains("Creates 2 files from 4 pages");
+    h.get_all_by_label("Split").last().unwrap().click();
+    h.run_steps(3);
+    let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    assert_eq!(names, ["doc (pages 1-2).pdf", "doc (pages 3-4).pdf"]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn split_from_pages_panel_context_menu() {
+    let mut h = harness(4, |app| app.right = Some(pdfcraft_ui_egui::RightPanel::Pages));
+    let thumb = h.get_all_by_label("Page 3").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap();
+    thumb.click_button(egui::PointerButton::Secondary);
+    h.run_steps(2);
+    h.get_all_by_label("Split document…").last().unwrap().click();
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, Some(pdfcraft_ui_egui::Dialog::Split));
+    assert_eq!(h.state().split_draft.mode, pdfcraft_ui_egui::SplitMode::Selection);
+    h.get_by_label_contains("Creates 2 files from 4 pages");
+}
+
+#[test]
+fn split_from_pages_panel_context_menu_on_current_page_without_selection() {
+    let mut h = harness(4, |app| app.right = Some(pdfcraft_ui_egui::RightPanel::Pages));
+    // Navigate to Page 2 (0-indexed 1) so it is current, but keep selected empty
+    h.state_mut().views[0].go_to_page(1);
+    h.state_mut().views[0].selected.clear();
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].current, 1);
+    assert!(h.state().views[0].selected.is_empty());
+    let thumb = h.get_all_by_label("Page 2").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap();
+    thumb.click_button(egui::PointerButton::Secondary);
+    h.run_steps(2);
+    h.get_all_by_label("Split document…").last().unwrap().click();
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, Some(pdfcraft_ui_egui::Dialog::Split));
+    assert_eq!(h.state().split_draft.mode, pdfcraft_ui_egui::SplitMode::Selection);
+    h.get_by_label_contains("Creates 2 files from 4 pages");
+}
+
+#[test]
+fn split_from_pages_panel_context_menu_on_page_one_falls_back_to_pages() {
+    let mut h = harness(4, |app| app.right = Some(pdfcraft_ui_egui::RightPanel::Pages));
+    let thumb = h.get_all_by_label("Page 1").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap();
+    thumb.click_button(egui::PointerButton::Secondary);
+    h.run_steps(2);
+    h.get_all_by_label("Split document…").last().unwrap().click();
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, Some(pdfcraft_ui_egui::Dialog::Split));
+    assert_eq!(h.state().split_draft.mode, pdfcraft_ui_egui::SplitMode::Pages);
+}
+
+#[test]
+fn split_from_pages_panel_context_menu_with_multi_selection() {
+    let mut h = harness(4, |app| app.right = Some(pdfcraft_ui_egui::RightPanel::Pages));
+    // Select pages 2 and 4 (indices 1 and 3)
+    h.state_mut().views[0].select_pages(&[1, 3]);
+    h.run_steps(2);
+    let thumb = h.get_all_by_label("Page 2").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap();
+    thumb.click_button(egui::PointerButton::Secondary);
+    h.run_steps(2);
+    h.get_all_by_label("Split document…").last().unwrap().click();
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, Some(pdfcraft_ui_egui::Dialog::Split));
+    assert_eq!(h.state().split_draft.mode, pdfcraft_ui_egui::SplitMode::Selection);
+    h.get_by_label_contains("Creates 3 files from 4 pages");
+}
+
 // ── Encrypted documents ───────────────────────────────────────────────────────────────────────
 
 fn protected(user: &str, owner: &str, permissions: i32) -> Vec<u8> {
@@ -2390,6 +2472,61 @@ fn the_security_notice_unlocks_with_the_permissions_password() {
     h.run_steps(3);
     h.get_by_label("Owner password (no restrictions apply)");
     assert!(!h.state().session.get(h.state().active_ids().unwrap().1).unwrap().dirty, "unlocking is not an edit");
+}
+
+/// #4035: the secured-document notice can be turned off for good. "Don't show again" hides it
+/// in every document, the choice is kept in the settings and turned back on in Preferences (or
+/// `--secured-notice`); the document stays restricted and Properties ▸ Security still opens.
+#[test]
+fn the_security_notice_can_be_turned_off_for_good() {
+    let open = |settings: Option<String>| {
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_cc| {
+            let mut app = PdfCraftApp::new();
+            if let Some(s) = &settings {
+                app.restore(s);
+            }
+            app.set_option("language", "en").unwrap();
+            app.open_bytes("locked.pdf", None, protected("", "owner", 0b0100)).unwrap();
+            app
+        });
+        h.run_steps(4);
+        h
+    };
+    let mut h = open(None);
+    assert!(h.state().show_secured_notice, "on by default");
+    h.get_by_label_contains("This document is secured");
+    h.get_by_label("Don't show again").click();
+    h.run_steps(2);
+    assert!(h.query_by_label_contains("This document is secured").is_none());
+    assert!(!h.state().show_secured_notice);
+    let id = h.state().active_ids().unwrap().1;
+    assert!(h.state().session.get(id).unwrap().security_summary().is_some_and(|s| !s.owner), "still restricted");
+    h.state_mut().set_option("dialog", "properties").unwrap();
+    h.run_steps(2);
+    h.get_by_label("Security").click();
+    h.run_steps(3);
+    h.get_by_label("Password security");
+    h.get_by_label("User password");
+    // Kept in the settings: a later session opens the same file without the notice.
+    let saved = h.state().persist();
+    let mut h = open(Some(saved));
+    assert!(h.query_by_label_contains("This document is secured").is_none(), "remembered across a restart");
+    // Back on from Preferences.
+    h.state_mut().set_option("dialog", "preferences").unwrap();
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::CheckBox, "Show a notice when a document is secured").scroll_to_me();
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::CheckBox, "Show a notice when a document is secured").click();
+    h.run_steps(2);
+    assert!(h.state().show_secured_notice);
+    h.state_mut().dialog = None;
+    h.run_steps(2);
+    h.get_by_label_contains("This document is secured");
+    // Scriptable, with a clear refusal for anything else.
+    let app = h.state_mut();
+    app.set_option("secured-notice", "false").unwrap();
+    assert!(!app.show_secured_notice);
+    assert_eq!(app.set_option("secured-notice", "maybe"), Err("secured-notice must be true or false".into()));
 }
 
 /// Changing a restricted document's security asks for its permissions password first (Acrobat

@@ -2057,6 +2057,10 @@ action wizard	Start	Iniciar
 	Perimeter	Perímetro
 	Area	Área
 	Drawing scale	Escala del dibujo
+	Scale	Escala
+	Common scales	Escalas habituales
+	Enter a scale such as 1:50.	Introduzca una escala como 1:50.
+	Applying a scale switches units to m / mm.	Al aplicar una escala, las unidades cambian a m / mm.
 	Snapping	Ajuste
 	Export measurements	Exportar mediciones
 	Open a PDF to measure it.	Abre un PDF para medirlo.
@@ -2161,6 +2165,7 @@ action wizard	Start	Iniciar
 	Lines +/−	Líneas +/−
 	@{login}: {prs} PRs, {commits} commits, +{added} / −{deleted} lines (Δ {delta}), +{bin_added} / −{bin_deleted} binary assets, {first} – {last}	@{login}: {prs} PR, {commits} commits, +{added} / −{deleted} líneas (Δ {delta}), +{bin_added} / −{bin_deleted} recursos binarios, {first} – {last}
 	Reopen the files that were open when PdfCraft last closed	Volver a abrir los archivos que estaban abiertos al cerrar PdfCraft por última vez
+	Restore the last view (page, zoom and page display) when a document is opened again	Restaurar la última vista (página, zoom y presentación de páginas) al volver a abrir un documento
 	Add {what}	Añadir {what}
 	Use {what}	Usar {what}
 	Place saved {what}	Colocar {what} desde lo guardado
@@ -2194,6 +2199,8 @@ action wizard	Start	Iniciar
 	Home / End	Inicio / Fin
 	H / Space (hold)	H / Espacio (mantener)
 	Reload documents when their files change on disk	Recargar los documentos cuando sus archivos cambien en el disco
+	Don't show again	No volver a mostrar
+	Show a notice when a document is secured	Mostrar un aviso cuando un documento está protegido
 	Always use my default zoom and page layout	Usar siempre mi zoom y presentación de página predeterminados
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Este archivo cambió en el disco. Recargar muestra la versión nueva y descarta los cambios sin guardar; Guardar la reemplaza por esta versión.
 	Reload	Recargar

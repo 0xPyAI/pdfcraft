@@ -125,7 +125,7 @@ impl Automation {
         let page = self.page(a)?;
         let ph = self.doc(a)?.info.pages[page].height as f64;
         let path = self.resolve(a.str("path")?, false)?;
-        let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+        let bytes = crate::read_input(&path)?;
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let rect = rect_arg(a, "rect")?.map(|r| to_display(r, ph));
         let mut out = self.apply(a, Edit::AddImage { page, rect, name, bytes: std::sync::Arc::new(bytes) })?;
@@ -195,7 +195,7 @@ impl Automation {
                 }
                 if let Some(p) = a.opt_str("image")? {
                     let path = self.resolve(p, false)?;
-                    let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+                    let bytes = crate::read_input(&path)?;
                     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     // Box and transforms first, then the new picture.
                     self.apply(a, Edit::UpdateContent { page, index, content: content.clone() })?;

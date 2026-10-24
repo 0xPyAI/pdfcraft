@@ -1903,6 +1903,10 @@
 	Perimeter	Периметър
 	Area	Площ
 	Drawing scale	Мащаб на чертежа
+	Scale	Мащаб
+	Common scales	Често използвани мащаби
+	Enter a scale such as 1:50.	Въведете мащаб, например 1:50.
+	Applying a scale switches units to m / mm.	Прилагането на мащаб превключва единиците на m / mm.
 	Snapping	Прилепване
 	Export measurements	Експортирай измерванията
 	Open a PDF to measure it.	Отворете PDF файл, за да го измервате.
@@ -2179,6 +2183,7 @@ signature pad	Type	Въвеждане
 action wizard	Start	Старт
 	Margins (in)	Полета (in)
 	Reopen the files that were open when PdfCraft last closed	Отваряй отново файловете, които бяха отворени при последното затваряне на PdfCraft
+	Restore the last view (page, zoom and page display) when a document is opened again	Възстановяване на последния изглед (страница, мащаб и показване на страниците) при повторно отваряне на документ
 	Clear Recent Files	Изчисти последно отваряните файлове
 	Remove from Recent	Премахни от последно отваряните
 	Remove {name} from Recent	Премахни {name} от последно отваряните
@@ -2283,6 +2288,8 @@ key	Space	Интервал
 	Printer paper and scaling may differ. Check driver settings.	Хартията и мащабът на принтера може да се различават. Проверете настройките на драйвера.
 	Drawing scale changes. Use Actual size for full-scale plans.	Мащабът на чертежа се променя. Използвайте Действителен размер за планове в оригинален мащаб.
 	Reload documents when their files change on disk	Презареждай документите, когато файловете им се променят на диска
+	Don't show again	Не показвай отново
+	Show a notice when a document is secured	Показвай известие, когато документът е защитен
 	Always use my default zoom and page layout	Винаги използвай моя мащаб и оформление на страниците по подразбиране
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Този файл беше променен на диска. „Презареждане“ показва новата версия и отхвърля незаписаните ви промени; „Запис“ я заменя с тази версия.
 	Reload	Презареди
