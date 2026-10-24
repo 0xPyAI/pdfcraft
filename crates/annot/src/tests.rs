@@ -1014,6 +1014,89 @@ fn a_note_without_an_appearance_is_shown_at_icon_size() {
     assert_eq!(rects(&doc), original, "the source document is unchanged");
 }
 
+/// The fourteen rubber stamp names viewers draw without an appearance (ISO 32000-2 Table 184).
+const TABLE_184_STAMPS: [(&str, &str); 14] = [
+    ("Approved", "APPROVED"),
+    ("Experimental", "EXPERIMENTAL"),
+    ("NotApproved", "NOT APPROVED"),
+    ("AsIs", "AS IS"),
+    ("Expired", "EXPIRED"),
+    ("NotForPublicRelease", "NOT FOR PUBLIC RELEASE"),
+    ("Confidential", "CONFIDENTIAL"),
+    ("Final", "FINAL"),
+    ("Sold", "SOLD"),
+    ("Departmental", "DEPARTMENTAL"),
+    ("ForComment", "FOR COMMENT"),
+    ("TopSecret", "TOP SECRET"),
+    ("Draft", "DRAFT"),
+    ("ForPublicRelease", "FOR PUBLIC RELEASE"),
+];
+
+fn stamp_dict(extra: &str) -> Dict {
+    let doc = document_of(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>",
+        b"<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>",
+        format!("<< /Type /Annot /Subtype /Stamp /Rect [20 40 140 100] {extra} >>").as_bytes(),
+    ]);
+    list(&doc, 0).remove(0)
+}
+
+fn drawn(d: &Dict) -> String {
+    String::from_utf8_lossy(&appearance::display_stamp(d).expect("a stamp is drawn").decoded().unwrap()).into_owned()
+}
+
+/// A stamp another program wrote without an appearance draws the stamp its `/Name` names, Draft
+/// when it has none, and a frame with both diagonals for any other name, never the name itself.
+#[test]
+fn a_stamp_without_an_appearance_draws_the_stamp_it_names() {
+    for (name, label) in TABLE_184_STAMPS {
+        let content = drawn(&stamp_dict(&format!("/Name /{name}")));
+        assert!(content.contains(&format!("({label}) Tj")), "{name}: {content}");
+    }
+    assert!(drawn(&stamp_dict("")).contains("(DRAFT) Tj"), "Table 184's default");
+    assert!(drawn(&stamp_dict("/IT /Stamp")).contains("(DRAFT) Tj"), "a stamp intent keeps the default");
+    // Any other name, a name in another case (names are compared byte for byte, §7.3.5), and an
+    // image stamp (`/IT`, which has no `/Name` to default): the frame and its diagonals.
+    for extra in ["/Name /MyCustomStamp", "/Name /draft", "/Name /APPROVED", "/IT /StampImage", "/Name /PCVoid"] {
+        let content = drawn(&stamp_dict(extra));
+        assert!(!content.contains("Tj") && content.contains(" re\n") && content.matches(" l\n").count() == 2, "{extra}: {content}");
+    }
+    // `/C` colours the stamp, as it does PdfCraft's own.
+    assert!(drawn(&stamp_dict("/Name /Final /C [1 0 1]")).contains("1 0 1 RG"));
+    // The placeholder stays grey whatever the `/C`: it is not the stamp, so it takes none of its colour.
+    let placeholder = drawn(&stamp_dict("/Name /MyCustomStamp /C [1 0 0]"));
+    assert!(placeholder.contains("0.45 0.45 0.45 RG") && !placeholder.contains("1 0 0 RG"), "{placeholder}");
+    // A stamp's own artwork is never replaced, and the drawing is for display only: edits
+    // (restyling, flattening) still find nothing they may write.
+    assert!(appearance::display_stamp(&stamp_dict("/Name /Draft /AP << /N 9 0 R >>")).is_none());
+    assert!(appearance::build(&stamp_dict("/Name /Draft")).is_none());
+    assert!(appearance::display_stamp(&stamp_dict("/Name /Draft /PCStamp true")).is_none(), "PdfCraft's own stamps are drawn by `build`");
+    assert!(appearance::display_stamp(&stamp_dict("/Name /Draft /Rect [5 5 5 50]")).is_none(), "no width");
+}
+
+/// The display copy draws a stamp that has no normal appearance, and keeps one that has.
+#[test]
+fn the_display_copy_draws_stamps_without_a_normal_appearance_only() {
+    let doc = document_of(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>",
+        b"<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R 6 0 R 7 0 R] >>",
+        b"<< /Type /Annot /Subtype /Stamp /Rect [20 40 140 100] /Name /TopSecret >>",
+        b"<< /Type /Annot /Subtype /Stamp /Rect [20 140 140 200] /Name /Draft /AP << /N 8 0 R >> >>",
+        b"<< /Type /Annot /Subtype /Stamp /Rect [20 240 140 300] /Name /Sold /AP << /D 8 0 R >> >>",
+        b"<< /Type /Annot /Subtype /Stamp /Rect [20 340 140 400] /Name /Unheard >>",
+        b"<< /Type /XObject /Subtype /Form /BBox [0 0 10 10] /Length 8 >>\nstream\n1 0 0 rg\nendstream",
+    ]);
+    let display = with_missing_appearances(&doc).expect("three stamps need an appearance");
+    let shown = list(&display, 0);
+    assert!(ap_content(&display, &shown[0]).contains("(TOP SECRET) Tj"));
+    assert_eq!(shown[1].get(b"AP"), list(&doc, 0)[1].get(b"AP"), "an existing appearance is kept");
+    assert!(ap_content(&display, &shown[2]).contains("(SOLD) Tj"), "an /AP without /N has nothing to keep");
+    assert!(!ap_content(&display, &shown[3]).contains("Tj"), "an unknown name gets the placeholder");
+    assert!(list(&doc, 0)[0].get(b"AP").is_none(), "the document itself is untouched");
+}
+
 #[test]
 fn every_line_ending_is_drawn() {
     let filled = [LineEnding::Square, LineEnding::Circle, LineEnding::Diamond, LineEnding::ClosedArrow, LineEnding::RClosedArrow];
@@ -1316,9 +1399,9 @@ fn cached_appearances_are_reused_while_annotations_are_unchanged() {
     .expect("strips");
     let mut cache = AppearanceCache::default();
     let first = with_missing_appearances_cached(&doc, &mut cache).expect("builds");
-    assert_eq!((cache.builds(), cache.hits()), (1, 0), "only the note needs an appearance");
+    assert_eq!((cache.builds(), cache.hits()), (2, 0), "the note and the file's stamp need an appearance");
     let second = with_missing_appearances_cached(&doc, &mut cache).expect("reuses");
-    assert_eq!((cache.builds(), cache.hits()), (1, 1), "nothing is redrawn");
+    assert_eq!((cache.builds(), cache.hits()), (2, 2), "nothing is redrawn");
     let [a, b] = [&first, &second].map(|copy| ap_content(copy, &list(copy, 0)[idx]));
     assert!(!a.is_empty());
     assert_eq!(a, b, "the reused appearance is byte-identical");
