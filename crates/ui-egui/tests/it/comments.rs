@@ -725,6 +725,33 @@ fn the_composer_hides_while_its_comment_is_scrolled_away() {
     assert_eq!(h.state().views[0].comments.composer.as_ref().map(|c| c.text.as_str()), Some("Draft"));
 }
 
+/// Editing a large comment whose top-right corner is scrolled away still shows the composer
+/// while the rest of the comment is on screen, so it can be posted or cancelled (#4095).
+#[test]
+fn the_edit_composer_shows_while_part_of_its_comment_is_on_screen() {
+    let mut h = harness(|app| app.set_option("quick", "square").unwrap());
+    drag_pt(&mut h, (20.0, 190.0), (280.0, 10.0));
+    // What "Edit text…" opens: the composer anchored at the comment's top-right corner.
+    h.state_mut().views[0].comments.composer = Some(pdfcraft_ui_egui::comments::Composer {
+        page: 0,
+        at: [280.0, 190.0],
+        kind: pdfcraft_ui_egui::comments::ComposerKind::Edit(0),
+        text: String::new(),
+        focus: true,
+    });
+    h.run_steps(2);
+    let viewport = h.state().views[0].viewport_rect();
+    h.state_mut().views[0].goto = Some((0, 0.4));
+    h.run_steps(4);
+    assert!(at(&h, 280.0, 190.0).y < viewport.top(), "the comment's top-right corner is scrolled away");
+    assert!(at(&h, 280.0, 10.0).y > viewport.top(), "part of the comment is still on screen");
+    let editors: Vec<_> = h.query_all_by(|n| n.role() == egui::accesskit::Role::MultilineTextInput).map(|n| n.rect()).collect();
+    assert!(editors.iter().any(|r| viewport.contains(r.center())), "the editor is drawn: {editors:?} (document {viewport:?})");
+    h.get_by_label("Cancel").click();
+    h.run_steps(2);
+    assert!(h.state().views[0].comments.composer.is_none(), "Cancel closes it");
+}
+
 /// With its whole page scrolled off the screen the composer keeps its draft, and the editor takes
 /// the keyboard again when the page comes back (#4021).
 #[test]

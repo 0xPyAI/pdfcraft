@@ -1316,7 +1316,9 @@ impl Automation {
             })
             .flatten();
         let header_version = bytes.strip_prefix(b"%PDF-").and_then(|b| b.get(..3)).and_then(valid_version);
-        let pdf_version = catalog_version.as_deref().or(header_version);
+        // Viewers read the later of the two (object streams raise the header past a lower catalog
+        // entry). Both are "d.d", so text order is version order.
+        let pdf_version = catalog_version.as_deref().into_iter().chain(header_version).max();
         let o = &r.optimize;
         Ok(json!({
             "path": path.to_string_lossy(),

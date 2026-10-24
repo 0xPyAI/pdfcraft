@@ -130,8 +130,11 @@ impl TextBox {
         // The smallest an automatic size goes ([`auto_text_size_by`]).
         let size = self.size.unwrap_or(4.0);
         if self.multiline {
-            let lines = wrap_with(&shown, size, self.inner_w, width_of).len() as f64;
-            lines * size * 1.15 <= self.inner_h + 1e-6
+            // As the appearance draws it: the first baseline is 0.85 em below the padded top and
+            // a line is drawn while its descent (0.207 em) stays inside the border, so the
+            // padding below the last line is not needed: `inner_h` plus 2 pt.
+            let above = wrap_with(&shown, size, self.inner_w, width_of).len().saturating_sub(1) as f64;
+            above * size * 1.15 + 1.057 * size <= self.inner_h + 2.0 + 0.01
         } else {
             // A line break in a single-line value is drawn as a space.
             let line: String = shown.chars().map(|c| if matches!(c, '\n' | '\r') { ' ' } else { c }).collect();

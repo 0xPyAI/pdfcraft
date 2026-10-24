@@ -255,6 +255,13 @@ fn kept_bytes(o: &Outcome) -> usize {
 }
 
 #[test]
+fn exec_menu_item_requests_are_capped_like_other_requests() {
+    let o = go("for (var i = 0; i < 12000; i++) app.execMenuItem('Print');", &Event::field("Mouse Up", "agree", ""));
+    assert_eq!(o.error, None);
+    assert_eq!(o.requests.len(), crate::xfa::MAX_EFFECTS);
+}
+
+#[test]
 fn console_alerts_and_requests_are_capped_in_count_and_bytes() {
     let o = go(
         "var s = 'x'; while (s.length < 8192) s += s; \
