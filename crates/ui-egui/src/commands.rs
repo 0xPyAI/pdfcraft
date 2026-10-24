@@ -669,6 +669,9 @@ impl PdfCraftApp {
             }
             "page.crop" => {
                 self.quick_tool = crate::QuickTool::Crop;
+                if let Some(v) = active.and_then(|i| self.views.get_mut(i)) {
+                    v.organize = false;
+                }
                 self.notify_tr("Drag a rectangle on a page to crop it; double-click a page for Set Page Boxes");
             }
             "page.boxes" => {
