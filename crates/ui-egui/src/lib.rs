@@ -396,6 +396,120 @@ pub struct PageClip {
     pub pages: Vec<usize>,
 }
 
+/// One page of a whole-document copy: its text as read for display, to read, or not to try
+/// (reading it failed before).
+enum CopyPage {
+    Read(std::sync::Arc<pdfcraft_render::PageText>),
+    ToRead,
+    Skip,
+}
+
+/// What a whole-document copy needs, taken from the view on the UI thread: each page's text
+/// layer as far as it was read, and the document to read the others from.
+struct DocumentCopyJob {
+    pages: Vec<CopyPage>,
+    bytes: std::sync::Arc<Vec<u8>>,
+    password: Option<std::sync::Arc<str>>,
+}
+
+impl DocumentCopyJob {
+    fn of(v: &DocView, doc: &pdfcraft_engine::Document) -> DocumentCopyJob {
+        let pages = (0..v.page_count())
+            .map(|p| match v.texts.get(&p) {
+                Some(t) => CopyPage::Read(t.clone()),
+                None if v.text_failed.contains(&p) => CopyPage::Skip,
+                None => CopyPage::ToRead,
+            })
+            .collect();
+        DocumentCopyJob { pages, bytes: doc.bytes.clone(), password: doc.password.as_deref().map(std::sync::Arc::from) }
+    }
+
+    /// The document's text in page order, a page per line run. Each page read here is let go
+    /// once its text is taken, so a large document never holds every page's text layer at once.
+    /// `None` when `cancel` was set.
+    fn text(self, cancel: &std::sync::atomic::AtomicBool) -> Option<String> {
+        let mut renderer: Option<pdfcraft_render::PageRenderer> = None;
+        let mut out = String::new();
+        let mut push = |text: String| {
+            if !text.is_empty() {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&text);
+            }
+        };
+        for (page, p) in self.pages.into_iter().enumerate() {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return None;
+            }
+            match p {
+                CopyPage::Read(t) => push(t.text_of(0..t.glyphs.len())),
+                CopyPage::ToRead => {
+                    let r = renderer.get_or_insert_with(|| {
+                        let config = pdfcraft_render::RenderConfig { password: self.password.clone(), ..Default::default() };
+                        pdfcraft_render::PageRenderer::new(self.bytes.clone(), config)
+                    });
+                    let req = pdfcraft_render::RenderRequest {
+                        page,
+                        kind: pdfcraft_render::RequestKind::Text,
+                        tile: None,
+                        scale: 1.0,
+                        tag: 0,
+                        preview: false,
+                    };
+                    if let Some(t) = r.render(req).text {
+                        push(t.text_of(0..t.glyphs.len()));
+                    }
+                }
+                CopyPage::Skip => {}
+            }
+        }
+        Some(out)
+    }
+}
+
+/// A whole-document copy reading its pages off the UI thread (in place on the web, which has no
+/// threads). Dropping it (a new copy, the document closed) stops the reading.
+struct DocumentCopy {
+    doc: DocId,
+    rx: std::sync::mpsc::Receiver<String>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl DocumentCopy {
+    fn start(doc: DocId, job: DocumentCopyJob, ctx: &egui::Context) -> DocumentCopy {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (stop, ctx) = (cancel.clone(), ctx.clone());
+            let spawned = std::thread::Builder::new().name("copy-document-text".into()).spawn(move || {
+                if let Some(text) = job.text(&stop) {
+                    let _ = tx.send(text);
+                    ctx.request_repaint();
+                }
+            });
+            if let Err(e) = spawned {
+                log::warn!("copying the document's text: {e}");
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = ctx;
+            if let Some(text) = job.text(&cancel) {
+                let _ = tx.send(text);
+            }
+        }
+        DocumentCopy { doc, rx, cancel }
+    }
+}
+
+impl Drop for DocumentCopy {
+    fn drop(&mut self) {
+        self.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// Files delivered asynchronously: (name, bytes).
 pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
@@ -629,6 +743,8 @@ pub struct PdfCraftApp {
     /// Whether the window currently has the app's header bar (`None` until the first frame).
     app_frame_shown: Option<bool>,
     pub password_prompt: Option<PasswordPrompt>,
+    /// Copy of a whole document's text (#2639) whose pages are being read off the UI thread.
+    document_copy: Option<DocumentCopy>,
     pub unlock_prompt: Option<UnlockPrompt>,
     pub full_screen: bool,
     /// Files delivered asynchronously (web drag-and-drop, web file picker).
@@ -1025,6 +1141,7 @@ impl PdfCraftApp {
             system_title_bar: false,
             app_frame_shown: None,
             password_prompt: None,
+            document_copy: None,
             unlock_prompt: None,
             full_screen: false,
             inbox: Default::default(),
@@ -1610,6 +1727,39 @@ impl PdfCraftApp {
             self.dialog_epoch = self.dialog_epoch.wrapping_add(1);
         }
         self.dialog_epoch
+    }
+
+    /// Edit ▸ Attach a file…: choose a file, then attach it to the active document and show
+    /// the Attachments panel with it.
+    pub fn attach_file_dialog(&mut self) {
+        if self.active_ids().is_none() {
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let dialog = rfd::AsyncFileDialog::new().set_title(tl!("Attach a file").to_string());
+            let target = self.active_ids().map(|(_, id)| id);
+            self.ask_one(pickers::Ask::File(dialog), target, |app, path| app.attach_file(&path));
+        }
+        #[cfg(target_arch = "wasm32")]
+        self.notify_tr("Attaching files is not available on the web yet");
+    }
+
+    /// Attach the file at `path` to the active document (document level: the Attachments
+    /// panel, not a paper-clip comment on a page).
+    pub fn attach_file(&mut self, path: &std::path::Path) {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => {
+                self.notify_fmt("Couldn't read {name}: {e}", &[("name", &name), ("e", &e.to_string())]);
+                return;
+            }
+        };
+        let mime = pdfcraft_engine::mime_for_name(&name).map(str::to_string);
+        if self.apply_edit(pdfcraft_engine::Edit::AddAttachment { name, bytes, description: None, mime }) {
+            self.choose_right_panel(Some(RightPanel::Attachments));
+        }
     }
 
     /// Save an attachment to disk, or open a PDF attachment in a new tab.
@@ -2302,11 +2452,11 @@ impl PdfCraftApp {
     }
 
     /// Changes the workspace and the tool that goes with it. The mode bar (through
-    /// [`Self::select_mode`]) and the Read mode command both come here, so they leave Edit alike.
-    /// Edit turns on Edit text & images at once, as Acrobat does: every paragraph and image on the
-    /// page gets its box and is editable with one click. Leaving Edit puts the editing tools down
-    /// again and applies a paragraph still open in the editor.
-    fn enter_mode(&mut self, mode: Mode) {
+    /// [`Self::select_mode`]), the Read mode command and the tool panels' back arrows all come
+    /// here, so they leave Edit alike. Edit turns on Edit text & images at once, as Acrobat does:
+    /// every paragraph and image on the page gets its box and is editable with one click. Leaving
+    /// Edit puts the editing tools down again and applies a paragraph still open in the editor.
+    pub(crate) fn enter_mode(&mut self, mode: Mode) {
         self.mode = mode;
         if mode == Mode::Edit {
             self.quick_tool = QuickTool::EditText;
@@ -3121,15 +3271,50 @@ impl PdfCraftApp {
     }
 
     /// Shared permission gate for copying selected page text from menus and keyboard events.
+    /// After Select All of the document (#2639), pages whose text wasn't read for display are read
+    /// off the UI thread ([`DocumentCopy`]), and the clipboard gets the text when they're done.
     pub(crate) fn copy_selected_text(&mut self, i: usize, ctx: &egui::Context) -> bool {
-        let Some((id, text)) = self.views.get(i).and_then(|v| Some((v.id, v.selected_text()?))).filter(|(_, text)| !text.is_empty()) else {
-            return false;
-        };
+        // A newer copy wins: a whole-document copy still reading must not replace it later.
+        self.document_copy = None;
+        let Some(v) = self.views.get(i) else { return false };
+        let id = v.id;
+        if v.all_text && !v.pages_without_text().is_empty() {
+            // Checked before any page is read: a document that refuses copying reads nothing.
+            if !self.may_copy(id) {
+                return false;
+            }
+            let Some(job) = self.views.get(i).and_then(|v| Some(DocumentCopyJob::of(v, self.session.get(id)?))) else { return false };
+            self.document_copy = Some(DocumentCopy::start(id, job, ctx));
+            return true;
+        }
+        let Some(text) = v.selected_text().filter(|text| !text.is_empty()) else { return false };
         if !self.may_copy(id) {
             return false;
         }
         ctx.copy_text(text);
         true
+    }
+
+    /// The clipboard text of a whole-document copy, once its pages are read; dropped with the
+    /// document it was copied from, and by any later copy (a text field's, a comment's), which
+    /// it must not replace. Run at the end of the frame, so it sees this frame's copies.
+    fn finish_document_copy(&mut self, ctx: &egui::Context) {
+        let Some(c) = &self.document_copy else { return };
+        let copied = ctx.output(|o| o.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(_) | egui::OutputCommand::CopyImage(_))));
+        if copied || !self.views.iter().any(|v| v.id == c.doc) {
+            self.document_copy = None;
+            return;
+        }
+        match c.rx.try_recv() {
+            Ok(text) => {
+                self.document_copy = None;
+                if !text.is_empty() {
+                    ctx.copy_text(text);
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(50)),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => self.document_copy = None,
+        }
     }
 
     /// The quick tools' keys, as in Acrobat: V selects, H pans, and holding Space pans until it
@@ -3355,6 +3540,7 @@ impl eframe::App for PdfCraftApp {
             }
         }
         self.poll_export();
+        self.auto_ocr_scanned_page();
         self.poll_ocr();
         self.poll_optimize();
         self.poll_action();
@@ -3450,6 +3636,7 @@ impl eframe::App for PdfCraftApp {
 
 impl PdfCraftApp {
     fn finish_render_frame(&mut self, ctx: &egui::Context) {
+        self.finish_document_copy(ctx);
         // The Combine grid's thumbnails, whichever tab shows (renders under way still finish).
         self.combine_thumbs_frame(ctx);
         // Retire hidden documents before admitting the visible document's textures, so the
