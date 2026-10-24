@@ -775,7 +775,7 @@ fn form_stream(place: crate::appearance::Placement, content: Vec<u8>, resources:
 /// color its `/DA` asks for (the widget's, else `field_da`, the field's own or inherited one).
 /// Also returns the first caption character the font can't draw (drawn as `?`), for the caller to
 /// mark and report.
-fn button_appearance(doc: &Document, w: &Widget, field_da: &str) -> (Stream, Option<char>) {
+pub(crate) fn button_appearance(doc: &Document, w: &Widget, field_da: &str) -> (Stream, Option<char>) {
     let (mut c, place) = frame_only(doc, w);
     let (width, height) = (place.layout_w, place.layout_h);
     let wobj = doc.get(w.obj);

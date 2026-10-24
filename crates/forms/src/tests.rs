@@ -3097,3 +3097,159 @@ fn a_skipped_field_leaves_its_widget_to_the_next() {
     let widgets: Vec<(&str, usize)> = all.iter().map(|f| (f.name.as_str(), f.widgets.len())).collect();
     assert_eq!(widgets, [("b", 1)]);
 }
+
+/// Check boxes, radio buttons and push buttons whose file gives them no appearance, a comb field
+/// and a combo box, for the display copy.
+fn left_buttons() -> Document {
+    let widget = |n: &str, rest: &str| format!("<< /Type /Annot /Subtype /Widget /T ({n}) /F 4 /P 3 0 R {rest} >>");
+    document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R 18 0 R] >>".into(),
+        "<< /Fields [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R 18 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        widget("i", "/FT /Btn /V /Yes /AS /Yes /DA (/ZaDb 0 Tf 0 g) /MK << /CA (4) /BC [0 0 0] >> /Rect [50 700 74 724]"), // 6
+        widget("j", "/FT /Btn /V /Yes /AS /Yes /DA (/ZaDb 0 Tf 0 0 1 rg) /MK << /CA (l) /BC [0 0 0] >> /Rect [100 700 124 724]"),
+        widget("k", "/FT /Btn /V /Yes /AS /Yes /DA (/ZaDb 0 Tf 1 0 0 rg) /MK << /CA (8) /BC [0 0 0] >> /Rect [150 700 174 724]"),
+        widget("l", "/FT /Btn /V /Yes /AS /Yes /DA (/ZaDb 9 Tf 0 g) /MK << /CA (H) /BC [0 0 0] /BG [1 1 0] >> /Rect [200 700 224 724]"),
+        widget("off", "/FT /Btn /V /Off /AS /Off /DA (/ZaDb 0 Tf 0 g) /MK << /CA (4) /BC [0 0 0] >> /Rect [250 700 274 724]"), // 10
+        widget("radio", "/FT /Btn /Ff 32768 /V /A /AS /A /DA (/ZaDb 0 Tf 0 g) /MK << /BC [0 0 0] >> /Rect [300 700 324 724]"),
+        widget(
+            "o",
+            "/FT /Btn /Ff 65536 /DA (/Helv 12 Tf 0 g) /MK << /CA (Press me) /BG [0.8 0.8 0.8] /BC [0 0 0] >> /BS << /W 2 /S /B >> /Rect [50 600 170 624]",
+        ),
+        widget("own", "/FT /Btn /V /Yes /AS /Yes /MK << /CA (4) /BC [0 0 0] >> /Rect [350 700 374 724] /AP << /N << /Yes 19 0 R /Off 19 0 R >> >>"),
+        widget("half", "/FT /Btn /V /Yes /AS /Yes /DA (/ZaDb 0 Tf 0 g) /MK << /CA (8) >> /Rect [400 700 424 724] /AP << /N << /Off 19 0 R >> >>"),
+        widget("bad", "/FT /Btn /V /Yes /AS /Yes /DA (/ZaDb nan Tf 1 x rg) /MK << /CA 42 /BC [(no) /Name] /BG 7 >> /BS << /W -3 >> /Rect [450 700 474 724]"), // 15
+        widget("d", "/FT /Tx /Ff 16777216 /MaxLen 6 /V (ABC123) /DA (/Helv 12 Tf 0 g) /MK << /BC [0 0 1] >> /Rect [50 500 170 524]"),
+        widget("m", "/FT /Ch /Ff 131072 /Opt [(Apple) (Banana)] /V (Banana) /Q 2 /DA (/Helv 12 Tf 0 g) /MK << /BC [0 0 0] >> /Rect [50 400 170 424]"),
+        widget("n", "/FT /Ch /Opt [(One) (Two)] /V (Two) /DA (/Helv 11 Tf 0 g) /MK << /BC [0 0 0] >> /Rect [200 400 320 460]"),
+        "<< /Length 4 >>\nstream\nq\nQ\nendstream".into(), // 19
+    ])
+}
+
+/// The appearance stream of widget `w` in `state` (a check box's `/AP /N /<state>`).
+fn state_ap(doc: &Document, w: &Widget, state: &str) -> String {
+    let wd = doc.get(w.obj).as_dict().cloned().unwrap();
+    let ap = doc.resolve(wd.get(b"AP").unwrap()).as_dict().cloned().unwrap();
+    let n = doc.resolve(ap.get(b"N").unwrap()).as_dict().cloned().unwrap();
+    let r = n.reference(state.as_bytes()).expect("the state's appearance");
+    let Object::Stream(s) = &*doc.get(r) else { panic!("a stream") };
+    String::from_utf8_lossy(&s.decoded().unwrap()).into_owned()
+}
+
+/// The decoded appearance PdfCraft would save for text or choice field `name` of `doc`.
+fn saved_look(doc: &Document, name: &str) -> String {
+    let all = fields(doc);
+    let f = field(&all, name);
+    String::from_utf8_lossy(&appearance::field_appearance(doc, f, &f.widgets[0], &f.value).decoded().unwrap()).into_owned()
+}
+
+/// ISO 32000-2 Table 192 and 12.7.5.2.3: a check box with no appearance shows its `/MK /BC`
+/// border and, when on, its caption `/MK /CA` as a ZapfDingbats character in the `/DA` colour,
+/// sized to the box when the `/DA` size is 0.
+#[test]
+fn check_boxes_without_an_appearance_show_their_caption_symbol() {
+    let doc = left_buttons();
+    let copy = with_field_appearances(&doc).expect("buttons to draw");
+    let all = fields(&copy);
+    for (name, symbol, colour) in [("i", "(4) Tj", "0 g"), ("j", "(l) Tj", "0 0 1 rg"), ("k", "(8) Tj", "1 0 0 rg"), ("l", "(H) Tj", "0 g")] {
+        let shown = state_ap(&copy, &field(&all, name).widgets[0], "Yes");
+        assert!(shown.contains(symbol), "{name}: {shown}");
+        assert!(shown.contains(&format!("{colour}\n")), "{name} in its colour: {shown}");
+        assert!(shown.contains("0 0 0 RG\n1 w\n0.5 0.5 23 23 re S"), "{name} has its border: {shown}");
+    }
+    // A /DA size is kept; the automatic one fills the box inside the border.
+    let l = state_ap(&copy, &field(&all, "l").widgets[0], "Yes");
+    assert!(l.contains("/ZaDb 9 Tf") && l.contains("1 1 0 rg\n0 0 24 24 re f"), "{l}");
+    let i = state_ap(&copy, &field(&all, "i").widgets[0], "Yes");
+    let size: f64 = i.split("/ZaDb ").nth(1).and_then(|s| s.split(' ').next()).and_then(|s| s.parse().ok()).unwrap();
+    assert!((18.0..=26.0).contains(&size), "{size}");
+    let w = copy.get(field(&all, "i").widgets[0].obj);
+    let ap = copy.resolve(w.as_dict().unwrap().get(b"AP").unwrap());
+    let n = copy.resolve(ap.as_dict().unwrap().get(b"N").unwrap());
+    let Object::Stream(s) = &*copy.get(n.as_dict().unwrap().reference(b"Yes").unwrap()) else { panic!() };
+    let font = s.dict.get(b"Resources").and_then(|r| r.as_dict()).and_then(|r| r.get(b"Font")).and_then(|f| f.as_dict()).and_then(|f| f.get(b"ZaDb"));
+    assert_eq!(font.and_then(|f| f.as_dict()).and_then(|f| f.name(b"BaseFont")), Some(&b"ZapfDingbats"[..]), "a standard-14 font, no program");
+}
+
+/// An Off check box shows only its border, a radio button without a caption a dot (`l`), a box
+/// whose file has only an Off look gets an on look, and one with its own look keeps it.
+#[test]
+fn button_states_without_an_appearance() {
+    let doc = left_buttons();
+    let copy = with_field_appearances(&doc).expect("buttons to draw");
+    let all = fields(&copy);
+    let off = state_ap(&copy, &field(&all, "off").widgets[0], "Off");
+    assert!(off.contains("re S") && !off.contains("Tj"), "{off}");
+    assert!(state_ap(&copy, &field(&all, "radio").widgets[0], "A").contains("(l) Tj"));
+    assert!(state_ap(&copy, &field(&all, "half").widgets[0], "Yes").contains("(8) Tj"));
+    let own = |d: &Document| d.get(field(&fields(d), "own").widgets[0].obj).as_dict().and_then(|w| w.get(b"AP").cloned());
+    assert_eq!(own(&copy), own(&doc), "a check box with its own look keeps it");
+    // Nonsense in /MK, /DA and /BS: the default symbol, no border, and no panic.
+    let bad = state_ap(&copy, &field(&all, "bad").widgets[0], "Yes");
+    assert!(bad.contains("(4) Tj") && !bad.contains("re S"), "{bad}");
+    // The document itself is untouched.
+    assert!(doc.get(field(&fields(&doc), "i").widgets[0].obj).as_dict().is_some_and(|w| !w.contains(b"AP")));
+}
+
+/// Table 192 and Table 168: a push button with no appearance shows its `/MK /BG` background, its
+/// beveled `/MK /BC` border in the `/BS` width, and its caption `/MK /CA` centred.
+#[test]
+fn push_buttons_without_an_appearance_show_their_caption_and_frame() {
+    let copy = with_field_appearances(&left_buttons()).expect("buttons to draw");
+    let shown = ap(&copy, &field(&fields(&copy), "o").widgets[0]);
+    for part in ["0.8 0.8 0.8 rg\n0 0 120 24 re f", "0 0 0 RG\n2 w\n1 1 118 22 re S", "1 g\n", "0.5 g\n", "(Press me) Tj", "/Helv 12.00 Tf"] {
+        assert!(shown.contains(part), "{part}: {shown}");
+    }
+}
+
+/// ISO 32000-2 Table 228, Comb: the field is divided into MaxLen equally spaced positions, and a
+/// bordered comb field shows them: MaxLen - 1 lines in the border colour, in its saved look too.
+#[test]
+fn comb_fields_show_their_cells() {
+    let mut doc = left_buttons();
+    let shown = saved_look(&doc, "d");
+    let lines: Vec<&str> = shown.lines().filter(|l| l.ends_with(" l") && l.contains(" 1 m ")).collect();
+    assert_eq!(lines, ["20 1 m 20 23 l", "40 1 m 40 23 l", "60 1 m 60 23 l", "80 1 m 80 23 l", "100 1 m 100 23 l"], "{shown}");
+    assert!(shown.contains("0 0 1 RG\n1 w\n20 1 m"), "in the border colour: {shown}");
+    // Past the cap no lines, and a huge MaxLen is no trouble; without a border, none either.
+    let r = field(&fields(&doc), "d").widgets[0].obj;
+    doc.update_dict(r, |w| w.set(b"MaxLen".to_vec(), Object::Int(1 << 40))).unwrap();
+    let huge = saved_look(&doc, "d");
+    assert!(!huge.contains(" 1 m ") && huge.contains("(A) Tj"), "{huge}");
+    doc.update_dict(r, |w| {
+        w.set(b"MaxLen".to_vec(), Object::Int(6));
+        w.remove(b"MK");
+    })
+    .unwrap();
+    let plain = saved_look(&doc, "d");
+    assert!(!plain.contains(" m ") && plain.contains("(A) Tj"), "{plain}");
+}
+
+/// A combo box drawn for display shows its drop-down button at the right edge and keeps its text
+/// clear of it; a list box, a text field, the combo box's saved look and its printed one have none.
+#[test]
+fn combo_boxes_shown_on_screen_have_a_drop_down_button() {
+    let doc = left_buttons();
+    let screen = with_field_appearances(&doc).expect("fields to draw");
+    let printed = with_printed_field_appearances(&doc).expect("fields to draw");
+    let m = ap(&screen, &field(&fields(&screen), "m").widgets[0]);
+    // A 22 pt square inside the 1 pt border, a line in the border colour, a triangle.
+    assert!(m.contains("0.85 g\n97 1 22 22 re f\n0 0 0 RG\n1 w\n97 1 m 97 23 l S\n0 g\n"), "{m}");
+    // The text's clip stops at the button.
+    assert!(m.contains("1 1 96 22 re W n"), "{m}");
+    let printed_m = ap(&printed, &field(&fields(&printed), "m").widgets[0]);
+    assert!(!printed_m.contains("0.85 g") && printed_m.contains("1 1 118 22 re W n"), "{printed_m}");
+    let saved = saved_look(&doc, "m");
+    assert!(!saved.contains("0.85 g"), "{saved}");
+    // Right-aligned text moves left by the button's width.
+    let x = |s: &str| -> f64 {
+        s.split(" Tm ").next().and_then(|s| s.rsplit("1 0 0 1 ").next()).and_then(|s| s.split(' ').next()).and_then(|s| s.parse().ok()).unwrap()
+    };
+    assert!((x(&saved) - x(&m) - 22.0).abs() < 0.01, "{saved} / {m}");
+    for other in ["n", "d"] {
+        let s = ap(&screen, &field(&fields(&screen), other).widgets[0]);
+        assert!(!s.contains("0.85 g"), "{other}: {s}");
+    }
+}

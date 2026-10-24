@@ -7438,3 +7438,64 @@ fn a_page_truncated_for_forms_and_pictures_is_listed_once() {
     assert!(pages[0].images.is_empty(), "the picture is past the budget");
     assert_eq!(truncated, [0]);
 }
+
+/// ISO 32000-2 Table 192, 12.7.5.2.3 and Table 228 (Comb): a check box, a push button, a comb
+/// field and a combo box the file leaves to the viewer. The page as displayed shows the check
+/// box's caption symbol in its text colour, the button's grey face, the comb's cells in the border
+/// colour and the combo box's drop-down button; printing leaves that button out, and saving
+/// writes the file as it was.
+#[test]
+fn buttons_and_combs_left_to_the_viewer_are_displayed() {
+    let pdf = b"%PDF-1.7\n\
+        1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >> endobj\n\
+        2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+        3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 400 200] /Annots [6 0 R 7 0 R 8 0 R 9 0 R] >> endobj\n\
+        4 0 obj << /Fields [6 0 R 7 0 R 8 0 R 9 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >> endobj\n\
+        5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> endobj\n\
+        6 0 obj << /Type /Annot /Subtype /Widget /FT /Btn /T (k) /V /Yes /AS /Yes /DA (/ZaDb 0 Tf 1 0 0 rg) /MK << /CA (8) /BC [0 0 0] >> /Rect [20 150 60 190] /F 4 /P 3 0 R >> endobj\n\
+        7 0 obj << /Type /Annot /Subtype /Widget /FT /Btn /Ff 65536 /T (o) /DA (/Helv 12 Tf 0 g) /MK << /CA (Press) /BG [0.8 0.8 0.8] /BC [0 0 0] >> /BS << /W 2 /S /B >> /Rect [100 150 220 190] /F 4 /P 3 0 R >> endobj\n\
+        8 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /Ff 16777216 /MaxLen 4 /T (d) /V (AB) /DA (/Helv 12 Tf 0 g) /MK << /BC [0 0 1] >> /Rect [20 80 220 110] /F 4 /P 3 0 R >> endobj\n\
+        9 0 obj << /Type /Annot /Subtype /Widget /FT /Ch /Ff 131072 /T (m) /Opt [(Apple) (Banana)] /V (Apple) /DA (/Helv 12 Tf 0 g) /MK << /BC [0 0 0] >> /Rect [20 20 220 50] /F 4 /P 3 0 R >> endobj\n\
+        trailer << /Root 1 0 R >>\n%%EOF"
+        .to_vec();
+    let render = |bytes: Arc<Vec<u8>>| {
+        let mut r = pdfcraft_render::PageRenderer::new(bytes, pdfcraft_render::RenderConfig::default());
+        r.render(pdfcraft_render::RenderRequest { page: 0, scale: 1.0, ..Default::default() })
+    };
+    // Pixels of the page (drawn at scale 1, 400 x 200) in user-space box x0..x1, y0..y1 that `keep`.
+    let count = |page: &pdfcraft_render::RenderedPage, (x0, y0, x1, y1): (u32, u32, u32, u32), keep: &dyn Fn(&[u8; 4]) -> bool| {
+        let (px, _) = page.rgba.as_chunks::<4>();
+        (200 - y1..200 - y0)
+            .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+            .filter(|&(x, y)| px.get((y * page.width + x) as usize).is_some_and(keep))
+            .count()
+    };
+    let red = |p: &[u8; 4]| p[0] > 200 && p[1] < 80 && p[2] < 80;
+    let grey = |p: &[u8; 4]| (180..=230).contains(&p[0]) && p[0] == p[1] && p[1] == p[2];
+    // Bluish: a 1 pt line on a pixel edge is half blue on each side.
+    let blue = |p: &[u8; 4]| p[2] > 200 && p[0] < 180 && p[1] < 180 && p[0] + 40 < p[2];
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, Arc::new(pdf), None).unwrap();
+    let shown = render(s.get(id).unwrap().display.clone());
+    assert!(count(&shown, (24, 154, 56, 186), &red) > 60, "the check box's red cross");
+    assert!(count(&shown, (104, 154, 216, 186), &grey) > 1000, "the push button's grey face");
+    // The comb's three inner lines at x = 70, 120 and 170, between its cells.
+    for x in [70, 120, 170] {
+        assert!(count(&shown, (x - 1, 84, x + 1, 106), &blue) >= 20, "a cell line at {x}");
+    }
+    assert_eq!(count(&shown, (95, 84, 97, 106), &blue), 0, "no line inside a cell");
+    // The combo box's drop-down button: a 28 pt square inside the right edge.
+    let button = (193, 22, 218, 48);
+    assert!(count(&shown, button, &grey) > 300, "the drop-down button on screen");
+    // Print as Image: the page as a picture, at 72 dpi so it is the size of the page here.
+    let raster = pdfcraft_print::Raster { dpi: 72.0, grayscale: false };
+    let pictures = crate::print_raster::rasterize(s.get(id).unwrap(), &[0], &raster, pdfcraft_print::Content::Document).unwrap();
+    let printed = render(Arc::new(pictures));
+    assert_eq!(count(&printed, button, &grey), 0, "not on paper");
+    assert!(count(&printed, (24, 154, 56, 186), &red) > 60, "the check box prints");
+    // The file is saved as it was: no widget has an appearance.
+    let saved = pdfcraft_cos::Document::open(s.save_bytes(id).unwrap()).unwrap();
+    for f in pdfcraft_forms::fields(&saved) {
+        assert!(saved.get(f.widgets[0].obj).as_dict().is_some_and(|d| !d.contains(b"AP")), "{} has no appearance", f.name);
+    }
+}
