@@ -1593,10 +1593,23 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
         ComposerKind::Edit(_) => "Edit comment",
     };
     // Its comment scrolled out of the document: keep the draft until it is back, rather than
-    // pushing the card into the window over the mode bar and toolbar (#4021).
+    // pushing the card into the window over the mode bar and toolbar (#4021). An edited comment
+    // that is only partly scrolled away keeps its card, at the nearest point inside the document.
+    let mut anchor = anchor;
     if !viewport.contains(anchor) {
-        c.focus = true;
-        return None;
+        let part_visible = matches!(c.kind, ComposerKind::Edit(index)
+        if info.annotations.iter().any(|a| a.page == page && a.index == index && {
+            let r = a.rect;
+            viewport.intersects(egui::Rect::from_two_pos(
+                cx.to_screen([f64::from(r[0]), f64::from(r[1])]),
+                cx.to_screen([f64::from(r[2]), f64::from(r[3])]),
+            ))
+        }));
+        if !part_visible {
+            c.focus = true;
+            return None;
+        }
+        anchor = anchor.clamp(viewport.min, viewport.max);
     }
     let pos = pos2(anchor.x + 12.0, anchor.y);
     let area = egui::Area::new(egui::Id::new(("comment-composer", view.id.0))).order(egui::Order::Foreground).constrain_to(viewport);
