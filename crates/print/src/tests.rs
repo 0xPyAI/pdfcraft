@@ -981,4 +981,11 @@ fn invisible_annotations_of_unknown_types_do_not_print() {
     assert!(!prints(&doc, &annot(None, 5), all), "no Subtype is no standard type");
     assert!(prints(&doc, &annot(Some("Square"), 5), all), "Invisible doesn't apply to a standard type");
     assert!(prints(&doc, &annot(Some("Widget"), 5), Content::FormFieldsOnly), "nor to a field");
+
+    // An indirect `/Subtype` (§7.3.10) is resolved: a standard type stays standard.
+    let mut doc = doc;
+    let square = doc.add(Object::name("Square"));
+    let mut indirect = annot(None, 5);
+    indirect.set(b"Subtype".to_vec(), Object::Ref(square));
+    assert!(prints(&doc, &indirect, all), "an indirect standard Subtype");
 }

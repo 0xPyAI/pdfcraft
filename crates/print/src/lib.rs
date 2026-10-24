@@ -760,7 +760,9 @@ fn prints(doc: &Document, d: &Dict, content: Content) -> bool {
     if flags & PRINT == 0 || flags & HIDDEN != 0 {
         return false;
     }
-    let subtype = d.name(b"Subtype").unwrap_or(b"");
+    // `/Subtype` may be an indirect reference (ISO 32000-2 §7.3.10), so resolve it first.
+    let subtype_obj = d.get(b"Subtype").map(|s| doc.resolve(s));
+    let subtype = subtype_obj.as_deref().and_then(Object::as_name).unwrap_or(b"");
     match subtype {
         b"Widget" => true,
         b"Link" | b"Popup" => false,
