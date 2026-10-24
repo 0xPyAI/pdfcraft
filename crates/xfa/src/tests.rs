@@ -2049,8 +2049,10 @@ fn a_multi_line_field_without_a_height_grows_to_hold_its_text() {
 }
 
 /// A flowed subform without a fixed height gets its border and fill round all it takes, margins
-/// included, drawn under its content; a flowed table too. One that doesn't fit in one content
-/// area keeps no border, and the layout says so.
+/// included, drawn under its content; a flowed table too. One a page break cuts between its
+/// children gets a closed border round its part on each page, its bottom margin ending the first
+/// part and its top margin starting the next, as another viewer draws it on a synthetic form. One
+/// whose own item a page break cuts keeps no border, and the layout says so.
 #[test]
 fn a_flowed_subform_is_drawn_with_its_border_under_its_content() {
     let field = |name: &str| format!(r#"<field name="{name}" w="3in" h="0.5in"><ui><textEdit/></ui></field>"#);
@@ -2076,10 +2078,36 @@ fn a_flowed_subform_is_drawn_with_its_border_under_its_content() {
     let table = r#"<subform name="grid" layout="table" columnWidths="2in 2in" w="4in"><border><edge/></border><subform name="row" layout="row"><draw name="c1" h="0.4in"><value><text>One</text></value></draw><draw name="c2" h="0.4in"><value><text>Two</text></value></draw></subform></subform>"#;
     let form = lay(table);
     assert_eq!(form.pages[0].items.iter().filter(|i| matches!(i, Item::Line { .. })).count(), 4, "{:?}", form.pages[0].items);
-    // Thirty fields don't fit one page: no border, and one warning.
+    // Thirty fields: 19 fit the first page after the top margin, 11 go to the second.
     let many: String = (0..30).map(|i| field(&format!("f{i}"))).collect();
     let form = lay(&boxed(&many));
-    assert!(form.pages.len() >= 2);
+    assert_eq!(form.pages.len(), 2);
+    let fills = |page: usize| -> Vec<Rect> {
+        form.pages[page].items.iter().filter_map(|i| if let Item::Fill { rect, .. } = i { Some(*rect) } else { None }).collect()
+    };
+    let (first, second) = (fills(0), fills(1));
+    assert_eq!((first.len(), second.len()), (1, 1), "a part on each page");
+    // Page 1: from the top (36) past 0.1in of margin and 19 fields, then 0.2in of margin.
+    assert!((first[0].y - 36.0).abs() < 0.01 && (first[0].bottom() - (36.0 + 7.2 + 19.0 * 36.0 + 14.4)).abs() < 0.01, "{:?}", first[0]);
+    // Page 2: the top margin again, 11 fields, the bottom margin.
+    assert!((second[0].y - 36.0).abs() < 0.01 && (second[0].bottom() - (36.0 + 7.2 + 11.0 * 36.0 + 14.4)).abs() < 0.01, "{:?}", second[0]);
+    let lines = |page: usize| form.pages[page].items.iter().filter(|i| matches!(i, Item::Line { .. })).count();
+    assert_eq!((lines(0), lines(1)), (4, 4), "each part's border is closed");
+    let f19 = form.pages[1].items.iter().find_map(|i| if let Item::Widget(w) = i { (w.name == "f19").then_some(w.rect) } else { None }).unwrap();
+    assert!((f19.y - 43.2).abs() < 0.01, "the second part starts after the top margin: {}", f19.y);
+    assert!(form.warnings.is_empty(), "{:?}", form.warnings);
+    // The margins come back without a border too.
+    let bare = format!(r#"<subform name="box" layout="tb" w="7.5in"><margin topInset="0.1in" bottomInset="0.2in"/>{many}</subform>"#);
+    let form = lay(&bare);
+    let f19 = form.pages[1].items.iter().find_map(|i| if let Item::Widget(w) = i { (w.name == "f19").then_some(w.rect) } else { None }).unwrap();
+    assert!((f19.y - 43.2).abs() < 0.01, "{}", f19.y);
+    // A text of its own longer than a page, cut across pages: no border, one warning.
+    let long = format!(
+        r#"<draw name="long" w="7in"><font typeface="Arial" size="10pt"/><value><text>{}</text></value></draw>"#,
+        "A line of the long text.\n".repeat(80)
+    );
+    let form = lay(&boxed(&(field("a") + &long)));
+    assert!(form.pages.len() >= 2, "the long text runs onto another page");
     assert!(form.pages.iter().all(|p| !p.items.iter().any(|i| matches!(i, Item::Fill { .. }))), "no fill drawn");
     assert_eq!(form.warnings.iter().filter(|w| w.contains("bordered section")).count(), 1, "{:?}", form.warnings);
 }

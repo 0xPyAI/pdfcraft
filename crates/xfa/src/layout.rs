@@ -188,6 +188,21 @@ struct FlowMark {
     items: usize,
 }
 
+/// A flowed subform being laid out ([`Layouter::frames`]): where it sits across, its margins and
+/// border, its part on the content area the flow is in, and its parts on earlier ones (page
+/// index, the page's first item of the part, the part's box).
+struct Frame {
+    x: f64,
+    w: f64,
+    margin: Margin,
+    border: Option<Border>,
+    part: FlowMark,
+    parts: Vec<(usize, usize, Rect)>,
+    /// The flow left a part's content area other than at a break between children (an item cut
+    /// across pages, a table's own break): the border is left out.
+    lost: bool,
+}
+
 struct Cursor {
     area: usize,
     content: usize,
@@ -222,6 +237,9 @@ struct Layouter<'t> {
     /// The fields and draws of the block being placed: (first item, one past the last, top,
     /// bottom) on the last page. A page break keeps each whole (see `split_block`).
     leaves: Vec<(usize, usize, f64, f64)>,
+    /// The flowed subforms being laid out, outermost first: a break between their children
+    /// closes their parts on one content area and opens new ones on the next.
+    frames: Vec<Frame>,
 }
 
 /// How many instances of a repeating subform to lay out: what the data holds once it holds
@@ -267,6 +285,7 @@ pub fn layout(tpl: &Template, data: Option<&DataNode>) -> Result<Form, XfaError>
         measured: RefCell::new(HashMap::new()),
         measures: Cell::new(0),
         leaves: Vec::new(),
+        frames: Vec::new(),
     };
     let ctx = Ctx { font: Font::default(), para: Para::default(), som: String::new() };
     l.new_page()?;
@@ -613,32 +632,98 @@ impl Layouter<'_> {
         Some(FlowMark { page: self.pages.len(), area: c.area, content: c.content, y: c.y, items: self.pages.last().map_or(0, |p| p.items.len()) })
     }
 
-    /// Draw a flowed subform's border `b` (edges and fill) round what it took since `start`, `x`
-    /// and `w` wide, under the content drawn since: once its content is placed, its height is
-    /// known. A subform that didn't stay in one content area is drawn without its border, and the
-    /// layout says so.
-    fn draw_flowed_border(&mut self, b: &Border, start: Option<FlowMark>, x: f64, w: f64) -> Result<(), XfaError> {
-        let Some(s) = start else { return Ok(()) };
+    /// Whether the flow is still in the content area `m` was taken in.
+    fn on_area(&self, m: &FlowMark) -> bool {
+        self.pages.len() == m.page && self.cur.as_ref().is_some_and(|c| c.area == m.area && c.content == m.content)
+    }
+
+    /// Whether page `page` (an index) got anything from item `at` on.
+    fn has_items_from(&self, page: usize, at: usize) -> bool {
+        self.pages.get(page).is_some_and(|p| p.items.len() > at)
+    }
+
+    /// Before placing a child `h` tall inside flowed subforms: when it doesn't fit what is left
+    /// of the content area but would fit a fresh one, break there ([`Self::break_frames`]).
+    fn break_before(&mut self, h: f64) -> Result<(), XfaError> {
+        let (rect, y, placed) = self.cursor();
+        if self.frames.is_empty() || !placed || y + h <= rect.bottom() + 0.01 || h > rect.h + 0.01 {
+            return Ok(());
+        }
+        self.break_frames()
+    }
+
+    /// Break the flowed subforms being laid out ([`Self::frames`]) across content areas, as
+    /// another viewer breaks such a section on a synthetic form: each one's part here ends after
+    /// its content and its bottom margin (the innermost first, each inside the next), the flow
+    /// moves to the next content area, and each starts a new part there after its top margin
+    /// (the outermost first).
+    fn break_frames(&mut self) -> Result<(), XfaError> {
+        let (rect, mut y, _) = self.cursor();
+        let page = self.pages.len().saturating_sub(1);
+        let here: Vec<bool> = self.frames.iter().map(|f| self.on_area(&f.part)).collect();
+        let filled: Vec<bool> = self.frames.iter().map(|f| self.has_items_from(page, f.part.items)).collect();
+        for ((f, here), filled) in self.frames.iter_mut().zip(here).zip(filled).rev() {
+            y = (y + f.margin.bottom).min(rect.bottom());
+            if !here {
+                f.lost = true;
+            } else if filled && y - f.part.y >= 0.01 {
+                f.parts.push((page, f.part.items, Rect::new(f.x, f.part.y, f.w, y - f.part.y)));
+            }
+        }
+        self.next_area()?;
+        for i in 0..self.frames.len() {
+            let Some(mark) = self.flow_mark() else { break };
+            let Some(f) = self.frames.get_mut(i) else { break };
+            f.part = mark;
+            let top = f.margin.top;
+            self.advance(top);
+        }
+        Ok(())
+    }
+
+    /// Close flowed subform `f` once its content is placed: its last part ends where the flow
+    /// is, and its border (edges and fill) is drawn round each part, closed on every side, under
+    /// that part's content. One whose flow left a content area other than at a break between its
+    /// children (an item of its own cut across pages) is drawn without its border, and the layout
+    /// says so.
+    fn finish_frame(&mut self, mut f: Frame) -> Result<(), XfaError> {
+        let Some(b) = f.border.take() else { return Ok(()) };
         if b.fill().is_none() && b.visible_edges() == [false; 4] {
             return Ok(());
         }
         let (_, end, _) = self.cursor();
-        let same_area = self.cur.as_ref().is_some_and(|c| c.area == s.area && c.content == s.content);
-        if self.pages.len() != s.page || !same_area {
-            self.warn_once("a bordered section that doesn't fit in one content area is drawn without its border");
+        let page = self.pages.len().saturating_sub(1);
+        if !self.on_area(&f.part) {
+            f.lost = true;
+        } else if self.has_items_from(page, f.part.items) && end - f.part.y >= 0.01 {
+            f.parts.push((page, f.part.items, Rect::new(f.x, f.part.y, f.w, end - f.part.y)));
+        }
+        if f.lost {
+            self.warn_once("a bordered section whose own item a page break cuts is drawn without its border");
             return Ok(());
         }
-        if end - s.y < 0.01 {
-            return Ok(());
+        // The last part first: a part's place on its page stays where it was found.
+        for (page, at, rect) in f.parts.into_iter().rev() {
+            self.insert_border(&b, rect, page, at)?;
         }
+        Ok(())
+    }
+
+    /// Draw border `b` round `rect` on page `page` (an index), under what that page got from item
+    /// `at` on.
+    fn insert_border(&mut self, b: &Border, rect: Rect, page: usize, at: usize) -> Result<(), XfaError> {
         let before = self.pages.last().map_or(0, |p| p.items.len());
-        self.draw_border(b, Rect::new(x, s.y, w, end - s.y))?;
-        // Moved back to where the subform started, so its content is drawn over them.
-        if let Some(p) = self.pages.last_mut() {
-            let added = p.items.len().saturating_sub(before);
-            if let Some(tail) = p.items.get_mut(s.items..) {
-                tail.rotate_right(added.min(tail.len()));
+        self.draw_border(b, rect)?;
+        let drawn: Vec<Item> = match self.pages.last_mut() {
+            Some(p) => {
+                let from = before.min(p.items.len());
+                p.items.drain(from..).collect()
             }
+            None => return Ok(()),
+        };
+        if let Some(target) = self.pages.get_mut(page) {
+            let at = at.min(target.items.len());
+            target.items.splice(at..at, drawn);
         }
         Ok(())
     }
@@ -841,8 +926,14 @@ impl Layouter<'_> {
                 continue;
             }
             let m = sf.common.margin;
-            // Where the subform starts: its border and fill go round what it takes from here.
-            let start = self.flow_mark();
+            // Its border and fill go round what it takes from here, a part on each content area.
+            let framed = match self.flow_mark() {
+                Some(part) => {
+                    self.frames.push(Frame { x, w, margin: m, border: sf.common.border.clone(), part, parts: Vec::new(), lost: false });
+                    true
+                }
+                None => false,
+            };
             self.advance(m.top);
             let inner_x = x + m.left;
             let inner_w = (w - m.horizontal()).max(1.0);
@@ -862,13 +953,14 @@ impl Layouter<'_> {
                             continue;
                         }
                         let (cw, ch) = self.size_of(child, inner_w, &ctx, depth + 1);
+                        self.break_before(ch)?;
                         self.flow_block(child, inner_x, (cw, ch), &ctx, depth + 1, csib)?;
                     }
                 }
             }
             self.advance(m.bottom);
-            if let Some(b) = &sf.common.border {
-                self.draw_flowed_border(b, start, x, w)?;
+            if framed && let Some(frame) = self.frames.pop() {
+                self.finish_frame(frame)?;
             }
         }
         if sf.break_after_page {
