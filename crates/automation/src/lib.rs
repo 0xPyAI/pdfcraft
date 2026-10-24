@@ -2616,7 +2616,8 @@ fn info(d: &Document) -> Value {
         // geometry-taking tools (#129).
         "annotations": i.annotations.iter().map(|a| json!({
             "page": page1(a.page), "type": a.subtype, "author": a.author, "contents": a.contents,
-            "modified": a.modified, "name": a.name, "in_reply_to": a.in_reply_to, "rect": view_rect(i, a.page, a.rect),
+            "modified": a.modified, "name": a.name, "in_reply_to": a.in_reply_to,
+            "rect": view_rect(i, a.page, a.shown_rect(i.pages.get(a.page).map_or(0, |p| p.rotation))),
         })).collect::<Vec<_>>(),
         "fields": i.fields.iter().map(|f| json!({
             "name": f.name, "kind": format!("{:?}", f.kind), "value": f.value, "page": f.page.map(page1),

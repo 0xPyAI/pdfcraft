@@ -675,6 +675,38 @@ fn sticky_note_composer_posts_and_returns_to_select() {
     assert_eq!(comments(&h).len(), 1);
 }
 
+/// #2583: a sticky note is saved NoRotate, so on a turned page its icon is drawn upright from
+/// where it was placed (right and down), not where its `/Rect` lies as displayed. The Select tool
+/// picks it where it is drawn.
+#[test]
+fn a_sticky_note_on_a_turned_page_is_picked_where_it_is_drawn() {
+    let mut h = harness(|app| {
+        app.apply_edit(pdfcraft_engine::Edit::RotatePages { pages: vec![0], degrees: 90 });
+        app.set_option("quick", "note").unwrap();
+    });
+    settle(&mut h);
+    let page = h.state().views[0].page_screen_rect(0).expect("page 1 on screen");
+    // Screen pixels per point of the displayed page (300 × 200 pt turned to 200 × 300).
+    let k = page.width() / 200.0;
+    let placed = page.left_top() + egui::vec2(100.0 * k, 60.0 * k);
+    click(&mut h, placed);
+    field(&h, "Add a comment").type_text("Turned");
+    h.run_steps(2);
+    h.get_by_label("Post").click();
+    h.run_steps(3);
+    settle(&mut h);
+    let c = comments(&h);
+    assert_eq!(c.len(), 1);
+    assert_eq!((c[0].subtype.as_str(), c[0].no_rotate), ("Text", true));
+    assert_eq!(h.state().quick_tool, QuickTool::Select);
+    // Where the note's /Rect lies as displayed, left of where it was placed: nothing.
+    click(&mut h, placed + egui::vec2(-10.0 * k, 10.0 * k));
+    assert_eq!(h.state().views[0].comments.selected, None);
+    // On the icon, drawn right and down from where it was placed.
+    click(&mut h, placed + egui::vec2(10.0 * k, 10.0 * k));
+    assert_eq!(h.state().views[0].comments.selected, Some((0, 0)));
+}
+
 /// The rectangle of the comment whose text starts with `text`.
 fn rect_of(h: &Harness<'static, PdfCraftApp>, text: &str) -> [f32; 4] {
     let c = comments(h);

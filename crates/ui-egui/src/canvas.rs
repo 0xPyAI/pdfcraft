@@ -5745,6 +5745,7 @@ mod tests {
             locked: false,
             intent: None,
             fill_sign,
+            no_rotate: false,
             points: Vec::new(),
         }
     }
