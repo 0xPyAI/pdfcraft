@@ -424,7 +424,9 @@ fn parse_caption(n: Option<XmlNode>, warnings: &mut Vec<String>) -> Option<Capti
             Some("inline") => Placement::Inline,
             _ => Placement::Left,
         },
-        reserve: attr_measure(n, "reserve").filter(|r| *r >= 0.0),
+        // A reserve of zero or less sizes the caption to its content, as none does (XFA 3.3,
+        // the caption's reserve).
+        reserve: attr_measure(n, "reserve").filter(|r| *r > 0.0),
         presence: Presence::parse(n.attribute("presence")),
         value: parse_value(child(n, "value"), warnings),
         font: parse_font(child(n, "font")),
