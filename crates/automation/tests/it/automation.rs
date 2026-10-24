@@ -8911,6 +8911,34 @@ fn bookmark_list_reports_colour_and_style() {
     assert_eq!(style(&ok(&mut b, "bookmark_list", json!({ "doc": re }))["bookmarks"]), style(&set), "saved");
 }
 
+/// An editable combo box (ISO 32000-2 Table 233, Edit) takes a value that isn't one of its
+/// options, and its page appearance shows it, before and after a save; one without Edit takes
+/// only its options.
+#[test]
+fn form_fill_takes_free_text_only_in_an_editable_combo_box() {
+    let dir = workdir("editable-combo");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let combo = |name: &str, top: f64, editable: bool| json!({ "doc": doc, "page": 1, "type": "combo", "rect": [20, top, 200, top + 22.0], "name": name, "options": ["Apple", "Banana"], "editable": editable });
+    ok(&mut a, "form_add_field", combo("fruit", 20.0, true));
+    ok(&mut a, "form_add_field", combo("veg", 60.0, false));
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "fruit": "Cherry" } }));
+    assert!(page_text(&mut a, doc)[0].contains("Cherry"), "the typed value is drawn");
+    let refused = err(&mut a, "form_fill", json!({ "doc": doc, "values": { "veg": "Cherry" } }));
+    assert!(matches!(&refused, ToolError::Failed(m) | ToolError::InvalidArgs(m) if m.contains("no option")), "{refused:?}");
+    // A choice from the list still works in both.
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "veg": "Banana" } }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "filled.pdf" }));
+    let saved = ok(&mut a, "doc_open", json!({ "path": "filled.pdf" }))["doc"].as_u64().unwrap();
+    let fields = ok(&mut a, "form_fields", json!({ "doc": saved }));
+    let value = |name: &str| fields["fields"].as_array().unwrap().iter().find(|f| f["name"] == name).map(|f| f["value"].clone());
+    assert_eq!(value("fruit"), Some(json!("Cherry")), "{fields}");
+    assert_eq!(value("veg"), Some(json!("Banana")), "{fields}");
+    let text = page_text(&mut a, saved);
+    assert!(text[0].contains("Cherry") && text[0].contains("Banana"), "{text:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `page_render`'s pixels show a rubber stamp written without an appearance as the stamp its
 /// `/Name` names (ISO 32000-2 Table 184), and one with an unknown name as a grey placeholder.
 #[test]
