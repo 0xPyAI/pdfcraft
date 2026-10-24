@@ -347,7 +347,7 @@ fn a_deeply_nested_form_keeps_the_text_nobody_marked() {
 /// can send. The pass also counts the forms it enters, and a page past that budget is treated as
 /// one it cannot read.
 #[test]
-fn a_form_that_fans_out_or_loops_is_bounded_by_the_visit_budget() {
+fn a_form_that_fans_out_or_loops_is_bounded_by_the_page_budget() {
     /// A page drawing `Fm1`, where each of `n` forms draws the next **twice** and the last draws
     /// text: 2^n paths if nothing stops the walk. With `looping`, the last form draws the first
     /// one again instead, so the chain has no end at all.
@@ -383,13 +383,12 @@ fn a_form_that_fans_out_or_loops_is_bounded_by_the_visit_budget() {
         let start = std::time::Instant::now();
         let mut doc = fan_out(crate::interp::MAX_DEPTH, looping);
         mark(&mut doc, 0, &[[5.0, 275.0, 60.0, 295.0]], "");
-        let report = apply(&mut doc, None).unwrap();
+        let result = apply(&mut doc, None);
         let took = start.elapsed();
         assert!(took < std::time::Duration::from_secs(20), "looping {looping}: the walk took {took:?}");
-        // The page was still redacted, and the budget stopped the walk rather than the pass.
-        assert!(report.forms_removed > 0, "looping {looping}: the forms past the budget are removed");
-        let c = content(&doc, 0);
-        assert!(!c.contains("(HEAD)"), "looping {looping}: the marked text is gone: {c}");
+        // The page's form budget stops the walk, and Apply refuses the page rather than
+        // removing forms it could not read.
+        assert!(result.is_err(), "looping {looping}: the page past its form budget is refused");
     }
 }
 
@@ -824,19 +823,19 @@ fn form_chain_at_max_depth_is_counted_and_removed_by_hidden_layer_sanitization()
     use crate::sanitize::{Hidden, remove_hidden, scan};
 
     const PRIVATE: &[u8] = b"PRIVATE_FORM_BEYOND_MAX_DEPTH";
-    // MAX_DEPTH is 12. The final Form is encountered at that depth and is removed
-    // conservatively without being entered. Verify must count that removal or sanitize
-    // can skip the HiddenLayers pass entirely.
+    // The final Form is encountered at MAX_DEPTH and is removed conservatively without being
+    // entered. Verify must count that removal or sanitize can skip the HiddenLayers pass entirely.
+    let max = crate::interp::MAX_DEPTH;
     let mut forms = Vec::new();
-    for depth in 0..=12 {
-        let content = if depth == 12 {
+    for depth in 0..=max {
+        let content = if depth == max {
             b"BT /F1 10 Tf 10 100 Td (PRIVATE_FORM_BEYOND_MAX_DEPTH) Tj ET".to_vec()
         } else {
             format!("/F{} Do", depth + 1).into_bytes()
         };
         forms.push(stream("/Type /XObject /Subtype /Form /BBox [0 0 300 300]", &content));
     }
-    let xobjects = (0..=12).map(|depth| format!("/F{depth} {} 0 R", 7 + depth)).collect::<Vec<_>>().join(" ");
+    let xobjects = (0..=max).map(|depth| format!("/F{depth} {} 0 R", 7 + depth)).collect::<Vec<_>>().join(" ");
     let mut doc = one_page(b"/F0 Do", &format!("/XObject << {xobjects} >>"), forms);
     assert!(
         write_full(&doc, &SaveOptions::default()).unwrap().windows(PRIVATE.len()).any(|w| w == PRIVATE),
