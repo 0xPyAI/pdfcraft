@@ -77,6 +77,9 @@ impl PdfCraftApp {
                     };
                     // Show/Hide: a panel already showing closes.
                     self.right = (self.right != Some(panel)).then_some(panel);
+                    if self.right.is_some() {
+                        self.pending_panel_reveals.push(crate::docking::Panel::Inspector);
+                    }
                 }
                 Request::Focus(_) | Request::Beep | Request::Reset(_) => {}
             }
