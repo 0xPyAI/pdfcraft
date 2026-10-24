@@ -1675,3 +1675,112 @@ fn a_star_note_keeps_its_star_when_recoloured() {
     let Object::Stream(s) = &*doc.get(n) else { panic!() };
     assert_eq!(s.decoded().unwrap(), note_drawing(Some("Star"), [0.0, 0.0, 1.0]));
 }
+
+/// The built appearance's content for an annotation dictionary written in PDF syntax.
+fn content_of(src: &str) -> String {
+    let doc = document_of(&[src.as_bytes()]);
+    let d = doc.get(ObjRef::new(1, 0)).as_dict().cloned().expect("a dictionary");
+    let stream = appearance::build(&d).expect("drawn");
+    String::from_utf8_lossy(&stream.decoded().unwrap()).into_owned()
+}
+
+/// ISO 32000-2 Table 166: `/Border [hr vr w [dash]]`; the optional fourth element, a dash array,
+/// used to hide the width (drawn 1 pt solid instead of 3 pt dashed).
+#[test]
+fn legacy_border_width_and_dash_are_drawn() {
+    let square = |border: &str| content_of(&format!("<< /Subtype /Square /Rect [0 0 100 100] /C [1 0 0] {border} >>"));
+    let c = square("/Border [0 0 3 [6 3]]");
+    assert!(c.contains("3 w") && c.contains("[6 3] 0 d"), "{c}");
+    assert!(c.contains("1.5 1.5 97 97 re"), "the stroke is inset by half its width: {c}");
+    let c = square("/Border [0 0 3]");
+    assert!(c.contains("3 w") && !c.contains(" d\n"), "no dash array: solid: {c}");
+    // `/BS` overrides `/Border` (Table 166), for the width and the dashes alike.
+    let c = square("/Border [0 0 3 [6 3]] /BS << /W 2 >>");
+    assert!(c.contains("2 w") && !c.contains(" d\n"), "{c}");
+    let c = square("/Border [0 0 3 [6 3]] /BS << /W 2 /S /D /D [4 1] >>");
+    assert!(c.contains("2 w") && c.contains("[4 1] 0 d"), "{c}");
+    // A /BS without /W means its default width 1, not the ignored /Border's.
+    let c = square("/Border [0 0 3] /BS << /S /S >>");
+    assert!(c.contains("1 w") && !c.contains("3 w"), "{c}");
+    // A FreeText border and a line take the legacy dash array too.
+    let c = content_of("<< /Subtype /FreeText /Rect [0 0 100 40] /Contents (x) /Border [0 0 2 [5 2]] >>");
+    assert!(c.contains("2 w") && c.contains("[5 2] 0 d"), "{c}");
+    let c = content_of("<< /Subtype /Line /Rect [0 0 100 100] /L [10 10 90 90] /C [0 0 1] /Border [0 0 2 [5 2]] >>");
+    assert!(c.contains("[5 2] 0 d"), "{c}");
+}
+
+/// Dash arrays that can't be drawn (§8.4.3.6: all zeros is invalid; negative or non-numeric
+/// lengths, and absurdly long arrays) draw solid, without a panic. A non-finite or negative
+/// width falls back to 1.
+#[test]
+fn bad_dash_arrays_draw_solid() {
+    let square = |border: &str| content_of(&format!("<< /Subtype /Square /Rect [0 0 100 100] /C [1 0 0] {border} >>"));
+    let long = format!("[{}]", vec!["1"; 65].join(" "));
+    for bad in ["[0 0]", "[-3 2]", "[]", "[(a) 2]", "5", long.as_str()] {
+        let c = square(&format!("/Border [0 0 3 {bad}]"));
+        assert!(c.contains("3 w") && !c.contains(" d\n"), "{bad}: {c}");
+        let c = square(&format!("/BS << /W 3 /S /D /D {bad} >>"));
+        assert!(c.contains("3 w") && !c.contains(" d\n"), "{bad}: {c}");
+    }
+    assert!(square(&format!("/Border [0 0 3 [{}]]", vec!["1"; 64].join(" "))).contains(" 0 d\n"), "64 elements are drawn");
+    // `/S /D` without `/D` uses the default `[3]` (Table 168).
+    assert!(square("/BS << /W 3 /S /D >>").contains("[3] 0 d"));
+    let mut d = Dict::new();
+    d.set(b"Subtype".to_vec(), Object::name("Square"));
+    d.set(b"Rect".to_vec(), Object::Array([0.0, 0.0, 100.0, 100.0].map(Object::Real).to_vec()));
+    d.set(b"C".to_vec(), Object::Array([1.0, 0.0, 0.0].map(Object::Real).to_vec()));
+    for w in [f64::NAN, f64::INFINITY, -2.0] {
+        let dash = Object::Array([f64::NAN, 2.0].map(Object::Real).to_vec());
+        d.set(b"Border".to_vec(), Object::Array(vec![Object::Int(0), Object::Int(0), Object::Real(w), dash]));
+        let c = String::from_utf8_lossy(&appearance::build(&d).unwrap().decoded().unwrap()).into_owned();
+        assert!(c.contains("1 w") && !c.contains(" d\n") && !c.contains("NaN") && !c.contains("inf"), "{w}: {c}");
+    }
+}
+
+/// Table 182: an ink annotation's `/BS` gives the width and dash pattern its paths are drawn with.
+#[test]
+fn ink_draws_its_border_style_dashes() {
+    let ink = |style: &str| content_of(&format!("<< /Subtype /Ink /Rect [0 0 100 100] /C [1 0 0] /InkList [[5 5 50 95 95 5]] {style} >>"));
+    let c = ink("/BS << /W 3 /S /D /D [6 3] >>");
+    assert!(c.contains("3 w 1 J 1 j\n[6 3] 0 d"), "{c}");
+    assert!(!ink("/BS << /W 3 >>").contains(" d\n"));
+    assert!(ink("/Border [0 0 2 [4 4]]").contains("[4 4] 0 d"));
+}
+
+/// Table 183: `/Sy /P` associates a new paragraph symbol (¶) with the caret. It is drawn to the
+/// caret's right in the caret's colour, inside `/Rect`; `/Sy /None` (the default) draws none.
+#[test]
+fn a_caret_with_a_paragraph_symbol_draws_the_pilcrow() {
+    let caret = |extra: &str| {
+        let doc = document_of(&[format!("<< /Subtype /Caret /Rect [30 30 60 60] /C [0.9 0.1 0.1] {extra} >>").as_bytes()]);
+        let d = doc.get(ObjRef::new(1, 0)).as_dict().cloned().unwrap();
+        let s = appearance::build(&d).unwrap();
+        (s.decoded().unwrap(), s.dict.get(b"Resources").and_then(Object::as_dict).is_some_and(|r| r.contains(b"Font")))
+    };
+    let has_pilcrow = |c: &[u8]| c.windows(5).any(|w| w == b"(\xb6) T");
+    let (c, font) = caret("/Sy /P");
+    assert!(has_pilcrow(&c) && font, "{}", String::from_utf8_lossy(&c));
+    let text = String::from_utf8_lossy(&c).into_owned();
+    assert!(text.starts_with("0.9 0.1 0.1 rg"), "{text}");
+    // The caret gives up room on the right for the symbol, which stays within /Rect.
+    let td: Vec<f64> = text.split("Tf ").nth(1).unwrap().split_whitespace().take(2).map(|v| v.parse().unwrap()).collect();
+    let size: f64 = text.split("/Helv ").nth(1).unwrap().split_whitespace().next().unwrap().parse().unwrap();
+    assert!(td[0] > 45.0 && td[0] + appearance::text_width("\u{b6}", size) <= 60.0 + 1e-6 && td[1] >= 30.0, "{text}");
+    assert!(!text.contains("60 30 c h f"), "the caret no longer reaches the right edge: {text}");
+    for none in ["/Sy /None", ""] {
+        let (c, font) = caret(none);
+        assert!(!has_pilcrow(&c) && !font, "{none}");
+        assert!(String::from_utf8_lossy(&c).contains("60 30 c h f"), "{none}: the caret fills /Rect as before");
+    }
+    // With /RD leaving room on the right, the caret keeps its box and the symbol fits beside it.
+    let (c, _) = caret("/Sy /P /RD [0 0 15 0]");
+    let text = String::from_utf8_lossy(&c).into_owned();
+    assert!(text.contains("45 30 c h f") && has_pilcrow(&c), "{text}");
+    // Malformed /RD and a degenerate /Rect don't panic.
+    for rd in ["/RD [40 0 40 0]", "/RD [-1 0 0 0]", "/RD [1 2]", "/RD (x)"] {
+        assert!(has_pilcrow(&caret(&format!("/Sy /P {rd}")).0), "{rd}");
+    }
+    let doc = document_of(&[b"<< /Subtype /Caret /Rect [30 30 30 30] /Sy /P >>"]);
+    let d = doc.get(ObjRef::new(1, 0)).as_dict().cloned().unwrap();
+    assert!(appearance::build(&d).is_some());
+}

@@ -180,23 +180,42 @@ fn interior_color(d: &Dict, fallback: Option<Rgb>) -> Option<Rgb> {
     color(d, b"IC").flatten().or(fallback)
 }
 
+/// The border width (ISO 32000-2 §12.5.4): `/BS /W` when there is a border style dictionary, which
+/// makes `/Border` ignored (Table 166), else the third element of `/Border [hr vr w [dash]]`, read
+/// whether or not the optional fourth element, a dash array, follows. 1 when neither says, and
+/// when the number given is negative or not finite.
 pub(crate) fn border_width(d: &Dict) -> f64 {
-    if let Some(w) = d.get(b"BS").and_then(|b| b.as_dict()).and_then(|b| b.get(b"W")).and_then(|w| w.as_f64()) {
-        return w.max(0.0);
-    }
-    match nums(d, b"Border") {
-        Some(b) if b.len() >= 3 => b[2].max(0.0),
-        _ => 1.0,
-    }
+    let width = match d.get(b"BS").and_then(Object::as_dict) {
+        Some(bs) => bs.get(b"W").and_then(Object::as_f64),
+        None => d.get(b"Border").and_then(Object::as_array).and_then(|b| b.get(2)).and_then(Object::as_f64),
+    };
+    width.filter(|w| w.is_finite() && *w >= 0.0).unwrap_or(1.0)
 }
 
-/// Dash pattern operator for a dashed border, if any.
+/// Elements a dash array may have before it is drawn solid instead: the lengths are written into
+/// the appearance as they are, so a file can't make it arbitrarily large.
+const MAX_DASH: usize = 64;
+
+/// A dash array (§8.4.3.6) as drawn: every element finite and non-negative, not all zero (that
+/// pattern is invalid) and at most [`MAX_DASH`] long. `None` for anything else, which is drawn solid.
+fn dash_array(o: &Object) -> Option<Vec<f64>> {
+    let a = o.as_array().filter(|a| !a.is_empty() && a.len() <= MAX_DASH)?;
+    let v: Vec<f64> = a.iter().map(Object::as_f64).collect::<Option<_>>()?;
+    (v.iter().all(|x| x.is_finite() && *x >= 0.0) && v.iter().any(|x| *x > 0.0)).then_some(v)
+}
+
+/// Dash pattern operator for a dashed border, if any: `/BS /S /D` with its `/D` (default `[3]`,
+/// Table 168), or, without `/BS`, the dash array that may follow the width in `/Border` (Table 166).
 fn dash(d: &Dict) -> String {
-    let Some(bs) = d.get(b"BS").and_then(|b| b.as_dict()) else { return String::new() };
-    if bs.name(b"S") != Some(b"D") {
-        return String::new();
-    }
-    let arr = nums(bs, b"D").filter(|a| !a.is_empty() && a.iter().all(|x| *x >= 0.0)).unwrap_or_else(|| vec![3.0]);
+    let arr = match d.get(b"BS").and_then(Object::as_dict) {
+        Some(bs) if bs.name(b"S") != Some(b"D") => return String::new(),
+        Some(bs) => match bs.get(b"D") {
+            None => Some(vec![3.0]),
+            Some(o) => dash_array(o),
+        },
+        None => d.get(b"Border").and_then(Object::as_array).and_then(|b| b.get(3)).and_then(dash_array),
+    };
+    let Some(arr) = arr else { return String::new() };
     format!("[{}] 0 d\n", arr.iter().map(|x| n(*x)).collect::<Vec<_>>().join(" "))
 }
 
@@ -297,6 +316,55 @@ pub fn undrawable_text(d: &Dict) -> Option<(&'static str, char)> {
         _ => return None,
     };
     Some((what, first_undrawable(&text)?))
+}
+
+/// `/Font` resources naming `/Helv`: standard Helvetica with WinAnsiEncoding.
+fn helvetica_resource() -> Object {
+    let mut font = Dict::new();
+    font.set(b"Type".to_vec(), Object::name("Font"));
+    font.set(b"Subtype".to_vec(), Object::name("Type1"));
+    font.set(b"BaseFont".to_vec(), Object::name("Helvetica"));
+    font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
+    let mut fonts = Dict::new();
+    fonts.set(b"Helv".to_vec(), Object::Dict(font));
+    Object::Dict(fonts)
+}
+
+/// Where a caret and its paragraph symbol go within `rect`: the box the caret is drawn in, and for
+/// `/Sy /P` the symbol's baseline origin and font size (ISO 32000-2 Table 183).
+///
+/// The caret lies within `/Rect` less `/RD` (left, top, right, bottom), when `/RD` is four finite,
+/// non-negative numbers that leave a box; otherwise within `/Rect`. The ¶ sits to the right of the
+/// caret, its height a little over half the caret's, in the room `/RD` leaves on the right; when
+/// that is too narrow, the caret gives up to half its width and the symbol shrinks to what is left,
+/// so both stay inside `/Rect` (the form's `/BBox`).
+fn caret_layout(d: &Dict, rect: [f64; 4]) -> ([f64; 4], Option<(f64, f64, f64)>) {
+    let rd = nums(d, b"RD").filter(|r| r.len() == 4 && r.iter().all(|x| x.is_finite() && *x >= 0.0));
+    let mut caret = match rd {
+        Some(rd) => [rect[0] + rd[0], rect[1] + rd[3], rect[2] - rd[2], rect[3] - rd[1]],
+        None => rect,
+    };
+    if !(caret[2] > caret[0] && caret[3] > caret[1]) {
+        caret = rect;
+    }
+    if d.name(b"Sy") != Some(b"P") {
+        return (caret, None);
+    }
+    let size = (caret[3] - caret[1]) * 0.6;
+    let (gap, glyph) = (size * 0.1, text_width("\u{b6}", size));
+    let need = gap + glyph;
+    let room = rect[2] - caret[2];
+    if room < need {
+        caret[2] -= (need - room).min((caret[2] - caret[0]) * 0.5);
+    }
+    let room = rect[2] - caret[2];
+    let scale = if need > room { room / need } else { 1.0 };
+    let size = size * scale;
+    if !(size.is_finite() && size > 0.0) {
+        return (caret, None);
+    }
+    // The pilcrow descends about a sixth of the size below its baseline.
+    (caret, Some((caret[2] + gap * scale, caret[1] + size * 0.18, size)))
 }
 
 /// Draw the normal appearance of an annotation, or `None` if this subtype/variant isn't supported.
@@ -512,7 +580,8 @@ pub fn build(d: &Dict) -> Option<Stream> {
         b"Caret" => {
             // A filled caret: two curved flanks meeting at the top centre.
             let col = stroke.unwrap_or([0.0, 0.47, 0.84]);
-            let [x0, y0, x1, y1] = rect;
+            let (caret, pilcrow) = caret_layout(d, rect);
+            let [x0, y0, x1, y1] = caret;
             let (cx, h) = ((x0 + x1) / 2.0, y1 - y0);
             c.push_str(&format!(
                 "{}{} {} m {} {} {} {} {} {} c {} {} {} {} {} {} c h f\n",
@@ -532,11 +601,22 @@ pub fn build(d: &Dict) -> Option<Stream> {
                 n(x1),
                 n(y0)
             ));
+            if let Some((x, y, size)) = pilcrow {
+                // `/Sy /P`: a new paragraph symbol beside the caret (Table 183), in its colour.
+                // 0xB6 is the pilcrow in WinAnsiEncoding.
+                let mut out = c.into_bytes();
+                out.extend(format!("BT /Helv {} Tf {} {} Td (", n(size), n(x), n(y)).bytes());
+                out.push(0xB6);
+                out.extend_from_slice(b") Tj ET\n");
+                res.set(b"Font".to_vec(), helvetica_resource());
+                return Some(form(rect, &out, res));
+            }
         }
         b"Ink" => {
             let col = stroke?;
             let list = d.get(b"InkList")?.as_array()?;
-            c.push_str(&format!("{}{} w 1 J 1 j\n", rg_stroke(col), n(w)));
+            // `/BS` gives an ink stroke its width and dash pattern (Table 182).
+            c.push_str(&format!("{}{} w 1 J 1 j\n{}", rg_stroke(col), n(w), dash(d)));
             for s in list {
                 let pts: Vec<f64> = s.as_array()?.iter().map(|o| o.as_f64()).collect::<Option<_>>()?;
                 let pts: Vec<(f64, f64)> = pts.as_chunks::<2>().0.iter().map(|p| (p[0], p[1])).collect();
@@ -773,14 +853,7 @@ pub fn build(d: &Dict) -> Option<Stream> {
                 y -= size * 1.2;
             }
             out.extend_from_slice(b"ET\n");
-            let mut font = Dict::new();
-            font.set(b"Type".to_vec(), Object::name("Font"));
-            font.set(b"Subtype".to_vec(), Object::name("Type1"));
-            font.set(b"BaseFont".to_vec(), Object::name("Helvetica"));
-            font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
-            let mut fonts = Dict::new();
-            fonts.set(b"Helv".to_vec(), Object::Dict(font));
-            res.set(b"Font".to_vec(), Object::Dict(fonts));
+            res.set(b"Font".to_vec(), helvetica_resource());
             let mut stream = form(full, &out, res);
             if let Some(m) = matrix {
                 stream.dict.set(b"Matrix".to_vec(), Object::Array(m.iter().copied().map(Object::Real).collect()));
@@ -803,14 +876,7 @@ pub fn build(d: &Dict) -> Option<Stream> {
             // WinAnsi bytes (e.g. 0xB2 for "²") go into the stream as-is, not through UTF-8.
             out.extend(literal(&win_ansi(&value)));
             out.extend_from_slice(b" Tj ET\n");
-            let mut font = Dict::new();
-            font.set(b"Type".to_vec(), Object::name("Font"));
-            font.set(b"Subtype".to_vec(), Object::name("Type1"));
-            font.set(b"BaseFont".to_vec(), Object::name("Helvetica"));
-            font.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
-            let mut fonts = Dict::new();
-            fonts.set(b"Helv".to_vec(), Object::Dict(font));
-            res.set(b"Font".to_vec(), Object::Dict(fonts));
+            res.set(b"Font".to_vec(), helvetica_resource());
         }
     }
     Some(form(rect, &out, res))
