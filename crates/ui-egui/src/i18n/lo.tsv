@@ -2279,6 +2279,8 @@ key	Space	Space
 	Printer paper and scaling may differ. Check driver settings.	ເຈ້ຍເຄື່ອງພິມ ແລະ ມາດຕາສ່ວນອາດແຕກຕ່າງກັນ. ກວດສອບການຕັ້ງຄ່າໄດຣເວີ.
 	Drawing scale changes. Use Actual size for full-scale plans.	ມາດຕາສ່ວນຮູບແຕ້ມປ່ຽນແປງ. ໃຊ້ "ຂະໜາດຈິງ" ສຳລັບແບບແຜນເຕັມສ່ວນ.
 	Reload documents when their files change on disk	ໂຫຼດເອກະສານຄືນໃໝ່ເມື່ອໄຟລ໌ໃນດິສກ໌ມີການປ່ຽນແປງ
+	Don't show again	ບໍ່ຕ້ອງສະແດງອີກ
+	Show a notice when a document is secured	ສະແດງການແຈ້ງເຕືອນເມື່ອເອກະສານຖືກປ້ອງກັນໄວ້
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	ໄຟລ໌ນີ້ມີການປ່ຽນແປງໃນດິສກ໌. "ໂຫຼດຄືນໃໝ່" ຈະສະແດງເວີຊັນໃໝ່ ແລະ ປະຖິ້ມການປ່ຽນແປງທີ່ຍັງບໍ່ໄດ້ບັນທຶກ; "ບັນທຶກ" ຈະຂຽນທັບດ້ວຍເວີຊັນນີ້.
 	Reload	ໂຫຼດຄືນໃໝ່
 	Couldn't reload {name}: {e}	ບໍ່ສາມາດໂຫຼດ {name} ຄືນໃໝ່ໄດ້: {e}

@@ -924,6 +924,8 @@
 	Redaction code:	Kode sensor:
 	Reload	Muat ulang
 	Reload documents when their files change on disk	Muat ulang dokumen saat file-nya berubah di disk
+	Don't show again	Jangan tampilkan lagi
+	Show a notice when a document is secured	Tampilkan pemberitahuan saat dokumen diamankan
 	Remove checkmark	Hapus centang
 	Remove invalid links and bookmarks	Hapus tautan dan bookmark yang tidak valid
 	Remove page	Hapus halaman

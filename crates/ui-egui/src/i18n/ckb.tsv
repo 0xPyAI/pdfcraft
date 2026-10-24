@@ -2303,6 +2303,8 @@ key	Space	بۆشایی
 	Printer paper and scaling may differ. Check driver settings.	ڕەنگە کاغەز و پێوەری چاپکەر جیاواز بن. ڕێکخستنەکانی درایڤەر بپشکنە.
 	Drawing scale changes. Use Actual size for full-scale plans.	پێوەری وێنەکێشان دەگۆڕێت. «قەبارەی ڕاستەقینە» بەکاربهێنە بۆ پلانەکان بە پێوەری تەواو.
 	Reload documents when their files change on disk	دووبارە بارکردنی بەڵگەنامەکان کاتێک فایلەکانیان لەسەر دیسک دەگۆڕێن
+	Don't show again	جارێکی تر پیشان مەدە
+	Show a notice when a document is secured	پیشاندانی ئاگادارکردنەوە کاتێک بەڵگەنامەیەک پارێزراوە
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	ئەم فایلە لەسەر دیسک گۆڕاوە. «دووبارە بارکردن» وەشانی نوێ پیشان دەدات و گۆڕانکارییە پاشەکەوتنەکراوەکانت فڕێدەدات؛ «پاشەکەوتکردن» بەم وەشانە جێگەی دەگرێتەوە.
 	Reload	دووبارە بارکردن
 	Couldn't reload {name}: {e}	دووبارە بارکردنی {name} نەکرا: {e}

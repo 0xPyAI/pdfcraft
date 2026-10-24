@@ -2268,6 +2268,8 @@ key	Space	Välilyönti
 	Printer paper and scaling may differ. Check driver settings.	Tulostimen paperi ja skaalaus voivat poiketa. Tarkista ohjaimen asetukset.
 	Drawing scale changes. Use Actual size for full-scale plans.	Piirustuksen mittakaava muuttuu. Käytä mittakaavaisille piirustuksille Todellinen koko -valintaa.
 	Reload documents when their files change on disk	Lataa asiakirjat uudelleen, kun niiden tiedostot muuttuvat levyllä
+	Don't show again	Älä näytä uudelleen
+	Show a notice when a document is secured	Näytä ilmoitus, kun asiakirja on suojattu
 	This file changed on disk. Reload it to see the new version; your unsaved changes will be lost.	Tämä tiedosto muuttui levyllä. Lataa se uudelleen nähdäksesi uuden version; tallentamattomat muutokset menetetään.
 	Reload	Lataa uudelleen
 	Couldn't reload {name}: {e}	Kohdetta {name} ei voitu ladata uudelleen: {e}

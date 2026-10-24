@@ -2658,9 +2658,12 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let editing_content =
         (app.left_open && app.left == crate::LeftPanel::Tool("edit")) || matches!(app.quick_tool, QuickTool::AddText | QuickTool::EditText);
     let text_style = app.text_style.clone();
+    let show_secured_notice = app.show_secured_notice;
     let view = &mut app.views[index];
-    // Opened without the owner password and something is restricted.
-    let secured = doc.security_summary().is_some_and(|s| !(s.owner || (s.permissions.modify() && s.permissions.assemble())));
+    // Opened without the owner password and something is restricted. The notice says so unless
+    // the user turned it off (#4035): the restrictions themselves, and Document Properties ▸
+    // Security, stay as they are.
+    let secured = show_secured_notice && doc.security_summary().is_some_and(|s| !(s.owner || (s.permissions.modify() && s.permissions.assemble())));
     let repaired = !doc.repair_log().is_empty();
     match notices(view, doc, secured, repaired, crate::sign_ui::banner(&doc.signatures), ui, &t) {
         #[cfg(not(target_arch = "wasm32"))]
@@ -2680,6 +2683,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         Some(Notice::Signatures) => app.right = Some(RightPanel::Signatures),
         Some(Notice::FieldHighlights(on)) => app.view_defaults.highlight_fields = on,
         Some(Notice::Console) => app.dialog = Some(crate::Dialog::JsConsole),
+        // Back on in Preferences ▸ General.
+        Some(Notice::HideSecured) => app.show_secured_notice = false,
         None => {}
     }
     // No dialog, close prompt or palette over the page: only then does page input count.
@@ -4755,6 +4760,8 @@ enum Notice {
     Unlock,
     /// Close this historical snapshot tab (View signed version / View revision).
     Close,
+    /// Stop showing the secured-document notice, in every document (#4035).
+    HideSecured,
 }
 
 /// The notice bar above the pages: a file changed on disk first, then what a historical
@@ -4832,6 +4839,7 @@ fn notices(
     }
     let mut open_security = false;
     let mut unlock = false;
+    let mut hide_secured = false;
     let mut open_repairs = false;
     let mut open_console = false;
     let mut toggled = None;
@@ -4913,6 +4921,10 @@ fn notices(
         if secured && doc.can_unlock() && crate::widgets::pill_button(ui, tl!("Unlock…"), true).clicked() {
             unlock = true;
         }
+        // Only when the bar shows the security message: a form's stopped scripts come first.
+        if secured && !scripts_off && crate::widgets::pill_button(ui, tl!("Don't show again"), false).clicked() {
+            hide_secured = true;
+        }
         if repaired && !secured && info.fields.is_empty() && crate::widgets::pill_button(ui, tl!("Details"), false).clicked() {
             open_repairs = true;
         }
@@ -4925,6 +4937,9 @@ fn notices(
     }
     if unlock {
         return Some(Notice::Unlock);
+    }
+    if hide_secured {
+        return Some(Notice::HideSecured);
     }
     open_security.then_some(Notice::Security).or(toggled)
 }

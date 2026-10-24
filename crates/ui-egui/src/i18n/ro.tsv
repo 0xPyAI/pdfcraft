@@ -933,6 +933,8 @@
 	Redaction code:	Cod de anonimizare:
 	Reload	Reîncărcare
 	Reload documents when their files change on disk	Reîncarcă documentele când fișierele lor se modifică pe disc
+	Don't show again	Nu mai afișa
+	Show a notice when a document is secured	Afișează o notificare când un document este securizat
 	Remove checkmark	Eliminare bifă
 	Remove invalid links and bookmarks	Eliminare linkuri și semne de carte nevalide
 	Remove page	Eliminare pagină

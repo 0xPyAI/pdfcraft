@@ -1802,8 +1802,8 @@ milestone = "M3"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/it/editing.rs::restricted_documents_show_a_notice_and_block_page_changes", "crates/ui-egui/tests/it/editing.rs::a_secured_form_shows_its_form_notice_and_its_security", "crates/ui-egui/tests/it/xfa.rs::a_secured_dynamic_xfa_form_shows_its_layout_and_its_security"]
-notes = "On a secured form (fields or XFA), the security sentence follows the form's notice, which keeps Highlight fields and the XFA layout notes."
+evidence = ["crates/ui-egui/tests/it/editing.rs::restricted_documents_show_a_notice_and_block_page_changes", "crates/ui-egui/tests/it/editing.rs::a_secured_form_shows_its_form_notice_and_its_security", "crates/ui-egui/tests/it/xfa.rs::a_secured_dynamic_xfa_form_shows_its_layout_and_its_security", "crates/ui-egui/tests/it/editing.rs::the_security_notice_can_be_turned_off_for_good"]
+notes = "On a secured form (fields or XFA), the security sentence follows the form's notice, which keeps Highlight fields and the XFA layout notes. The notice's Don't show again turns it off in every document (#4035), kept in the settings and turned back on in Preferences (--secured-notice); the restrictions and Document Properties > Security are unchanged."
 
 [[feature]]
 id = "view.pdfa-view-mode"
