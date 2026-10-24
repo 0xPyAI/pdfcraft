@@ -704,7 +704,7 @@ pub(crate) fn menu_item(name: &str) -> Option<Request> {
 fn exec_menu_item(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     let item = text(&arg(args, 0), ctx)?;
     if let Some(r) = menu_item(&item) {
-        host(ctx)?.borrow_mut().requests.push(r);
+        host(ctx)?.borrow_mut().request(r);
     }
     Ok(JsValue::undefined())
 }
