@@ -213,6 +213,49 @@ fn doc_info_lists_page_transitions_and_display_times() {
     );
 }
 
+/// `doc_info` says where the document opens: the `/OpenAction` destination, a named one
+/// resolved (ISO 32000-2 §12.3.2.4), as a 1-based page and a destination in view coordinates.
+#[test]
+fn doc_info_reports_the_open_destination() {
+    let dir = workdir("open-destination");
+    let write = |name: &str, catalog: &str| {
+        let objects: Vec<String> = vec![
+            format!("<< /Type /Catalog /Pages 2 0 R {catalog} >>"),
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 612 792] >>".into(),
+            "<< /Type /Page /Parent 2 0 R >>".into(),
+            "<< /Type /Page /Parent 2 0 R >>".into(),
+        ];
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, object) in objects.iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+        for o in offsets {
+            bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+        std::fs::write(dir.join(name), bytes).unwrap();
+    };
+    write("named.pdf", "/OpenAction << /S /GoTo /D /there >> /Dests << /there [4 0 R /XYZ 100 500 2] >>");
+    write("script.pdf", "/OpenAction << /S /JavaScript /JS (1) >>");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "named.pdf" }))["doc"].as_u64().unwrap();
+    let open = ok(&mut a, "doc_info", json!({ "doc": doc }))["open_destination"].clone();
+    assert_eq!(open["page"], 2, "{open}");
+    // y 500 is 292 points below the top of the 792-point page.
+    assert_eq!(
+        (open["destination"]["fit"].as_str(), open["destination"]["left"].as_f64(), open["destination"]["top"].as_f64()),
+        (Some("XYZ"), Some(100.0), Some(292.0)),
+        "{open}"
+    );
+    assert_eq!(open["destination"]["zoom"].as_f64(), Some(2.0));
+    let doc = ok(&mut a, "doc_open", json!({ "path": "script.pdf" }))["doc"].as_u64().unwrap();
+    assert!(ok(&mut a, "doc_info", json!({ "doc": doc }))["open_destination"].is_null());
+}
+
 /// Page transitions through the tools: set on chosen pages, written to the file as `/Trans` and
 /// `/Dur`, removed again, bad values refused, and one undo step. (Read through `pdfcraft_cos`,
 /// so this does not lean on `doc_info` listing them.)

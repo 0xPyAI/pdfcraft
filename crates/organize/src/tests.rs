@@ -2392,6 +2392,46 @@ fn initial_view_round_trips_and_keeps_scripts() {
     assert!(crate::set_initial_view(&mut doc, &crate::InitialView { page: 9, ..Default::default() }).is_err());
 }
 
+#[test]
+fn an_unchanged_opening_destination_keeps_its_position_and_name() {
+    use crate::view::{Magnification, Navigation};
+    let page2 = Object::Ref(pdfcraft_cos::ObjRef::new(5, 0));
+    let xyz = Object::Array(vec![page2.clone(), Object::name("XYZ"), Object::Int(100), Object::Int(500), Object::Int(2)]);
+    let mut named = pdfcraft_cos::Dict::new();
+    named.set(b"S".to_vec(), Object::name("GoTo"));
+    named.set(b"D".to_vec(), Object::name("there"));
+    let mut dests = pdfcraft_cos::Dict::new();
+    dests.set(b"there".to_vec(), Object::Array(vec![page2, Object::name("Fit")]));
+    let mut prefs = pdfcraft_cos::Dict::new();
+    prefs.set(b"NonFullScreenPageMode".to_vec(), Object::name("UseOutlines"));
+    for action in [xyz, Object::Dict(named)] {
+        let mut doc = open(fixture());
+        let root = doc.root().unwrap();
+        doc.update_dict(root, |c| {
+            c.set(b"OpenAction".to_vec(), action.clone());
+            c.set(b"Dests".to_vec(), Object::Dict(dests.clone()));
+            c.set(b"PageMode".to_vec(), Object::name("FullScreen"));
+            c.set(b"ViewerPreferences".to_vec(), Object::Dict(prefs.clone()));
+        })
+        .unwrap();
+        // Another option changes: the opening action is written back as it was, and so is the
+        // full-screen panel, which the dialog doesn't edit.
+        let v = crate::initial_view(&doc);
+        assert_eq!(v.non_full_screen, Navigation::Bookmarks);
+        crate::set_initial_view(&mut doc, &crate::InitialView { hide_toolbar: true, ..v.clone() }).unwrap();
+        let catalog = doc.get(root).as_dict().cloned().unwrap();
+        assert_eq!(catalog.get(b"OpenAction"), Some(&action));
+        let doc = save_and_reopen(&doc);
+        assert_eq!(crate::initial_view(&doc), crate::InitialView { hide_toolbar: true, ..v.clone() });
+        // A changed magnification writes a destination of its own.
+        let mut doc = doc;
+        crate::set_initial_view(&mut doc, &crate::InitialView { magnification: Magnification::FitPage, ..v }).unwrap();
+        let catalog = doc.get(root).as_dict().cloned().unwrap();
+        assert_ne!(catalog.get(b"OpenAction"), Some(&action));
+        assert_eq!(crate::initial_view(&doc).magnification, Magnification::FitPage);
+    }
+}
+
 // ── Split / Extract keep only the resources the part draws (#204) ──────────────────────────────
 
 /// A content stream with no text operators (an image draw).

@@ -1284,14 +1284,19 @@ impl PdfCraftApp {
     }
 
     /// Open a document the way it asks to be opened: navigation panel, layout, magnification,
-    /// page (Document Properties ▸ Initial View). With Always use my default zoom and page
-    /// layout on, the layout and magnification stay at the defaults the view opened with.
+    /// page and the place on it (Document Properties ▸ Initial View, `/OpenAction`). With Always
+    /// use my default zoom and page layout on, the layout and magnification stay at the defaults
+    /// the view opened with, and the view goes to the opening page's top.
     fn apply_initial_view(&mut self, index: usize, v: &pdfcraft_engine::InitialView) {
         use pdfcraft_engine::{InitialLayout as L, Magnification as M, Navigation as N};
         let pages = self.session.get(self.views[index].id).map_or(0, |d| d.info.pages.len());
         // A right panel the user closed stays closed, whatever the document asks for (#2884).
+        // A document that asks for full screen gets the panel it names for outside it
+        // (`/NonFullScreenPageMode`, Table 147), there when the prompt is declined or full
+        // screen is left.
+        let navigation = if v.full_screen { v.non_full_screen } else { v.navigation };
         if self.active == Some(index) && !self.right_panel_closed {
-            match v.navigation {
+            match navigation {
                 N::PageOnly => {}
                 N::Bookmarks => self.right = Some(RightPanel::Bookmarks),
                 N::Pages => self.right = Some(RightPanel::Pages),
@@ -1325,8 +1330,19 @@ impl PdfCraftApp {
                 M::FitHeight => view.fit = canvas::Fit::Height,
             }
         }
-        if v.page > 0 && v.page < pages {
-            view.go_to_page(v.page);
+        // The opening destination (`/OpenAction`, named destinations resolved): its page, and
+        // where on it and how large, as a bookmark or link to it would (ISO 32000-2 Table 149).
+        // With the default view kept, only the page.
+        let info = self.session.get(view.id).map(|d| &d.info);
+        match info.and_then(|i| i.open_dest.filter(|(page, _)| *page < pages).map(|d| (i, d))) {
+            Some((info, (page, dest))) if !self.always_default_view => view.go_to_dest(page, dest, info),
+            Some((_, (page, _))) => {
+                if page > 0 {
+                    view.go_to_page(page);
+                }
+            }
+            None if v.page > 0 && v.page < pages => view.go_to_page(v.page),
+            None => {}
         }
     }
 
@@ -1526,16 +1542,18 @@ impl PdfCraftApp {
         // Read mode opens with the panes closed; the rail still opens them (#932). A right panel
         // the user closed stays closed (#1590).
         let opening_mode = self.mode_override.unwrap_or(self.default_mode);
+        let initial = doc.initial_view();
         if activate && self.right.is_none() && !self.right_panel_closed && opening_mode != Mode::Read {
             self.right = if !doc.info.annotations.is_empty() {
                 Some(RightPanel::Comments)
-            } else if !doc.info.outline.is_empty() {
+            // A full-screen document names its panel for outside full screen, and with
+            // `/NonFullScreenPageMode /UseNone` (the default) no outline is visible (Table 147).
+            } else if !doc.info.outline.is_empty() && !initial.full_screen {
                 Some(RightPanel::Bookmarks)
             } else {
                 None
             };
         }
-        let initial = doc.initial_view();
         let view = DocView::new(id, &doc.info, self.view_defaults);
         self.views.push(view);
         if activate {

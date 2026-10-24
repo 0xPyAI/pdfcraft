@@ -50,6 +50,7 @@ mod links;
 mod marks;
 mod object_selection;
 mod ocr;
+mod open_action;
 mod organize_drag;
 mod pageboxes;
 mod panel_snapshots;

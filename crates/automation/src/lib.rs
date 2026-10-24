@@ -2635,6 +2635,9 @@ fn info(d: &Document) -> Value {
         "creator": i.creator, "producer": i.producer,
         "tagged": i.tagged,
         "has_javascript": i.has_javascript,
+        // Where the document opens (/OpenAction, named destinations resolved): 1-based page and
+        // destination, null without one.
+        "open_destination": i.open_dest.as_ref().map(|(p, view)| json!({ "page": page1(*p), "destination": i.pages.get(*p).and_then(|pg| destination(view, pg)) })),
         // XFA forms: "static" (the PDF's own fields work; the XFA data is ignored) or "dynamic"
         // (laid out from the template by PdfCraft, see xfa_layout; placeholder pages when that failed).
         "xfa": i.xfa.map(|x| match x { pdfcraft_render::Xfa::Static => "static", pdfcraft_render::Xfa::Dynamic => "dynamic" }),
