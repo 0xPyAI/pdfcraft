@@ -3652,7 +3652,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
 
             // Any press on the page ends Select All of the document: text read or not, any tool,
             // on a link too.
-            if view.all_text && ui.input(|inp| inp.pointer.primary_pressed() && inp.pointer.press_origin().is_some_and(|o| r.contains(o))) {
+            // A press that lands on something drawn over the page (a menu, a dialog) is not one.
+            if view.all_text && pressed_page == Some(i) {
                 view.all_text = false;
             }
             // Text layer: find matches, selection, I-beam and drag-to-select.
@@ -6312,6 +6313,17 @@ trailer << /Root 1 0 R >>
         h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
         h.run_steps(2);
         assert!(!h.state().views[0].all_text, "a press on the page ends it");
+
+        // A press while a dialog is up lands on the dialog, not the page: the selection stays.
+        h.state_mut().views[0].select_all();
+        h.state_mut().dialog = Some(crate::Dialog::JsConsole);
+        h.run_steps(2);
+        h.event(egui::Event::PointerMoved(at));
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(2);
+        assert!(h.state().views[0].all_text, "a press beneath a dialog doesn't end it");
     }
 
     /// The pages of a whole-document copy come out in order whatever was read before, and a
