@@ -2054,7 +2054,7 @@ fn a_multi_line_field_without_a_height_grows_to_hold_its_text() {
 /// included, drawn under its content; a flowed table too. One a page break cuts between its
 /// children gets a closed border round its part on each page, its bottom margin ending the first
 /// part and its top margin starting the next, as another viewer draws it on a synthetic form. One
-/// whose own item a page break cuts keeps no border, and the layout says so.
+/// holding an item that doesn't fit on its page keeps no border, and the layout says so.
 #[test]
 fn a_flowed_subform_is_drawn_with_its_border_under_its_content() {
     let field = |name: &str| format!(r#"<field name="{name}" w="3in" h="0.5in"><ui><textEdit/></ui></field>"#);
