@@ -105,6 +105,75 @@ fn a_blank_tooltip_shows_nothing() {
     assert!(egui::Tooltip::seconds_since_last_tooltip(&h.ctx).is_infinite(), "no tooltip was shown");
 }
 
+/// A text field that doesn't scroll (`DoNotScroll`) takes no more than it shows, measured as its
+/// appearance draws it: a long paste keeps what fits, typing into a full field adds nothing, and
+/// a field without the flag takes it all.
+#[test]
+fn a_field_that_doesnt_scroll_stops_taking_text_when_full() {
+    let mut h = harness();
+    set_city(
+        &mut h,
+        pdfcraft_engine::FieldProps { flags: vec![(pdfcraft_engine::field_flags::DO_NOT_SCROLL, true)], font_size: Some(12.0), ..Default::default() },
+    );
+    let text_box = |h: &Harness<'static, PdfCraftApp>| {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().field_text_box("city", 0).expect("the city field's text box")
+    };
+    let typing = |h: &Harness<'static, PdfCraftApp>| h.state().views[0].forms.focus.as_ref().map(|f| f.text.clone()).unwrap_or_default();
+    click_field(&mut h, "city", 0);
+    h.event(egui::Event::Text("W".repeat(80)));
+    h.run_steps(2);
+    let kept = typing(&h);
+    let tb = text_box(&h);
+    assert!(!kept.is_empty() && kept.len() < 80, "{} of 80 kept", kept.len());
+    assert!(tb.fits(&kept) && !tb.fits(&format!("{kept}W")), "as much as fits: {}", kept.len());
+    h.event(egui::Event::Text("WWW".into()));
+    h.run_steps(2);
+    assert_eq!(typing(&h), kept, "a full field takes no more");
+    h.key_press(egui::Key::Tab);
+    h.run_steps(4);
+    assert_eq!(value(&h, "city"), [kept]);
+    // A field without the flag takes the whole paste.
+    click_field(&mut h, "name", 0);
+    h.event(egui::Event::Text("W".repeat(80)));
+    h.run_steps(2);
+    h.key_press(egui::Key::Tab);
+    h.run_steps(4);
+    assert_eq!(value(&h, "name"), ["W".repeat(80)]);
+}
+
+/// A multi-line field that doesn't scroll, with an automatic size, takes lines until even the
+/// smallest size it shrinks to can't show them all.
+#[test]
+fn a_multi_line_auto_sized_field_that_doesnt_scroll_stops_when_full() {
+    let mut h = harness();
+    set_city(
+        &mut h,
+        pdfcraft_engine::FieldProps {
+            flags: vec![(pdfcraft_engine::field_flags::DO_NOT_SCROLL, true)],
+            multiline: Some(true),
+            font_size: Some(0.0),
+            ..Default::default()
+        },
+    );
+    let da = {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().form.iter().find(|f| f.name == "city").unwrap().da.clone()
+    };
+    assert!(da.contains(" 0 Tf"), "an automatic size: {da}");
+    click_field(&mut h, "city", 0);
+    h.event(egui::Event::Text("line\n".repeat(60)));
+    h.run_steps(2);
+    let kept = h.state().views[0].forms.focus.as_ref().map(|f| f.text.clone()).unwrap_or_default();
+    let tb = {
+        let s = h.state();
+        s.session.get(s.views[0].id).unwrap().field_text_box("city", 0).expect("the city field's text box")
+    };
+    let lines = kept.lines().count();
+    assert!(lines > 1 && lines < 60, "{lines} of 60 lines kept");
+    assert!(tb.fits(&kept) && !tb.fits(&format!("{kept}\nline")), "as many lines as fit at 4 pt: {lines}");
+}
+
 #[test]
 fn typing_into_a_text_field_and_tabbing_on() {
     let mut h = harness();

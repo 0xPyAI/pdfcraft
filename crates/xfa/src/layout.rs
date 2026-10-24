@@ -126,6 +126,8 @@ pub struct Widget {
     pub action: Option<Action>,
     /// Check boxes: the on and off values of the data; radio buttons: the on value.
     pub items: Vec<String>,
+    /// A text field that doesn't scroll: it takes no more text than it shows (`DoNotScroll`).
+    pub no_scroll: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1804,6 +1806,7 @@ impl Layouter<'_> {
             default: template_default,
             action,
             items,
+            no_scroll: f.no_scroll,
         })))
     }
 }

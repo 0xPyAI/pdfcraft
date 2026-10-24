@@ -516,8 +516,26 @@ fn paint_unbaked_widget(painter: &egui::Painter, xf: &PageXform, f: &FormField, 
     }
 }
 
+/// How the focused text field lays text out, when it is one that doesn't scroll (`DoNotScroll`):
+/// its editor then takes no more than fits ([`overlay`]).
+pub(crate) fn text_box(doc: &pdfcraft_engine::Document, view: &DocView, form: &[FormField]) -> Option<form_appearance::TextBox> {
+    let fx = view.forms.focus.as_ref()?;
+    let f = form.iter().find(|f| f.name == fx.name)?;
+    let no_scroll = f.kind == FormFieldKind::Text && f.has(field_flags::DO_NOT_SCROLL);
+    no_scroll.then(|| doc.field_text_box(&fx.name, fx.widget)).flatten()
+}
+
 /// The in-place editor or option list for the focused field. Returns an edit to apply.
-pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, form: &[FormField], today: (i64, u32, u32)) -> Option<Edit> {
+/// `text_box`, for a text field that doesn't scroll, is how its widget lays text out: the editor
+/// then takes no more than fits.
+pub(crate) fn overlay(
+    ctx: &egui::Context,
+    view: &mut DocView,
+    info: &DocInfo,
+    form: &[FormField],
+    text_box: Option<&form_appearance::TextBox>,
+    today: (i64, u32, u32),
+) -> Option<Edit> {
     let pressed = view.forms.pressed;
     if !ctx.input(|i| i.pointer.primary_down()) {
         view.forms.pressed = false;
@@ -566,6 +584,8 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
                     let font = (field_text_size(ui.painter(), f, w, &fx.text) * zoom).clamp(3.0, 64.0);
                     // The field is pale yellow in every theme, so the caret must not follow the theme (pale in dark mode) (#655).
                     ui.visuals_mut().text_cursor.stroke.color = crate::edit_text_ui::caret_color_on(FIELD_FILL);
+                    // A field that doesn't scroll takes no more than fits (ISO 32000-2 Table 228).
+                    let before = text_box.map(|_| fx.text.clone());
                     let mut te = if multiline { egui::TextEdit::multiline(&mut fx.text) } else { egui::TextEdit::singleline(&mut fx.text) };
                     te = te
                         // Wraps (inside the 3 px side margins) at the width the size was fitted to:
@@ -589,6 +609,19 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, f
                         laid_out = Some((out.galley, out.galley_pos));
                         out.response.response
                     });
+                    if let (Some(tb), Some(before)) = (text_box, before)
+                        && fx.text != before
+                    {
+                        let (kept, caret) = tb.fitted_edit(&before, &fx.text);
+                        if kept != fx.text {
+                            fx.text = kept;
+                            if let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), r.id) {
+                                st.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(caret))));
+                                st.store(ui.ctx(), r.id);
+                            }
+                            ui.ctx().request_repaint();
+                        }
+                    }
                     if let Some(press) = fx.press.take()
                         && let Some((galley, pos)) = laid_out
                         && let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), r.id)

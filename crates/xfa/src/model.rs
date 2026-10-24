@@ -486,6 +486,9 @@ pub struct Field {
     pub check_size: Option<f64>,
     pub check_round: bool,
     pub multiline: bool,
+    /// The field doesn't scroll in the direction its text runs out (`hScrollPolicy="off"` for one
+    /// line, `vScrollPolicy="off"` for several): it takes no more text than it shows.
+    pub no_scroll: bool,
     pub caption: Option<Caption>,
     pub value: Value,
     /// Check buttons: the on value then the off value; choice lists: the items as shown.

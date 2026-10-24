@@ -787,6 +787,17 @@ impl Document {
         self.editable() && self.permissions().is_none_or(|p| p.modify())
     }
 
+    /// How widget `widget` of text field `name` lays its value out, for asking whether a typed
+    /// value fits it ([`form_appearance::TextBox::fits`]): a field that doesn't scroll takes no
+    /// more than fits. `None` without such a field or widget, or when the document can't be
+    /// edited.
+    pub fn field_text_box(&self, name: &str, widget: usize) -> Option<form_appearance::TextBox> {
+        let cos = &self.editor.as_ref()?.cos;
+        let f = self.form.iter().find(|f| f.name == name)?;
+        let w = f.widgets.get(widget)?;
+        Some(form_appearance::text_box(cos, f, w))
+    }
+
     /// Filling in form fields is allowed (Table 22, bits 6 and 9).
     pub fn allows_form_filling(&self) -> bool {
         self.editable() && self.permissions().is_none_or(|p| p.fill_forms())

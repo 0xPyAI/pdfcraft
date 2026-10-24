@@ -356,6 +356,45 @@ fn form_text_the_standard_fonts_cannot_draw_is_reported() {
     assert!(!render_into(&mut doc).unwrap().warnings.iter().any(|w| w.contains("standard fonts")));
 }
 
+/// A field whose ui doesn't scroll in the direction its text runs out (`hScrollPolicy="off"` for
+/// one line, `vScrollPolicy="off"` for several) is written with DoNotScroll (`/Ff` bit 24), so it
+/// takes no more text than it shows; the other direction's policy, or the default, doesn't.
+#[test]
+fn fields_that_dont_scroll_are_written_with_do_not_scroll() {
+    let field = |name: &str, ui: &str| format!(r#"<field name="{name}" w="2in" h="0.4in"><ui>{ui}</ui></field>"#);
+    let xdp = format!(
+        r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"><subform name="form" layout="tb">
+{}{}{}{}{}{}{}
+</subform></template></xdp:xdp>"##,
+        field("line", r#"<textEdit hScrollPolicy="off"/>"#),
+        field("lines", r#"<textEdit multiLine="1" vScrollPolicy="off"/>"#),
+        field("number", r#"<numericEdit hScrollPolicy="off"/>"#),
+        field("when", r#"<dateTimeEdit hScrollPolicy="off"/>"#),
+        field("linesAcross", r#"<textEdit multiLine="1" hScrollPolicy="off"/>"#),
+        field("lineDown", r#"<textEdit vScrollPolicy="off"/>"#),
+        field("free", r#"<textEdit/>"#),
+    );
+    let mut doc = Document::open(Arc::new(shell(&xdp))).unwrap();
+    render_into(&mut doc).unwrap();
+    let catalog = doc.get(doc.root().unwrap());
+    let acro = doc.resolve(catalog.as_dict().unwrap().get(b"AcroForm").unwrap());
+    let fields = doc.resolve(acro.as_dict().unwrap().get(b"Fields").unwrap()).as_array().unwrap().clone();
+    let mut no_scroll = std::collections::BTreeMap::new();
+    for r in fields.iter().filter_map(Object::as_ref) {
+        let f = doc.get(r);
+        let d = f.as_dict().unwrap();
+        let name = d.get(b"T").and_then(Object::as_string).map(|t| t.to_text()).unwrap_or_default();
+        no_scroll.insert(name, d.int(b"Ff").unwrap_or(0) & (1 << 23) != 0);
+    }
+    let expected: std::collections::BTreeMap<String, bool> =
+        [("line", true), ("lines", true), ("number", true), ("when", true), ("linesAcross", false), ("lineDown", false), ("free", false)]
+            .into_iter()
+            .map(|(n, v)| (n.to_string(), v))
+            .collect();
+    assert_eq!(no_scroll, expected);
+}
+
 #[test]
 fn documents_without_xfa_are_not_touched() {
     let mut doc = Document::new_empty();

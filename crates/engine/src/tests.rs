@@ -4750,6 +4750,25 @@ fn measurement_edits_are_transactional_and_honour_annotation_permissions() {
     );
 }
 
+/// A laid-out XFA field that doesn't scroll (`hScrollPolicy="off"`) opens as a text field with
+/// DoNotScroll, and its text box says what fits it: what the editor takes no more than.
+#[test]
+fn an_xfa_field_that_doesnt_scroll_opens_with_do_not_scroll_and_a_text_box() {
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"><subform name="form" layout="tb">
+<field name="code" w="1in" h="0.3in"><ui><textEdit hScrollPolicy="off"/></ui><font typeface="Arial" size="10pt"/></field>
+<field name="note" w="1in" h="0.3in"><ui><textEdit/></ui><font typeface="Arial" size="10pt"/></field>
+</subform></template></xdp:xdp>"##;
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(xdp)), None).expect("opens");
+    let doc = s.get(id).unwrap();
+    let field = |end: &str| doc.form.iter().find(|f| f.name.ends_with(end)).unwrap_or_else(|| panic!("no field {end}"));
+    assert!(field("code").has(field_flags::DO_NOT_SCROLL) && !field("note").has(field_flags::DO_NOT_SCROLL));
+    let tb = doc.field_text_box(&field("code").name, 0).expect("a text box");
+    assert!(tb.fits("A1B2") && !tb.fits(&"W".repeat(40)), "a 1-inch field at 10 pt");
+    assert!(doc.field_text_box("no such field", 0).is_none() && doc.field_text_box(&field("code").name, 5).is_none());
+}
+
 #[test]
 fn dynamic_xfa_forms_are_laid_out_on_open_filled_and_saved_incrementally() {
     let original = Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::template(3)));
