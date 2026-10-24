@@ -5884,6 +5884,113 @@ fn comments_without_appearances_are_drawn_but_not_saved() {
     }
 }
 
+/// A stamp's `/Rect` and the colour family expected inside it.
+type StampRect = ([f64; 4], char);
+
+/// Rubber stamps without an appearance (ISO 32000-2 Table 184): the fourteen standard names, one
+/// without `/Name`, one custom name, and last a Draft stamp with artwork of its own (magenta).
+/// Each sits in a 120 × 60 `/Rect` on a 612 × 792 page; the name and the expected colour family
+/// (`'r'`, `'g'`, `'b'`, or `'n'` for the neutral placeholder) of each, in page order.
+fn stamps_without_appearances() -> (Arc<Vec<u8>>, Vec<StampRect>) {
+    let stamps: [(Option<&str>, char); 16] = [
+        (Some("Approved"), 'g'),
+        (Some("Experimental"), 'b'),
+        (Some("NotApproved"), 'r'),
+        (Some("AsIs"), 'b'),
+        (Some("Expired"), 'r'),
+        (Some("NotForPublicRelease"), 'r'),
+        (Some("Confidential"), 'r'),
+        (Some("Final"), 'g'),
+        (Some("Sold"), 'g'),
+        (Some("Departmental"), 'b'),
+        (Some("ForComment"), 'b'),
+        (Some("TopSecret"), 'r'),
+        (Some("Draft"), 'b'),
+        (Some("ForPublicRelease"), 'b'),
+        (None, 'b'),
+        (Some("MyCustomStamp"), 'n'),
+    ];
+    let mut objs: Vec<String> =
+        vec!["<< /Type /Catalog /Pages 2 0 R >>".into(), "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>".into(), String::new()];
+    let mut expected = Vec::new();
+    for (i, (name, family)) in stamps.iter().enumerate() {
+        let (x, y) = (30 + (i % 4) * 145, 660 - (i / 4) * 150);
+        let rect = [x as f64, y as f64, x as f64 + 120.0, y as f64 + 60.0];
+        let name = name.map(|n| format!("/Name /{n}")).unwrap_or_default();
+        objs.push(format!("<< /Type /Annot /Subtype /Stamp /Rect [{} {} {} {}] {name} /F 4 >>", rect[0], rect[1], rect[2], rect[3]));
+        expected.push((rect, *family));
+    }
+    let own = objs.len() + 2;
+    objs.push(format!("<< /Type /Annot /Subtype /Stamp /Rect [30 60 150 120] /Name /Draft /F 4 /AP << /N {own} 0 R >> >>"));
+    expected.push(([30.0, 60.0, 150.0, 120.0], 'm'));
+    objs.push("<< /Type /XObject /Subtype /Form /BBox [0 0 10 10] /Length 23 >>\nstream\n1 0 1 rg 0 0 10 10 re f\nendstream".into());
+    let annots: Vec<String> = (4..own).map(|n| format!("{n} 0 R")).collect();
+    objs[2] = format!("<< /Type /Page /Parent 2 0 R /Annots [{}] >>", annots.join(" "));
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    (Arc::new(bytes), expected)
+}
+
+/// The colour family of an RGBA pixel that isn't white: `'r'`, `'g'` or `'b'` for the dominant
+/// channel, `'n'` for a grey, `'m'` for magenta.
+fn colour_family(p: &[u8]) -> Option<char> {
+    let (r, g, b) = (i32::from(p[0]), i32::from(p[1]), i32::from(p[2]));
+    if r.min(g).min(b) > 200 {
+        return None;
+    }
+    Some(if (r - g).abs() < 24 && (g - b).abs() < 24 {
+        'n'
+    } else if r > 200 && b > 200 && g < 80 {
+        'm'
+    } else if r > g && r > b {
+        'r'
+    } else if g > r && g > b {
+        'g'
+    } else {
+        'b'
+    })
+}
+
+/// Rubber stamps without an appearance are drawn from their `/Name` (ISO 32000-2 Table 184), in
+/// the colour of the stamp they name; an unknown name gets a grey placeholder; a stamp's own
+/// artwork is drawn as it is. Display only: Save writes the file without new appearances.
+#[test]
+fn stamps_without_appearances_draw_the_stamp_they_name() {
+    let (original, expected) = stamps_without_appearances();
+    let mut s = Session::new();
+    let id = s.open("stamps.pdf", None, original.clone(), None).expect("opens");
+    let p = shown(&s, id, 0);
+    for (i, (rect, family)) in expected.iter().enumerate() {
+        let mut counts = std::collections::HashMap::new();
+        for y in (792.0 - rect[3]) as u32..(792.0 - rect[1]) as u32 {
+            for x in rect[0] as u32..rect[2] as u32 {
+                let px = &p.rgba[((y * p.width + x) * 4) as usize..][..4];
+                if let Some(f) = colour_family(px) {
+                    *counts.entry(f).or_insert(0) += 1;
+                }
+            }
+        }
+        let total: u32 = counts.values().sum();
+        let main = counts.iter().max_by_key(|(_, n)| **n).map(|(f, _)| *f);
+        assert!(total > 300, "stamp {i} draws ink inside its /Rect: {counts:?}");
+        assert_eq!(main, Some(*family), "stamp {i} is drawn in its colour: {counts:?}");
+    }
+    let saved = pdfcraft_cos::Document::open(s.save_bytes(id).unwrap()).unwrap();
+    for n in 4..20 {
+        assert!(saved.get(pdfcraft_cos::ObjRef::new(n, 0)).as_dict().is_some_and(|d| !d.contains(b"AP")), "{n} is saved without /AP");
+    }
+}
+
 /// A page with a FreeText comment that has no `/AP` stream: the smallest case behind #2371.
 fn free_text_without_appearance() -> Arc<Vec<u8>> {
     let objs: Vec<&[u8]> = vec![

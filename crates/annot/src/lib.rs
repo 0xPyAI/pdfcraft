@@ -1586,7 +1586,14 @@ pub fn with_missing_appearances_cached(doc: &Document, cache: &mut AppearanceCac
                 apply_appearance(copy.get_or_insert_with(|| doc.clone()), r, &d, stream).ok();
                 continue;
             }
-            let Some(stream) = build_appearance(doc, &d) else { continue };
+            // Another program's stamp gets a drawing for display only (ISO 32000-2 Table 184). Its
+            // `/AP`, if any, has no `/N` to keep here.
+            let other_stamp = || {
+                let mut bare = d.clone();
+                bare.remove(b"AP");
+                appearance::display_stamp(&bare)
+            };
+            let Some(stream) = build_appearance(doc, &d).or_else(other_stamp) else { continue };
             cache.insert(r, &stream);
             // Fails only when `r` isn't a dictionary, which the build just ruled out.
             apply_appearance(copy.get_or_insert_with(|| doc.clone()), r, &d, stream).ok();
