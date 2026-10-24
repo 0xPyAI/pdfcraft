@@ -642,6 +642,12 @@ pub struct PdfCraftApp {
     pub close_request: Option<CloseRequest>,
     /// The button of the "save changes?" question the keyboard has chosen; Save when it opens.
     pub(crate) save_prompt_button: dialogs::PromptButton,
+    /// `attend_save_prompt` has seen the pending "save changes?" question. It is false again once
+    /// the question is answered, so the next document's question is told apart from it.
+    save_prompt_seen: bool,
+    /// The "save changes?" question asked for the user's attention and the request still stands
+    /// (see `attend_save_prompt`).
+    save_prompt_attention: bool,
     /// A save waiting behind [`Dialog::OverwriteChanged`] (the web build has no files to check).
     #[cfg(not(target_arch = "wasm32"))]
     pub pending_overwrite: Option<editing::PendingOverwrite>,
@@ -1018,6 +1024,8 @@ impl PdfCraftApp {
             host_dirty: None,
             close_request: None,
             save_prompt_button: Default::default(),
+            save_prompt_seen: false,
+            save_prompt_attention: false,
             #[cfg(not(target_arch = "wasm32"))]
             pending_overwrite: None,
             save_override: None,
@@ -3146,6 +3154,8 @@ impl eframe::App for PdfCraftApp {
         storage.set_string("pdfcraft", self.persist());
     }
 
+    /// Each frame's work before drawing: opens, operating-system and control-channel requests,
+    /// the quit guard, shortcuts, and the background jobs' results.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.ctx = Some(ctx.clone());
         #[cfg(not(target_arch = "wasm32"))]
@@ -3312,6 +3322,8 @@ impl eframe::App for PdfCraftApp {
         self.process_file_requests();
         #[cfg(not(target_arch = "wasm32"))]
         self.process_picked();
+        // Last, after everything that can open or answer the "save changes?" question.
+        self.attend_save_prompt(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

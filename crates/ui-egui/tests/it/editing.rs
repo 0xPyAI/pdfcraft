@@ -791,6 +791,50 @@ fn quitting_with_unsaved_changes_asks_for_each_document() {
     assert!(h.state().close_request.is_none());
 }
 
+/// Run `frames` frames and collect every attention request they sent to the window.
+fn attention_over(h: &mut Harness<'static, PdfCraftApp>, frames: usize) -> Vec<egui::UserAttentionType> {
+    let mut sent = Vec::new();
+    for _ in 0..frames {
+        h.step();
+        let commands = h.output().viewport_output.values().flat_map(|v| v.commands.iter());
+        sent.extend(commands.filter_map(|c| if let egui::ViewportCommand::RequestUserAttention(a) = c { Some(*a) } else { None }));
+    }
+    sent
+}
+
+/// Close the window as the operating system does: Quit in the Dock menu, or logging out.
+fn close_window(h: &mut Harness<'static, PdfCraftApp>) {
+    h.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+}
+
+/// Quit from the Dock while another app is in front: the prompt opens in a window the user can't
+/// see, so the Dock icon bounces (the taskbar button flashes) until they come back. A prompt that
+/// opens in front asks for nothing.
+#[test]
+fn a_save_prompt_opened_in_the_background_asks_for_attention_until_the_user_returns() {
+    use egui::UserAttentionType::{Critical, Reset};
+    let mut h = harness(2, |_| {});
+    h.state_mut().views[0].select_pages(&[0]);
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::RotatePages { pages: vec![0], degrees: 90 });
+    h.input_mut().focused = false;
+    close_window(&mut h);
+    assert_eq!(attention_over(&mut h, 4), [Critical], "asked once, when the prompt opened");
+    assert_eq!(h.state().close_request, Some(CloseRequest::Quit));
+    h.input_mut().focused = true;
+    assert_eq!(attention_over(&mut h, 3), [Reset], "coming back withdraws the request");
+    h.get_by_label_contains("Save changes to “doc.pdf”");
+    h.get_by_label("Cancel").click();
+    assert!(attention_over(&mut h, 3).is_empty());
+    assert_eq!(h.state().views.len(), 1, "cancel keeps the document open");
+    // With PdfCraft in front, the prompt is in plain sight.
+    close_window(&mut h);
+    assert!(attention_over(&mut h, 4).is_empty());
+    h.get_by_label_contains("Save changes to “doc.pdf”");
+    // Leaving with the prompt open doesn't ask either: the user has seen it.
+    h.input_mut().focused = false;
+    assert!(attention_over(&mut h, 3).is_empty());
+}
+
 /// PDFs written to a fresh temp folder, removed when the test ends.
 struct TempPdfs(std::path::PathBuf);
 
