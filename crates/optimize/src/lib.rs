@@ -38,10 +38,60 @@ pub use images::effective_resolutions;
 pub enum OptimizeError {
     #[error("the document has no page tree")]
     NoPages,
+    #[error("the document's encryption requires PDF {required} or later (chosen: PDF {chosen})")]
+    IncompatibleEncryption { required: &'static str, chosen: &'static str },
     #[error(transparent)]
     Cos(#[from] pdfcraft_cos::CosError),
     #[error("the optimization was cancelled")]
     Cancelled,
+}
+
+/// The target header version and object-stream policy for an optimized copy.
+///
+/// Partial compatibility only: encryption requirements are checked, but content newer than
+/// the target is neither detected nor converted. A lower header does not guarantee that
+/// older readers can read the document.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Compatibility {
+    /// Keep the document's version (upgraded to 1.5 when object streams are written).
+    #[default]
+    Retain,
+    Pdf1_4,
+    Pdf1_5,
+    Pdf1_6,
+    Pdf1_7,
+    Pdf2_0,
+}
+
+impl Compatibility {
+    pub const ALL: [Compatibility; 6] =
+        [Compatibility::Retain, Compatibility::Pdf1_4, Compatibility::Pdf1_5, Compatibility::Pdf1_6, Compatibility::Pdf1_7, Compatibility::Pdf2_0];
+
+    /// The name tools use (`"retain"`, `"1.4"`, `"1.5"`, `"1.6"`, `"1.7"`, `"2.0"`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Compatibility::Retain => "retain",
+            Compatibility::Pdf1_4 => "1.4",
+            Compatibility::Pdf1_5 => "1.5",
+            Compatibility::Pdf1_6 => "1.6",
+            Compatibility::Pdf1_7 => "1.7",
+            Compatibility::Pdf2_0 => "2.0",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Compatibility> {
+        let trimmed = name.trim();
+        let stripped = if trimmed.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("pdf ")) { &trimmed[4..] } else { trimmed };
+        Compatibility::ALL.into_iter().find(|c| c.name().eq_ignore_ascii_case(stripped))
+    }
+
+    /// The three-character `%PDF-` header version, when a target version is chosen.
+    pub fn version(self) -> Option<&'static str> {
+        match self {
+            Compatibility::Retain => None,
+            _ => Some(self.name()),
+        }
+    }
 }
 
 /// Where an optimization is, reported to [`optimize_with_progress`]'s callback.
@@ -89,6 +139,8 @@ impl ImageSettings {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
+    /// Target PDF version (`Retain` by default).
+    pub compatibility: Compatibility,
     /// Put page pictures drawn as many stacked fragments back together first ([`fragments`]).
     pub merge_fragments: bool,
     pub color: ImageSettings,
@@ -100,16 +152,28 @@ pub struct Settings {
     /// Flate-compress streams stored without a filter, and strip a redundant outer ASCII85 or
     /// ASCIIHex layer from streams that have one.
     pub flate_unencoded: bool,
+    /// Clean Up: pack non-stream objects into compressed object streams with a cross-reference
+    /// stream (PDF 1.5+, §7.5.7–7.5.8). Always off when `compatibility` is [`Compatibility::Pdf1_4`].
+    pub object_streams: bool,
     /// Clean Up: remove links (and bookmark destinations) that point nowhere.
     pub remove_invalid_links: bool,
     /// Clean Up: remove named destinations nothing refers to.
     pub remove_unreferenced_dests: bool,
 }
 
+impl Settings {
+    /// Whether `write_full` should pack non-stream objects into compressed object streams:
+    /// enabled when `object_streams` is set and the target version is not PDF 1.4 (§7.5.7).
+    pub fn effective_object_streams(&self) -> bool {
+        self.object_streams && self.compatibility != Compatibility::Pdf1_4
+    }
+}
+
 impl Default for Settings {
     /// Acrobat's Reduce File Size choices.
     fn default() -> Self {
         Self {
+            compatibility: Compatibility::Retain,
             merge_fragments: true,
             color: ImageSettings::REDUCE,
             gray: ImageSettings::REDUCE,
@@ -118,6 +182,7 @@ impl Default for Settings {
             discard_tags: false,
             discard_print_settings: false,
             flate_unencoded: true,
+            object_streams: true,
             remove_invalid_links: true,
             remove_unreferenced_dests: true,
         }
@@ -186,6 +251,20 @@ pub struct Report {
     pub unused_xobjects: usize,
 }
 
+/// The minimum PDF version required by `doc`'s active security handler, when it uses features
+/// introduced after PDF 1.4 (crypt filters in 1.5, AES-128 in 1.6, AES-256 in 1.7).
+fn required_encryption_version(doc: &Document) -> Option<&'static str> {
+    let h = doc.output_handler()?;
+    let d = h.dict();
+    if d.v >= 5 || d.crypt_filters.iter().any(|(_, m)| *m == pdfcraft_cos::CryptMethod::Aes256) {
+        Some("1.7")
+    } else if d.v == 4 {
+        if d.crypt_filters.iter().any(|(_, m)| *m == pdfcraft_cos::CryptMethod::Aes128) { Some("1.6") } else { Some("1.5") }
+    } else {
+        None
+    }
+}
+
 /// Optimize `doc` in place.
 pub fn optimize(doc: &mut Document, settings: &Settings) -> Result<Report, OptimizeError> {
     optimize_with_progress(doc, settings, &mut |_| true)
@@ -195,6 +274,13 @@ pub fn optimize(doc: &mut Document, settings: &Settings) -> Result<Report, Optim
 /// during a long one). Returning `false` stops with [`OptimizeError::Cancelled`]; `doc` is then
 /// partly optimized and should be dropped.
 pub fn optimize_with_progress(doc: &mut Document, settings: &Settings, progress: &mut dyn FnMut(Stage) -> bool) -> Result<Report, OptimizeError> {
+    // Lexical ordering is valid for these fixed versions with single-digit components.
+    if let Some(chosen) = settings.compatibility.version()
+        && let Some(required) = required_encryption_version(doc)
+        && chosen < required
+    {
+        return Err(OptimizeError::IncompatibleEncryption { required, chosen });
+    }
     let mut report = Report::default();
     let pages = pdfcraft_annot::page_refs(doc).map_err(|_| OptimizeError::NoPages)?;
     if settings.merge_fragments {
@@ -230,6 +316,16 @@ pub fn optimize_with_progress(doc: &mut Document, settings: &Settings, progress:
         }
     }
     let root = doc.root();
+    if let Some(chosen) = settings.compatibility.version() {
+        doc.set_version(chosen);
+        if let Some(root) = root
+            && doc.get(root).as_dict().is_some_and(|c| c.contains(b"Version"))
+        {
+            doc.update_dict(root, |c| {
+                c.remove(b"Version");
+            })?;
+        }
+    }
     if settings.discard_tags
         && let Some(root) = root
         && doc.get(root).as_dict().is_some_and(|c| c.contains(b"StructTreeRoot"))

@@ -1215,7 +1215,7 @@ impl Automation {
     }
 
     fn doc_optimize(&mut self, a: &Args) -> Result<Value> {
-        use pdfcraft_engine::optimize::{Compression, ImageSettings, Preset};
+        use pdfcraft_engine::optimize::{Compatibility, Compression, ImageSettings, Preset};
         let id = self.doc(a)?.id;
         let before = self.doc(a)?.bytes.len();
         let path = self.resolve(a.str("path")?, true)?;
@@ -1223,6 +1223,10 @@ impl Automation {
             None => Preset::Standard.settings(),
             Some(p) => Preset::from_name(p).ok_or_else(|| ToolError::InvalidArgs(format!("unknown preset {p:?} (standard, mobile)")))?.settings(),
         };
+        if let Some(c) = a.opt_str("compatibility")? {
+            settings.compatibility = Compatibility::from_name(c)
+                .ok_or_else(|| ToolError::InvalidArgs(format!("unknown compatibility {c:?} (retain, 1.4, 1.5, 1.6, 1.7, 2.0)")))?;
+        }
         let images = |key: &str, base: ImageSettings| -> Result<ImageSettings> {
             let Some(v) = a.get(key) else { return Ok(base) };
             let mut s = base;
@@ -1256,6 +1260,7 @@ impl Automation {
             ("discard_tags", &mut settings.discard_tags),
             ("discard_print_settings", &mut settings.discard_print_settings),
             ("flate_unencoded", &mut settings.flate_unencoded),
+            ("object_streams", &mut settings.object_streams),
             ("remove_invalid_links", &mut settings.remove_invalid_links),
             ("remove_unreferenced_dests", &mut settings.remove_unreferenced_dests),
         ] {
@@ -1278,9 +1283,24 @@ impl Automation {
         };
         let (bytes, r) = self.session.optimized_bytes(id, &settings, &discard).map_err(failed)?;
         write_atomic(&path, &bytes)?;
+        fn valid_version(v: &[u8]) -> Option<&str> {
+            if matches!(v, [b'1'..=b'9', b'.', b'0'..=b'9']) { std::str::from_utf8(v).ok() } else { None }
+        }
+        let catalog_version = (settings.compatibility == Compatibility::Retain)
+            .then(|| {
+                let pw = self.doc(a).ok().and_then(|d| d.password.as_deref());
+                let doc = pdfcraft_cos::Document::open_with_password(bytes.clone(), pw).ok()?;
+                let root = doc.root()?;
+                doc.get(root).as_dict()?.name(b"Version").and_then(valid_version).map(str::to_owned)
+            })
+            .flatten();
+        let header_version = bytes.strip_prefix(b"%PDF-").and_then(|b| b.get(..3)).and_then(valid_version);
+        let pdf_version = catalog_version.as_deref().or(header_version);
         let o = &r.optimize;
         Ok(json!({
             "path": path.to_string_lossy(),
+            "pdf_version": pdf_version,
+            "object_streams": settings.effective_object_streams(),
             "bytes_before": before,
             "bytes_after": bytes.len(),
             "merged_images": o.merged_images,

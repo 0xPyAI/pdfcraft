@@ -5755,6 +5755,28 @@ fn optimizing_through_tools() {
     assert!(reduced["bytes_after"].as_u64().unwrap() < reduced["bytes_before"].as_u64().unwrap());
     assert_eq!(reduced["written"], true);
     assert_eq!(std::fs::metadata(dir.join("reduced.pdf")).unwrap().len(), reduced["bytes_after"].as_u64().unwrap());
+
+    // Target PDF 1.4 (disables object streams) and PDF 2.0 (with object_streams toggled off).
+    let v14 = ok(&mut a, "doc_optimize", json!({ "doc": doc, "path": "v14.pdf", "compatibility": "1.4" }));
+    assert_eq!((v14["pdf_version"].as_str(), v14["object_streams"].as_bool()), (Some("1.4"), Some(false)), "{v14}");
+    let v14_bytes = std::fs::read(dir.join("v14.pdf")).unwrap();
+    assert!(v14_bytes.starts_with(b"%PDF-1.4\n") && !v14_bytes.windows(7).any(|w| w == b"/ObjStm"));
+
+    let v20 = ok(&mut a, "doc_optimize", json!({ "doc": doc, "path": "v20.pdf", "compatibility": "2.0", "object_streams": false }));
+    assert_eq!((v20["pdf_version"].as_str(), v20["object_streams"].as_bool()), (Some("2.0"), Some(false)), "{v20}");
+    assert!(std::fs::read(dir.join("v20.pdf")).unwrap().starts_with(b"%PDF-2.0\n"));
+
+    // In retain mode, a catalog /Version override is reported as the effective PDF version.
+    let mut cos14 = pdfcraft_cos::Document::open(std::sync::Arc::new(v14_bytes)).unwrap();
+    let root = cos14.root().unwrap();
+    cos14.update_dict(root, |c| c.set(b"Version".to_vec(), pdfcraft_cos::Object::name("1.6"))).unwrap();
+    let cat16 = pdfcraft_cos::write_full(&cos14, &pdfcraft_cos::SaveOptions { object_streams: false, ..Default::default() }).unwrap();
+    std::fs::write(dir.join("cat16.pdf"), &cat16).unwrap();
+    let cat_doc = ok(&mut a, "doc_open", json!({ "path": "cat16.pdf" }))["doc"].as_u64().unwrap();
+    let retained = ok(&mut a, "doc_optimize", json!({ "doc": cat_doc, "path": "retained.pdf", "compatibility": "retain", "object_streams": false }));
+    assert_eq!(retained["pdf_version"].as_str(), Some("1.6"), "{retained}");
+
+    assert!(matches!(a.call("doc_optimize", &json!({ "doc": doc, "path": "x.pdf", "compatibility": "1.3" })), Err(ToolError::InvalidArgs(_))));
     assert!(matches!(
         a.call("doc_optimize", &json!({ "doc": doc, "path": "x.pdf", "color": { "compression": "gif" } })),
         Err(ToolError::InvalidArgs(_))
