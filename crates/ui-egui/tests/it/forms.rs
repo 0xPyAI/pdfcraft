@@ -14,13 +14,7 @@ fn harness() -> Harness<'static, PdfCraftApp> {
         app.set_option("zoom", "150").unwrap();
         app
     });
-    for _ in 0..60 {
-        h.run_steps(2);
-        if !h.state().render_pending() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    crate::support::settle(&mut h);
     h
 }
 
@@ -1150,13 +1144,7 @@ fn calculated_field_and_script_side_effect_on_another_page_re_render() {
         event: "calculate".into(),
         script: Some("event.value = 'from_' + getField('name').value;".into()),
     }));
-    for _ in 0..60 {
-        h.run_steps(2);
-        if !h.state().render_pending() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    crate::support::settle(&mut h);
     click_field(&mut h, "name", 0);
     h.event(egui::Event::Text("hello".into()));
     h.run_steps(2);
@@ -1164,13 +1152,7 @@ fn calculated_field_and_script_side_effect_on_another_page_re_render() {
     h.run_steps(2);
     assert_eq!(value(&h, "page2_field"), ["from_hello"]);
     // Wait for all re-renders to complete.
-    for _ in 0..60 {
-        h.run_steps(2);
-        if !h.state().render_pending() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    crate::support::settle(&mut h);
     assert_eq!(value(&h, "name"), ["hello"]);
     assert_eq!(value(&h, "page2_field"), ["from_hello"]);
 }
@@ -1186,13 +1168,7 @@ fn overlay_clears_after_fresh_tiles_zoom_then_edit_and_rejected_edit() {
     h.key_press(egui::Key::Tab);
     h.run_steps(2);
     assert_eq!(value(&h, "name"), ["GoodVal"]);
-    for _ in 0..60 {
-        h.run_steps(2);
-        if !h.state().render_pending() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    crate::support::settle(&mut h);
     assert!(!h.state().views[0].forms.unbaked.contains(&("name".to_string(), 0)));
 
     // 2. Rejected edit: typing rejected by validate script leaves unbaked clean.
@@ -1212,13 +1188,7 @@ fn overlay_clears_after_fresh_tiles_zoom_then_edit_and_rejected_edit() {
 
     // 3. Zoom then edit: zoom to another scale, let tiles settle, then edit.
     h.state_mut().views[0].zoom_step(true);
-    for _ in 0..60 {
-        h.run_steps(2);
-        if !h.state().render_pending() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    crate::support::settle(&mut h);
     click_field(&mut h, "name", 0);
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
     h.event(egui::Event::Text("ZoomedVal".into()));
@@ -1226,13 +1196,7 @@ fn overlay_clears_after_fresh_tiles_zoom_then_edit_and_rejected_edit() {
     h.key_press(egui::Key::Tab);
     h.run_steps(2);
     assert_eq!(value(&h, "name"), ["ZoomedVal"]);
-    for _ in 0..60 {
-        h.run_steps(2);
-        if !h.state().render_pending() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    crate::support::settle(&mut h);
     assert!(!h.state().views[0].forms.unbaked.contains(&("name".to_string(), 0)));
 }
 
