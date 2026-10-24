@@ -558,6 +558,7 @@
 	Discard private data of other applications	다른 응용 프로그램의 개인 데이터 삭제
 	Discard hidden text	숨겨진 텍스트 삭제
 	Use Flate to encode streams that are not encoded	인코딩되지 않은 스트림을 Flate로 인코딩
+	In streams that use LZW encoding, use Flate instead	LZW 인코딩 스트림을 Flate로 인코딩
 	Remove invalid links and bookmarks	잘못된 링크 및 책갈피 제거
 	Remove unreferenced named destinations	참조되지 않은 이름이 지정된 대상 제거
 	Compress document structure (object streams)	문서 구조 압축(개체 스트림)
@@ -2750,3 +2751,6 @@ theme	Appearance	모양
 	field names can't contain a period: {name}	필드 이름에는 마침표를 쓸 수 없습니다: {name}
 	two cells would both be named {name}	두 셀의 이름이 모두 {name}이(가) 됩니다
 	a field named {name} already exists	{name}(이)라는 필드가 이미 있습니다
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	오늘

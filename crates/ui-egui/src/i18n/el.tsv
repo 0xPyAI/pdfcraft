@@ -1923,6 +1923,7 @@
 	Discard private data of other applications	Αφαίρεση ιδιωτικών δεδομένων άλλων εφαρμογών
 	Discard hidden text	Αφαίρεση κρυφού κειμένου
 	Use Flate to encode streams that are not encoded	Χρήση συμπίεσης Flate για ροές που δεν είναι συμπιεσμένες
+	In streams that use LZW encoding, use Flate instead	Χρήση Flate αντί για LZW στις ροές με κωδικοποίηση LZW
 	Remove invalid links and bookmarks	Αφαίρεση μη έγκυρων συνδέσμων και σελιδοδεικτών
 	Remove unreferenced named destinations	Αφαίρεση ονομασμένων προορισμών χωρίς αναφορές
 	Compress document structure (object streams)	Συμπίεση δομής εγγράφου (ροές αντικειμένων)
@@ -2521,3 +2522,6 @@ animation effects	Off	Ανενεργά
 	field names can't contain a period: {name}	τα ονόματα πεδίων δεν μπορούν να περιέχουν τελεία: {name}
 	two cells would both be named {name}	δύο κελιά θα είχαν το ίδιο όνομα {name}
 	a field named {name} already exists	υπάρχει ήδη πεδίο με όνομα {name}
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	Σήμερα

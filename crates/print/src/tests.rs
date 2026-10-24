@@ -961,3 +961,31 @@ fn odd_and_even_pages_are_page_numbers_not_places_in_the_range() {
     // A range with no page of the kind prints nothing.
     assert_eq!(select_pages(12, Some("3, 5"), &[], Subset::Even, false), Err(PrintError::NoPages));
 }
+
+/// ISO 32000-2 Table 167: an Invisible annotation of a type that isn't standard does not print,
+/// even with its Print flag; Invisible means nothing for a standard type.
+#[test]
+fn invisible_annotations_of_unknown_types_do_not_print() {
+    let doc = fixture(1);
+    let annot = |subtype: Option<&str>, flags: i64| {
+        let mut d = Dict::new();
+        if let Some(s) = subtype {
+            d.set(b"Subtype".to_vec(), Object::name(s));
+        }
+        d.set(b"F".to_vec(), Object::Int(flags));
+        d
+    };
+    let all = Content::DocumentAndMarkups;
+    assert!(prints(&doc, &annot(Some("MyCustomType"), 4), all), "an unknown type prints without Invisible");
+    assert!(!prints(&doc, &annot(Some("MyCustomType"), 5), all), "Invisible + Print on an unknown type");
+    assert!(!prints(&doc, &annot(None, 5), all), "no Subtype is no standard type");
+    assert!(prints(&doc, &annot(Some("Square"), 5), all), "Invisible doesn't apply to a standard type");
+    assert!(prints(&doc, &annot(Some("Widget"), 5), Content::FormFieldsOnly), "nor to a field");
+
+    // An indirect `/Subtype` (§7.3.10) is resolved: a standard type stays standard.
+    let mut doc = doc;
+    let square = doc.add(Object::name("Square"));
+    let mut indirect = annot(None, 5);
+    indirect.set(b"Subtype".to_vec(), Object::Ref(square));
+    assert!(prints(&doc, &indirect, all), "an indirect standard Subtype");
+}

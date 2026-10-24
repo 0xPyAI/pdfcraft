@@ -238,6 +238,7 @@
 	Discard private data of other applications	Descartar dados privados de outros aplicativos
 	Discard hidden text	Descartar texto oculto
 	Use Flate to encode streams that are not encoded	Usar Flate para codificar fluxos não codificados
+	In streams that use LZW encoding, use Flate instead	Em fluxos que usam codificação LZW, usar Flate
 	Remove invalid links and bookmarks	Remover links e marcadores inválidos
 	Remove unreferenced named destinations	Remover destinos nomeados não referenciados
 	Compress document structure (object streams)	Compactar estrutura do documento (fluxos de objetos)
@@ -2800,3 +2801,6 @@ theme	Appearance	Aparência
 	a table has 1 to {max} columns	uma tabela tem de 1 a {max} colunas
 	the first row number can be at most {max}	o número da primeira linha pode ser no máximo {max}
 	the area, the spacing and the column widths must be numbers, the spacing 0 or more and each width more than 0	a área, o espaçamento e as larguras das colunas devem ser números, o espaçamento 0 ou mais e cada largura maior que 0
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	Hoje

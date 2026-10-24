@@ -568,6 +568,7 @@
 	Discard private data of other applications	ละทิ้งข้อมูลเฉพาะของแอปพลิเคชันอื่น
 	Discard hidden text	ละทิ้งข้อความที่ซ่อนอยู่
 	Use Flate to encode streams that are not encoded	ใช้ Flate เข้ารหัสสตรีมที่ยังไม่ได้เข้ารหัส
+	In streams that use LZW encoding, use Flate instead	ใช้ Flate แทนในสตรีมที่เข้ารหัสแบบ LZW
 	Remove invalid links and bookmarks	เอาลิงก์และบุ๊กมาร์กที่ใช้ไม่ได้ออก
 	Remove unreferenced named destinations	เอาปลายทางที่มีชื่อซึ่งไม่ถูกอ้างถึงออก
 	Compress document structure (object streams)	บีบอัดโครงสร้างเอกสาร (object streams)
@@ -2681,3 +2682,6 @@ key	Space	Space
 	Page properties	คุณสมบัติหน้า
 	The password must have at least 8 characters.	รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร
 theme	Appearance	ลักษณะที่ปรากฏ
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	วันนี้

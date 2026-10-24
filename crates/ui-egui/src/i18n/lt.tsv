@@ -1278,6 +1278,7 @@
 	Update	Atnaujinti
 	Use 72 DPI (one point per pixel)	Naudoti 72 DPI (vienas taškas vienam pikseliui)
 	Use Flate to encode streams that are not encoded	Nekoduotiems srautams koduoti naudoti „Flate“
+	In streams that use LZW encoding, use Flate instead	LZW koduotiems srautams naudoti „Flate“
 	Use a Digital ID from a file	Naudoti faile esantį skaitmeninį ID
 	Use custom DPI	Naudoti pasirinktinį DPI
 	Use each image's embedded DPI; use 72 DPI when it is absent.	Naudoti paveikslėlyje įrašytą DPI; jei jo nėra, naudoti 72 DPI.
@@ -2776,3 +2777,6 @@ theme	Appearance	Išvaizda
 	a table has 1 to {max} columns	lentelėje gali būti nuo 1 iki {max} stulpelių
 	the first row number can be at most {max}	pirmosios eilutės numeris gali būti ne didesnis nei {max}
 	the area, the spacing and the column widths must be numbers, the spacing 0 or more and each width more than 0	sritis, tarpai ir stulpelių pločiai turi būti skaičiai, tarpai – 0 arba daugiau, o kiekvienas plotis – daugiau nei 0
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	Šiandien

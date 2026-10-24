@@ -606,6 +606,7 @@
 	Discard private data of other applications	Usuń prywatne dane innych aplikacji
 	Discard hidden text	Usuń ukryty tekst
 	Use Flate to encode streams that are not encoded	Zakoduj nieskompresowane strumienie metodą Flate
+	In streams that use LZW encoding, use Flate instead	Zakoduj strumienie LZW metodą Flate
 	Remove invalid links and bookmarks	Usuń nieprawidłowe łącza i zakładki
 	Remove unreferenced named destinations	Usuń nieużywane nazwane miejsca docelowe
 	Compress document structure (object streams)	Kompresuj strukturę dokumentu (strumienie obiektów)
@@ -2611,3 +2612,6 @@ animation effects	Off	Wyłączone
 	field names can't contain a period: {name}	nazwy pól nie mogą zawierać kropki: {name}
 	two cells would both be named {name}	dwie komórki miałyby nazwę {name}
 	a field named {name} already exists	pole o nazwie {name} już istnieje
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	Dzisiaj

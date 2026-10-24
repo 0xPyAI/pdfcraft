@@ -220,6 +220,9 @@ pub struct RenderedPage {
 pub enum RenderWarning {
     /// Content was skipped after the per-page decoded-content budget was exhausted.
     ContentTruncated,
+    /// A colour could not be computed (a colour space that cannot be read, or a Separation or
+    /// DeviceN tint transform that cannot be evaluated) and was painted in a fallback colour.
+    ColourFallback,
 }
 
 /// Counters for work performed by a renderer or render pool.
@@ -402,12 +405,15 @@ fn warning_settings(settings: &InterpreterSettings, warnings: Arc<Mutex<Vec<Rend
     InterpreterSettings {
         warning_sink: Arc::new(move |warning| {
             // Nested forms, Type 3 glyphs and patterns are interpreted again and each reports the
-            // exhausted budget: once per page is enough.
-            if matches!(warning, InterpreterWarning::ContentTruncated) {
-                let mut warnings = lock(&target);
-                if !warnings.contains(&RenderWarning::ContentTruncated) {
-                    warnings.push(RenderWarning::ContentTruncated);
-                }
+            // exhausted budget, or the colours that fell back: once per page is enough.
+            let warning = match warning {
+                InterpreterWarning::ContentTruncated => RenderWarning::ContentTruncated,
+                InterpreterWarning::ColorFallback => RenderWarning::ColourFallback,
+                InterpreterWarning::UnsupportedFont | InterpreterWarning::ImageDecodeFailure => return,
+            };
+            let mut warnings = lock(&target);
+            if !warnings.contains(&warning) {
+                warnings.push(warning);
             }
         }),
         ..settings.clone()
@@ -3341,6 +3347,40 @@ trailer << /Root 1 0 R >>
         let hidden = render(true);
         assert_eq!(px(&hidden, 75, 25), vec![255, 255, 255, 255], "Hide all comments");
         assert_eq!(px(&hidden, 20, 80), vec![255, 0, 0, 255], "fields stay");
+    }
+
+    /// ISO 32000-2 Table 167: Invisible hides an annotation of a type that isn't standard and
+    /// nothing else; §12.5.6.14: a popup has no appearance of its own, so its `/AP` isn't painted.
+    #[test]
+    fn invisible_unknown_annotations_and_popups_paint_nothing() {
+        let annots = [
+            "/Subtype /MyCustomType /F 0",
+            "/Subtype /MyCustomType /F 1",
+            "/Subtype /MyCustomType /F 5",
+            "/F 1",
+            "/Subtype /Square /F 1",
+            "/Subtype /Popup /F 4 /Open true",
+        ];
+        let mut pdf = String::from("%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
+        pdf.push_str("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n");
+        let refs: Vec<String> = (0..annots.len()).map(|i| format!("{} 0 R", 10 + i)).collect();
+        pdf.push_str(&format!("3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 50] /Annots [{}] >> endobj\n", refs.join(" ")));
+        pdf.push_str("4 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 30 30] /Length 24 >> stream\n0 1 0 rg 0 0 30 30 re f\nendstream endobj\n");
+        for (i, a) in annots.iter().enumerate() {
+            let x = 10 + 50 * i;
+            pdf.push_str(&format!("{} 0 obj << /Type /Annot {a} /Rect [{x} 10 {} 40] /AP << /N 4 0 R >> >> endobj\n", 10 + i, x + 30));
+        }
+        pdf.push_str("trailer << /Root 1 0 R >>\n%%EOF");
+        let mut r = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default());
+        let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+        let px = |x: u32| p.rgba[((25 * p.width + x) * 4) as usize..][..4].to_vec();
+        let (green, white) = (vec![0, 255, 0, 255], vec![255, 255, 255, 255]);
+        assert_eq!(px(25), green, "an unknown type without Invisible is drawn");
+        assert_eq!(px(75), white, "Invisible hides an unknown type");
+        assert_eq!(px(125), white, "even with the Print flag");
+        assert_eq!(px(175), white, "no Subtype is no standard type");
+        assert_eq!(px(225), green, "Invisible means nothing for a standard type");
+        assert_eq!(px(275), white, "a popup's appearance is not painted on the page");
     }
 
     #[test]
@@ -7439,6 +7479,9 @@ endstream endobj
     // ICC profiles whose stream dictionaries are the same (vendored hayro-interpret patch 48).
     mod icc_profile_cache;
 
+    // A symbolic TrueType font draws through its (3, 0) cmap subtable first (#4156).
+    mod symbolic_truetype_cmap;
+
     /// Render `pdf`'s first page at 72 dpi with no time limit beyond the test's own.
     fn render_first_page(pdf: Vec<u8>) -> RenderedPage {
         let mut r = PageRenderer::new(Arc::new(pdf), RenderConfig::default());
@@ -8162,6 +8205,10 @@ trailer << /Root 1 0 R >>
 
     // #1201: /DefaultGray, /DefaultRGB and /DefaultCMYK (vendored hayro-interpret patch 38).
     mod default_colour_spaces;
+
+    // #4260: DeviceN colours with many inks, and tint transforms that cannot be evaluated
+    // (vendored hayro-syntax patch 28, hayro-interpret patch 55).
+    mod devicen_inks;
 
     /// #3109 / #3116: clipping-only text (`7 Tr`) installs a clip for subsequent painting
     /// but draws no pixels itself.

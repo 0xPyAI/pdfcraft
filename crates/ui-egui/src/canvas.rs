@@ -4204,7 +4204,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if let Some(e) = crate::edit_text_ui::overlay(ui.ctx(), view, info) {
         view.pending_edit = Some(e);
     }
-    if let Some(e) = crate::forms_ui::overlay(ui.ctx(), view, info, &form, today) {
+    let text_box = crate::forms_ui::text_box(doc, view, &form);
+    if let Some(e) = crate::forms_ui::overlay(ui.ctx(), view, info, &form, text_box.as_ref(), today) {
         view.pending_edit = Some(e);
     }
     if let Some(e) = crate::fill_sign::type_box(ui.ctx(), view, info, &author) {
@@ -4846,8 +4847,12 @@ fn notices(
         let mut text =
             crate::i18n::fmt(tl!("Dynamic XFA form laid out from its template: {pages}, {fields}."), &[("pages", &pages), ("fields", &fields)]);
         if !x.warnings.is_empty() {
+            // The notes are clauses ("a picture is left out"); the first starts a sentence here.
+            let notes = x.warnings.join("; ");
+            let mut chars = notes.chars();
             text.push(' ');
-            text.push_str(&x.warnings.join("; "));
+            text.extend(chars.next().into_iter().flat_map(char::to_uppercase));
+            text.push_str(chars.as_str());
             text.push('.');
         }
         Some(("text-cursor-input", text, true))

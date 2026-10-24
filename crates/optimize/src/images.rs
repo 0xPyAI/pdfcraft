@@ -158,15 +158,18 @@ pub fn effective_resolutions(doc: &Document, pages: &[ObjRef]) -> HashMap<ObjRef
         out: HashMap::new(),
     };
     for p in pages {
-        let Some(d) = doc.get(*p).as_dict().cloned() else { continue };
-        let Some(contents) = d.get(b"Contents") else { continue };
+        let Some(dict) = doc.get(*p).as_dict().cloned() else { continue };
+        let page = pdfcraft_model::Page { obj: *p, dict };
+        let Some(contents) = page.dict.get(b"Contents") else { continue };
         let res = page_resources(doc, *p).unwrap_or_default();
         walk.budget = DecodeBudget::page();
         let Some(data) = content_bytes(doc, contents, &mut walk.budget) else {
             walk.complete = false;
             continue;
         };
-        walk.content(&data, &res, Matrix([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]));
+        // Content coordinates are in page units; image resolution is in physical inches.
+        let unit = page.user_unit(doc);
+        walk.content(&data, &res, Matrix([unit, 0.0, 0.0, unit, 0.0, 0.0]));
     }
     if !walk.complete {
         walk.out.values_mut().for_each(|v| *v = f64::INFINITY);

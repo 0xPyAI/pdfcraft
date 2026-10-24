@@ -692,6 +692,7 @@ key	Space	Mezerník
 	Discard private data of other applications	Zahodit soukromá data jiných aplikací
 	Discard hidden text	Zahodit skrytý text
 	Use Flate to encode streams that are not encoded	Kódovat nekódované proudy metodou Flate
+	In streams that use LZW encoding, use Flate instead	Proudy kódované LZW kódovat metodou Flate
 	Remove invalid links and bookmarks	Odebrat neplatné odkazy a záložky
 	Remove unreferenced named destinations	Odebrat nepoužívané pojmenované cíle
 	Compress document structure (object streams)	Komprimovat strukturu dokumentu (proudy objektů)
@@ -2822,3 +2823,6 @@ certificate	Version	Verze
 	field names can't contain a period: {name}	názvy polí nesmějí obsahovat tečku: {name}
 	two cells would both be named {name}	dvě buňky by se jmenovaly {name}
 	a field named {name} already exists	pole s názvem {name} už existuje
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	Dnes

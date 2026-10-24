@@ -584,6 +584,7 @@
 	Discard private data of other applications	Private Daten anderer Anwendungen verwerfen
 	Discard hidden text	Ausgeblendeten Text verwerfen
 	Use Flate to encode streams that are not encoded	Nicht codierte Streams mit Flate codieren
+	In streams that use LZW encoding, use Flate instead	In LZW-codierten Streams stattdessen Flate verwenden
 	Remove invalid links and bookmarks	Ungültige Links und Lesezeichen entfernen
 	Remove unreferenced named destinations	Nicht referenzierte benannte Ziele entfernen
 	Compress document structure (object streams)	Dokumentstruktur komprimieren (Objekt-Streams)
@@ -2516,3 +2517,6 @@ animation effects	Off	Aus
 	field names can't contain a period: {name}	Feldnamen dürfen keinen Punkt enthalten: {name}
 	two cells would both be named {name}	zwei Zellen hätten beide den Namen {name}
 	a field named {name} already exists	ein Feld namens {name} ist bereits vorhanden
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	Heute

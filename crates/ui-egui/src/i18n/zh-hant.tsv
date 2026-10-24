@@ -244,6 +244,7 @@
 	Discard private data of other applications	捨棄其他應用程式的私有資料
 	Discard hidden text	捨棄隱藏文字
 	Use Flate to encode streams that are not encoded	使用 Flate 編碼未編碼的流
+	In streams that use LZW encoding, use Flate instead	在使用 LZW 編碼的流中改用 Flate
 	Remove invalid links and bookmarks	刪除無效連結和書籤
 	Remove unreferenced named destinations	刪除未引用的命名目標
 	Compress document structure (object streams)	壓縮文件結構（物件流）
@@ -2465,3 +2466,6 @@ animation effects	Off	關
 	field names can't contain a period: {name}	欄位名稱不能包含句點：{name}
 	two cells would both be named {name}	兩個儲存格的名稱都會是 {name}
 	a field named {name} already exists	已有名為 {name} 的欄位
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	今天

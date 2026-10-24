@@ -1219,6 +1219,7 @@
 	Update	Perbarui
 	Use 72 DPI (one point per pixel)	Gunakan 72 DPI (satu titik per piksel)
 	Use Flate to encode streams that are not encoded	Gunakan Flate untuk mengodekan stream yang belum dikodekan
+	In streams that use LZW encoding, use Flate instead	Pada stream yang memakai pengodean LZW, gunakan Flate sebagai gantinya
 	Use a Digital ID from a file	Gunakan ID Digital dari file
 	Use custom DPI	Gunakan DPI kustom
 	Use each image's embedded DPI; use 72 DPI when it is absent.	Gunakan DPI tertanam pada setiap gambar; gunakan 72 DPI jika tidak ada.
@@ -2751,3 +2752,6 @@ theme	Appearance	Tampilan
 	field names can't contain a period: {name}	nama kolom tidak boleh berisi titik: {name}
 	two cells would both be named {name}	dua sel akan sama-sama bernama {name}
 	a field named {name} already exists	kolom bernama {name} sudah ada
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	Hari ini

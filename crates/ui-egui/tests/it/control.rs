@@ -256,6 +256,65 @@ fn control_quit_preserves_dirty_documents_and_cancel_keeps_them_open() {
     assert!(!close_requested(&h));
 }
 
+/// Run one frame and return the attention requests it sent to the window.
+fn step_attention(h: &mut Harness<'static, PdfCraftApp>) -> Vec<egui::UserAttentionType> {
+    h.step();
+    let commands = h.output().viewport_output.values().flat_map(|v| v.commands.iter());
+    commands.filter_map(|c| if let egui::ViewportCommand::RequestUserAttention(a) = c { Some(*a) } else { None }).collect()
+}
+
+/// Send a request, run frames until it is answered and three more, and collect every attention
+/// request those frames sent.
+fn attention_during(h: &mut Harness<'static, PdfCraftApp>, c: &ControlClient, method: &str, params: Value) -> Vec<egui::UserAttentionType> {
+    let rx = c.send(method, params);
+    let mut sent = Vec::new();
+    for _ in 0..30 {
+        sent.extend(step_attention(h));
+        if rx.try_recv().is_ok() {
+            (0..3).for_each(|_| sent.extend(step_attention(h)));
+            return sent;
+        }
+    }
+    panic!("{method}: no reply after 30 frames");
+}
+
+/// Open `name` with an unsaved change, in a tab of its own.
+fn open_unsaved(h: &mut Harness<'static, PdfCraftApp>, name: &str) {
+    let app = h.state_mut();
+    app.open_bytes(name, None, fixture(1)).unwrap();
+    app.active = Some(app.views.len() - 1);
+    app.apply_edit(pdfcraft_engine::Edit::RotatePages { pages: vec![0], degrees: 90 });
+}
+
+/// An agent quits while another app is in front, then answers the prompts itself. Quitting asks
+/// about each unsaved document in turn; the request made for the first question stands for the
+/// next, and answering the last withdraws it, so the taskbar or the window list stops flagging a
+/// window with nothing to ask. Each question is a new one: when the first opened in front, the
+/// next one asks when it opens in the background.
+#[test]
+fn a_save_prompt_answered_in_the_background_withdraws_its_attention_request() {
+    use egui::UserAttentionType::{Critical, Reset};
+    let (mut h, c) = harness();
+    ok(&mut h, &c, "ui.command", json!({"id": "page.insert_blank"}));
+    open_unsaved(&mut h, "second.pdf");
+    h.input_mut().focused = false;
+    assert_eq!(attention_during(&mut h, &c, "ui.quit", json!({})), [Critical]);
+    assert!(attention_during(&mut h, &c, "ui.click", json!({"label": "Don't save"})).is_empty(), "the request stands");
+    assert_eq!(attention_during(&mut h, &c, "ui.click", json!({"label": "Cancel"})), [Reset]);
+
+    open_unsaved(&mut h, "third.pdf");
+    h.input_mut().focused = true;
+    assert!(attention_during(&mut h, &c, "ui.quit", json!({})).is_empty(), "the first question opens in front");
+    h.input_mut().focused = false;
+    assert!(attention_during(&mut h, &c, "ui.state", json!({})).is_empty(), "leaving it open asks nothing");
+    assert_eq!(attention_during(&mut h, &c, "ui.click", json!({"label": "Don't save"})), [Critical], "the next opens in the background");
+    assert_eq!(attention_during(&mut h, &c, "ui.click", json!({"label": "Cancel"})), [Reset]);
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    assert_eq!(state["close_prompt"], false);
+    let left: Vec<_> = state["documents"].as_array().unwrap().iter().map(|d| (d["name"].clone(), d["dirty"].clone())).collect();
+    assert_eq!(left, [(json!("third.pdf"), json!(true))], "Don't save closed doc.pdf and second.pdf; Cancel kept third.pdf");
+}
+
 #[test]
 fn control_quit_clean_document_requests_normal_window_close() {
     for params in [json!({}), Value::Null] {
@@ -1488,6 +1547,22 @@ fn explicit_panel_requests_reveal_inactive_group_members() {
     h.get_by_label("Header and footer");
 }
 
+/// #3580 review: a panel a script opens (`app.execMenuItem("ShowHideBookmarks")`) is shown even
+/// when the inspector is a background tab of a custom docking layout.
+#[test]
+fn a_script_opened_panel_reveals_an_inactive_inspector() {
+    let (mut h, c) = harness();
+    ok(&mut h, &c, "ui.set", json!({"key":"panel", "value":"pages"}));
+    ok(&mut h, &c, "ui.dock", json!({"operation":"move", "panel":"inspector", "target":"tools", "zone":"center"}));
+    ok(&mut h, &c, "ui.dock", json!({"operation":"activate", "panel":"tools"}));
+    h.run_steps(3);
+    assert!(h.query_by_label("This document has no bookmarks.").is_none());
+    let id = h.state().active_ids().unwrap().1;
+    h.state_mut().run_button_script(id, "", "app.execMenuItem('ShowHideBookmarks')");
+    h.run_steps(4);
+    h.get_by_label("This document has no bookmarks.");
+}
+
 #[test]
 fn home_and_combine_suppress_inspector_without_forgetting_layout_or_choice() {
     use pdfcraft_ui_egui::docking::Panel;
@@ -1674,7 +1749,9 @@ fn control_open_replies_pending_while_the_worker_opens_and_focuses_once_it_has()
     assert_eq!(first["pending"], true, "{first}");
 
     // The worker completes the open on later frames; the tab shows, and only then does a
-    // repeated open focus it instead of reporting another pending open.
+    // repeated open focus it instead of reporting another pending open. The worker is a thread
+    // of its own, so the wait is bounded by time: a busy runner can draw 30 frames before it has
+    // read the file.
     let mut documents = 0;
     let opened = crate::support::step_until(&mut h, |h| {
         let state = ok(h, &c, "ui.state", json!({}));

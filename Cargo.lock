@@ -4235,6 +4235,7 @@ dependencies = [
  "pdfcraft-annot",
  "pdfcraft-content",
  "pdfcraft-cos",
+ "pdfcraft-filters",
  "pdfcraft-model",
  "pdfcraft-render",
  "thiserror 2.0.21",

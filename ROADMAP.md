@@ -2,7 +2,12 @@
 
 **Stage: alpha** · next: beta, ~25% (ready for real work 50% → 75%) and ~400–700 h away
 
-> **Last reviewed:** 2026-10-22 · **Last updated:** 2026-10-22 · **Change:** minor (M14, #3558: rebase guarded macOS per-file association recovery onto current main; estimates unchanged)
+> **Last reviewed:** 2026-10-23 | **Last updated:** 2026-10-23 | **Change:** minor (M8, #3205 follow-up: labelled Italian international phone numbers with a slash match whole; estimates unchanged)
+> **Last reviewed:** 2026-10-23 · **Last updated:** 2026-10-23 · **Change:** minor (M7, #2636 partial: pasting added text boxes and images in the engine and through `content_copy`; estimates unchanged)
+> **Last reviewed:** 2026-10-23 · **Last updated:** 2026-10-23 · **Change:** minor (M11: image optimization accounts for page-local UserUnit; estimates unchanged)
+> **Last reviewed:** 2026-10-23 | **Last updated:** 2026-10-23 | **Change:** minor (M10: Word table cells use the widths of their own grid columns; estimates unchanged)
+> **Last reviewed:** 2026-10-23 | **Last updated:** 2026-10-23 | **Change:** minor (M10: table spans retain text from covered slots in Office exports; estimates unchanged)
+> **Last reviewed:** 2026-10-23 · **Last updated:** 2026-10-23 · **Change:** minor (M10: image export preserves soft-mask Decode opacity ranges; estimates unchanged)
 > **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (M3, #3808: the Pages inspector has an independent 50–150% thumbnail size slider and buttons; selection and current-page following are retained, with headless ui.set coverage. Estimates unchanged.)
 > **Last reviewed:** 2026-10-20 | **Last updated:** 2026-10-20 | **Change:** minor (M11 #3507: image merging preserves content stream boundaries; estimates unchanged)
 > **Last reviewed:** 2026-10-20 | **Last updated:** 2026-10-20 | **Change:** minor (M10, #3532 partial: vector printing retains existing appearances with absent Subtype; estimates unchanged)
@@ -54,6 +59,8 @@
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (architectural paper controls from #599; localized shortcut labels, #496; readiness table with hours per audience; full number as weighted sum 49%; earlier: second look: ready 40% → 47%, mainstream 55% added; core-workflow gate applied → alpha) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (closed issues synced: #774, #756 and the #799–#821 batch; earlier: localized shortcut labels, #496; readiness table with hours per audience; full number as weighted sum 49%; earlier: second look: ready 40% → 47%, mainstream 55% added; core-workflow gate applied → alpha) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
 > **Last reviewed:** 2026-10-18 - **Last updated:** 2026-10-18 - **Change:** minor (M6 #2892: Push-button normal labels are editable per widget through Options and form_set_props, independently of field names; rendering, undo/redo and incremental/full save/reopen are covered. Estimates unchanged)
+> **Last reviewed:** 2026-10-18 - **Last updated:** 2026-10-18 - **Change:** minor (M12 #2589: Active XFA skips PDF-container fallback scripts while retaining requested messages and saved scripts; ordinary/static/unlaid-out documents and explicit console/field calls keep their existing behavior. Estimates unchanged)
+> **Last reviewed:** 2026-10-18 - **Last updated:** 2026-10-18 - **Change:** minor (M7 #2592: Styled fallback fonts batch up to 240 glyphs per actual face and retain source styles. Budget refusal and distinct same-BaseFont descriptor weights have mutation-checked regressions; coverage and complex mixed runs remain limited. Estimates unchanged)
 > **Last reviewed:** 2026-10-18 - **Last updated:** 2026-10-18 - **Change:** minor (M7 #3187: Added-image automation normalizes extreme signed rotation angles before combining them with the current orientation; integer bounds, history, pixels, save/reopen and MCP have regressions. Estimates unchanged)
 > **Last reviewed:** 2026-10-18 - **Last updated:** 2026-10-18 - **Change:** minor (M12 #2569: Growable multiline XFA text reflows after edits, with undo/redo, save/reopen and print coverage; oversized fields still become read-only page text. Structured-data synchronization warnings retain accepted whitespace without relayout from stale data. Estimates unchanged)
 > **Last reviewed:** 2026-10-18 - **Last updated:** 2026-10-18 - **Change:** minor (M12 #2572: Every repeated page-master button resolves its own field to the shared XFA click script, including print buttons. Estimates unchanged)
@@ -191,6 +198,18 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-23 (M7, #4280):** Edit text names each standard stand-in font after its face (`PCEdTimesBold`, ...) instead of one shared `PCEdHelv`. Rewriting a bold paragraph whose subset lacks an accent no longer repoints the paragraphs set earlier in a regular stand-in at Times-Bold, and the editor's frame stays on the paragraph being edited. Pages saved by older builds keep their shared name and are not repaired. Estimates unchanged.
+- **2026-10-23 (M8, #3205 follow-up):** Phone-pattern redaction matches complete labelled Italian geographic numbers such as `Tel. +39 0426/123456`, with synthetic matcher and mark/apply/save/reopen coverage; unlabelled international slash numbers remain unsupported.
+- **2026-10-23 (M7, #2636 partial):** A new `PasteContent` edit pastes an added text box or image copied in the same document or another, keeping its style, picture, turns, flips and crop, as one undo step; `content_copy` drives it headlessly. A paste lands beside earlier copies (18 pt steps) and stays on the page. A pasted image reuses its picture object in its own document and after the first paste into another; there a colour profile is dropped and CMYK colours stored losslessly are turned to RGB. The desktop keys and menus follow in separate PRs. Estimates unchanged.
+- **2026-10-23 (M11, optimizer resolution):** Image downsampling includes each page's `/UserUnit` scale, preserving images already below the physical resolution threshold, including shared nested forms.
+  Synthetic measurement and optimization regressions cover direct and indirect units and page-local defaults.
+  Estimates unchanged.
+- **2026-10-23 (M10, Word table widths):** Word export sizes each cell from the grid columns it spans, keeping unequal columns and cells after a merged cell consistent with the table grid.
+- **2026-10-23 (M10, table continuation text):** Office exporters retain text from table slots covered by another cell's span as paragraph text.
+  Synthetic regressions check every input fragment survives exactly once in Word, HTML, RTF and PowerPoint, while ordinary superscripts stay in their table cells.
+- **2026-10-23 (M10, image export):** Soft-mask Decode intervals preserve partial opacity in Export all images and Save Image As.
+  Synthetic regressions cover direct and indirect ranges, inverted/subrange alpha, packed masks, JPEG masks and unchanged image component Decode.
+
 - **2026-10-22 (M4, #3916 partial):** Document edits and Undo/Redo cancel an Organize page drag. Pointer-release regressions check exact page order and save/reopen.
 - **2026-10-22 (M14, macOS association recovery candidate):** Successful desktop open/save/sign can queue recovery of an existing per-file binding to the running PDFCraft bundle through NSWorkspace. Metadata-only watcher changes retain undo and avoid false overwrite prompts; real same-length/same-mtime edits remain protected. Rebased on 0.12.0 and reuses #3042's shared atomic metadata preservation; the bounded recovery parser does not narrow save limits. Prior native Preview TEST-signature and Finder workflows passed on macOS 27.0.1; other versions remain unqualified. Estimates unchanged.
 - **2026-10-13 (M7, free image rotation):** A selected page image has a rotate knob (Shift: 15 degree steps) and `image_edit` a `rotate_by` action; the angle is written as one undoable `cm`. Snapping to page edges while moving is in #1740; resize snapping is not done. Estimates unchanged.
@@ -248,6 +267,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 - **2026-10-18 (M6, #2892):** Push-button normal labels are editable per widget through Options and form_set_props, independently of field names; rendering, undo/redo and incremental/full save/reopen are covered. Estimates unchanged.
 
 - **2026-10-18 (M7, #3212):** Headers, Bates numbers, watermarks and added text stay visible after unfinished marked content, with original content preserved.
+- **2026-10-18 (M12, #2589):** Active XFA skips PDF-container fallback scripts while retaining requested messages and saved scripts; ordinary/static/unlaid-out documents and explicit console/field calls keep their existing behavior. Estimates unchanged.
+- **2026-10-18 (M7, #2592):** Styled fallback fonts batch up to 240 glyphs per actual face and retain source styles. Budget refusal and distinct same-BaseFont descriptor weights have mutation-checked regressions; coverage and complex mixed runs remain limited. Estimates unchanged.
 - **2026-10-18 (M7, #3187):** Added-image automation normalizes extreme signed rotation angles before combining them with the current orientation; integer bounds, history, pixels, save/reopen and MCP have regressions. Estimates unchanged.
 - **2026-10-18 (M12, #2569):** Growable multiline XFA text reflows after edits, with undo/redo, save/reopen and print coverage; oversized fields still become read-only page text. Structured-data synchronization warnings retain accepted whitespace without relayout from stale data. Estimates unchanged.
 - **2026-10-18 (M12, #2572):** Every repeated page-master button resolves its own field to the shared XFA click script, including print buttons. Estimates unchanged.
@@ -640,6 +661,11 @@ Newest first: the date, what moved, and the new overall estimate.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-23 | minor | M8, #3205 follow-up: phone-pattern redaction includes the +39 country code on labelled Italian geographic numbers with a slash; dates, protocol identifiers and whole-run guards remain. Estimates unchanged. |
+| 2026-10-23 | minor | M11: image downsampling measures physical resolution after page-local UserUnit scaling, including shared nested forms; synthetic measurement and optimization regressions. Estimates unchanged. |
+| 2026-10-23 | minor | M10: Word table cells use the grid columns they span, including cells after a merged cell; synthetic export regression and CLI reproduction. Estimates unchanged. |
+| 2026-10-23 | minor | M10: covered table slots retain their text in paragraph flow across Office exporters; emitted superscripts remain in their cells. Synthetic source and CLI regressions; estimates unchanged. |
+| 2026-10-23 | minor | M10: Export all images and Save Image As apply soft-mask Decode intervals to PNG alpha before resizing, including inverted/subrange, indirect, packed and JPEG masks. Estimates unchanged. |
 | 2026-10-22 | minor | M4, #3916 partial: document edits and Undo/Redo cancel Organize drags. Pointer-release and save/reopen regressions check page order. Estimates unchanged. |
 | 2026-10-20 | minor | M4: initial-view window and interface options resolve indirect boolean ViewerPreferences values; synthetic true/false and save/reopen regressions retain defaults for malformed entries. Estimates unchanged. |
 | 2026-10-20 | minor | M6, #3502: form detection preserves comments across content streams; estimates unchanged. |
@@ -685,8 +711,15 @@ Newest first: the date, what moved, and the new overall estimate.
 - **2026-10-13 (M7):** Edit a PDF ▸ Add content: Header and footer, Watermark and Background open an Add / Update / Remove menu (Update and Remove enabled only when the document has that mark), as Acrobat's Watermark control does. The catalogue gains `ToolItem::actions`, so any tool can list more commands (#1192).
 
 - **2026-10-18 (M8, #1350):** Published the history-preserving integration; simplified the inherited-form resource guard for Rust 1.96 Clippy. Formatting, 64 redaction tests, scoped Clippy, layering, assets and the scoped wasm check pass locally. CI remains pending; estimates unchanged.
+
+- 2026-10-18: M11 / #3227: mark target-version compatibility partial; document the unchecked newer-content limitation.
+
+- **2026-10-18 (PR #3227 integration):** M11: integrate upstream b0e5c6eb; retain partial target-version compatibility claims and effective-version reporting, correcting the borrowed version parser lifetime. Scope and estimates unchanged.
+
 - **2026-10-12 (i18n):** Albanian (`sq`, Shqip) added: 2,343-entry catalog, month and weekday names, Preferences entry; not yet reviewed by a native speaker.
 
 - **2026-10-21 (M4, #3865):** A new bookmark records where the reader is: the top-left of the selected text, or the top of the window, as `/XYZ left top null` (zoom kept), instead of the page top (`Edit::AddBookmark` takes `left` and `top`; `bookmark_add` takes `top` and `left`; `PageInfo::xyz_for_view`).
 
 - **2026-10-18 (renderer, hayro patches 19/35):** A mesh shading (types 4–7) is sampled over its own triangles instead of the whole path: a BricsCAD plan with 310 one-triangle `sh` fills took 2 s per 1024 px tile at every zoom (and hit the 20 s watchdog on a busy machine); now about 70 ms, so zooming into dense topology drawings stays fluid. Estimates unchanged.
+
+- **2026-10-22 (PR #3227 integration):** M11: integrate upstream `80b7d215`; retain partial target-version compatibility and upstream content-boundary and image-size regression coverage. Scope and estimates unchanged.

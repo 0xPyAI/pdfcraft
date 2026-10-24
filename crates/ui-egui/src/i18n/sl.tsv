@@ -1964,6 +1964,7 @@
 	Update watermark…	Posodobi vodni žig…
 	Use 72 DPI (one point per pixel)	Uporabi 72 DPI (ena točka na slikovno piko)
 	Use Flate to encode streams that are not encoded	Za kodiranje nekodiranih tokov uporabi Flate
+	In streams that use LZW encoding, use Flate instead	V tokovih s kodiranjem LZW uporabi Flate
 	Use JavaScript	Uporabi JavaScript
 	Use a Digital ID from a file	Uporabi digitalno identiteto iz datoteke
 	Use a certificate	Uporabi potrdilo
@@ -2520,3 +2521,6 @@ animation effects	Off	Izklopljeni
 	field names can't contain a period: {name}	imena polj ne smejo vsebovati pike: {name}
 	two cells would both be named {name}	dve celici bi imeli enako ime {name}
 	a field named {name} already exists	polje z imenom {name} že obstaja
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	Danes

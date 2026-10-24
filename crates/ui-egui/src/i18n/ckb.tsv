@@ -581,6 +581,7 @@
 	Discard private data of other applications	فڕێدانی داتا تایبەتەکانی بەرنامەکانی تر
 	Discard hidden text	فڕێدانی دەقی شاراوە
 	Use Flate to encode streams that are not encoded	بەکارهێنانی Flate بۆ کۆدکردنی ئەو لێشاوانەی کۆد نەکراون
+	In streams that use LZW encoding, use Flate instead	بەکارهێنانی Flate لە جیاتی LZW بۆ ئەو لێشاوانەی بە LZW کۆد کراون
 	Remove invalid links and bookmarks	لابردنی بەستەر و دڵخوازە نادروستەکان
 	Remove unreferenced named destinations	لابردنی مەبەستە ناونراوەکانی ئاماژەپێنەکراو
 	Compress document structure (object streams)	پەستاندنی پێکهاتەی بەڵگەنامە (لێشاوەکانی تەن)
@@ -2713,3 +2714,6 @@ certificate	Version	وەشان
 	Make properties default	کردنی تایبەتمەندییەکان بە بنەڕەتی
 	Pages selected	پەڕە هەڵبژێردراوەکان
 	Page properties	تایبەتمەندییەکانی پەڕە
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	ئەمڕۆ

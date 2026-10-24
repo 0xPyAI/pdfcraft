@@ -579,6 +579,7 @@
 	Discard private data of other applications	ຕັດຂໍ້ມູນສ່ວນຕົວຂອງແອັບພລິເຄຊັນອື່ນອອກ
 	Discard hidden text	ຕັດຂໍ້ຄວາມທີ່ເຊື່ອງໄວ້ອອກ
 	Use Flate to encode streams that are not encoded	ໃຊ້ Flate ເພື່ອເຂົ້າລະຫັດສະຕຣີມທີ່ຍັງບໍ່ໄດ້ເຂົ້າລະຫັດ
+	In streams that use LZW encoding, use Flate instead	ໃຊ້ Flate ແທນ LZW ໃນສະຕຣີມທີ່ເຂົ້າລະຫັດດ້ວຍ LZW
 	Remove invalid links and bookmarks	ລຶບລິ້ງຄ໌ ແລະ ບຸກມາກທີ່ໃຊ້ການບໍ່ໄດ້
 	Remove unreferenced named destinations	ລຶບຈຸດໝາຍປາຍທາງທີ່ມີຊື່ເຊິ່ງບໍ່ມີການອ້າງອີງ
 	Compress document structure (object streams)	ບີບອັດໂຄງສ້າງເອກະສານ (ສະຕຣີມວັດຖຸ)
@@ -2429,3 +2430,6 @@ animation effects	Off	ປິດ
 	Make properties default	ກຳນົດຄຸນສົມບັດເປັນຄ່າເລີ່ມຕົ້ນ
 	Pages selected	ໜ້າທີ່ເລືອກ
 	Page properties	ຄຸນສົມບັດໜ້າ
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	ມື້ນີ້

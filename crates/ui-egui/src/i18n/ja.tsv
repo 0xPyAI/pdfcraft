@@ -611,6 +611,7 @@
 	Discard private data of other applications	他のアプリケーションのプライベートデータを破棄
 	Discard hidden text	非表示テキストを破棄
 	Use Flate to encode streams that are not encoded	未エンコードのストリームを Flate でエンコード
+	In streams that use LZW encoding, use Flate instead	LZW エンコードのストリームを Flate でエンコード
 	Remove invalid links and bookmarks	無効なリンクとしおりを削除
 	Remove unreferenced named destinations	参照されていない名前付き移動先を削除
 	Compress document structure (object streams)	文書構造を圧縮（オブジェクトストリーム）
@@ -2515,3 +2516,6 @@ animation effects	Off	オフ
 	field names can't contain a period: {name}	フィールド名にピリオドは使えません: {name}
 	two cells would both be named {name}	2 つのセルが同じ名前 {name} になります
 	a field named {name} already exists	{name} という名前のフィールドは既にあります
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	今日

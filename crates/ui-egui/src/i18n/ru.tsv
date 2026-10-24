@@ -604,6 +604,7 @@
 	Discard private data of other applications	Удалить личные данные других приложений
 	Discard hidden text	Удалить скрытый текст
 	Use Flate to encode streams that are not encoded	Использовать Flate для кодирования некодированных потоков
+	In streams that use LZW encoding, use Flate instead	Использовать Flate вместо LZW в потоках с кодированием LZW
 	Remove invalid links and bookmarks	Удалить недействительные ссылки и закладки
 	Remove unreferenced named destinations	Удалить неиспользуемые именованные места назначения
 	Compress document structure (object streams)	Сжать структуру документа (потоки объектов)
@@ -2428,3 +2429,6 @@ animation effects	Off	Выкл
 	field names can't contain a period: {name}	имена полей не могут содержать точку: {name}
 	two cells would both be named {name}	две ячейки получили бы одно имя {name}
 	a field named {name} already exists	поле с именем {name} уже существует
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	Сегодня

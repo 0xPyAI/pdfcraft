@@ -569,6 +569,7 @@
 	Discard private data of other applications	Diğer uygulamaların özel verilerini at
 	Discard hidden text	Gizli metni at
 	Use Flate to encode streams that are not encoded	Kodlanmamış akışları kodlamak için Flate kullan
+	In streams that use LZW encoding, use Flate instead	LZW kodlamalı akışlarda bunun yerine Flate kullan
 	Remove invalid links and bookmarks	Geçersiz bağlantıları ve yer işaretlerini kaldır
 	Remove unreferenced named destinations	Referans verilmeyen adlandırılmış hedefleri kaldır
 	Compress document structure (object streams)	Belge yapısını sıkıştır (nesne akışları)
@@ -2511,3 +2512,6 @@ animation effects	Off	Kapalı
 	field names can't contain a period: {name}	alan adları nokta içeremez: {name}
 	two cells would both be named {name}	iki hücrenin de adı {name} olurdu
 	a field named {name} already exists	{name} adlı bir alan zaten var
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	Bugün

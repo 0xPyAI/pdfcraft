@@ -2,7 +2,7 @@
 //! the JavaScript console (⌘J), Document JavaScripts, and Preferences ▸ JavaScript.
 
 use egui::{Align, Layout};
-use pdfcraft_engine::js::{JsOutput, Request};
+use pdfcraft_engine::js::{JsOutput, Panel, Request};
 use pdfcraft_engine::{DocId, Edit};
 
 use crate::theme::{self, Tokens};
@@ -67,6 +67,20 @@ impl PdfCraftApp {
                     &[("u", &u)],
                 ),
                 Request::SaveAs => self.run_command("file.save_as"),
+                Request::ShowPanel(p) => {
+                    let panel = match p {
+                        Panel::Bookmarks => crate::RightPanel::Bookmarks,
+                        Panel::Pages => crate::RightPanel::Pages,
+                        Panel::Attachments => crate::RightPanel::Attachments,
+                        Panel::Signatures => crate::RightPanel::Signatures,
+                        Panel::Layers => crate::RightPanel::Layers,
+                    };
+                    // Show/Hide: a panel already showing closes.
+                    self.right = (self.right != Some(panel)).then_some(panel);
+                    if self.right.is_some() {
+                        self.pending_panel_reveals.push(crate::docking::Panel::Inspector);
+                    }
+                }
                 Request::Focus(_) | Request::Beep | Request::Reset(_) => {}
             }
         }
@@ -88,7 +102,13 @@ impl PdfCraftApp {
                 {
                     self.views[i].document_changed(&info);
                 }
-                let out = JsOutput { alerts: o.alerts, console: o.console, requests: o.requests, errors: o.error.into_iter().collect() };
+                let out = JsOutput {
+                    alerts: o.alerts,
+                    console: o.console,
+                    requests: o.requests,
+                    errors: o.error.into_iter().collect(),
+                    doc_errors: Vec::new(),
+                };
                 self.handle_js(id, out);
             }
             Err(e) => self.notify_fmt("{field}: {e}", &[("field", field), ("e", &e.to_string())]),
@@ -128,7 +148,7 @@ impl PdfCraftApp {
                     self.views[i].document_changed(&info);
                 }
                 let (error, result) = (o.error.clone(), o.result.clone());
-                let out = JsOutput { alerts: o.alerts, console: o.console, requests: o.requests, errors: Vec::new() };
+                let out = JsOutput { alerts: o.alerts, console: o.console, requests: o.requests, errors: Vec::new(), doc_errors: Vec::new() };
                 self.handle_js(id, out);
                 match error {
                     Some(e) => self.js_console.log.push(format!("Error: {e}")),

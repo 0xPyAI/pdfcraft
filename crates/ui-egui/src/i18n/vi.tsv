@@ -1268,6 +1268,7 @@ theme	Appearance	Giao diện
 	Update	Cập nhật
 	Use 72 DPI (one point per pixel)	Dùng 72 DPI (một điểm cho mỗi điểm ảnh)
 	Use Flate to encode streams that are not encoded	Dùng Flate để mã hóa các luồng chưa được mã hóa
+	In streams that use LZW encoding, use Flate instead	Dùng Flate thay cho LZW trong các luồng mã hóa LZW
 	Use a Digital ID from a file	Dùng Digital ID từ một tệp
 	Use custom DPI	Dùng DPI tùy chỉnh
 	Use each image's embedded DPI; use 72 DPI when it is absent.	Dùng DPI nhúng của từng hình ảnh; dùng 72 DPI khi không có.
@@ -2780,3 +2781,6 @@ key	Space	Space
 	a table has 1 to {max} columns	một bảng có từ 1 đến {max} cột
 	the first row number can be at most {max}	số hàng đầu tiên tối đa là {max}
 	the area, the spacing and the column widths must be numbers, the spacing 0 or more and each width more than 0	vùng, khoảng cách và độ rộng cột phải là số, khoảng cách từ 0 trở lên và mỗi độ rộng lớn hơn 0
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	Hôm nay

@@ -607,6 +607,7 @@
 	Discard private data of other applications	Descartar datos privados de otras aplicaciones
 	Discard hidden text	Descartar texto oculto
 	Use Flate to encode streams that are not encoded	Usar Flate para codificar las secuencias sin codificar
+	In streams that use LZW encoding, use Flate instead	En las secuencias con codificación LZW, usar Flate en su lugar
 	Remove invalid links and bookmarks	Quitar enlaces y marcadores no válidos
 	Remove unreferenced named destinations	Quitar destinos con nombre sin referencias
 	Compress document structure (object streams)	Comprimir la estructura del documento (secuencias de objetos)
@@ -2838,3 +2839,6 @@ theme	Appearance	Aspecto
 	field names can't contain a period: {name}	los nombres de campo no pueden contener un punto: {name}
 	two cells would both be named {name}	dos celdas se llamarían {name}
 	a field named {name} already exists	ya existe un campo llamado {name}
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	Hoy

@@ -1228,6 +1228,7 @@
 	Update	Actualizare
 	Use 72 DPI (one point per pixel)	Folosire 72 DPI (un punct pe pixel)
 	Use Flate to encode streams that are not encoded	Folosire Flate pentru codarea fluxurilor necodate
+	In streams that use LZW encoding, use Flate instead	Folosire Flate în locul LZW pentru fluxurile codate LZW
 	Use a Digital ID from a file	Folosire ID digital dintr-un fișier
 	Use custom DPI	Folosire DPI personalizat
 	Use each image's embedded DPI; use 72 DPI when it is absent.	Folosește DPI-ul încorporat al fiecărei imagini; 72 DPI când lipsește.
@@ -2774,3 +2775,6 @@ theme	Appearance	Aspect
 	field names can't contain a period: {name}	numele câmpurilor nu pot conține punct: {name}
 	two cells would both be named {name}	două celule s-ar numi amândouă {name}
 	a field named {name} already exists	există deja un câmp numit {name}
+
+# Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
+	Today	Astăzi
