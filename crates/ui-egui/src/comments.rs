@@ -1562,6 +1562,11 @@ fn edit_anchor(info: &DocInfo, a: &Annotation) -> [f64; 2] {
     p.view_to_user(u[0].max(v[0]), u[1].min(v[1])).map(f64::from)
 }
 
+/// Whether comment `index` on the composer's page is at least partly inside `viewport`, as drawn.
+fn edited_in_view(cx: &PageCx<'_>, index: usize, viewport: Rect) -> bool {
+    cx.info.annotations.iter().any(|a| a.page == cx.page && a.index == index && viewport.intersects(cx.screen_rect(a)))
+}
+
 fn new_comment(cx: &PageCx<'_>, tool: CommentTool, shape: Shape, contents: String) -> Edit {
     Edit::AddAnnotation(NewAnnotation { page: cx.page, shape, style: cx.prefs.style(tool), contents, author: cx.prefs.author.clone() })
 }
@@ -1597,14 +1602,7 @@ pub(crate) fn composer(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
     // that is only partly scrolled away keeps its card, at the nearest point inside the document.
     let mut anchor = anchor;
     if !viewport.contains(anchor) {
-        let part_visible = matches!(c.kind, ComposerKind::Edit(index)
-        if info.annotations.iter().any(|a| a.page == page && a.index == index && {
-            let r = a.rect;
-            viewport.intersects(egui::Rect::from_two_pos(
-                cx.to_screen([f64::from(r[0]), f64::from(r[1])]),
-                cx.to_screen([f64::from(r[2]), f64::from(r[3])]),
-            ))
-        }));
+        let part_visible = matches!(c.kind, ComposerKind::Edit(index) if edited_in_view(&cx, index, viewport));
         if !part_visible {
             c.focus = true;
             return None;
@@ -2294,6 +2292,51 @@ mod tests {
         assert_eq!(changing_points(Some(&dragging), None, (0, 3), &line, to_user, to, false), Some(vec![[10.0, 10.0], [60.0, 10.0]]));
         assert_eq!(changing_points(None, None, (0, 3), &line, to_user, to, false), None, "not changing");
     }
+
+    /// A sticky note on a page turned a quarter is drawn upright beside its `/Rect`: an edit
+    /// composer stays open while the drawn note is partly in view, even with `/Rect` out of it.
+    #[test]
+    fn an_upright_note_on_a_turned_page_is_in_view_where_it_is_drawn() {
+        let note = |no_rotate| Annotation {
+            page: 0,
+            subtype: "Text".into(),
+            author: None,
+            contents: None,
+            modified: None,
+            name: None,
+            in_reply_to: None,
+            rect: [40.0, 20.0, 70.0, 40.0],
+            color: None,
+            index: 0,
+            state: None,
+            quads: Vec::new(),
+            locked: false,
+            intent: None,
+            fill_sign: false,
+            no_rotate,
+            points: Vec::new(),
+        };
+        let page = PageInfo { width: 140.0, height: 200.0, label: String::new(), crop: [0.0, 0.0, 200.0, 140.0], rotation: 90 };
+        let xf = PageXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(140.0, 200.0)), rot: 0, pw: 140.0, ph: 200.0 };
+        let prefs = CommentPrefs::default();
+        // Screen x is user y here: `/Rect` spans x 20..40, the upright note x 40..70.
+        let viewport = Rect::from_min_max(pos2(50.0, 0.0), pos2(140.0, 200.0));
+        for (no_rotate, in_view) in [(true, true), (false, false)] {
+            let info = DocInfo { pages: vec![page.clone()], annotations: vec![note(no_rotate)], ..Default::default() };
+            let cx = PageCx {
+                page: 0,
+                xf: &xf,
+                info: &info,
+                tool: QuickTool::Select,
+                prefs: &prefs,
+                allowed: true,
+                hidden: false,
+                redact_mark: ([0.0; 3], 1.0),
+            };
+            assert_eq!(edited_in_view(&cx, 0, viewport), in_view, "no_rotate: {no_rotate}");
+        }
+    }
+
     use pdfcraft_render::TextGlyph;
 
     /// One glyph per character, `w` points wide, on a line of `em`-point text whose baseline is at `y`, drawn
