@@ -1599,6 +1599,22 @@ fn explicit_panel_requests_reveal_inactive_group_members() {
     h.get_by_label("Header and footer");
 }
 
+/// #3580 review: a panel a script opens (`app.execMenuItem("ShowHideBookmarks")`) is shown even
+/// when the inspector is a background tab of a custom docking layout.
+#[test]
+fn a_script_opened_panel_reveals_an_inactive_inspector() {
+    let (mut h, c) = harness();
+    ok(&mut h, &c, "ui.set", json!({"key":"panel", "value":"pages"}));
+    ok(&mut h, &c, "ui.dock", json!({"operation":"move", "panel":"inspector", "target":"tools", "zone":"center"}));
+    ok(&mut h, &c, "ui.dock", json!({"operation":"activate", "panel":"tools"}));
+    h.run_steps(3);
+    assert!(h.query_by_label("This document has no bookmarks.").is_none());
+    let id = h.state().active_ids().unwrap().1;
+    h.state_mut().run_button_script(id, "", "app.execMenuItem('ShowHideBookmarks')");
+    h.run_steps(4);
+    h.get_by_label("This document has no bookmarks.");
+}
+
 #[test]
 fn home_and_combine_suppress_inspector_without_forgetting_layout_or_choice() {
     use pdfcraft_ui_egui::docking::Panel;

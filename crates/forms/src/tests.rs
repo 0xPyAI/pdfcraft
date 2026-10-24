@@ -439,6 +439,38 @@ fn a_text_field_says_what_fits_it_as_its_appearance_draws_it() {
     assert!(tb("comb").fits(&"W".repeat(50)));
 }
 
+/// #4339 review: a multi-line field is full when its appearance stops drawing lines (a line is
+/// drawn while its descent stays inside the border), not when `lines x size x 1.15` outgrows the
+/// padded height: a 16 pt field at 12 pt draws one line.
+#[test]
+fn a_short_multiline_field_takes_the_one_line_it_draws() {
+    let tx = |name: &str, extra: &str, h: i32| {
+        format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /DA (/Helv 12 Tf 0 g) /Ff {}{extra} /Rect [50 {} 150 700] /P 3 0 R >>",
+            flags::MULTILINE,
+            700 - h
+        )
+    };
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R] >>".into(),
+        "<< /Fields [6 0 R 7 0 R] /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        tx("plain", "", 16),
+        tx("boxed", " /MK << /BC [0] >>", 16),
+    ];
+    let doc = document(&objs);
+    let all = fields(&doc);
+    let tb = |name: &str| {
+        let f = field(&all, name);
+        appearance::text_box(&doc, f, &f.widgets[0])
+    };
+    assert!(tb("plain").fits("one line") && !tb("plain").fits("one\ntwo"));
+    // A 1 pt border takes 1 pt from each side: the line's descent then falls outside it.
+    assert!(!tb("boxed").fits("one line"));
+}
+
 /// An edit to a field that doesn't scroll keeps as much of what it inserted as fits, wherever the
 /// caret was, and always keeps a deletion.
 #[test]

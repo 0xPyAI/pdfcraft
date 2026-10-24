@@ -1345,6 +1345,24 @@ pub fn has_password_values(doc: &Document) -> bool {
     !password_fields(doc).is_empty()
 }
 
+/// The typed values of the text fields with the Password flag, as (name, text) pairs, for
+/// [`restore_password_values`] after the document was rebased on a file written without them.
+pub fn password_values(doc: &Document) -> Vec<(String, String)> {
+    password_fields(doc).into_iter().filter_map(|f| f.value.first().map(|v| (f.name.clone(), v.clone()))).collect()
+}
+
+/// Put values from [`password_values`] back into the open document, in memory only. A field
+/// that is gone or read-only keeps what it has.
+pub fn restore_password_values(doc: &mut Document, values: &[(String, String)]) -> Result<(), FormError> {
+    for (name, v) in values {
+        match set_value(doc, name, &FieldValue::Text(v.clone())) {
+            Ok(()) | Err(FormError::NoSuchField(_) | FormError::ReadOnly(_)) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
 /// `r` and its field ancestors (`/Parent`), nearest first, at most 32 deep and without repeats.
 fn field_chain(doc: &Document, r: ObjRef) -> Vec<ObjRef> {
     let mut chain = vec![r];

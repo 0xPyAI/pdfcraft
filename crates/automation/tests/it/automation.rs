@@ -5942,6 +5942,26 @@ fn optimizing_through_tools() {
     assert!(matches!(a.call("doc_optimize", &json!({ "doc": doc, "path": "x.pdf", "discard": ["everything"] })), Err(ToolError::InvalidArgs(_))));
 }
 
+/// #3227 review: retaining the version, a catalog `/Version` below the 1.5 an object stream
+/// needs is not what viewers read: the header is raised, and the later of the two is reported.
+#[test]
+fn retained_pdf_version_reports_the_header_raised_for_object_streams() {
+    let dir = workdir("optimize-retain-version");
+    let mut a = auto(&dir);
+    let blank = ok(&mut a, "doc_create", json!({ "from": "blank", "width": 300, "height": 400 }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_optimize", json!({ "doc": blank, "path": "v14.pdf", "compatibility": "1.4" }));
+    let mut cos = pdfcraft_cos::Document::open(std::sync::Arc::new(std::fs::read(dir.join("v14.pdf")).unwrap())).unwrap();
+    let root = cos.root().unwrap();
+    cos.update_dict(root, |c| c.set(b"Version".to_vec(), pdfcraft_cos::Object::name("1.4"))).unwrap();
+    let bytes = pdfcraft_cos::write_full(&cos, &pdfcraft_cos::SaveOptions { object_streams: false, ..Default::default() }).unwrap();
+    std::fs::write(dir.join("cat14.pdf"), &bytes).unwrap();
+    let doc = ok(&mut a, "doc_open", json!({ "path": "cat14.pdf" }))["doc"].as_u64().unwrap();
+    let r = ok(&mut a, "doc_optimize", json!({ "doc": doc, "path": "out.pdf", "compatibility": "retain", "object_streams": true }));
+    let out = std::fs::read(dir.join("out.pdf")).unwrap();
+    assert!(out.starts_with(b"%PDF-1.5\n") && out.windows(7).any(|w| w == b"/ObjStm"), "{r}");
+    assert_eq!(r["pdf_version"].as_str(), Some("1.5"), "{r}");
+}
+
 /// `data` as LZW with one 9-bit literal code per byte (clear-table first, EOD last): valid for
 /// fewer than 250 bytes, before the code width grows.
 fn lzw_literals(data: &[u8]) -> Vec<u8> {
