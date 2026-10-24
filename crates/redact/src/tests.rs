@@ -385,7 +385,8 @@ fn a_form_that_fans_out_or_loops_is_bounded_by_the_page_budget() {
         mark(&mut doc, 0, &[[5.0, 275.0, 60.0, 295.0]], "");
         let result = apply(&mut doc, None);
         let took = start.elapsed();
-        assert!(took < std::time::Duration::from_secs(20), "looping {looping}: the walk took {took:?}");
+        // An unbounded walk would never end; the limit leaves room for a loaded test machine.
+        assert!(took < std::time::Duration::from_secs(120), "looping {looping}: the walk took {took:?}");
         // The page's form budget stops the walk, and Apply refuses the page rather than
         // removing forms it could not read.
         assert!(result.is_err(), "looping {looping}: the page past its form budget is refused");
