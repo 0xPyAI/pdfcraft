@@ -244,6 +244,8 @@ impl Emitter<'_> {
         format!("/{} {} Tf {} rg", face.resource_name(), n(face.size), rgb(face.color)).into_bytes()
     }
 
+    /// Write laid-out widget `w` on `page` as an AcroForm widget annotation (and its field), with
+    /// its border, background and kind, and return the annotation's object.
     fn widget(&mut self, w: &Widget, page: &Page, page_ref: ObjRef) -> Result<Option<ObjRef>, XfaError> {
         let r = w.rect;
         let (x0, y0, x1, y1) = (r.x, page.height - r.bottom(), r.right(), page.height - r.y);
@@ -284,6 +286,10 @@ impl Emitter<'_> {
                 }
                 if w.kind == WidgetKind::Password {
                     ff |= 1 << 13;
+                }
+                // DoNotScroll (ISO 32000-2 Table 228): the field takes no more than it shows.
+                if w.no_scroll {
+                    ff |= 1 << 23;
                 }
                 if let Some(m) = w.max_chars {
                     d.set(b"MaxLen".to_vec(), Object::Int(m.min(100_000) as i64));
@@ -768,6 +774,13 @@ pub fn write_form(doc: &mut Document, form: &Form) -> Result<Written, XfaError> 
         z.set(b"Subtype".to_vec(), Object::name("Type1"));
         z.set(b"BaseFont".to_vec(), Object::name("ZapfDingbats"));
         dr_fonts.set(b"ZaDb".to_vec(), Object::Dict(z));
+    }
+    // Each font its own object: Acrobat shows nothing in a text field it redraws after typing
+    // when the field's /DR font is a dictionary written inline (#3441).
+    let inline: Vec<(Vec<u8>, Dict)> = dr_fonts.iter().filter_map(|(k, v)| Some((k.clone(), v.as_dict()?.clone()))).collect();
+    for (name, font) in inline {
+        let r = doc.add(Object::Dict(font));
+        dr_fonts.set(name, Object::Ref(r));
     }
     dr.set(b"Font".to_vec(), Object::Dict(dr_fonts));
     acro.set(b"DR".to_vec(), Object::Dict(dr));

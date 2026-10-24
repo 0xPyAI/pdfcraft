@@ -791,6 +791,17 @@ impl Document {
         self.editable() && self.permissions().is_none_or(|p| p.modify())
     }
 
+    /// How widget `widget` of text field `name` lays its value out, for asking whether a typed
+    /// value fits it ([`form_appearance::TextBox::fits`]): a field that doesn't scroll takes no
+    /// more than fits. `None` without such a field or widget, or when the document can't be
+    /// edited.
+    pub fn field_text_box(&self, name: &str, widget: usize) -> Option<form_appearance::TextBox> {
+        let cos = &self.editor.as_ref()?.cos;
+        let f = self.form.iter().find(|f| f.name == name)?;
+        let w = f.widgets.get(widget)?;
+        Some(form_appearance::text_box(cos, f, w))
+    }
+
     /// Filling in form fields is allowed (Table 22, bits 6 and 9).
     pub fn allows_form_filling(&self) -> bool {
         self.editable() && self.permissions().is_none_or(|p| p.fill_forms())
@@ -849,6 +860,14 @@ impl Document {
         let e = self.editor.as_ref()?;
         let f = self.form.iter().find(|f| f.name == name)?;
         matches!(f.kind, FormFieldKind::CheckBox | FormFieldKind::Radio).then(|| pdfcraft_forms::check_style(&e.cos, f))
+    }
+
+    /// Whether text field `name`'s value is cut off by its box at the field's font size (#4018):
+    /// the page (0-based) of the first widget that cuts it, and how.
+    pub fn field_overflow(&self, name: &str) -> Option<(Option<usize>, pdfcraft_forms::appearance::Overflow)> {
+        let e = self.editor.as_ref()?;
+        let f = self.form.iter().find(|f| f.name == name)?;
+        f.widgets.iter().find_map(|w| pdfcraft_forms::appearance::value_overflow(&e.cos, f, w).map(|o| (w.page, o)))
     }
 
     /// Remove Hidden Information: what each category would remove.
@@ -2989,6 +3008,19 @@ fn renderer_password(bytes: &[u8]) -> String {
     }
 }
 
+/// The document as it may be written to a file (#3926): a copy without the values of text fields
+/// with the Password flag, or `cos` itself when it holds none. ISO 32000-2 §12.7.5.3, Table 231
+/// (a note to the Password flag): "it is imperative that PDF processors never store the value of
+/// the text field in the PDF file if this flag is set". The open document keeps them in memory.
+fn writable(cos: &pdfcraft_cos::Document) -> Result<std::borrow::Cow<'_, pdfcraft_cos::Document>, EditError> {
+    if !pdfcraft_forms::has_password_values(cos) {
+        return Ok(std::borrow::Cow::Borrowed(cos));
+    }
+    let mut copy = cos.clone();
+    pdfcraft_forms::clear_password_values(&mut copy).map_err(|e| EditError::Write(e.to_string()))?;
+    Ok(std::borrow::Cow::Owned(copy))
+}
+
 /// The last-resort guard (AGENTS.md §4): run `f`, turning a panic that escapes it into an error
 /// message, so one bad file or edit can't take the app and its other documents down. It is a
 /// safety net for bugs, not a substitute for returning errors.
@@ -4366,12 +4398,13 @@ impl Session {
         // file so that revision stays in the chain. A full rewrite (redaction, new encryption,
         // a reconstructed file) still writes the current graph on its own.
         let rewrite = editor.cos.full_save_required() || editor.cos.encryption_changed() || editor.cos.revisions().is_empty();
+        let cos = writable(&editor.cos)?;
         guard(|| {
             if on_saved || rewrite {
-                write_incremental(&editor.cos, &opts)
+                write_incremental(&cos, &opts)
             } else {
                 let mut base = pdfcraft_cos::Document::open_with_password(editor.saved.clone(), editor.saved_keys.reopen.as_deref())?;
-                base.overlay_changes_from(&editor.cos)?;
+                base.overlay_changes_from(&cos)?;
                 write_incremental(&base, &opts)
             }
         })
@@ -4388,7 +4421,8 @@ impl Session {
         }
         let editor = doc.editor.as_ref().ok_or_else(|| EditError::ReadOnly(doc.read_only_reason.clone().unwrap_or_default()))?;
         let opts = SaveOptions { mod_date: self.now().map(pdfcraft_cos::pdf_date), ..SaveOptions::default() };
-        guard(|| write_full(&editor.cos, &opts)).map_err(EditError::Write)?.map(Arc::new).map_err(|e| EditError::Write(e.to_string()))
+        let cos = writable(&editor.cos)?;
+        guard(|| write_full(&cos, &opts)).map_err(EditError::Write)?.map(Arc::new).map_err(|e| EditError::Write(e.to_string()))
     }
 
     /// Check that `bytes`, from [`Self::save_bytes`] or [`Self::save_full_bytes`], reopen as this
@@ -4996,9 +5030,12 @@ impl Session {
     }
 
     /// [`Self::write_new`] without the check, for bytes nobody writes: measuring a part's size.
+    /// Like a save, a new file never carries a typed Password-field value (#3926): Extract and
+    /// Split copy the fields of the pages they take.
     fn write_unchecked(&self, doc: &pdfcraft_cos::Document) -> Result<Arc<Vec<u8>>, EditError> {
         let opts = SaveOptions { mod_date: self.now().map(pdfcraft_cos::pdf_date), ..SaveOptions::default() };
-        write_full(doc, &opts).map(Arc::new).map_err(|e| EditError::Write(e.to_string()))
+        let doc = writable(doc)?;
+        write_full(&doc, &opts).map(Arc::new).map_err(|e| EditError::Write(e.to_string()))
     }
 
     /// Whether a changed document still needs a recovery snapshot. This does not consume it.
@@ -5012,12 +5049,23 @@ impl Session {
         let mut out = Vec::new();
         for d in &mut self.docs {
             if d.dirty && d.generation != d.snapshot_generation {
+                // The working bytes hold typed Password-field values (#3926): a recovery file is
+                // written from a copy without them, and none is written if that copy fails.
+                let bytes = match d.editor.as_ref().filter(|e| pdfcraft_forms::has_password_values(&e.cos)) {
+                    Some(e) => match writable(&e.cos)
+                        .and_then(|c| write_incremental(&c, &SaveOptions::default()).map_err(|e| EditError::Write(e.to_string())))
+                    {
+                        Ok(b) => Arc::new(b),
+                        Err(_) => continue,
+                    },
+                    None => d.bytes.clone(),
+                };
                 d.snapshot_generation = d.generation;
                 out.push(RecoverySnapshot {
                     doc: d.id,
                     name: d.name.clone(),
                     path: d.path.clone(),
-                    bytes: d.bytes.clone(),
+                    bytes,
                     encrypted: d.info.encrypted || d.editor.as_ref().is_some_and(|e| e.cos.security().is_some()),
                 });
             }
@@ -5171,7 +5219,9 @@ impl Session {
         if opts.date.is_empty() {
             opts.date = self.signing_date();
         }
-        Ok(Arc::new(pdfcraft_sign::sign(&editor.cos, id, &opts)?))
+        // A typed Password-field value is not signed into the file (#3926), as it isn't saved.
+        let cos = writable(&editor.cos)?;
+        Ok(Arc::new(pdfcraft_sign::sign(&cos, id, &opts)?))
     }
 
     /// [`Session::sign`], embedding an RFC 3161 signature timestamp (PAdES B-T) produced by
@@ -5188,7 +5238,8 @@ impl Session {
         if opts.date.is_empty() {
             opts.date = self.signing_date();
         }
-        let signed = Arc::new(pdfcraft_sign::sign_with_timestamp(&editor.cos, id, &opts, tsa)?);
+        let cos = writable(&editor.cos)?;
+        let signed = Arc::new(pdfcraft_sign::sign_with_timestamp(&cos, id, &opts, tsa)?);
         // Checked like a save before anyone writes it (#2166).
         self.check_save(doc, &signed)?;
         Ok(signed)
@@ -5200,7 +5251,8 @@ impl Session {
         let d = self.get(doc).ok_or(EditError::NoDocument)?;
         let editor = d.editor.as_ref().ok_or_else(|| EditError::ReadOnly(d.read_only_reason.clone().unwrap_or_default()))?;
         let date = if date.is_empty() { self.signing_date() } else { date };
-        let stamped = Arc::new(pdfcraft_sign::timestamp_document(&editor.cos, tsa, &date)?);
+        let cos = writable(&editor.cos)?;
+        let stamped = Arc::new(pdfcraft_sign::timestamp_document(&cos, tsa, &date)?);
         self.check_save(doc, &stamped)?;
         Ok(stamped)
     }
@@ -5210,7 +5262,8 @@ impl Session {
     pub fn embed_ltv(&self, doc: DocId, evidence: &pdfcraft_sign::dss::Evidence) -> Result<Arc<Vec<u8>>, EditError> {
         let d = self.get(doc).ok_or(EditError::NoDocument)?;
         let editor = d.editor.as_ref().ok_or_else(|| EditError::ReadOnly(d.read_only_reason.clone().unwrap_or_default()))?;
-        let embedded = Arc::new(pdfcraft_sign::dss::embed(&editor.cos, evidence)?);
+        let cos = writable(&editor.cos)?;
+        let embedded = Arc::new(pdfcraft_sign::dss::embed(&cos, evidence)?);
         self.check_save(doc, &embedded)?;
         Ok(embedded)
     }

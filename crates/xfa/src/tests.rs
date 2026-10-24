@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pdfcraft_cos::{Document, Object, SaveOptions, write_incremental};
+use pdfcraft_cos::{Dict, Document, Object, SaveOptions, write_incremental};
 
 use super::*;
 use crate::data::{
@@ -324,6 +324,12 @@ fn rendering_into_the_pdf_replaces_the_placeholder_page_and_adds_fields() {
     let dr = doc.resolve(acro.get(b"DR").unwrap());
     let fonts = doc.resolve(dr.as_dict().unwrap().get(b"Font").unwrap());
     assert!(fonts.as_dict().unwrap().contains(b"Cour") && fonts.as_dict().unwrap().contains(b"ZaDb"));
+    // Each one its own object: Acrobat shows nothing in a text field it redraws after typing
+    // when the /DR font is written inline (#3441).
+    for (name, font) in fonts.as_dict().unwrap().iter() {
+        let r = font.as_ref().unwrap_or_else(|| panic!("{} is an object", String::from_utf8_lossy(name)));
+        assert_eq!(doc.get(r).as_dict().and_then(|f| f.name(b"Type")), Some(&b"Font"[..]));
+    }
     // A field carries its SOM path for data round trips.
     let first = doc.resolve(&doc.resolve(acro.get(b"Fields").unwrap()).as_array().unwrap()[0]);
     assert!(first.as_dict().unwrap().contains(SOM_KEY));
@@ -348,6 +354,45 @@ fn form_text_the_standard_fonts_cannot_draw_is_reported() {
     let latin = xdp.replace("申请表", "Application").replace("签名", "Signature");
     let mut doc = Document::open(Arc::new(shell(&latin))).unwrap();
     assert!(!render_into(&mut doc).unwrap().warnings.iter().any(|w| w.contains("standard fonts")));
+}
+
+/// A field whose ui doesn't scroll in the direction its text runs out (`hScrollPolicy="off"` for
+/// one line, `vScrollPolicy="off"` for several) is written with DoNotScroll (`/Ff` bit 24), so it
+/// takes no more text than it shows; the other direction's policy, or the default, doesn't.
+#[test]
+fn fields_that_dont_scroll_are_written_with_do_not_scroll() {
+    let field = |name: &str, ui: &str| format!(r#"<field name="{name}" w="2in" h="0.4in"><ui>{ui}</ui></field>"#);
+    let xdp = format!(
+        r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"><subform name="form" layout="tb">
+{}{}{}{}{}{}{}
+</subform></template></xdp:xdp>"##,
+        field("line", r#"<textEdit hScrollPolicy="off"/>"#),
+        field("lines", r#"<textEdit multiLine="1" vScrollPolicy="off"/>"#),
+        field("number", r#"<numericEdit hScrollPolicy="off"/>"#),
+        field("when", r#"<dateTimeEdit hScrollPolicy="off"/>"#),
+        field("linesAcross", r#"<textEdit multiLine="1" hScrollPolicy="off"/>"#),
+        field("lineDown", r#"<textEdit vScrollPolicy="off"/>"#),
+        field("free", r#"<textEdit/>"#),
+    );
+    let mut doc = Document::open(Arc::new(shell(&xdp))).unwrap();
+    render_into(&mut doc).unwrap();
+    let catalog = doc.get(doc.root().unwrap());
+    let acro = doc.resolve(catalog.as_dict().unwrap().get(b"AcroForm").unwrap());
+    let fields = doc.resolve(acro.as_dict().unwrap().get(b"Fields").unwrap()).as_array().unwrap().clone();
+    let mut no_scroll = std::collections::BTreeMap::new();
+    for r in fields.iter().filter_map(Object::as_ref) {
+        let f = doc.get(r);
+        let d = f.as_dict().unwrap();
+        let name = d.get(b"T").and_then(Object::as_string).map(|t| t.to_text()).unwrap_or_default();
+        no_scroll.insert(name, d.int(b"Ff").unwrap_or(0) & (1 << 23) != 0);
+    }
+    let expected: std::collections::BTreeMap<String, bool> =
+        [("line", true), ("lines", true), ("number", true), ("when", true), ("linesAcross", false), ("lineDown", false), ("free", false)]
+            .into_iter()
+            .map(|(n, v)| (n.to_string(), v))
+            .collect();
+    assert_eq!(no_scroll, expected);
 }
 
 #[test]
@@ -2831,4 +2876,40 @@ fn long_names_repeated_by_an_index_are_capped() {
     }];
     let data = build_data(&doc, &fields);
     assert!(data.len() < 2_000_000, "{} bytes of data built", data.len());
+}
+
+/// #3441: a font the form already holds as an object stays that object when the XFA layout
+/// writes its fields' fonts into `/DR`.
+#[test]
+fn rendering_keeps_the_forms_own_font_objects() {
+    let mut doc = Document::open(Arc::new(shell(&template(2)))).unwrap();
+    let mut font = Dict::new();
+    font.set(b"Type".to_vec(), Object::name("Font"));
+    font.set(b"Subtype".to_vec(), Object::name("Type1"));
+    font.set(b"BaseFont".to_vec(), Object::name("Symbol"));
+    let mine = doc.add(Object::Dict(font));
+    let mut fonts = Dict::new();
+    fonts.set(b"Mine".to_vec(), Object::Ref(mine));
+    let mut dr = Dict::new();
+    dr.set(b"Font".to_vec(), Object::Dict(fonts));
+    let root = doc.root().unwrap();
+    match doc.get(root).as_dict().unwrap().get(b"AcroForm").cloned().unwrap() {
+        Object::Ref(af) => doc.update_dict(af, |d| d.set(b"DR".to_vec(), Object::Dict(dr))).unwrap(),
+        _ => doc
+            .update_dict(root, |c| {
+                if let Some(Object::Dict(af)) = c.get(b"AcroForm").cloned() {
+                    let mut af = af;
+                    af.set(b"DR".to_vec(), Object::Dict(dr));
+                    c.set(b"AcroForm".to_vec(), Object::Dict(af));
+                }
+            })
+            .unwrap(),
+    }
+    render_into(&mut doc).unwrap();
+    let catalog = doc.get(root);
+    let acro = doc.resolve(catalog.as_dict().unwrap().get(b"AcroForm").unwrap());
+    let dr = doc.resolve(acro.as_dict().unwrap().get(b"DR").unwrap());
+    let fonts = doc.resolve(dr.as_dict().unwrap().get(b"Font").unwrap());
+    assert_eq!(fonts.as_dict().unwrap().reference(b"Mine"), Some(mine), "the form's own font object");
+    assert!(fonts.as_dict().unwrap().reference(b"Helv").is_some(), "and the layout's fonts as objects");
 }

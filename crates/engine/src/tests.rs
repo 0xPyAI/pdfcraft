@@ -2120,6 +2120,81 @@ fn form_fixture() -> Vec<u8> {
     out
 }
 
+/// Whether `needle` appears in `bytes`, or in any stream of the PDF they hold once decoded (so
+/// compressed object streams are searched too), as literal or hex string bytes.
+fn appears_in_pdf(bytes: &Arc<Vec<u8>>, needle: &str) -> bool {
+    let hex: String = needle.bytes().map(|b| format!("{b:02x}")).collect();
+    let forms = [needle.as_bytes().to_vec(), hex.clone().into_bytes(), hex.to_uppercase().into_bytes()];
+    let found = |hay: &[u8]| forms.iter().any(|f| hay.windows(f.len()).any(|w| w == f.as_slice()));
+    if found(bytes) {
+        return true;
+    }
+    let doc = pdfcraft_cos::Document::open(bytes.clone()).unwrap();
+    doc.object_numbers().into_iter().any(|num| match &*doc.get(pdfcraft_cos::ObjRef { num, generation: 0 }) {
+        pdfcraft_cos::Object::Stream(st) => st.decoded().is_ok_and(|d| found(&d)),
+        _ => false,
+    })
+}
+
+/// #3926: a value typed into a text field with the Password flag stays in the open document but
+/// is written to no file: Save, a full rewrite, Reduce File Size, a recovery snapshot, or a new
+/// file made from its pages (Extract, Split, Combine). ISO
+/// 32000-2 §12.7.5.3, Table 231, note to the Password flag: PDF processors should never store
+/// the value in the PDF file.
+#[test]
+fn password_field_values_are_kept_in_memory_but_written_to_no_file() {
+    let fixture = String::from_utf8(form_fixture()).unwrap().replace("/T (name)", "/T (name) /Ff 8192");
+    // Offsets shift by the inserted text; the parser rebuilds the cross-reference table.
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("form.pdf", None, Arc::new(fixture.into_bytes()), None).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "name".into(), value: FieldValue::Text("hunter2".into()) }).unwrap();
+    let field = s.get(id).unwrap().form.iter().find(|f| f.name == "name").cloned().unwrap();
+    assert!(field.has(pdfcraft_forms::flags::PASSWORD));
+    assert_eq!(field.value, vec!["hunter2".to_string()], "the open document keeps the value");
+    assert!(appears_in_pdf(&s.get(id).unwrap().bytes, "hunter2"), "the working bytes do hold it (the test can see it)");
+
+    let saved = s.save_bytes(id).unwrap();
+    assert!(!appears_in_pdf(&saved, "hunter2"), "Save");
+    // As Acrobat saves it (#3943 review): no default value, so an empty field whose appearance
+    // no longer shows how long the typed password was.
+    assert!(!appears_in_pdf(&saved, "*******"), "the typed length is not kept in the appearance");
+    assert!(!appears_in_pdf(&s.save_full_bytes(id).unwrap(), "hunter2"), "a full rewrite");
+    assert!(!appears_in_pdf(&s.reduced_bytes(id).unwrap().0, "hunter2"), "Reduce File Size");
+    let snaps = s.autosave_snapshots();
+    assert_eq!(snaps.len(), 1);
+    assert!(!appears_in_pdf(&snaps[0].bytes, "hunter2"), "the recovery snapshot");
+    // New files built from its pages too (#3943 review): Extract copies the fields of the pages it
+    // takes, and Split writes each part the same way.
+    let extracted = s.extract(id, &[0]).unwrap();
+    assert!(!appears_in_pdf(&extracted, "hunter2"), "Extract Pages");
+    assert!(!appears_in_pdf(&extracted, "*******"), "nor on the extracted page");
+    for (_, _, part) in s.split_by_size(id, 1).unwrap() {
+        assert!(!appears_in_pdf(&part, "hunter2"), "Split");
+    }
+    assert!(!appears_in_pdf(&s.combine(&[("form.pdf".into(), s.get(id).unwrap().bytes.clone())]).unwrap(), "hunter2"), "Combine");
+    // Reopened, the field is empty, as in any reader.
+    let mut t = Session::new();
+    let reopened = t.open("saved.pdf", None, saved, None).unwrap();
+    assert!(t.get(reopened).unwrap().form.iter().find(|f| f.name == "name").unwrap().value.iter().all(|v| v.is_empty()));
+}
+
+/// #3926 / #3943 review: signing writes the signed file from the same copy a save does, so a
+/// typed Password-field value is not signed into the file either.
+#[test]
+fn a_signed_file_carries_no_password_field_value() {
+    let p12 = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12")).unwrap();
+    let digital_id = sign::pkcs12::open(&p12, "test").unwrap();
+    let fixture = String::from_utf8(form_fixture()).unwrap().replace("/T (name)", "/T (name) /Ff 8192");
+    // After the test certificate's start date (2026-10-02).
+    let mut s = Session::new().with_clock(|| 1_800_000_000);
+    let id = s.open("form.pdf", None, Arc::new(fixture.into_bytes()), None).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "name".into(), value: FieldValue::Text("hunter2".into()) }).unwrap();
+    assert!(appears_in_pdf(&s.get(id).unwrap().bytes, "hunter2"), "the working bytes hold it");
+    let signed = s.sign(id, &digital_id, SignOptions { rect: None, ..SignOptions::default() }).unwrap();
+    assert!(!appears_in_pdf(&signed, "hunter2"), "the signed file");
+    assert!(!appears_in_pdf(&signed, "*******"), "nor the typed length");
+}
+
 /// A value its field's font can't draw is kept, and the edit that drew it reports it in
 /// `edit_notices` (the interface shows it, tools return it): not a later unrelated edit, not a
 /// failed one, and not a value that can be drawn. The form (an inline AcroForm here) asks other
@@ -4810,6 +4885,25 @@ fn measurement_edits_are_transactional_and_honour_annotation_permissions() {
         ),
         Err(EditError::NotPermitted("comments"))
     );
+}
+
+/// A laid-out XFA field that doesn't scroll (`hScrollPolicy="off"`) opens as a text field with
+/// DoNotScroll, and its text box says what fits it: what the editor takes no more than.
+#[test]
+fn an_xfa_field_that_doesnt_scroll_opens_with_do_not_scroll_and_a_text_box() {
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"><subform name="form" layout="tb">
+<field name="code" w="1in" h="0.3in"><ui><textEdit hScrollPolicy="off"/></ui><font typeface="Arial" size="10pt"/></field>
+<field name="note" w="1in" h="0.3in"><ui><textEdit/></ui><font typeface="Arial" size="10pt"/></field>
+</subform></template></xdp:xdp>"##;
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(xdp)), None).expect("opens");
+    let doc = s.get(id).unwrap();
+    let field = |end: &str| doc.form.iter().find(|f| f.name.ends_with(end)).unwrap_or_else(|| panic!("no field {end}"));
+    assert!(field("code").has(field_flags::DO_NOT_SCROLL) && !field("note").has(field_flags::DO_NOT_SCROLL));
+    let tb = doc.field_text_box(&field("code").name, 0).expect("a text box");
+    assert!(tb.fits("A1B2") && !tb.fits(&"W".repeat(40)), "a 1-inch field at 10 pt");
+    assert!(doc.field_text_box("no such field", 0).is_none() && doc.field_text_box(&field("code").name, 5).is_none());
 }
 
 #[test]
@@ -7588,4 +7682,60 @@ fn a_page_truncated_for_forms_and_pictures_is_listed_once() {
     let (pages, truncated) = doc.export_pages_checked(true, 0);
     assert!(pages[0].images.is_empty(), "the picture is past the budget");
     assert_eq!(truncated, [0]);
+}
+
+/// ISO 32000-2 Table 192, 12.7.5.2.3 and Table 228 (Comb): a check box, a push button, a comb
+/// field the file leaves to the viewer. The page as displayed and printed as an image shows the
+/// check box's caption symbol in its text colour, the button's grey face and the comb's cells in
+/// the border colour, and saving writes the file as it was.
+#[test]
+fn buttons_and_combs_left_to_the_viewer_are_displayed() {
+    let pdf = b"%PDF-1.7\n\
+        1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >> endobj\n\
+        2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
+        3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 400 200] /Annots [6 0 R 7 0 R 8 0 R] >> endobj\n\
+        4 0 obj << /Fields [6 0 R 7 0 R 8 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >> endobj\n\
+        5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> endobj\n\
+        6 0 obj << /Type /Annot /Subtype /Widget /FT /Btn /T (k) /V /Yes /AS /Yes /DA (/ZaDb 0 Tf 1 0 0 rg) /MK << /CA (8) /BC [0 0 0] >> /Rect [20 150 60 190] /F 4 /P 3 0 R >> endobj\n\
+        7 0 obj << /Type /Annot /Subtype /Widget /FT /Btn /Ff 65536 /T (o) /DA (/Helv 12 Tf 0 g) /MK << /CA (Press) /BG [0.8 0.8 0.8] /BC [0 0 0] >> /BS << /W 2 /S /B >> /Rect [100 150 220 190] /F 4 /P 3 0 R >> endobj\n\
+        8 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /Ff 16777216 /MaxLen 4 /T (d) /V (AB) /DA (/Helv 12 Tf 0 g) /MK << /BC [0 0 1] >> /Rect [20 80 220 110] /F 4 /P 3 0 R >> endobj\n\
+        trailer << /Root 1 0 R >>\n%%EOF"
+        .to_vec();
+    let render = |bytes: Arc<Vec<u8>>| {
+        let mut r = pdfcraft_render::PageRenderer::new(bytes, pdfcraft_render::RenderConfig::default());
+        r.render(pdfcraft_render::RenderRequest { page: 0, scale: 1.0, ..Default::default() })
+    };
+    // Pixels of the page (drawn at scale 1, 400 x 200) in user-space box x0..x1, y0..y1 that `keep`.
+    let count = |page: &pdfcraft_render::RenderedPage, (x0, y0, x1, y1): (u32, u32, u32, u32), keep: &dyn Fn(&[u8; 4]) -> bool| {
+        let (px, _) = page.rgba.as_chunks::<4>();
+        (200 - y1..200 - y0)
+            .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+            .filter(|&(x, y)| px.get((y * page.width + x) as usize).is_some_and(keep))
+            .count()
+    };
+    let red = |p: &[u8; 4]| p[0] > 200 && p[1] < 80 && p[2] < 80;
+    let grey = |p: &[u8; 4]| (180..=230).contains(&p[0]) && p[0] == p[1] && p[1] == p[2];
+    // Bluish: a 1 pt line on a pixel edge is half blue on each side.
+    let blue = |p: &[u8; 4]| p[2] > 200 && p[0] < 180 && p[1] < 180 && p[0] + 40 < p[2];
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, Arc::new(pdf), None).unwrap();
+    let shown = render(s.get(id).unwrap().display.clone());
+    assert!(count(&shown, (24, 154, 56, 186), &red) > 60, "the check box's red cross");
+    assert!(count(&shown, (104, 154, 216, 186), &grey) > 1000, "the push button's grey face");
+    // The comb's three inner lines at x = 70, 120 and 170, between its cells.
+    for x in [70, 120, 170] {
+        assert!(count(&shown, (x - 1, 84, x + 1, 106), &blue) >= 20, "a cell line at {x}");
+    }
+    assert_eq!(count(&shown, (95, 84, 97, 106), &blue), 0, "no line inside a cell");
+    // Print as Image: the page as a picture, at 72 dpi so it is the size of the page here.
+    let raster = pdfcraft_print::Raster { dpi: 72.0, grayscale: false };
+    let pictures = crate::print_raster::rasterize(s.get(id).unwrap(), &[0], &raster, pdfcraft_print::Content::Document).unwrap();
+    let printed = render(Arc::new(pictures));
+    assert!(count(&printed, (24, 154, 56, 186), &red) > 60, "the check box prints");
+    assert!(count(&printed, (104, 154, 216, 186), &grey) > 1000, "and the push button");
+    // The file is saved as it was: no widget has an appearance.
+    let saved = pdfcraft_cos::Document::open(s.save_bytes(id).unwrap()).unwrap();
+    for f in pdfcraft_forms::fields(&saved) {
+        assert!(saved.get(f.widgets[0].obj).as_dict().is_some_and(|d| !d.contains(b"AP")), "{} has no appearance", f.name);
+    }
 }
