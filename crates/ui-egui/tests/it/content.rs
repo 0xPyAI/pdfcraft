@@ -714,7 +714,6 @@ fn format_text_panel_sets_alignment_and_lists_planned_controls_disabled() {
     assert!(h.state().text_style.bold);
 }
 
-/// Where a mode bar tab is, by its label.
 /// Opening right-aligned added text to edit it shows it right-aligned, as the page does, not at
 /// the box's left edge, where it never was.
 #[test]
@@ -764,6 +763,7 @@ fn the_text_editor_aligns_a_narrow_box_to_its_own_edge() {
     );
 }
 
+/// Where a mode bar tab is, by its label.
 fn mode_tab(h: &Harness<'static, PdfCraftApp>, label: &str) -> egui::Rect {
     h.get_all_by_role_and_label(egui::accesskit::Role::Button, label).map(|n| n.rect()).find(|r| r.bottom() < 120.0).expect("a mode tab")
 }
