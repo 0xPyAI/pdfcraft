@@ -75,6 +75,57 @@ fn stream(doc: &Document, r: ObjRef) -> Stream {
 }
 
 #[test]
+fn image_resolution_uses_the_pages_physical_unit() {
+    for (unit, scale) in [
+        (None, 1.0),
+        (Some(Object::Int(10)), 10.0),
+        (Some(Object::Real(2.5)), 2.5),
+        (Some(Object::Int(0)), 1.0),
+        (Some(Object::Int(-10)), 1.0),
+        (Some(Object::Real(0.5)), 1.0),
+        (Some(Object::name("Ten")), 1.0),
+        (Some(Object::Int(100_000)), pdfcraft_model::MAX_USER_UNIT),
+    ] {
+        for indirect in [false, true] {
+            let mut doc = Document::new_empty();
+            let img = image(&mut doc, 720, 720, 1, false, None);
+            let p = page(&mut doc, &[("Im", img)], "q 72 0 0 72 0 0 cm /Im Do Q");
+            let parent = doc.get(p).as_dict().unwrap().reference(b"Parent").unwrap();
+            // UserUnit is page-local, unlike Resources and MediaBox.
+            doc.update_dict(parent, |d| d.set(b"UserUnit".to_vec(), Object::Int(10))).unwrap();
+            if let Some(unit) = unit.clone() {
+                let unit = if indirect { Object::Ref(doc.add(unit)) } else { unit };
+                doc.update_dict(p, |d| d.set(b"UserUnit".to_vec(), unit)).unwrap();
+            }
+            let ppi = effective_resolutions(&doc, &[p])[&img];
+            assert!((ppi - 720.0 / scale).abs() < 1e-9, "unit={unit:?}, indirect={indirect}: {ppi}");
+        }
+    }
+}
+
+#[test]
+fn optimization_retains_an_image_below_threshold_on_a_scaled_page() {
+    let mut doc = Document::new_empty();
+    let img = image(&mut doc, 720, 720, 3, false, None);
+    let p = page(&mut doc, &[("Im", img)], "q 72 0 0 72 0 0 cm /Im Do Q");
+    doc.update_dict(p, |d| d.set(b"UserUnit".to_vec(), Object::Int(10))).unwrap();
+    // 720 pixels across ten inches is 72 ppi, already below the 225 ppi threshold.
+    let report = optimize(&mut doc, &Settings::default()).unwrap();
+    assert_eq!(report.images_resampled, 0, "{report:?}");
+    let image = stream(&doc, img);
+    assert_eq!((image.dict.int(b"Width"), image.dict.int(b"Height")), (Some(720), Some(720)));
+    let reopened = Document::open(Arc::new(write_full(&doc, &SaveOptions::default()).unwrap())).unwrap();
+    let dimensions: Vec<_> = reopened
+        .scan_objects()
+        .filter_map(|(_, object)| match &*object {
+            Object::Stream(s) if s.dict.name(b"Subtype") == Some(b"Image") => Some((s.dict.int(b"Width"), s.dict.int(b"Height"))),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(dimensions, [(Some(720), Some(720))]);
+}
+
+#[test]
 fn images_are_measured_where_drawn_and_downsampled() {
     let mut doc = Document::new_empty();
     // 1200 px drawn 144 pt (2 in) wide → 600 ppi.
@@ -923,6 +974,23 @@ fn nested_forms(doc: &mut Document, img: ObjRef, levels: usize) -> ObjRef {
         inner = form(doc, Some(Object::Dict(resources(xobjects(&[("F", inner)])))), "/F Do");
     }
     inner
+}
+
+#[test]
+fn shared_forms_are_measured_in_each_pages_physical_units() {
+    for reverse in [false, true] {
+        let mut doc = Document::new_empty();
+        let img = image(&mut doc, 720, 720, 3, false, None);
+        let outer = nested_forms(&mut doc, img, 3);
+        let normal = page(&mut doc, &[("F", outer)], "q 72 0 0 72 0 0 cm /F Do Q");
+        let scaled = page(&mut doc, &[("F", outer)], "q 72 0 0 72 0 0 cm /F Do Q");
+        doc.update_dict(scaled, |d| d.set(b"UserUnit".to_vec(), Object::Int(10))).unwrap();
+        let pages = if reverse { [scaled, normal] } else { [normal, scaled] };
+        assert_eq!(effective_resolutions(&doc, &pages)[&img], 72.0, "reverse={reverse}");
+        let report = optimize(&mut doc, &Settings::default()).unwrap();
+        assert_eq!(report.images_resampled, 0, "{report:?}");
+        assert_eq!(stream(&doc, img).dict.int(b"Width"), Some(720));
+    }
 }
 
 #[test]
