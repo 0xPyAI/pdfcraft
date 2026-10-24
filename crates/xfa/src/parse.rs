@@ -146,7 +146,23 @@ fn parse_border(n: Option<XmlNode>) -> Option<Border> {
         3 => [e(0), e(1), e(2), e(1)],
         _ => [e(0), e(1), e(2), e(3)],
     };
-    Some(Border { presence: Presence::parse(n.attribute("presence")), edges: four, fill: parse_fill(child(n, "fill")) })
+    Some(Border { presence: Presence::parse(n.attribute("presence")), edges: four, corners: parse_corners(n), fill: parse_fill(child(n, "fill")) })
+}
+
+/// The `<corner>` children of a border or rectangle, top-left, top-right, bottom-right then
+/// bottom-left: one applies to all four, and a corner not given is the last one given. Without
+/// any, the corners are square.
+fn parse_corners(n: XmlNode) -> [Corner; 4] {
+    let given: Vec<Corner> = children(n, "corner")
+        .take(4)
+        .map(|c| Corner {
+            presence: Presence::parse(c.attribute("presence")),
+            radius: attr_measure(c, "radius").filter(|r| r.is_finite()).unwrap_or(0.0).max(0.0),
+            inverted: c.attribute("inverted") == Some("1"),
+        })
+        .collect();
+    let Some(last) = given.last().copied() else { return [Corner::default(); 4] };
+    std::array::from_fn(|i| given.get(i).copied().unwrap_or(last))
 }
 
 /// `<font>`: typeface, size, weight, posture, underline, fill color and horizontal scale.
@@ -201,7 +217,7 @@ fn parse_common(n: XmlNode) -> Common {
 }
 
 /// Rich text: XHTML `body > p > span…`. `br` starts a new paragraph; `xfa:embed` spans become
-/// embedded fields.
+/// embedded fields; the text of an `<a href>` keeps where it links to.
 fn parse_rich(body: XmlNode) -> RichText {
     #[derive(Clone, Default)]
     struct Style {
@@ -210,6 +226,8 @@ fn parse_rich(body: XmlNode) -> RichText {
         underline: Option<bool>,
         size: Option<f64>,
         h_scale: Option<f64>,
+        /// The `href` of the `<a>` the text is in.
+        link: Option<std::sync::Arc<str>>,
     }
     /// `base` with the CSS declarations in `css` applied: weight, style, underline, size and
     /// `xfa-font-horizontal-scale`. Anything else is ignored.
@@ -254,6 +272,7 @@ fn parse_rich(body: XmlNode) -> RichText {
                             size: style.size,
                             h_scale: style.h_scale,
                             embed: None,
+                            link: style.link.clone(),
                         },
                     );
                 }
@@ -285,6 +304,13 @@ fn parse_rich(body: XmlNode) -> RichText {
                         "b" => st.bold = Some(true),
                         "i" => st.italic = Some(true),
                         "u" => st.underline = Some(true),
+                        // A link's text keeps where it points; an `<a>` without one (a named
+                        // anchor) leaves the text as it was.
+                        "a" => {
+                            if let Some(href) = c.attribute("href").map(str::trim).filter(|h| !h.is_empty()) {
+                                st.link = Some(std::sync::Arc::from(href));
+                            }
+                        }
                         _ => {}
                     }
                     let embed = c.attributes().find(|a| a.name() == "embed").map(|a| a.value().trim_start_matches('#').to_string());
@@ -300,6 +326,7 @@ fn parse_rich(body: XmlNode) -> RichText {
                                 size: st.size,
                                 h_scale: st.h_scale,
                                 embed: Some(e),
+                                link: st.link.clone(),
                             },
                         );
                     }
@@ -378,7 +405,7 @@ fn parse_value(n: Option<XmlNode>, warnings: &mut Vec<String>) -> Value {
             "rectangle" => {
                 let mut b = parse_border(Some(c)).unwrap_or_default();
                 b.fill = parse_fill(child(c, "fill"));
-                return Value::Rectangle(b);
+                return Value::Rectangle(Box::new(b));
             }
             "date" | "time" | "dateTime" | "integer" | "decimal" | "float" | "boolean" => return Value::Text(text_of(c)),
             _ => {}

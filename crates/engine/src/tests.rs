@@ -4322,6 +4322,11 @@ fn recognize_text_reads_a_picture_on_a_page_that_has_text() {
 /// A form whose scripts are custom JavaScript: total = price × qty (calculate, through a
 /// document-level function), shown with a custom format; qty is validated; a button script.
 fn scripted_form() -> Vec<u8> {
+    scripted_form_with("function times\\(a, b\\) { console.println('times'); return a * b; }")
+}
+
+/// [`scripted_form`] with `helpers` (PDF string syntax) as its document-level script.
+fn scripted_form_with(helpers: &str) -> Vec<u8> {
     let text = |name: &str, y: u32, aa: &str| {
         format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /Rect [20 {y} 180 {}] /P 3 0 R /F 4 {aa} >>", y + 20)
     };
@@ -4335,7 +4340,7 @@ fn scripted_form() -> Vec<u8> {
         "<< /Type /Annot /Subtype /Widget /FT /Btn /Ff 65536 /T (go) /Rect [20 150 80 170] /P 3 0 R /F 4 >>".to_string(),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string(),
         "<< >>".to_string(),
-        "<< /S /JavaScript /JS (function times\\(a, b\\) { console.println('times'); return a * b; }) >>".to_string(),
+        format!("<< /S /JavaScript /JS ({helpers}) >>"),
     ];
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();
@@ -4395,6 +4400,99 @@ fn scripts_in_an_xfa_form_see_the_xfa_plugin_installed() {
     let plain = s.open("order.pdf", None, Arc::new(scripted_form()), None).unwrap();
     let o = s.run_javascript(plain, check, None).unwrap();
     assert_eq!((o.error, o.result.as_deref()), (None, Some("undefined number 3.5")));
+}
+
+/// #3940: a document-level script that defines the helper and then calls a method PdfCraft lacks
+/// (an Acrobat form copying a button icon at open) left every calculated field blank. The
+/// helper stays defined, the form calculates, and the error is reported once.
+#[test]
+fn a_document_script_that_throws_still_lets_the_form_calculate() {
+    let helpers =
+        "function times\\(a, b\\) { return a * b; } this.getField\\('go'\\).buttonSetIcon\\(this.getField\\('go'\\).buttonGetIcon\\(\\)\\);";
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("order.pdf", None, Arc::new(scripted_form_with(helpers)), None).unwrap();
+    let _ = s.take_js_output(id);
+    s.apply(id, Edit::SetFieldValue { name: "qty".into(), value: FieldValue::Text("4".into()) }).unwrap();
+    let total = s.get(id).unwrap().form.iter().find(|f| f.name == "total").unwrap().value.clone();
+    assert_eq!(total, ["10"], "calculated through the helper the failing script defined");
+    let out = s.take_js_output(id);
+    assert_eq!(out.errors.len(), 1, "reported once, not once per script: {out:?}");
+    assert!(out.errors[0].starts_with("document script 1: TypeError"), "{out:?}");
+    // The console runs too, and says which document script failed.
+    let o = s.run_javascript(id, "times(2, 3)", None).unwrap();
+    assert_eq!((o.error, o.result.as_deref(), o.doc_errors.len()), (None, Some("6"), 1));
+}
+
+#[test]
+fn active_xfa_does_not_run_pdf_container_scripts_but_keeps_requested_alerts() {
+    let template = pdfcraft_xfa::fixtures::scripted_template().replace(
+        r#"xfa.host.messageBox("Hello " + qty.rawValue);"#,
+        r#"xfa.host.messageBox("Hello " + qty.rawValue); xfa.host.print(1, "0", "0", 0, 0, 0, 0, 0);"#,
+    );
+    let mut cos = pdfcraft_cos::Document::open(Arc::new(pdfcraft_xfa::fixtures::shell(&template))).unwrap();
+    let fallback = "app.alert('This PDF form requires a newer version of Adobe Acrobat');";
+    pdfcraft_forms::set_document_script(&mut cos, "viewerFallback", Some(fallback)).unwrap();
+    let bytes = Arc::new(pdfcraft_cos::write_full(&cos, &Default::default()).unwrap());
+    let mut s = Session::new();
+    let id = s.open("xfa.pdf", None, bytes, None).unwrap();
+    assert!(s.get(id).unwrap().xfa.is_some());
+    assert!(s.take_js_output(id).alerts.is_empty());
+    let out = s.run_javascript(id, "app.alert('Console message');", None).unwrap();
+    assert!(out.error.is_none(), "{out:?}");
+    assert_eq!(out.alerts, ["Console message"]);
+    assert_eq!(s.get(id).unwrap().document_scripts(), [("viewerFallback".into(), fallback.into())]);
+    let out = s.run_javascript(id, "", Some("hello")).unwrap();
+    assert!(out.error.is_none(), "{out:?}");
+    assert_eq!(out.alerts, ["Hello 2"]);
+    assert_eq!(out.requests, [js::Request::Print]);
+    // The same context rule applies to format/validate/calculate through JsRunner.
+    s.apply(id, Edit::SetFieldScript { name: "qty".into(), event: "validate".into(), script: Some("app.alert('Field message');".into()) }).unwrap();
+    s.take_js_output(id);
+    s.apply(id, Edit::SetFieldValue { name: "qty".into(), value: FieldValue::Text("3".into()) }).unwrap();
+    assert_eq!(s.take_js_output(id).alerts, ["Field message"]);
+    // Saved XFA keeps its container scripts for inspection, but does not execute them.
+    let saved = s.get(id).unwrap().bytes.clone();
+    let reopened = s.open("saved.pdf", None, saved, None).unwrap();
+    assert!(s.run_javascript(reopened, "", None).unwrap().alerts.is_empty());
+    // Making the form static restores the ordinary PDF context; undo restores XFA's.
+    s.apply(id, Edit::XfaToStatic).unwrap();
+    assert_eq!(s.run_javascript(id, "", None).unwrap().alerts.len(), 1);
+    s.undo(id).unwrap();
+    assert!(s.run_javascript(id, "", None).unwrap().alerts.is_empty());
+}
+
+#[test]
+fn active_xfa_without_template_scripts_does_not_initialize_pdf_fallback_scripts() {
+    let template = r#"<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb"><pageSet><pageArea name="page">
+<contentArea x="36pt" y="36pt" w="540pt" h="720pt"/><medium short="612pt" long="792pt"/>
+</pageArea></pageSet><field name="text" w="200pt" h="30pt"><ui><textEdit/></ui></field></subform></template>"#;
+    let mut s = Session::new();
+    let id = s.open("no-scripts.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(template)), None).unwrap();
+    assert!(s.get(id).unwrap().xfa.is_some());
+    assert!(s.get(id).unwrap().xfa_template.is_none());
+    s.apply(id, Edit::SetDocumentScript { name: "fallback".into(), script: Some("throw new Error('PDF fallback ran');".into()) }).unwrap();
+    let out = s.run_javascript(id, "app.alert('Console message');", None).unwrap();
+    assert!(out.error.is_none(), "{out:?}");
+    assert_eq!(out.alerts, ["Console message"]);
+}
+
+#[test]
+fn inactive_xfa_and_ordinary_pdfs_keep_document_helpers_and_alerts() {
+    for bytes in [
+        fixture(1),
+        pdfcraft_xfa::fixtures::static_shell("<form1><page1><name>Test</name></page1></form1>"),
+        pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template()),
+    ] {
+        let mut cos = pdfcraft_cos::Document::open(Arc::new(bytes)).unwrap();
+        pdfcraft_forms::set_document_script(&mut cos, "helper", Some("function twice(n) { return n * 2; } app.alert('PDF message');")).unwrap();
+        // The raw dynamic shell has not been laid out: XFA's presence alone is not enough.
+        let runner = js::JsRunner::new(&cos, "control.pdf");
+        let out = pdfcraft_js::run("twice(3)", &pdfcraft_js::Event::doc("Console"), &runner.doc, &[], &runner.doc_scripts, Default::default());
+        assert!(out.error.is_none(), "{out:?}");
+        assert_eq!(out.result.as_deref(), Some("6"));
+        assert_eq!(out.alerts, ["PDF message"]);
+    }
 }
 
 #[test]
@@ -4904,6 +5002,61 @@ fn an_xfa_field_that_doesnt_scroll_opens_with_do_not_scroll_and_a_text_box() {
     let tb = doc.field_text_box(&field("code").name, 0).expect("a text box");
     assert!(tb.fits("A1B2") && !tb.fits(&"W".repeat(40)), "a 1-inch field at 10 pt");
     assert!(doc.field_text_box("no such field", 0).is_none() && doc.field_text_box(&field("code").name, 5).is_none());
+}
+
+/// A round XFA check button opens drawn round: the appearance its laid-out widget gets draws a
+/// circle, the on state with its mark in it, while a square one keeps its box.
+#[test]
+fn round_xfa_check_buttons_open_drawn_round() {
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"><subform name="form" layout="tb">
+<field name="round" w="1in" h="0.3in"><ui><checkButton shape="round"/></ui><items><integer>1</integer><integer>0</integer></items></field>
+<field name="square" w="1in" h="0.3in"><ui><checkButton/></ui><items><integer>1</integer><integer>0</integer></items></field>
+</subform></template></xdp:xdp>"##;
+    let mut s = Session::new();
+    let id = s.open("form.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(xdp)), None).expect("opens");
+    let cos = s.get(id).unwrap().editor.as_ref().unwrap().cos.clone();
+    let all = pdfcraft_forms::fields(&cos);
+    // The decoded appearance of `name`'s widget in `state`.
+    let drawn = |name: &str, state: &[u8]| {
+        let w = all.iter().find(|f| f.name.ends_with(name)).unwrap_or_else(|| panic!("no field {name}")).widgets[0].obj;
+        let wd = cos.get(w).as_dict().cloned().unwrap();
+        let n = cos.resolve(wd.get(b"AP").unwrap().as_dict().unwrap().get(b"N").unwrap());
+        let r = n.as_dict().unwrap().reference(state).unwrap_or_else(|| panic!("{name} has no {} state", String::from_utf8_lossy(state)));
+        let pdfcraft_cos::Object::Stream(st) = &*cos.get(r) else { panic!("a stream") };
+        String::from_utf8_lossy(&st.decoded().unwrap()).into_owned()
+    };
+    for state in [&b"Off"[..], b"1"] {
+        let round = drawn("round", state);
+        assert!(round.contains(" c S") && !round.contains(" re S"), "the round one's border is a circle: {round}");
+        assert!(drawn("square", state).contains(" re S"), "the square one keeps its box");
+    }
+}
+
+#[test]
+fn a_dynamic_xfa_form_is_saved_without_the_usage_rights_its_layout_voided() {
+    let xdp = pdfcraft_xfa::fixtures::template(3);
+    let original = Arc::new(pdfcraft_xfa::fixtures::usage_rights_shell(&xdp, "", false));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("form.pdf", None, original.clone(), None).expect("opens");
+    let doc = s.get(id).unwrap();
+    let warnings = &doc.xfa.as_ref().expect("laid out from the template").warnings;
+    assert!(warnings.iter().any(|w| w.contains("usage rights")), "the user is told: {warnings:?}");
+    assert!(!doc.dirty, "laying out is still not an edit");
+    s.apply(id, Edit::SetFieldValue { name: "familyName".into(), value: FieldValue::Text("Singh".into()) }).unwrap();
+    let incremental = s.save_bytes(id).unwrap();
+    assert!(incremental.starts_with(&original[..]), "still an incremental save");
+    // Saved either way, the file no longer carries them, and keeps what was filled in.
+    for saved in [incremental, s.save_full_bytes(id).unwrap()] {
+        let cos = pdfcraft_cos::Document::open(saved.clone()).unwrap();
+        let catalog = cos.get(cos.root().unwrap()).as_dict().cloned().unwrap();
+        assert!(!catalog.contains(b"Perms"), "{catalog:?}");
+        let again = s.open("saved.pdf", None, saved, None).unwrap();
+        let d2 = s.get(again).unwrap();
+        assert_eq!(d2.form.iter().find(|f| f.name == "familyName").unwrap().value, vec!["Singh".to_string()]);
+        let warnings = &d2.xfa.as_ref().expect("the layout is remembered").warnings;
+        assert!(!warnings.iter().any(|w| w.contains("usage rights")), "nothing left to say: {warnings:?}");
+    }
 }
 
 #[test]
@@ -7636,6 +7789,100 @@ fn exporting_office_keeps_dotted_leader_entries_as_paragraphs() {
     let entries = ["Art.1. Scope .................... 3", "Art.2. Eligibility .................... 7", "Art.3. Application .................... 12"];
     let positions: Vec<_> = entries.iter().map(|entry| html.find(&format!("<p>{entry}</p>")).expect("one paragraph per entry")).collect();
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "reading order: {html}");
+}
+
+/// A date typed in another of an XFA date field's edit patterns is kept in its first: yymmdd and
+/// yyyymd are rewritten as yyyymmdd, a date none of them reads is refused, and the data holds the date.
+#[test]
+fn a_date_typed_by_another_of_an_xfa_fields_edit_patterns_is_kept_in_its_first() {
+    let mut s = Session::new();
+    let id = s
+        .open("dates.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::date_alternatives_template())), None)
+        .expect("opens");
+    let value = |s: &Session| s.get(id).unwrap().form.iter().find(|f| f.name == "leave").unwrap().value.clone();
+    s.apply(id, Edit::SetFieldValue { name: "leave".into(), value: FieldValue::Text("261018".into()) }).expect("yymmdd is one of its patterns");
+    assert_eq!(value(&s), ["20261018"]);
+    s.apply(id, Edit::SetFieldValue { name: "leave".into(), value: FieldValue::Text("2026118".into()) }).expect("so is yyyymd");
+    assert_eq!(value(&s), ["20261108"]);
+    let refused = s.apply(id, Edit::SetFieldValue { name: "leave".into(), value: FieldValue::Text("2618".into()) });
+    assert!(refused.is_err_and(|e| e.to_string().contains("yyyymmdd")), "none of its patterns reads it");
+    assert_eq!(value(&s), ["20261108"]);
+    // The data holds the date.
+    let cos = pdfcraft_cos::Document::open(s.save_bytes(id).unwrap()).unwrap();
+    let data = pdfcraft_xfa::parse_datasets(&pdfcraft_xfa::read_packets(&cos).unwrap().unwrap().xdp).expect("a datasets packet");
+    assert_eq!(data.text_at(&pdfcraft_xfa::som_to_path("form[0].leave[0]")), Some("2026-11-08"));
+}
+
+/// A date the field's own scripts refuse is not tried again in another of an XFA date field's
+/// patterns: only a date its format refuses is, which happens before any script runs, so the
+/// scripts run once. This validate script counts its runs in `name` and accepts on its second.
+#[test]
+fn a_date_its_validate_script_refuses_is_not_tried_again() {
+    let mut s = Session::new();
+    let id = s
+        .open("dates.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::date_alternatives_template())), None)
+        .expect("opens");
+    let script = Some("var n = Number(getField('name').value || 0) + 1; getField('name').value = String(n); event.rc = n >= 2;".to_string());
+    s.apply(id, Edit::SetFieldScript { name: "leave".into(), event: "validate".into(), script }).unwrap();
+    let value = |s: &Session, n: &str| s.get(id).unwrap().form.iter().find(|f| f.name == n).unwrap().value.clone();
+    // Its format reads 18OCT26, and so does its DDMMMYY pattern.
+    let refused = s.apply(id, Edit::SetFieldValue { name: "leave".into(), value: FieldValue::Text("18OCT26".into()) });
+    assert!(refused.is_err(), "the validate script refused it, once");
+    assert!(value(&s, "name").is_empty(), "nothing the refused run changed is kept: {:?}", value(&s, "name"));
+}
+
+/// An XFA button's click script may show the attachments panel; a text field's exit script
+/// asking the same is noted on the console and ignored.
+#[test]
+fn an_xfa_button_may_show_a_side_panel_and_other_events_may_not() {
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <field name="files" w="2in" h="0.3in"><ui><button/></ui><caption><value><text>Attachments</text></value></caption>
+  <event activity="click"><script contentType="application/x-javascript">app.execMenuItem("ShowHideFileAttachment");</script></event></field>
+ <field name="note" w="2in" h="0.3in"><ui><textEdit/></ui>
+  <event activity="exit"><script contentType="application/x-javascript">app.execMenuItem("ShowHideFileAttachment");</script></event></field>
+</subform>
+</template>
+</xdp:xdp>
+"##;
+    let mut s = Session::new();
+    let id = s.open("files.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(xdp)), None).expect("opens");
+    s.take_js_output(id);
+    s.apply(id, Edit::XfaEvent { som: "form[0].files[0]".into(), activity: "click".into() }).unwrap();
+    let out = s.take_js_output(id);
+    assert_eq!(out.requests, [pdfcraft_js::Request::ShowPanel(pdfcraft_js::Panel::Attachments)], "{out:?}");
+    s.apply(id, Edit::SetFieldValue { name: "note".into(), value: FieldValue::Text("x".into()) }).unwrap();
+    let out = s.take_js_output(id);
+    assert!(out.requests.is_empty(), "only a click shows a panel: {out:?}");
+    assert!(out.console.iter().any(|c| c.contains("show a side panel")), "{:?}", out.console);
+}
+
+/// A validate script that asks for Save As and a side panel gets neither, with a console note
+/// for each; a button's script may still open Save As.
+#[test]
+fn a_fields_own_script_may_not_save_as_or_show_a_panel() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("order.pdf", None, Arc::new(scripted_form()), None).unwrap();
+    s.apply(
+        id,
+        Edit::SetFieldScript {
+            name: "qty".into(),
+            event: "validate".into(),
+            script: Some("app.execMenuItem('SaveAs'); app.execMenuItem('ShowHideFileAttachment');".into()),
+        },
+    )
+    .unwrap();
+    s.take_js_output(id);
+    s.apply(id, Edit::SetFieldValue { name: "qty".into(), value: FieldValue::Text("4".into()) }).unwrap();
+    let out = s.take_js_output(id);
+    assert!(out.requests.is_empty(), "a validate script runs unasked: {out:?}");
+    assert_eq!(out.console.iter().filter(|c| c.contains("only a button may")).count(), 2, "{:?}", out.console);
+    // A button's script may.
+    let o = s.run_javascript(id, "app.execMenuItem('SaveAs');", Some("go")).unwrap();
+    assert_eq!(o.requests, [js::Request::SaveAs]);
 }
 
 /// A page whose forms go past the reading limit and whose picture goes past the image budget is

@@ -48,6 +48,10 @@ pub enum FormError {
     ReadOnly(String),
     #[error("{0}")]
     Invalid(String),
+    /// The value doesn't fit the field's format (its keystroke check refused it), which is
+    /// checked before any of the field's scripts run.
+    #[error("{0}")]
+    Format(String),
     #[error("{0}")]
     Cos(#[from] pdfcraft_cos::CosError),
 }
@@ -1050,7 +1054,7 @@ fn write_value(doc: &mut Document, f: &Field, value: &FieldValue, scripts: &mut 
                 return invalid(format!("{:?} takes at most {max} characters", f.name));
             }
             // Keystroke (on commit) and Validate, as Acrobat runs them before accepting a value.
-            let t = &af::keystroke(&f.actions.format, &f.name, t).map_err(FormError::Invalid)?;
+            let t = &af::keystroke(&f.actions.format, &f.name, t).map_err(FormError::Format)?;
             af::validate(&f.actions.validate, t).map_err(FormError::Invalid)?;
             let t = &scripting::accept(doc, f, t, scripts)?;
             doc.update_dict(f.obj, |d| {

@@ -1373,6 +1373,9 @@ fn on_screen_fit(h: &Harness<'static, PdfCraftApp>, name: &str, text: &str) -> (
     }
 }
 
+/// Text typed into an auto-size field shrinks to fit the box's width, while short text keeps a
+/// larger size; a multiline auto-size field wraps and shrinks only as far as the box's height
+/// needs, and a fixed 10 pt field keeps its size.
 #[test]
 fn auto_size_fields_shrink_and_wrap_typed_text_to_fit_their_box() {
     let mut h = auto_size_harness();
@@ -1454,4 +1457,21 @@ fn mode_tabs_keep_the_hand_over_a_text_field_scrolled_under_them() {
     let convert = mode_tab(&h, "Convert").center();
     click_at(&mut h, convert);
     assert_eq!(h.state().mode, pdfcraft_ui_egui::Mode::Convert, "the tab takes the click, not the field's editor");
+}
+
+/// A button script's `ShowHideFileAttachment` opens the attachments panel, and running it again
+/// closes it.
+#[test]
+fn a_form_button_shows_and_hides_the_attachments_panel() {
+    let mut h = harness();
+    h.state_mut().set_option("panel", "none").unwrap();
+    h.run_steps(2);
+    let id = h.state().views[0].id;
+    h.state_mut().run_button_script(id, "size", "app.execMenuItem('ShowHideFileAttachment');");
+    h.run_steps(2);
+    assert_eq!(h.state().right, Some(pdfcraft_ui_egui::RightPanel::Attachments));
+    // Show/Hide, as its name says: asked again, it closes.
+    h.state_mut().run_button_script(id, "size", "app.execMenuItem('ShowHideFileAttachment');");
+    h.run_steps(2);
+    assert_eq!(h.state().right, None);
 }

@@ -6148,6 +6148,12 @@ fn javascript_through_tools() {
     assert_eq!(total["value"], "3750");
     let r = ok(&mut a, "js_run", json!({ "doc": doc, "script": "nope()" }));
     assert!(r["error"].as_str().unwrap().contains("nope"));
+    assert_eq!(r["document_errors"], json!([]));
+    // A document script that throws (#3940) is reported, and the others and the script still run.
+    ok(&mut a, "js_set_document_script", json!({ "doc": doc, "name": "zz", "script": "getField('Total').buttonSetIcon(null);" }));
+    let r = ok(&mut a, "js_run", json!({ "doc": doc, "script": "money(5)" }));
+    assert_eq!((r["error"].clone(), r["result"].clone()), (json!(null), json!("EUR 5,00")));
+    assert!(r["document_errors"][0].as_str().unwrap().starts_with("document script 2: TypeError"), "{r}");
     assert_eq!(ok(&mut a, "js_enabled", json!({ "enabled": false }))["enabled"], false);
     assert!(a.call("js_run", &json!({ "doc": doc, "script": "1" })).is_err());
 }
@@ -6658,6 +6664,33 @@ fn xfa_rich_text_max_length_is_reported_and_enforced_through_tools() {
     assert_eq!(family["value"], "éàöüñ");
 }
 
+/// A link in a dynamic XFA form's rich text is a link on the laid-out page, as link_list reports
+/// it, and stays one after a save and a fresh open.
+#[test]
+fn links_in_xfa_rich_text_are_listed_through_tools() {
+    let dir = workdir("xfa-links");
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"><subform name="form" layout="tb">
+ <pageSet><pageArea name="page"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <draw name="help" w="6in"><font typeface="Arial" size="10pt"/><value><exData contentType="text/html"><body xmlns="http://www.w3.org/1999/xhtml"><p>Questions? Email <a href="mailto:forms@example.com">forms@example.com</a>.</p></body></exData></value></draw>
+ <field name="name" w="3in" h="0.3in"><ui><textEdit/></ui></field>
+</subform></template></xdp:xdp>"##;
+    std::fs::write(dir.join("links.pdf"), pdfcraft_xfa::fixtures::shell(xdp)).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "links.pdf" }))["doc"].as_u64().unwrap();
+    let urls = |a: &mut Automation, doc: u64| -> Vec<String> {
+        let listed = ok(a, "link_list", json!({ "doc": doc }));
+        let links = listed["links"].as_array().cloned().unwrap_or_default();
+        links.iter().filter_map(|l| l["url"].as_str().map(str::to_string)).collect()
+    };
+    assert_eq!(urls(&mut a, doc), ["mailto:forms@example.com"]);
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "name": "Ada" } }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "saved.pdf" }));
+    ok(&mut a, "doc_close", json!({ "doc": doc }));
+    let doc = ok(&mut a, "doc_open", json!({ "path": "saved.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(urls(&mut a, doc), ["mailto:forms@example.com"], "one link after a save and a fresh open, not two");
+}
+
 #[test]
 fn dynamic_xfa_forms_open_render_fill_and_save_through_tools() {
     let dir = workdir("xfa");
@@ -6989,6 +7022,35 @@ fn xfa_scripts_run_for_buttons_and_field_changes_through_tools() {
     assert!(field(&mut a, "amount_2").is_none());
     let r = ok(&mut a, "js_run", json!({ "doc": doc, "script": "", "field": "hello" }));
     assert_eq!(r["alerts"], json!(["Hello 4"]));
+}
+
+#[test]
+fn active_xfa_skips_container_fallback_scripts_after_save_and_reopen() {
+    let dir = workdir("xfa-container-scripts");
+    std::fs::write(dir.join("form.pdf"), pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template())).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path": "form.pdf"}))["doc"].as_u64().unwrap();
+    let fallback = "app.alert('This PDF form requires a newer version of Adobe Acrobat');";
+    ok(&mut a, "js_set_document_script", json!({"doc":doc,"name":"viewerFallback","script":fallback}));
+    let out = ok(&mut a, "js_run", json!({"doc":doc,"script":"app.alert('Console message');"}));
+    assert!(out["error"].is_null(), "{out}");
+    assert_eq!(out["alerts"], json!(["Console message"]));
+    ok(&mut a, "doc_save", json!({"doc":doc,"path":"saved.pdf"}));
+    ok(&mut a, "doc_close", json!({"doc":doc}));
+    let doc = ok(&mut a, "doc_open", json!({"path":"saved.pdf"}))["doc"].as_u64().unwrap();
+    assert_eq!(ok(&mut a, "js_document_scripts", json!({"doc":doc}))["scripts"], json!([{"name":"viewerFallback","script":fallback}]));
+    let out = ok(&mut a, "js_run", json!({"doc":doc,"script":""}));
+    assert!(out["error"].is_null(), "{out}");
+    assert_eq!(out["alerts"], json!([]));
+    let out = ok(&mut a, "js_run", json!({"doc":doc,"script":"","field":"hello"}));
+    assert!(out["error"].is_null(), "{out}");
+    assert_eq!(out["alerts"], json!(["Hello 2"]));
+    ok(&mut a, "xfa_to_static", json!({"doc":doc}));
+    let out = ok(&mut a, "js_run", json!({"doc":doc,"script":""}));
+    assert_eq!(out["alerts"].as_array().unwrap().len(), 1);
+    ok(&mut a, "edit_undo", json!({"doc":doc}));
+    assert_eq!(ok(&mut a, "js_run", json!({"doc":doc,"script":""}))["alerts"], json!([]));
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
