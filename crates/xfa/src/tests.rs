@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pdfcraft_cos::{Document, Object, SaveOptions, write_incremental};
+use pdfcraft_cos::{Dict, Document, Object, SaveOptions, write_incremental};
 
 use super::*;
 use crate::data::{
@@ -324,6 +324,12 @@ fn rendering_into_the_pdf_replaces_the_placeholder_page_and_adds_fields() {
     let dr = doc.resolve(acro.get(b"DR").unwrap());
     let fonts = doc.resolve(dr.as_dict().unwrap().get(b"Font").unwrap());
     assert!(fonts.as_dict().unwrap().contains(b"Cour") && fonts.as_dict().unwrap().contains(b"ZaDb"));
+    // Each one its own object: Acrobat shows nothing in a text field it redraws after typing
+    // when the /DR font is written inline (#3441).
+    for (name, font) in fonts.as_dict().unwrap().iter() {
+        let r = font.as_ref().unwrap_or_else(|| panic!("{} is an object", String::from_utf8_lossy(name)));
+        assert_eq!(doc.get(r).as_dict().and_then(|f| f.name(b"Type")), Some(&b"Font"[..]));
+    }
     // A field carries its SOM path for data round trips.
     let first = doc.resolve(&doc.resolve(acro.get(b"Fields").unwrap()).as_array().unwrap()[0]);
     assert!(first.as_dict().unwrap().contains(SOM_KEY));
@@ -2831,4 +2837,40 @@ fn long_names_repeated_by_an_index_are_capped() {
     }];
     let data = build_data(&doc, &fields);
     assert!(data.len() < 2_000_000, "{} bytes of data built", data.len());
+}
+
+/// #3441: a font the form already holds as an object stays that object when the XFA layout
+/// writes its fields' fonts into `/DR`.
+#[test]
+fn rendering_keeps_the_forms_own_font_objects() {
+    let mut doc = Document::open(Arc::new(shell(&template(2)))).unwrap();
+    let mut font = Dict::new();
+    font.set(b"Type".to_vec(), Object::name("Font"));
+    font.set(b"Subtype".to_vec(), Object::name("Type1"));
+    font.set(b"BaseFont".to_vec(), Object::name("Symbol"));
+    let mine = doc.add(Object::Dict(font));
+    let mut fonts = Dict::new();
+    fonts.set(b"Mine".to_vec(), Object::Ref(mine));
+    let mut dr = Dict::new();
+    dr.set(b"Font".to_vec(), Object::Dict(fonts));
+    let root = doc.root().unwrap();
+    match doc.get(root).as_dict().unwrap().get(b"AcroForm").cloned().unwrap() {
+        Object::Ref(af) => doc.update_dict(af, |d| d.set(b"DR".to_vec(), Object::Dict(dr))).unwrap(),
+        _ => doc
+            .update_dict(root, |c| {
+                if let Some(Object::Dict(af)) = c.get(b"AcroForm").cloned() {
+                    let mut af = af;
+                    af.set(b"DR".to_vec(), Object::Dict(dr));
+                    c.set(b"AcroForm".to_vec(), Object::Dict(af));
+                }
+            })
+            .unwrap(),
+    }
+    render_into(&mut doc).unwrap();
+    let catalog = doc.get(root);
+    let acro = doc.resolve(catalog.as_dict().unwrap().get(b"AcroForm").unwrap());
+    let dr = doc.resolve(acro.as_dict().unwrap().get(b"DR").unwrap());
+    let fonts = doc.resolve(dr.as_dict().unwrap().get(b"Font").unwrap());
+    assert_eq!(fonts.as_dict().unwrap().reference(b"Mine"), Some(mine), "the form's own font object");
+    assert!(fonts.as_dict().unwrap().reference(b"Helv").is_some(), "and the layout's fonts as objects");
 }

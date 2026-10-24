@@ -134,10 +134,9 @@ pub(crate) fn ensure_form(doc: &mut Document) -> Result<ObjRef, FormError> {
     if !af.contains(b"DA") {
         af.set(b"DA".to_vec(), PdfString::literal(b"/Helv 0 Tf 0 g".to_vec()));
     }
-    let mut dr = af.get(b"DR").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
-    let mut fonts = dr.get(b"Font").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
+    let (dr, mut fonts) = form_fonts(doc, &af);
+    let mut added = inline_fonts_as_objects(doc, &mut fonts);
     // Acrobat's resource names for the standard fonts its Appearance tab offers.
-    let mut added = false;
     for (name, base) in [("Helv", "Helvetica"), ("TiRo", "Times-Roman"), ("Cour", "Courier")] {
         if fonts.contains(name.as_bytes()) {
             continue;
@@ -147,15 +146,103 @@ pub(crate) fn ensure_form(doc: &mut Document) -> Result<ObjRef, FormError> {
         f.set(b"Subtype".to_vec(), Object::name("Type1"));
         f.set(b"BaseFont".to_vec(), Object::name(base));
         f.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
-        fonts.set(name.as_bytes().to_vec(), Object::Dict(f));
+        let r = doc.add(Object::Dict(f));
+        fonts.set(name.as_bytes().to_vec(), Object::Ref(r));
         added = true;
     }
     if added {
-        dr.set(b"Font".to_vec(), Object::Dict(fonts));
-        af.set(b"DR".to_vec(), Object::Dict(dr));
+        store_form_fonts(doc, &mut af, dr, fonts);
     }
     doc.set(r, Object::Dict(af));
     Ok(r)
+}
+
+/// The form dictionary's `/DR` and its `/Font` dictionary, resolved (empty where missing).
+fn form_fonts(doc: &Document, af: &Dict) -> (Dict, Dict) {
+    let dr = af.get(b"DR").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
+    let fonts = dr.get(b"Font").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
+    (dr, fonts)
+}
+
+/// Each /DR font its own object: Acrobat, redrawing a text field after it is typed in, shows
+/// nothing when the font is a dictionary written inline in /DR (#3441). Fonts written inline
+/// (by an earlier save, or another writer) become objects saying the same; a font that is an
+/// object already, or an entry that isn't a dictionary, is left alone. Whether any changed.
+fn inline_fonts_as_objects(doc: &mut Document, fonts: &mut Dict) -> bool {
+    let inline: Vec<(Vec<u8>, Dict)> = fonts.iter().filter_map(|(k, v)| Some((k.clone(), v.as_dict()?.clone()))).collect();
+    let changed = !inline.is_empty();
+    for (name, font) in inline {
+        let r = doc.add(Object::Dict(font));
+        fonts.set(name, Object::Ref(r));
+    }
+    changed
+}
+
+/// Write `fonts` back as the `/DR /Font` of the form dictionary `af`. An indirect `/DR` or
+/// `/Font` stays the object it is.
+fn store_form_fonts(doc: &mut Document, af: &mut Dict, mut dr: Dict, fonts: Dict) {
+    match dr.get(b"Font").and_then(Object::as_ref) {
+        Some(fr) => doc.set(fr, Object::Dict(fonts)),
+        None => dr.set(b"Font".to_vec(), Object::Dict(fonts)),
+    }
+    match af.get(b"DR").and_then(Object::as_ref) {
+        Some(dr_ref) => doc.set(dr_ref, Object::Dict(dr)),
+        None => af.set(b"DR".to_vec(), Object::Dict(dr)),
+    }
+}
+
+/// Filling a field: the form's inline `/DR` fonts become objects (see
+/// [`inline_fonts_as_objects`]), so a form an earlier version of PdfCraft made works in Acrobat
+/// once it has been filled here too (#3441). Only the font storage changes; nothing is added.
+/// Not in a form a signature covers: there the file stays as the signer saw it, apart from the
+/// value itself.
+pub(crate) fn form_fonts_as_objects(doc: &mut Document, all: &[crate::Field]) -> Result<(), FormError> {
+    let signed = all.iter().any(|f| f.kind == crate::FieldKind::Signature && holds_value(doc, f.obj));
+    if signed {
+        return Ok(());
+    }
+    let Some(root) = doc.root() else { return Ok(()) };
+    let Some(entry) = doc.get(root).as_dict().and_then(|c| c.get(b"AcroForm").cloned()) else { return Ok(()) };
+    match entry {
+        Object::Ref(r) => {
+            let Some(mut af) = doc.get(r).as_dict().cloned() else { return Ok(()) };
+            let (dr, mut fonts) = form_fonts(doc, &af);
+            if inline_fonts_as_objects(doc, &mut fonts) {
+                store_form_fonts(doc, &mut af, dr, fonts);
+                doc.set(r, Object::Dict(af));
+            }
+        }
+        // A form dictionary written directly in the catalog (the catalog's /AcroForm need not be
+        // an indirect reference) is written back there.
+        Object::Dict(mut af) => {
+            let (dr, mut fonts) = form_fonts(doc, &af);
+            if inline_fonts_as_objects(doc, &mut fonts) {
+                store_form_fonts(doc, &mut af, dr, fonts);
+                doc.update_dict(root, |c| c.set(b"AcroForm".to_vec(), Object::Dict(af)))?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Whether the field `r`, or the nearest ancestor that has one, holds a `/V` (the entry is
+/// inheritable, ISO 32000-2 §12.7.4). The `/Parent` chain is followed at most 64 deep, as deep
+/// as the field walk goes, so a cyclic chain ends.
+fn holds_value(doc: &Document, r: ObjRef) -> bool {
+    let mut at = r;
+    for _ in 0..=64 {
+        let obj = doc.get(at);
+        let Some(d) = obj.as_dict() else { return false };
+        if d.contains(b"V") {
+            return true;
+        }
+        match d.reference(b"Parent") {
+            Some(p) => at = p,
+            None => return false,
+        }
+    }
+    false
 }
 
 /// The Appearance tab: borders, colours and text.

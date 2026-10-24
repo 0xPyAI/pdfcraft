@@ -769,6 +769,13 @@ pub fn write_form(doc: &mut Document, form: &Form) -> Result<Written, XfaError> 
         z.set(b"BaseFont".to_vec(), Object::name("ZapfDingbats"));
         dr_fonts.set(b"ZaDb".to_vec(), Object::Dict(z));
     }
+    // Each font its own object: Acrobat shows nothing in a text field it redraws after typing
+    // when the field's /DR font is a dictionary written inline (#3441).
+    let inline: Vec<(Vec<u8>, Dict)> = dr_fonts.iter().filter_map(|(k, v)| Some((k.clone(), v.as_dict()?.clone()))).collect();
+    for (name, font) in inline {
+        let r = doc.add(Object::Dict(font));
+        dr_fonts.set(name, Object::Ref(r));
+    }
     dr.set(b"Font".to_vec(), Object::Dict(dr_fonts));
     acro.set(b"DR".to_vec(), Object::Dict(dr));
     if !acro.contains(b"DA") {

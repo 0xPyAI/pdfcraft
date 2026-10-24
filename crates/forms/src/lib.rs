@@ -932,6 +932,7 @@ pub fn set_value_with(doc: &mut Document, name: &str, value: &FieldValue, script
         return Err(FormError::ReadOnly(name.into()));
     }
     write_value(doc, f, value, scripts)?;
+    author::form_fonts_as_objects(doc, &all)?;
     // Fields with the same fully qualified name are one field (§12.7.3.1). Writers that repeat a
     // name as separate field dictionaries, instead of widgets under one parent, get the value
     // the first one took after its scripts, without running them again.

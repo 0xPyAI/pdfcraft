@@ -3332,3 +3332,311 @@ fn a_typed_name_loses_its_ends_but_keeps_spaces_beside_periods() {
     // A part that is only spaces is still empty.
     assert!(add_field(&mut doc, 0, [300.0, 300.0, 450.0, 320.0], &text, Some("g. .h")).is_err());
 }
+
+/// The form's `/DR /Font` entries, resolved through an indirect `/DR` or `/Font`.
+fn dr_fonts(doc: &Document) -> Dict {
+    let af = acroform(doc).unwrap();
+    let dr = doc.resolve(af.get(b"DR").unwrap());
+    doc.resolve(dr.as_dict().unwrap().get(b"Font").unwrap()).as_dict().cloned().unwrap()
+}
+
+/// #3441: Acrobat shows nothing in a text field it redraws after typing when the field's `/DR`
+/// font is a dictionary written inline. A form PdfCraft makes holds each font as its own object.
+#[test]
+fn a_new_form_holds_its_fonts_as_objects() {
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+    ]);
+    add_field(&mut doc, 0, [40.0, 600.0, 300.0, 630.0], &NewField::Text { multiline: false }, Some("name")).unwrap();
+    let doc = reopen(&doc);
+    let fonts = dr_fonts(&doc);
+    for (name, base) in [("Helv", "Helvetica"), ("TiRo", "Times-Roman"), ("Cour", "Courier")] {
+        let r = fonts.reference(name.as_bytes()).unwrap_or_else(|| panic!("{name} is an object: {fonts:?}"));
+        assert_eq!(doc.get(r).as_dict().and_then(|f| f.name(b"BaseFont")), Some(base.as_bytes()));
+    }
+}
+
+/// #3441: a form saved earlier with inline `/DR` fonts gets them as objects once a field is
+/// added, saying the same; an indirect `/Font` dictionary stays the object it was.
+#[test]
+fn inline_form_fonts_become_objects_and_an_indirect_font_dictionary_stays_one() {
+    for indirect in [false, true] {
+        let font = "/Helv << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> /Mine << /Type /Font /Subtype /Type1 /BaseFont /Symbol >>";
+        let (fonts_entry, extra) =
+            if indirect { ("6 0 R".to_string(), vec![format!("<< {font} >>")]) } else { (format!("<< {font} >>"), Vec::new()) };
+        let mut objs: Vec<String> = vec![
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+            "<< /Type /Page /Parent 2 0 R >>".into(),
+            format!("<< /Fields [] /DA (/Helv 0 Tf 0 g) /DR << /Font {fonts_entry} >> >>"),
+            "null".into(),
+        ];
+        objs.extend(extra);
+        let mut doc = document(&objs);
+        add_field(&mut doc, 0, [40.0, 600.0, 300.0, 630.0], &NewField::Text { multiline: false }, Some("name")).unwrap();
+        let doc = reopen(&doc);
+        let fonts = dr_fonts(&doc);
+        for (name, base) in [("Helv", "Helvetica"), ("Mine", "Symbol"), ("TiRo", "Times-Roman")] {
+            let r = fonts.reference(name.as_bytes()).unwrap_or_else(|| panic!("{name} is an object (indirect {indirect}): {fonts:?}"));
+            assert_eq!(doc.get(r).as_dict().and_then(|f| f.name(b"BaseFont")), Some(base.as_bytes()), "{name} says the same");
+        }
+        let dr = doc.resolve(acroform(&doc).unwrap().get(b"DR").unwrap());
+        assert_eq!(dr.as_dict().unwrap().reference(b"Font").is_some(), indirect, "the /Font dictionary keeps its form");
+    }
+}
+
+/// #3441: an indirect `/DR` stays the object it is, and a form whose three standard fonts are
+/// all already there (inline) still gets them as objects, though none is added.
+#[test]
+fn an_indirect_resource_dictionary_and_a_complete_inline_set_are_handled() {
+    let inline = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>";
+    let all = format!(
+        "/Helv {inline} /TiRo << /Type /Font /Subtype /Type1 /BaseFont /Times-Roman >> /Cour << /Type /Font /Subtype /Type1 /BaseFont /Courier >>"
+    );
+    for indirect_dr in [false, true] {
+        let dr = if indirect_dr { "5 0 R".to_string() } else { format!("<< /Font << {all} >> >>") };
+        let doc = document(&[
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+            "<< /Type /Page /Parent 2 0 R >>".into(),
+            format!("<< /Fields [] /DA (/Helv 0 Tf 0 g) /DR {dr} >>"),
+            format!("<< /Font << {all} >> >>"),
+        ]);
+        let mut doc = doc;
+        add_field(&mut doc, 0, [40.0, 600.0, 300.0, 630.0], &NewField::Text { multiline: false }, Some("name")).unwrap();
+        let doc = reopen(&doc);
+        let fonts = dr_fonts(&doc);
+        for name in ["Helv", "TiRo", "Cour"] {
+            assert!(fonts.reference(name.as_bytes()).is_some(), "{name} is an object (indirect /DR {indirect_dr}): {fonts:?}");
+        }
+        assert_eq!(acroform(&doc).unwrap().reference(b"DR").is_some(), indirect_dr, "/DR keeps its form");
+    }
+}
+
+/// #3441: fonts the form already has are its own, not replaced by the standard ones: an inline
+/// `/Helv` that is Arial becomes an object that is still Arial, a `/TiRo` object stays that
+/// object, and a form needing no change leaves its `/DR` object unwritten. The fonts PdfCraft
+/// adds use WinAnsi, as Acrobat's do.
+#[test]
+fn existing_form_fonts_are_kept_and_an_unchanged_resource_dictionary_is_not_rewritten() {
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        "<< /Fields [] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv << /Type /Font /Subtype /Type1 /BaseFont /Arial >> /TiRo 5 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Times-Bold >>".into(),
+    ]);
+    add_field(&mut doc, 0, [40.0, 600.0, 300.0, 630.0], &NewField::Text { multiline: false }, Some("name")).unwrap();
+    let doc = reopen(&doc);
+    let fonts = dr_fonts(&doc);
+    let font = |name: &str| doc.get(fonts.reference(name.as_bytes()).unwrap()).as_dict().cloned().unwrap();
+    assert_eq!(font("Helv").name(b"BaseFont"), Some(&b"Arial"[..]), "the form's own Helv");
+    assert_eq!(fonts.reference(b"TiRo"), Some(pdfcraft_cos::ObjRef::new(5, 0)), "the same object");
+    assert_eq!(font("Cour").name(b"Encoding"), Some(&b"WinAnsiEncoding"[..]));
+
+    // Every font an object already, /DR an object: adding a field leaves /DR as it was.
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R >>".into(),
+        "<< /Fields [] /DA (/Helv 0 Tf 0 g) /DR 5 0 R >>".into(),
+        "<< /Font << /Helv 6 0 R /TiRo 6 0 R /Cour 6 0 R >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+    ]);
+    add_field(&mut doc, 0, [40.0, 600.0, 300.0, 630.0], &NewField::Text { multiline: false }, Some("name")).unwrap();
+    assert!(!doc.modified_objects().contains(&5), "/DR unchanged: {:?}", doc.modified_objects());
+}
+
+/// #3441, exhaustively: every way a form's `/DR` may hold its fonts. `/DR` missing, inline or an
+/// object; its `/Font` missing, inline, an object or not a dictionary; `/Helv` missing, inline,
+/// an object, a reference to nothing, `null` or a number; and a font of the form's own, inline or
+/// an object. After a field is added, whatever the shape:
+/// - no font is a dictionary written inline;
+/// - a font that was an object is the same object, and one that was inline says the same as an
+///   object;
+/// - a `/DR` or `/Font` that was an object (and a dictionary) still is one;
+/// - an entry that is not a dictionary (`null`, a number, a reference to nothing) is left alone;
+/// - Helv, TiRo and Cour are there.
+#[test]
+fn every_shape_of_form_fonts_ends_as_objects() {
+    let font = |base: &str| format!("<< /Type /Font /Subtype /Type1 /BaseFont /{base} >>");
+    let mut cases = 0;
+    for dr_shape in ["missing", "inline", "object"] {
+        for font_shape in ["missing", "inline", "object", "number"] {
+            for helv in ["missing", "inline", "object", "dangling", "null", "number"] {
+                for mine in ["missing", "inline", "object"] {
+                    if dr_shape == "missing" && (font_shape != "missing" || helv != "missing" || mine != "missing") {
+                        continue;
+                    }
+                    if matches!(font_shape, "missing" | "number") && (helv != "missing" || mine != "missing") {
+                        continue;
+                    }
+                    cases += 1;
+                    let what = format!("/DR {dr_shape}, /Font {font_shape}, /Helv {helv}, /Mine {mine}");
+                    let mut entries = String::new();
+                    match helv {
+                        "inline" => entries += &format!("/Helv {} ", font("Arial")),
+                        "object" => entries += "/Helv 7 0 R ",
+                        "dangling" => entries += "/Helv 99 0 R ",
+                        "null" => entries += "/Helv null ",
+                        "number" => entries += "/Helv 3 ",
+                        _ => {}
+                    }
+                    match mine {
+                        "inline" => entries += &format!("/Mine {} ", font("Symbol")),
+                        "object" => entries += "/Mine 8 0 R ",
+                        _ => {}
+                    }
+                    let fonts_value = match font_shape {
+                        "inline" => format!("<< {entries}>>"),
+                        "object" => "6 0 R".into(),
+                        "number" => "7".into(),
+                        _ => String::new(),
+                    };
+                    let dr_dict = if fonts_value.is_empty() { "<< >>".to_string() } else { format!("<< /Font {fonts_value} >>") };
+                    let dr_value = match dr_shape {
+                        "inline" => dr_dict.clone(),
+                        "object" => "5 0 R".into(),
+                        _ => String::new(),
+                    };
+                    let af = if dr_value.is_empty() { "<< /Fields [] >>".to_string() } else { format!("<< /Fields [] /DR {dr_value} >>") };
+                    let mut doc = document(&[
+                        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+                        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+                        "<< /Type /Page /Parent 2 0 R >>".into(),
+                        af,
+                        if dr_shape == "object" { dr_dict } else { "null".into() },
+                        if font_shape == "object" { format!("<< {entries}>>") } else { "null".into() },
+                        font("Helvetica-Oblique"),
+                        font("ZapfDingbats"),
+                    ]);
+                    add_field(&mut doc, 0, [40.0, 600.0, 300.0, 630.0], &NewField::Text { multiline: false }, Some("name"))
+                        .unwrap_or_else(|e| panic!("{what}: {e}"));
+                    let doc = reopen(&doc);
+                    let af = acroform(&doc).unwrap();
+                    let dr = doc.resolve(af.get(b"DR").unwrap_or_else(|| panic!("{what}: no /DR")));
+                    let fonts = dr_fonts(&doc);
+                    for (name, value) in fonts.iter() {
+                        assert!(value.as_dict().is_none(), "{what}: {} is inline", String::from_utf8_lossy(name));
+                    }
+                    for name in ["Helv", "TiRo", "Cour"] {
+                        assert!(fonts.contains(name.as_bytes()), "{what}: no {name}");
+                    }
+                    let base =
+                        |name: &[u8]| fonts.reference(name).and_then(|r| doc.get(r).as_dict().and_then(|f| f.name(b"BaseFont").map(<[u8]>::to_vec)));
+                    match helv {
+                        "inline" => assert_eq!(base(b"Helv").as_deref(), Some(&b"Arial"[..]), "{what}"),
+                        "object" => assert_eq!(fonts.reference(b"Helv"), Some(pdfcraft_cos::ObjRef::new(7, 0)), "{what}"),
+                        "dangling" => assert_eq!(fonts.reference(b"Helv"), Some(pdfcraft_cos::ObjRef::new(99, 0)), "{what}"),
+                        "null" => assert_eq!(fonts.get(b"Helv"), Some(&Object::Null), "{what}"),
+                        "number" => assert_eq!(fonts.get(b"Helv"), Some(&Object::Int(3)), "{what}"),
+                        _ => assert_eq!(base(b"Helv").as_deref(), Some(&b"Helvetica"[..]), "{what}"),
+                    }
+                    match mine {
+                        "inline" => assert_eq!(base(b"Mine").as_deref(), Some(&b"Symbol"[..]), "{what}"),
+                        "object" => assert_eq!(fonts.reference(b"Mine"), Some(pdfcraft_cos::ObjRef::new(8, 0)), "{what}"),
+                        _ => assert!(!fonts.contains(b"Mine"), "{what}"),
+                    }
+                    if dr_shape == "object" {
+                        assert_eq!(af.reference(b"DR"), Some(pdfcraft_cos::ObjRef::new(5, 0)), "{what}: /DR stays its object");
+                    }
+                    if font_shape == "object" {
+                        assert_eq!(dr.as_dict().unwrap().reference(b"Font"), Some(pdfcraft_cos::ObjRef::new(6, 0)), "{what}: /Font stays its object");
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(cases, 1 + 2 * (2 + 2 * 6 * 3), "every shape was tried");
+}
+
+/// #3441 (review follow-up): filling a field converts the form's inline `/DR` fonts, so a form
+/// an earlier PdfCraft made works in Acrobat once it has been filled here. Nothing is added. A
+/// form a signature covers keeps `/DR` as the signer saw it, and a form whose fonts are objects
+/// already leaves its `/DR` object unwritten.
+#[test]
+fn filling_a_field_makes_inline_form_fonts_objects_unless_the_form_is_signed() {
+    let inline = "/Helv << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>";
+    let form = |signed: bool, dr: &str| {
+        let sig = if signed { "<< /Type /Annot /Subtype /Widget /FT /Sig /T (sig) /V 7 0 R /Rect [0 0 0 0] /P 3 0 R >>" } else { "null" };
+        let fields = if signed { "[5 0 R 6 0 R]" } else { "[5 0 R]" };
+        document(&[
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+            "<< /Type /Page /Parent 2 0 R /Annots [5 0 R] >>".into(),
+            format!("<< /Fields {fields} /DA (/Helv 0 Tf 0 g) /DR {dr} >>"),
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /DA (/Helv 12 Tf 0 g) /Rect [50 700 300 720] /P 3 0 R >>".into(),
+            sig.into(),
+            "<< /Type /Sig /Filter /Adobe.PPKLite /Contents <00> >>".into(),
+            "<< /Font << /Helv 9 0 R >> >>".into(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        ])
+    };
+    let mut doc = form(false, &format!("<< /Font << {inline} >> >>"));
+    set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
+    let doc = reopen(&doc);
+    let fonts = dr_fonts(&doc);
+    assert!(fonts.reference(b"Helv").is_some(), "Helv became an object: {fonts:?}");
+    assert_eq!(fonts.len(), 1, "nothing added: {fonts:?}");
+    assert_eq!(field(&fields(&doc), "name").value, ["Ada"]);
+
+    let mut doc = form(true, &format!("<< /Font << {inline} >> >>"));
+    set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
+    let doc = reopen(&doc);
+    assert!(dr_fonts(&doc).get(b"Helv").is_some_and(|h| h.as_dict().is_some()), "a signed form keeps /DR as it was");
+
+    // An empty signature field signs nothing: the form is converted as an unsigned one.
+    let mut doc = form(true, &format!("<< /Font << {inline} >> >>"));
+    doc.update_dict(pdfcraft_cos::ObjRef::new(6, 0), |d| {
+        d.remove(b"V");
+    })
+    .unwrap();
+    set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
+    assert!(dr_fonts(&reopen(&doc)).reference(b"Helv").is_some(), "an unsigned signature field doesn't hold /DR back");
+
+    let mut doc = form(false, "8 0 R");
+    set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
+    assert!(!doc.modified_objects().contains(&8), "/DR unchanged: {:?}", doc.modified_objects());
+}
+
+/// #3441 (review follow-up): a signature value held by a parent field signs its kid too (`/V` is
+/// inheritable, ISO 32000-2 Table 226), so the form still counts as signed and keeps its `/DR`.
+#[test]
+fn a_signature_value_on_a_parent_field_keeps_the_form_fonts_as_signed() {
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [5 0 R 8 0 R] >>".into(),
+        "<< /Fields [5 0 R 6 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> >> >> >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /DA (/Helv 12 Tf 0 g) /Rect [50 700 300 720] /P 3 0 R >>".into(),
+        "<< /FT /Sig /T (sig) /V 7 0 R /Kids [8 0 R] >>".into(),
+        "<< /Type /Sig /Filter /Adobe.PPKLite /Contents <00> >>".into(),
+        "<< /Type /Annot /Subtype /Widget /T (s1) /Parent 6 0 R /Rect [0 0 0 0] /P 3 0 R >>".into(),
+    ]);
+    let kid = pdfcraft_cos::ObjRef::new(8, 0);
+    assert!(fields(&doc).iter().any(|f| f.obj == kid && f.kind == FieldKind::Signature), "the kid is the signature field");
+    set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
+    let doc = reopen(&doc);
+    assert!(dr_fonts(&doc).get(b"Helv").is_some_and(|h| h.as_dict().is_some()), "an inherited signature value keeps /DR as it was");
+    assert_eq!(field(&fields(&doc), "name").value, ["Ada"]);
+}
+
+/// #3441 (review follow-up): a catalog that holds `/AcroForm` as a direct dictionary gets its
+/// inline `/DR` fonts converted too when a field is filled.
+#[test]
+fn filling_a_field_converts_inline_fonts_of_a_direct_form_dictionary() {
+    let mut doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> >> >> >> >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /DA (/Helv 12 Tf 0 g) /Rect [50 700 300 720] /P 3 0 R >>".into(),
+    ]);
+    set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
+    let doc = reopen(&doc);
+    let fonts = dr_fonts(&doc);
+    assert!(fonts.reference(b"Helv").is_some(), "Helv became an object: {fonts:?}");
+    assert_eq!(fonts.len(), 1, "nothing added: {fonts:?}");
+    assert_eq!(field(&fields(&doc), "name").value, ["Ada"]);
+}
