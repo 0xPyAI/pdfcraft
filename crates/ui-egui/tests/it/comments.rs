@@ -1351,12 +1351,12 @@ trailer << /Root 1 0 R >>
 // Contributor-original PDF. Page 1: an unnamed comment with a reply and a reply to that reply,
 // a Replace Text strikeout with its grouped caret, and a hidden status whose comment no page
 // lists. Page 2: an `/IRT` to the annotation itself, to an annotation no page lists (object 11),
-// to a pop-up, to a link and to a form field.
+// to a pop-up, to a link and to a form field, and two annotations whose `/IRT`s point at each other.
 const THREAD_EDGES: &[u8] = b"%PDF-1.7
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj
 3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [5 0 R 6 0 R 7 0 R 8 0 R 9 0 R 19 0 R] >> endobj
-4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [10 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R 18 0 R] >> endobj
+4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Annots [10 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R 18 0 R 20 0 R 21 0 R] >> endobj
 5 0 obj << /Type /Annot /Subtype /Text /Rect [20 160 40 180] /T (Alpha) /Contents (Unnamed parent) >> endobj
 6 0 obj << /Type /Annot /Subtype /Text /Rect [20 160 40 180] /IRT 5 0 R /T (Beta) /Contents (Direct reply) >> endobj
 7 0 obj << /Type /Annot /Subtype /Text /Rect [20 160 40 180] /IRT 6 0 R /T (Gamma) /Contents (Reply to the reply) >> endobj
@@ -1372,6 +1372,8 @@ const THREAD_EDGES: &[u8] = b"%PDF-1.7
 17 0 obj << /Type /Annot /Subtype /Text /Rect [20 50 40 70] /IRT 15 0 R /T (Delta) /Contents (Points at a link) >> endobj
 18 0 obj << /Type /Annot /Subtype /Text /Rect [20 20 40 40] /IRT 16 0 R /T (Delta) /Contents (Points at a form field) >> endobj
 19 0 obj << /Type /Annot /Subtype /Text /Rect [240 20 260 40] /F 30 /IRT 11 0 R /T (Delta) /StateModel /Review /State /Accepted /Contents (Stray status) >> endobj
+20 0 obj << /Type /Annot /Subtype /Text /Rect [60 20 80 40] /IRT 21 0 R /T (Delta) /Contents (Loop one) >> endobj
+21 0 obj << /Type /Annot /Subtype /Text /Rect [90 20 110 40] /IRT 20 0 R /T (Delta) /Contents (Loop two) >> endobj
 trailer << /Root 1 0 R >>
 %%EOF";
 
@@ -1384,7 +1386,9 @@ fn replies_that_lead_nowhere_stay_comments_and_deeper_replies_join_their_thread(
     // An `/IRT` that reaches no listed comment leaves its annotation a comment of its own,
     // rather than a reply shown nowhere.
     // Links, form widgets and pop-ups are never parents: neither reader lists them as comments.
-    for orphan in ["Points at itself", "Points at an unlisted note", "Points at a pop-up", "Points at a link", "Points at a form field"] {
+    for orphan in
+        ["Points at itself", "Points at an unlisted note", "Points at a pop-up", "Points at a link", "Points at a form field", "Loop one", "Loop two"]
+    {
         assert!(h.get_by_label(orphan).rect().top() > h.get_by_label("Page 2").rect().top(), "{orphan}");
     }
     // A reply to a reply joins the thread of the comment it starts from, also when that comment
@@ -1392,9 +1396,9 @@ fn replies_that_lead_nowhere_stay_comments_and_deeper_replies_join_their_thread(
     let (parent, direct, deeper) = (h.get_by_label("Unnamed parent"), h.get_by_label("Direct reply"), h.get_by_label("Reply to the reply"));
     assert!(parent.rect().top() < direct.rect().top() && direct.rect().top() < deeper.rect().top());
     assert!(deeper.rect().top() < h.get_by_label("Struck words").rect().top(), "under its own thread");
-    // Comments: the unnamed parent, the strikeout and the five on page 2. Replies: the two
+    // Comments: the unnamed parent, the strikeout and the seven on page 2. Replies: the two
     // replies, not the Replace Text caret grouped with its strikeout.
-    h.get_by_label("7");
+    h.get_by_label("9");
     h.get_by_label("2 replies");
     // A status whose comment no page lists is not a comment: no card, and nothing to pick on the
     // page where it sits.
