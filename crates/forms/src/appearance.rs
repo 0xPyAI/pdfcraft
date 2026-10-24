@@ -473,12 +473,43 @@ fn frame(doc: &Document, wd: &Dict, w: f64, h: f64) -> (String, f64) {
 fn border_width(doc: &Document, wd: &Dict) -> f64 {
     let mk = wd.get(b"MK").map(|m| doc.resolve(m)).and_then(|m| m.as_dict().cloned());
     let bs = wd.get(b"BS").map(|b| doc.resolve(b)).and_then(|b| b.as_dict().cloned());
-    let bw = bs.as_ref().and_then(|b| b.get(b"W")).and_then(|x| doc.resolve(x).as_f64()).unwrap_or(1.0).max(0.0);
+    let bw = line_width(doc, wd);
     if color_array(doc, mk.as_ref(), b"BC").is_none() || bw <= 0.0 {
         return 0.0;
     }
     let style = bs.as_ref().and_then(|b| b.name(b"S").map(<[u8]>::to_vec)).unwrap_or_default();
     if style == b"B" || style == b"I" { 2.0 * bw } else { bw }
+}
+
+/// The widget's border line width, `/BS /W` (default 1, Table 168), as [`frame`] strokes it.
+fn line_width(doc: &Document, wd: &Dict) -> f64 {
+    let bs = wd.get(b"BS").map(|b| doc.resolve(b)).and_then(|b| b.as_dict().cloned());
+    // `f64::max` turns NaN into 0, as it does a negative width.
+    bs.as_ref().and_then(|b| b.get(b"W")).and_then(|x| doc.resolve(x).as_f64()).unwrap_or(1.0).max(0.0)
+}
+
+/// Comb fields stop drawing their cells past this many; they would be a solid block anyway.
+const MAX_COMB_DIVIDERS: usize = 500;
+
+/// The lines between the `cells` positions of a comb field `w` × `h` (ISO 32000-2 Table 228,
+/// Comb: the field is divided into `MaxLen` equally spaced positions), in the border's colour and
+/// width, inside the border. None without a border, or past [`MAX_COMB_DIVIDERS`] cells.
+fn comb_dividers(doc: &Document, wd: &Dict, w: f64, h: f64, cells: usize) -> String {
+    let mk = wd.get(b"MK").map(|m| doc.resolve(m)).and_then(|m| m.as_dict().cloned());
+    let inset = border_width(doc, wd);
+    let lw = line_width(doc, wd);
+    let Some(bc) = color_array(doc, mk.as_ref(), b"BC") else { return String::new() };
+    if !(inset > 0.0 && inset.is_finite() && lw > 0.0 && lw.is_finite()) || !(2..=MAX_COMB_DIVIDERS).contains(&cells) {
+        return String::new();
+    }
+    let cell = w / cells as f64;
+    let mut c = format!("{}\n{} w\n", stroke_op(&bc), n(lw));
+    for i in 1..cells {
+        let x = cell * i as f64;
+        c.push_str(&format!("{} {} m {} {} l\n", n(x), n(inset), n(x), n(h - inset)));
+    }
+    c.push_str("S\n");
+    c
 }
 
 /// Where a list box draws its options: one row per option from the top, starting with option
@@ -739,6 +770,7 @@ fn field_appearance_fit(doc: &Document, f: &Field, w: &Widget, values: &[String]
                 if comb {
                     let cells = f.max_len.unwrap_or(1).max(1);
                     let cell = width / cells as f64;
+                    c.push_str(&comb_dividers(doc, &wd, width, height, cells));
                     for (i, ch) in text.chars().take(cells).enumerate() {
                         let s = ch.to_string();
                         show(&mut body, cell * i as f64 + (cell - width_of(&s, size)) / 2.0, y, &s);
@@ -907,6 +939,94 @@ fn check_mark(style: crate::author::CheckStyle, cx: f64, cy: f64, s: f64, color:
             )
         }
     }
+}
+
+/// How a check box or radio button widget `w` of field `f` looks in state on (`on`) or Off when
+/// the file has no appearance for that state: its `/MK` background and border ([`frame`]), and
+/// when on, its caption `/MK /CA` (ISO 32000-2 Table 192: the normal caption, which check boxes
+/// and radio buttons may use too) as a ZapfDingbats character, as in the check box example of
+/// 12.7.5.2.3: `4` (a check mark) by default, `l` (a dot) for a radio button. The character is
+/// drawn in the `/DA` colour, at the `/DA` size or, for an automatic size (`0 Tf`), filling most
+/// of the box. ZapfDingbats is one of the standard 14 fonts, so no font program is needed.
+pub(crate) fn button_state_shown(doc: &Document, f: &Field, w: &Widget, on: bool) -> Stream {
+    let wobj = doc.get(w.obj);
+    let wd = wobj.as_dict().cloned().unwrap_or_default();
+    let (page_w, page_h) = ((w.rect[2] - w.rect[0]).max(1.0), (w.rect[3] - w.rect[1]).max(1.0));
+    let place = placement(mk_rotation(doc, &wd), page_w, page_h);
+    let (width, height) = (place.layout_w, place.layout_h);
+    let (frame_c, bw) = frame(doc, &wd, width, height);
+    let mut content = frame_c.into_bytes();
+    let mut res = Dict::new();
+    if on {
+        let mk = wd.get(b"MK").map(|m| doc.resolve(m)).and_then(|m| m.as_dict().cloned());
+        let caption = mk.as_ref().and_then(|mk| mk.get(b"CA")).and_then(|o| doc.resolve(o).as_string().map(|s| s.to_text()));
+        let dingbats = pdfcraft_fonts::Std14::ZapfDingbats;
+        // The caption's first character as a ZapfDingbats code, when the font has a glyph there.
+        let code = caption
+            .and_then(|s| s.chars().next())
+            .and_then(|ch| u8::try_from(u32::from(ch)).ok())
+            .filter(|&code| dingbats.width(code) > 0.0)
+            .unwrap_or(if f.kind == FieldKind::Radio { b'l' } else { b'4' });
+        let da = parse_da(wd.get(b"DA").and_then(|o| doc.resolve(o).as_string().map(|s| s.to_text())).as_deref().unwrap_or(&f.da));
+        // The glyph's advance and (about) its height, in ems.
+        let (advance, tall) = (dingbats.width(code) / 1000.0, 0.75);
+        let room = |side: f64| (side - 2.0 * bw - 2.0).max(1.0);
+        // An automatic size leaves a margin of a tenth of the room on each side.
+        let size = if da.size > 0.0 { da.size } else { (0.8 * room(width) / advance.max(0.1)).min(0.8 * room(height) / tall).clamp(1.0, 300.0) };
+        let (x, y) = ((width - advance * size) / 2.0, (height - tall * size) / 2.0 + 0.05 * size);
+        content.extend(format!("q\nBT\n/ZaDb {} Tf\n{}\n{} {} Td\n", n(size), da.color, n(x), n(y)).bytes());
+        content.extend(literal(&[code]));
+        content.extend_from_slice(b" Tj\nET\nQ\n");
+        let mut font = Dict::new();
+        font.set(b"Type".to_vec(), Object::name("Font"));
+        font.set(b"Subtype".to_vec(), Object::name("Type1"));
+        font.set(b"BaseFont".to_vec(), Object::name("ZapfDingbats"));
+        let mut fonts = Dict::new();
+        fonts.set(b"ZaDb".to_vec(), Object::Dict(font));
+        res.set(b"Font".to_vec(), Object::Dict(fonts));
+    }
+    let mut d = Dict::new();
+    d.set(b"Type".to_vec(), Object::name("XObject"));
+    d.set(b"Subtype".to_vec(), Object::name("Form"));
+    set_form_box(&mut d, place);
+    d.set(b"Resources".to_vec(), Object::Dict(res));
+    Stream::flate(d, &content)
+}
+
+/// How a push button widget `w` of field `f` with no normal appearance looks: its `/MK`
+/// background and border, in the `/BS` width and style ([`frame`]: Table 168, `B` beveled, `I`
+/// inset), with its caption `/MK /CA` (Table 192) centred in the `/DA` font, size and colour.
+/// A button with an icon (`/MK /I`) is drawn as PdfCraft draws its own buttons, icon included.
+pub(crate) fn push_button_shown(doc: &Document, f: &Field, w: &Widget) -> Stream {
+    let wobj = doc.get(w.obj);
+    let wd = wobj.as_dict().cloned().unwrap_or_default();
+    let mk = wd.get(b"MK").map(|m| doc.resolve(m)).and_then(|m| m.as_dict().cloned()).unwrap_or_default();
+    if mk.contains(b"I") {
+        return crate::author::button_appearance(doc, w, &f.da).0;
+    }
+    let (page_w, page_h) = ((w.rect[2] - w.rect[0]).max(1.0), (w.rect[3] - w.rect[1]).max(1.0));
+    let place = placement(mk_rotation(doc, &wd), page_w, page_h);
+    let (width, height) = (place.layout_w, place.layout_h);
+    let (frame_c, _) = frame(doc, &wd, width, height);
+    let mut content = frame_c.into_bytes();
+    let caption = mk.get(b"CA").and_then(|o| doc.resolve(o).as_string().map(|s| s.to_text())).unwrap_or_default();
+    let mut fonts = Dict::new();
+    if !caption.is_empty() && mk.get(b"TP").and_then(|t| doc.resolve(t).as_int()) != Some(1) {
+        let da = wd.get(b"DA").and_then(|o| doc.resolve(o).as_string().map(|s| s.to_text()));
+        // The automatic size PdfCraft's own buttons use.
+        let auto = ((height - 4.0) * 0.6).clamp(4.0, 14.0);
+        let (ops, name, font, _) = button_caption(doc, da.as_deref().unwrap_or(&f.da), &caption, width, height, auto);
+        content.extend(ops);
+        fonts.set(name.into_bytes(), font);
+    }
+    let mut res = Dict::new();
+    res.set(b"Font".to_vec(), Object::Dict(fonts));
+    let mut d = Dict::new();
+    d.set(b"Type".to_vec(), Object::name("XObject"));
+    d.set(b"Subtype".to_vec(), Object::name("Form"));
+    set_form_box(&mut d, place);
+    d.set(b"Resources".to_vec(), Object::Dict(res));
+    Stream::flate(d, &content)
 }
 
 #[cfg(test)]

@@ -1420,11 +1420,14 @@ pub fn need_appearances(doc: &Document) -> bool {
     acroform(doc).is_some_and(|af| matches!(af.get(b"NeedAppearances").map(|o| doc.resolve(o)).as_deref(), Some(Object::Bool(true))))
 }
 
-/// A copy of `doc` in which text and choice fields are drawn from their values, for displaying
-/// the document (`None` when no widget needs it): every such widget when the form sets
-/// `/NeedAppearances` (ISO 32000-2 Table 224: the writer left the appearances to the viewer),
-/// and otherwise each widget without a normal appearance (`/AP /N`). Drawn as typing the value
-/// would draw it (#3470). `doc` is not changed: saving writes the file as it was.
+/// A copy of `doc` in which form fields are drawn the way the file leaves to the viewer, for
+/// displaying the document (`None` when no widget needs it). Text and choice fields are drawn from
+/// their values: every one when the form sets `/NeedAppearances` (ISO 32000-2 Table 224: the
+/// writer left the appearances to the viewer), and otherwise each widget without a normal
+/// appearance (`/AP /N`), as typing the value would draw it (#3470). Check boxes and radio buttons
+/// with no normal appearance for their state (`/AS`) are drawn from their `/MK` background, border
+/// and caption, and push buttons with none from their `/MK` and `/BS` (Table 192). `doc` is not
+/// changed: saving writes the file as it was.
 pub fn with_field_appearances(doc: &Document) -> Option<Document> {
     with_field_appearances_cached(doc, &mut FieldAppearanceCache::default())
 }
@@ -1434,18 +1437,45 @@ pub fn with_field_appearances(doc: &Document) -> Option<Document> {
 pub fn with_field_appearances_cached(doc: &Document, cache: &mut FieldAppearanceCache) -> Option<Document> {
     let all = need_appearances(doc);
     let mut copy: Option<Document> = None;
-    for f in fields(doc).iter().filter(|f| matches!(f.kind, FieldKind::Text | FieldKind::Combo | FieldKind::List)) {
+    for f in fields(doc) {
         for w in &f.widgets {
             let widget = doc.get(w.obj);
-            let drawn = widget.as_dict().and_then(|d| d.get(b"AP")).is_some_and(|ap| doc.resolve(ap).as_dict().is_some_and(|ap| ap.contains(b"N")));
-            if drawn && !all {
+            let normal = widget
+                .as_dict()
+                .and_then(|d| d.get(b"AP"))
+                .and_then(|ap| doc.resolve(ap).as_dict().and_then(|ap| ap.get(b"N").map(|n| doc.resolve(n))));
+            // A check box or radio button shows the appearance of its state (12.7.5.2.3): `/AS`,
+            // else a check box's value, else Off. An Off state may go without one (it shows
+            // nothing); an on state needs one.
+            let state = match f.kind {
+                FieldKind::CheckBox | FieldKind::Radio => {
+                    let value = f.value.first().filter(|v| f.kind == FieldKind::CheckBox && !v.is_empty() && v.as_str() != "Off");
+                    Some(w.state.clone().or_else(|| value.cloned()).unwrap_or_else(|| "Off".into()))
+                }
+                _ => None,
+            };
+            let missing = match f.kind {
+                FieldKind::Text | FieldKind::Combo | FieldKind::List => normal.is_none() || all,
+                FieldKind::PushButton => normal.is_none(),
+                FieldKind::CheckBox | FieldKind::Radio => match (normal.as_deref(), state.as_deref()) {
+                    (None, _) => true,
+                    (Some(Object::Dict(states)), Some(s)) => s != "Off" && !states.contains(&name_bytes(s)),
+                    _ => false,
+                },
+                FieldKind::Signature => false,
+            };
+            if !missing {
                 continue;
             }
             let inputs = appearance_inputs(doc, w);
             let stream = match cache.get(w.obj, &inputs) {
                 Some(stream) => stream,
                 None => {
-                    let (stream, _) = appearance::field_appearance_drawn(doc, f, w, &f.value, true);
+                    let stream = match f.kind {
+                        FieldKind::CheckBox | FieldKind::Radio => appearance::button_state_shown(doc, &f, w, state.as_deref() != Some("Off")),
+                        FieldKind::PushButton => appearance::push_button_shown(doc, &f, w),
+                        _ => appearance::field_appearance_drawn(doc, &f, w, &f.value, true).0,
+                    };
                     cache.insert(w.obj, inputs, &stream);
                     stream
                 }
@@ -1453,10 +1483,25 @@ pub fn with_field_appearances_cached(doc: &Document, cache: &mut FieldAppearance
             let target = copy.get_or_insert_with(|| doc.clone());
             let ap = target.add(Object::Stream(stream));
             let mut fresh = Dict::new();
-            fresh.set(b"N".to_vec(), Object::Ref(ap));
+            match &state {
+                // The drawn look under its state's name, and that state as the widget's own.
+                Some(s) => {
+                    let mut states = Dict::new();
+                    states.set(name_bytes(s), Object::Ref(ap));
+                    fresh.set(b"N".to_vec(), Object::Dict(states));
+                }
+                None => fresh.set(b"N".to_vec(), Object::Ref(ap)),
+            }
             let apd = merged_appearance(target, w.obj, &fresh);
             // Fails only when the widget isn't a dictionary; that widget then keeps its own look.
-            target.update_dict(w.obj, |d| d.set(b"AP".to_vec(), Object::Dict(apd))).ok();
+            target
+                .update_dict(w.obj, |d| {
+                    d.set(b"AP".to_vec(), Object::Dict(apd));
+                    if let Some(s) = &state {
+                        d.set(b"AS".to_vec(), Object::Name(name_bytes(s)));
+                    }
+                })
+                .ok();
         }
     }
     copy
