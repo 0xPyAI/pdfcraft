@@ -649,15 +649,17 @@ impl Layouter<'_> {
         if self.frames.is_empty() || !placed || y + h <= rect.bottom() + 0.01 || h > rect.h + 0.01 {
             return Ok(());
         }
-        self.break_frames()
+        self.break_frames(h)
     }
 
     /// Break the flowed subforms being laid out ([`Self::frames`]) across content areas, as
     /// another viewer breaks such a section on a synthetic form: each one's part here ends after
     /// its content and its bottom margin (the innermost first, each inside the next), the flow
     /// moves to the next content area, and each starts a new part there after its top margin
-    /// (the outermost first).
-    fn break_frames(&mut self) -> Result<(), XfaError> {
+    /// (the outermost first). The top margins take only what the `need` points of the child that
+    /// comes next leave of the new area: a child that fits a fresh area but not after the margins
+    /// would otherwise run past its bottom, out of its border.
+    fn break_frames(&mut self, need: f64) -> Result<(), XfaError> {
         let (rect, mut y, _) = self.cursor();
         let page = self.pages.len().saturating_sub(1);
         let here: Vec<bool> = self.frames.iter().map(|f| self.on_area(&f.part)).collect();
@@ -671,11 +673,15 @@ impl Layouter<'_> {
             }
         }
         self.next_area()?;
+        let (rect, y, _) = self.cursor();
+        let mut room = (rect.bottom() - y - need).max(0.0);
         for i in 0..self.frames.len() {
             let Some(mark) = self.flow_mark() else { break };
             let Some(f) = self.frames.get_mut(i) else { break };
             f.part = mark;
-            let top = f.margin.top;
+            // `max` before `min`: a NaN margin counts as none and leaves `room` a number.
+            let top = f.margin.top.max(0.0).min(room);
+            room = (room - top).max(0.0);
             self.advance(top);
         }
         Ok(())

@@ -2117,6 +2117,16 @@ fn a_flowed_subform_is_drawn_with_its_border_under_its_content() {
     assert!(form.pages.len() >= 2, "the long text runs onto another page");
     assert!(form.pages.iter().all(|p| !p.items.iter().any(|i| matches!(i, Item::Fill { .. }))), "no fill drawn");
     assert_eq!(form.warnings.iter().filter(|w| w.contains("bordered section")).count(), 1, "{:?}", form.warnings);
+    // A field that fits a fresh page (720pt) but not after the 7.2pt top margin: the margin
+    // gives way, so the field ends at the content area's bottom, inside the second part.
+    let tall = r#"<field name="tall" w="3in" h="715pt"><ui><textEdit/></ui></field>"#;
+    let form = lay(&boxed(&(field("a") + tall)));
+    assert_eq!(form.pages.len(), 2);
+    let tall = form.pages[1].items.iter().find_map(|i| if let Item::Widget(w) = i { (w.name == "tall").then_some(w.rect) } else { None }).unwrap();
+    assert!(tall.bottom() <= 756.01, "the field stays in the content area: {tall:?}");
+    let part = form.pages[1].items.iter().find_map(|i| if let Item::Fill { rect, .. } = i { Some(*rect) } else { None }).expect("the second part");
+    assert!(part.y <= tall.y + 0.01 && part.bottom() >= tall.bottom() - 0.01, "the border holds the field: {part:?} {tall:?}");
+    assert!(form.warnings.is_empty(), "{:?}", form.warnings);
 }
 
 #[test]
