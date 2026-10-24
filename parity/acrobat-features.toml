@@ -1670,8 +1670,8 @@ milestone = "M3"
 status = "shipped"
 commands = ["view.theme.system"]
 tools = []
-evidence = ["crates/ui-egui/tests/it/theme.rs::toolbar_and_view_menu_share_three_state_preferences", "crates/ui-egui/tests/it/theme.rs::saved_preferences_restore_with_legacy_light_dark_settings", "crates/ui-egui/tests/it/control.rs::theme_commands_and_options_report_preference_and_effective_colours"]
-notes = "Toolbar, Display theme and --theme system share a persisted System preference that follows OS changes without losing the selected mode; ui.state reports preference and resolved colours separately."
+evidence = ["crates/ui-egui/tests/it/theme.rs::a_fresh_install_follows_the_system_theme", "crates/ui-egui/tests/it/theme.rs::toolbar_and_view_menu_share_three_state_preferences", "crates/ui-egui/tests/it/theme.rs::saved_preferences_restore_with_legacy_light_dark_settings", "crates/ui-egui/tests/it/control.rs::theme_commands_and_options_report_preference_and_effective_colours"]
+notes = "Toolbar, Display theme and --theme system share a persisted System preference that follows OS changes without losing the selected mode; ui.state reports preference and resolved colours separately. System is the default on a fresh install (#1248), Light where the desktop says nothing; a saved choice wins."
 
 [[feature]]
 id = "view.home-view"
