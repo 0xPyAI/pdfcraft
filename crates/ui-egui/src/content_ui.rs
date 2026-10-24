@@ -537,6 +537,16 @@ pub(crate) fn editor(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, ad
     }
     let r = screen_rect(&xf, info, page, draft.rect);
     let source_rect = draft.index.map(|_| screen_rect(&xf, info, page, draft.style.rect));
+    // At least 60 points wide, so a short box can still be clicked into. Where that is wider than
+    // the box, the editor reaches past it away from the edge its text keeps (the right edge for
+    // right-aligned text, both halves for centred), so the text stays where the page draws it.
+    let width = r.width().max(60.0);
+    let anchor = match draft.style.align {
+        pdfcraft_engine::TextAlign::Center => 0.5,
+        pdfcraft_engine::TextAlign::Right => 1.0,
+        pdfcraft_engine::TextAlign::Left | pdfcraft_engine::TextAlign::Justify => 0.0,
+    };
+    let at = r.min - egui::vec2((width - r.width()) * anchor, 0.0);
     let background_ready = draft.index.is_some_and(|index| view.text_background.ready_added(page, index));
     let tokens = Tokens::get(ctx);
     let (mut commit, mut cancel, mut done) = (false, false, false);
@@ -548,7 +558,7 @@ pub(crate) fn editor(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, ad
     egui::Area::new(egui::Id::new(("added-text", view.id.0)))
         .fade_in(false)
         .order(egui::Order::Foreground)
-        .fixed_pos(r.min)
+        .fixed_pos(at)
         .constrain_to(view.viewport_rect())
         .constrain(false)
         .show(ctx, |ui| {
@@ -560,13 +570,21 @@ pub(crate) fn editor(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, ad
             // The box is white in every theme, so the caret must not follow the theme (pale in dark mode) (#655).
             ui.visuals_mut().text_cursor.stroke.color = crate::edit_text_ui::caret_color_on(Color32::WHITE);
             let [cr, cg, cb] = t.style.color.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
+            // Laid out as the page draws it, so opening the box doesn't show it realigned.
+            // shortcut: justified text is shown left-aligned here (TextEdit can't justify), until the editor gets its own layouter.
+            let halign = match t.style.align {
+                pdfcraft_engine::TextAlign::Center => egui::Align::Center,
+                pdfcraft_engine::TextAlign::Right => egui::Align::Max,
+                pdfcraft_engine::TextAlign::Left | pdfcraft_engine::TextAlign::Justify => egui::Align::Min,
+            };
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 let resp = ui.add(
                     egui::TextEdit::multiline(&mut t.text)
                         .font(font)
-                        .desired_width(r.width().max(60.0))
+                        .desired_width(width)
                         .desired_rows(1)
+                        .horizontal_align(halign)
                         .background_color(if background_ready { Color32::TRANSPARENT } else { Color32::WHITE })
                         .text_color(Color32::from_rgb(cr, cg, cb))
                         .hint_text(tl!("Type text"))
