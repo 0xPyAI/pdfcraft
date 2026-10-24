@@ -8,6 +8,7 @@
 > **Last reviewed:** 2026-10-23 | **Last updated:** 2026-10-23 | **Change:** minor (M10: Word table cells use the widths of their own grid columns; estimates unchanged)
 > **Last reviewed:** 2026-10-23 | **Last updated:** 2026-10-23 | **Change:** minor (M10: table spans retain text from covered slots in Office exports; estimates unchanged)
 > **Last reviewed:** 2026-10-23 · **Last updated:** 2026-10-23 · **Change:** minor (M10: image export preserves soft-mask Decode opacity ranges; estimates unchanged)
+> **Last reviewed:** 2026-10-23 · **Last updated:** 2026-10-23 · **Change:** minor (M10: vector printing preserves existing page XObjects when adding annotation appearances; estimates unchanged)
 > **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (M3, #3808: the Pages inspector has an independent 50–150% thumbnail size slider and buttons; selection and current-page following are retained, with headless ui.set coverage. Estimates unchanged.)
 > **Last reviewed:** 2026-10-20 | **Last updated:** 2026-10-20 | **Change:** minor (M11 #3507: image merging preserves content stream boundaries; estimates unchanged)
 > **Last reviewed:** 2026-10-20 | **Last updated:** 2026-10-20 | **Change:** minor (M10, #3532 partial: vector printing retains existing appearances with absent Subtype; estimates unchanged)
@@ -209,8 +210,12 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
   Synthetic regressions check every input fragment survives exactly once in Word, HTML, RTF and PowerPoint, while ordinary superscripts stay in their table cells.
 - **2026-10-23 (M10, image export):** Soft-mask Decode intervals preserve partial opacity in Export all images and Save Image As.
   Synthetic regressions cover direct and indirect ranges, inverted/subrange alpha, packed masks, JPEG masks and unchanged image component Decode.
+- **2026-10-23 (M10, print resources):** Vector printing preserves original page artwork when existing XObjects use annotation resource names.
+  The regression checks two distinct appearances, inherited resources, print/reopen pixels and unchanged source data.
+  Estimates unchanged.
 - **2026-10-21 (M3, window resize and move on Wayland):** With PdfCraft's own title bar on GNOME/Wayland, a second resize by a window edge, or a second move by the empty tab strip, works straight after the first; it waited for a click inside the window, because the compositor keeps the button's release from egui. A unit test covers the release given back; checked by hand in a test build. Estimates unchanged.
 - **2026-10-22 (M4, #3916 partial):** Document edits and Undo/Redo cancel an Organize page drag. Pointer-release regressions check exact page order and save/reopen.
+- **2026-10-22 (M10, #3752 paper):** CUPS jobs ask for the chosen paper in every size. The 13 sizes the Print dialog sent no paper for (A6, A0–A2, ARCH, ANSI C–E) use PWG 5101.1 names, checked against a synthetic PPD with `cupsfilter`, and `doc_print` to a printer sends the paper too. The macOS tray half (Auto Select instead of the PPD's default tray) is a craft-print change that needs a pin bump here. Estimates unchanged.
 - **2026-10-22 (M14, macOS association recovery candidate):** Successful desktop open/save/sign can queue recovery of an existing per-file binding to the running PDFCraft bundle through NSWorkspace. Metadata-only watcher changes retain undo and avoid false overwrite prompts; real same-length/same-mtime edits remain protected. Rebased on 0.12.0 and reuses #3042's shared atomic metadata preservation; the bounded recovery parser does not narrow save limits. Prior native Preview TEST-signature and Finder workflows passed on macOS 27.0.1; other versions remain unqualified. Estimates unchanged.
 - **2026-10-13 (M7, free image rotation):** A selected page image has a rotate knob (Shift: 15 degree steps) and `image_edit` a `rotate_by` action; the angle is written as one undoable `cm`. Snapping to page edges while moving is in #1740; resize snapping is not done. Estimates unchanged.
 
@@ -672,6 +677,7 @@ Newest first: the date, what moved, and the new overall estimate.
 | 2026-10-23 | minor | M10: Word table cells use the grid columns they span, including cells after a merged cell; synthetic export regression and CLI reproduction. Estimates unchanged. |
 | 2026-10-23 | minor | M10: covered table slots retain their text in paragraph flow across Office exporters; emitted superscripts remain in their cells. Synthetic source and CLI regressions; estimates unchanged. |
 | 2026-10-23 | minor | M10: Export all images and Save Image As apply soft-mask Decode intervals to PNG alpha before resizing, including inverted/subrange, indirect, packed and JPEG masks. Estimates unchanged. |
+| 2026-10-23 | minor | M10: annotation appearances use unoccupied XObject names, preserving original page artwork and distinct appearances through inherited resources and print/reopen. Estimates unchanged. |
 | 2026-10-22 | minor | M4, #3916 partial: document edits and Undo/Redo cancel Organize drags. Pointer-release and save/reopen regressions check page order. Estimates unchanged. |
 | 2026-10-20 | minor | M4: initial-view window and interface options resolve indirect boolean ViewerPreferences values; synthetic true/false and save/reopen regressions retain defaults for malformed entries. Estimates unchanged. |
 | 2026-10-20 | minor | M6, #3502: form detection preserves comments across content streams; estimates unchanged. |

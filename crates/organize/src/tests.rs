@@ -931,9 +931,111 @@ fn links_are_rewired_to_copied_pages_or_dropped() {
     assert!(!link.contains(b"Dest") && !link.contains(b"A"));
 }
 
-/// A widget annotation that is its own form field (no `/Parent`).
-fn own_field(doc: &Document, r: ObjRef) -> bool {
-    doc.get(r).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Widget") && !d.contains(b"Parent"))
+/// Issue #1810: a widget that is its own field was shared between both copies of a repeated
+/// page, so only the last page could identify it (its `/P`), and per-page annotation edits were
+/// impossible. Each copy must get its own widget sharing one parent field (name and value).
+#[test]
+fn repeated_page_splits_a_combined_field_widget() {
+    let out = full_roundtrip(&extract_pages(&doc_a(), &[1, 1]).unwrap());
+    let ps = pages(&out).unwrap();
+    let widget = |i: usize| -> ObjRef {
+        let list = page_dict(&out, i).get(b"Annots").map(|a| out.resolve(a).as_array().cloned().unwrap_or_default()).unwrap_or_default();
+        list.iter()
+            .filter_map(|a| a.as_ref())
+            .find(|r| out.get(*r).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Widget")))
+            .expect("a widget annotation")
+    };
+    let (w1, w2) = (widget(0), widget(1));
+    assert_ne!(w1, w2, "each copy of the page has its own widget");
+    for (i, w) in [(0, w1), (1, w2)] {
+        let d = out.get(w).as_dict().unwrap().clone();
+        for key in [b"T".as_slice(), b"V", b"FT"] {
+            assert!(!d.contains(key), "a widget inherits field entries: {key:?}");
+        }
+        assert_eq!(d.reference(b"P"), Some(ps[i].obj), "/P names the page holding the widget");
+        let parent = d.reference(b"Parent").expect("the widget has a parent field");
+        let f = out.get(parent).as_dict().unwrap().clone();
+        assert_eq!(f.get(b"T").and_then(|v| v.as_string()).map(|s| s.to_text()).as_deref(), Some("name"));
+        assert_eq!(f.get(b"V").and_then(|v| v.as_string()).map(|s| s.to_text()).as_deref(), Some("Ada"));
+        let kids: Vec<ObjRef> =
+            f.get(b"Kids").and_then(|k| out.resolve(k).as_array().cloned()).unwrap_or_default().iter().filter_map(|k| k.as_ref()).collect();
+        assert!(kids.contains(&w1) && kids.contains(&w2), "one field holds both widgets: {kids:?}");
+        let fields: Vec<ObjRef> = catalog(&out)
+            .get(b"AcroForm")
+            .map(|f| out.resolve(f))
+            .and_then(|f| f.as_dict().cloned())
+            .and_then(|f| f.get(b"Fields").map(|x| out.resolve(x)))
+            .and_then(|f| f.as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|f| f.as_ref())
+            .collect();
+        assert_eq!(fields, [parent], "the parent is the one top-level field");
+    }
+}
+
+#[test]
+fn splitting_a_combined_widget_keeps_annotation_actions_and_field_triggers() {
+    let mut src = doc_a();
+    let page = pages(&src).unwrap()[1].obj;
+    let list = page_dict(&src, 1).get(b"Annots").and_then(|a| a.as_array()).cloned().unwrap();
+    let widget =
+        list.iter().filter_map(Object::as_ref).find(|r| src.get(*r).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Widget"))).unwrap();
+    let mut action = Dict::new();
+    action.set(b"S".to_vec(), Object::name("GoTo"));
+    action.set(b"D".to_vec(), Object::Array(vec![Object::Ref(page), Object::name("Fit")]));
+    let mut named = Dict::new();
+    named.set(b"S".to_vec(), Object::name("Named"));
+    named.set(b"N".to_vec(), Object::name("NextPage"));
+    let mut aa = Dict::new();
+    aa.set(b"E".to_vec(), Object::Dict(named.clone()));
+    aa.set(b"K".to_vec(), Object::Dict(named));
+    let aa = src.add(Object::Dict(aa));
+    src.update_dict(widget, |d| {
+        d.set(b"A".to_vec(), Object::Dict(action));
+        d.set(b"AA".to_vec(), Object::Ref(aa));
+    })
+    .unwrap();
+    let out = full_roundtrip(&extract_pages(&src, &[1, 1]).unwrap());
+    let ps = pages(&out).unwrap();
+    for i in 0..2 {
+        let w = annots(&out, i).into_iter().find(|d| d.name(b"Subtype") == Some(b"Widget")).unwrap();
+        let action = out.resolve(w.get(b"A").expect("the widget keeps its action"));
+        let dest = action.as_dict().unwrap().get(b"D").and_then(|a| a.as_array()).unwrap()[0].as_ref().unwrap();
+        assert!(ps.iter().any(|p| p.obj == dest), "the action targets a copied page");
+        let waa = out.resolve(w.get(b"AA").expect("widget triggers"));
+        assert!(waa.as_dict().unwrap().contains(b"E"));
+        assert!(!waa.as_dict().unwrap().contains(b"K"));
+        let parent = out.get(w.reference(b"Parent").unwrap()).as_dict().unwrap().clone();
+        assert!(!parent.contains(b"A"));
+        let faa = out.resolve(parent.get(b"AA").expect("field triggers"));
+        assert!(faa.as_dict().unwrap().contains(b"K"));
+        assert!(!faa.as_dict().unwrap().contains(b"E"));
+    }
+}
+
+#[test]
+fn splitting_a_combined_widget_keeps_its_annotation_only_keys() {
+    let mut src = doc_a();
+    let list = page_dict(&src, 1).get(b"Annots").and_then(|a| a.as_array()).cloned().unwrap();
+    let widget =
+        list.iter().filter_map(Object::as_ref).find(|r| src.get(*r).as_dict().is_some_and(|d| d.name(b"Subtype") == Some(b"Widget"))).unwrap();
+    src.update_dict(widget, |d| {
+        d.set(b"Contents".to_vec(), Object::String(PdfString::text("alt text")));
+        d.set(b"BM".to_vec(), Object::name("Multiply"));
+        d.set(b"Lang".to_vec(), Object::String(PdfString::text("en-US")));
+        d.set(b"AF".to_vec(), Object::Array(Vec::new()));
+    })
+    .unwrap();
+    let out = full_roundtrip(&extract_pages(&src, &[1, 1]).unwrap());
+    for i in 0..2 {
+        let w = annots(&out, i).into_iter().find(|d| d.name(b"Subtype") == Some(b"Widget")).unwrap();
+        let parent = out.get(w.reference(b"Parent").unwrap()).as_dict().unwrap().clone();
+        for key in [b"Contents".as_slice(), b"BM", b"Lang", b"AF"] {
+            assert!(w.contains(key), "the widget keeps {key:?}");
+            assert!(!parent.contains(key), "the parent field does not take {key:?}");
+        }
+    }
 }
 
 #[test]
@@ -949,15 +1051,11 @@ fn repeated_page_gets_independent_annotations() {
         assert!(!refs[i].is_empty());
         assert_eq!(refs[i].len(), refs[i + 1].len());
         for (a, b) in refs[i].iter().zip(&refs[i + 1]) {
-            // A widget that is its own field stays one object on both pages, so the field stays
-            // one (#790); every other annotation is copied.
-            if !own_field(&out, *a) {
-                assert_ne!(a, b, "each copy of the page has its own annotation objects");
-            }
+            assert_ne!(a, b, "each copy of the page has its own annotation objects");
         }
     }
     for (i, list) in refs.iter().enumerate() {
-        for a in list.iter().filter(|a| !own_field(&out, **a)) {
+        for a in list.iter() {
             assert_eq!(out.get(*a).as_dict().unwrap().reference(b"P"), Some(ps[i].obj), "/P names the page holding the copy");
         }
     }
@@ -978,7 +1076,10 @@ fn form_fields_come_along_and_are_registered() {
     assert_eq!(fields.len(), 1);
     let field = out.resolve(&fields[0]).as_dict().cloned().unwrap();
     assert_eq!(field.get(b"V").and_then(|v| v.as_string()).map(|s| s.to_text()).as_deref(), Some("Ada"));
-    assert_eq!(field.reference(b"P"), Some(pages(&out).unwrap()[0].obj));
+    // The widget child, not the field, names the page (#1810).
+    let kid =
+        field.get(b"Kids").map(|k| out.resolve(k)).and_then(|k| k.as_array().cloned()).and_then(|k| k.first().and_then(|k| k.as_ref())).unwrap();
+    assert_eq!(out.get(kid).as_dict().unwrap().reference(b"P"), Some(pages(&out).unwrap()[0].obj));
 }
 
 #[test]
@@ -2850,8 +2951,9 @@ fn import_renames_a_field_colliding_with_another_incoming_field() {
     assert_eq!(form_field_names(&dst), ["Other", "Text1", "Text1-1"]);
 }
 
-/// A page listed twice shows its widget on both copies — also when the field was renamed: both
-/// pages' widgets belong to the one renamed field, and no second Text1 appears.
+/// A page listed twice shows its widget on both copies — also when the field was renamed: each
+/// copy has its own widget, both widgets belong to the one renamed field (#1810), and no second
+/// Text1 appears.
 #[test]
 fn a_repeated_page_joins_the_renamed_field() {
     let mut dst = doc_with_field("Text1");
@@ -2868,10 +2970,14 @@ fn a_repeated_page_joins_the_renamed_field() {
         .and_then(|l| l.as_array().cloned())
         .unwrap();
     let renamed = fields[1].clone();
+    let mut widgets = Vec::new();
     for page in [1, 2] {
         let list = page_dict(&dst, page).get(b"Annots").map(|a| dst.resolve(a)).and_then(|a| a.as_array().cloned()).unwrap();
-        assert!(list.contains(&renamed), "page {page}'s widget belongs to the renamed field");
+        let widget = list.iter().find_map(|a| a.as_ref()).expect("a widget on the page");
+        widgets.push(widget);
+        assert_eq!(dst.get(widget).as_dict().unwrap().reference(b"Parent"), renamed.as_ref(), "page {page}'s widget belongs to the renamed field");
     }
+    assert_ne!(widgets[0], widgets[1], "each copy has its own widget");
 }
 
 /// Combining forms keeps same-named fields separate — the second file's colliding field is

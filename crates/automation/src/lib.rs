@@ -424,7 +424,7 @@ impl Automation {
             "page_replace" => {
                 let pages = self.pages(&a, "pages")?;
                 let path = self.resolve(a.str("path")?, false)?;
-                let bytes = Arc::new(std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?);
+                let bytes = Arc::new(read_input(&path)?);
                 let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 let src_pages = match a.opt_ints("from_pages")? {
                     Some(p) => one_based(&p)?,
@@ -573,7 +573,7 @@ impl Automation {
                         "delete" => ImageEdit::Delete,
                         "replace" => {
                             let path = self.resolve(a.str("path")?, false)?;
-                            let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+                            let bytes = read_input(&path)?;
                             ImageEdit::Replace {
                                 name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
                                 bytes: Arc::new(bytes),
@@ -803,7 +803,7 @@ impl Automation {
             "form_fill" => self.form_fill(&a)?,
             "form_set_image" => {
                 let path = self.resolve(a.str("path")?, false)?;
-                let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+                let bytes = read_input(&path)?;
                 self.apply(&a, Edit::SetFieldImage { name: a.str("field")?.to_owned(), image: Arc::new(bytes) })?
             }
             "form_reset" => self.form_reset(&a)?,
@@ -1038,7 +1038,7 @@ impl Automation {
 
     fn doc_open(&mut self, a: &Args) -> Result<Value> {
         let path = self.resolve(a.str("path")?, false)?;
-        let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+        let bytes = read_input(&path)?;
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let id = self.session.open(name, Some(path.to_string_lossy().into_owned()), Arc::new(bytes), a.opt_str("password")?).map_err(failed)?;
         let doc = self.session.get(id).ok_or_else(|| failed("the document vanished"))?;
@@ -1330,7 +1330,7 @@ impl Automation {
     fn mark_file(&self, a: &Args) -> Result<Option<pdfcraft_engine::MarkFile>> {
         let Some(p) = a.opt_str("file")? else { return Ok(None) };
         let path = self.resolve(p, false)?;
-        let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+        let bytes = read_input(&path)?;
         let page = a.opt_int("file_page")?.unwrap_or(1).max(1) as usize - 1;
         Ok(Some(pdfcraft_engine::MarkFile {
             name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -1504,7 +1504,7 @@ impl Automation {
                 let mut images = Vec::new();
                 for p in a.strs("paths")? {
                     let path = self.resolve(p, false)?;
-                    let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+                    let bytes = read_input(&path)?;
                     images.push((path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), bytes));
                 }
                 let name = if images.len() == 1 {
@@ -1519,7 +1519,7 @@ impl Automation {
                     (Some(t), _) => ("Text".to_string(), t.to_string()),
                     (None, Some(p)) => {
                         let path = self.resolve(p, false)?;
-                        let t = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+                        let t = read_input(&path)?;
                         (path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), pdfcraft_engine::decode_text(&t))
                     }
                     (None, None) => return Err(ToolError::InvalidArgs("text needs `text` or `path`".into())),
@@ -1694,7 +1694,7 @@ impl Automation {
     fn insert_file(&mut self, a: &Args) -> Result<Value> {
         let at = self.position(a, "at")?;
         let path = self.resolve(a.str("path")?, false)?;
-        let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+        let bytes = read_input(&path)?;
         let pages = a.opt_ints("pages")?.map(|p| one_based(&p)).transpose()?;
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         self.apply(a, Edit::InsertPagesFrom { name, bytes: Arc::new(bytes), pages, at, field_conflicts: pdfcraft_organize::FieldConflicts::Rename })
@@ -1737,7 +1737,7 @@ impl Automation {
         // Each file is read, converted and copied in turn, so a long list holds one file at a time.
         let sources = paths.into_iter().zip(ranges).map(|(p, range)| -> std::result::Result<pdfcraft_engine::CombineSource, ToolError> {
             let path = self.resolve(p, false)?;
-            let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+            let bytes = read_input(&path)?;
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let (_, pdf) = self.session.convert_to_pdf(&name, &Arc::new(bytes)).map_err(failed)?;
             let title = path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -1754,7 +1754,7 @@ impl Automation {
         let mut out = Vec::new();
         for &p in paths {
             let converted = self.resolve(p, false).map_err(|e| e.to_string()).and_then(|src| {
-                let bytes = std::fs::read(&src).map_err(|e| format!("{}: {e}", src.display()))?;
+                let bytes = read_input_bytes(&src).map_err(|e| format!("{}: {e}", src.display()))?;
                 let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 let stem = src.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
                 let (kind, pdf) = self.session.convert_to_pdf(&name, &Arc::new(bytes)).map_err(|e| e.to_string())?;
@@ -1858,7 +1858,7 @@ impl Automation {
                     if let Some(g) = group {
                         firsts.push((g, path.clone(), sources.len()));
                     }
-                    let bytes = Arc::new(std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?);
+                    let bytes = Arc::new(read_input(&path)?);
                     // Images and text files are made into PDFs first (#569), as in the Combine files tab.
                     let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     self.session.as_pdf(&file_name, &bytes).map_err(failed)?
@@ -2772,6 +2772,28 @@ fn unused(dir: &Path, stem: &str) -> PathBuf {
     (2..10_000u32).map(|n| child(dir, &format!("{stem} ({n}).pdf"))).find(|p| !p.exists()).unwrap_or(first)
 }
 
+/// Largest input file a tool reads into memory (512 MiB, matching `doc_batch`).
+pub(crate) const MAX_INPUT: u64 = 512 * 1024 * 1024;
+
+/// Read a resolved input file of at most [`MAX_INPUT`] bytes without buffering past the cap.
+pub(crate) fn read_input_bytes(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read as _;
+    let file = std::fs::File::open(path)?;
+    if file.metadata().is_ok_and(|m| m.is_file() && m.len() > MAX_INPUT) {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "input exceeds 512 MiB"));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_INPUT + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_INPUT {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "input exceeds 512 MiB"));
+    }
+    Ok(bytes)
+}
+
+pub(crate) fn read_input(path: &Path) -> Result<Vec<u8>> {
+    read_input_bytes(path).map_err(|e| failed(format!("{}: {e}", path.display())))
+}
+
 /// Write and sync a temporary file in the same directory, then rename over the target.
 /// This flushes staged contents; it does not promise parent-directory durability after a
 /// power loss. Filesystems that refuse sync cause the save to fail before publication.
@@ -3328,5 +3350,36 @@ mod tests {
             json(&mut a, "doc_close", json!({"doc": id.0, "discard_changes": true}));
             assert!(a.session.get(id).is_none());
         }
+    }
+
+    #[test]
+    fn tool_file_reads_refuse_inputs_exceeding_512_mib() {
+        let dir = staging_dir("capped-read");
+        let huge = dir.join("huge.bin");
+        let file = std::fs::File::create(&huge).unwrap();
+        file.set_len(MAX_INPUT + 1).unwrap();
+        drop(file);
+        let huge_str = huge.to_string_lossy().into_owned();
+
+        let mut a = Automation::new();
+        let id = a.session.open("a.pdf", None, Arc::new(numbered_pages(2)), None).unwrap().0;
+        for (tool, args) in [
+            ("doc_open", json!({ "path": huge_str })),
+            ("page_insert_file", json!({ "doc": id, "at": 1, "path": huge_str })),
+            ("page_replace", json!({ "doc": id, "pages": [1], "path": huge_str })),
+            ("page_add_image", json!({ "doc": id, "page": 1, "path": huge_str })),
+            ("doc_import_data", json!({ "doc": id, "path": huge_str })),
+            ("doc_create", json!({ "from": "text", "path": huge_str })),
+            ("doc_create", json!({ "from": "images", "paths": [huge_str] })),
+            ("doc_combine", json!({ "paths": [huge_str, huge_str] })),
+            ("form_merge_data", json!({ "paths": [huge_str], "path": dir.join("out.csv").to_string_lossy() })),
+            ("comment_add", json!({ "doc": id, "page": 1, "type": "attachment", "at": [72.0, 72.0], "path": huge_str })),
+            ("stamp_custom", json!({ "doc": id, "page": 1, "at": [72.0, 72.0], "path": huge_str })),
+            ("sign_trust", json!({ "paths": [huge_str] })),
+        ] {
+            let err = a.call(tool, &args).unwrap_err().to_string();
+            assert!(err.contains("input exceeds 512 MiB"), "{tool}: {err}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

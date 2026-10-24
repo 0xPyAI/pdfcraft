@@ -1286,8 +1286,8 @@ milestone = "M4"
 status = "shipped"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/it/editing.rs::dragging_pages_panel_thumbnails_reorders_pages", "crates/ui-egui/tests/it/viewer.rs::pages_panel_thumbnails_have_a_context_menu", "crates/ui-egui/tests/it/editing.rs::deleting_pages_from_the_pages_panel_menu", "crates/ui-egui/tests/it/editing.rs::the_delete_key_deletes_pages_picked_in_the_pages_panel_but_never_every_page"]
-notes = "Drag the selection (or the page grabbed) to reorder, with a drop bar and edge scrolling; right-click offers Extract pages, Cut, Copy, Paste after and Delete pages (also the Delete key over the panel). Not yet: Rotate, Insert and Page labels in the menu, dragging pages between documents, or dropping files onto the panel."
+evidence = ["crates/ui-egui/tests/it/editing.rs::dragging_pages_panel_thumbnails_reorders_pages", "crates/ui-egui/tests/it/viewer.rs::pages_panel_thumbnails_have_a_context_menu", "crates/ui-egui/tests/it/editing.rs::split_from_pages_panel_context_menu", "crates/ui-egui/tests/it/editing.rs::deleting_pages_from_the_pages_panel_menu", "crates/ui-egui/tests/it/editing.rs::the_delete_key_deletes_pages_picked_in_the_pages_panel_but_never_every_page"]
+notes = "Drag the selection (or the page grabbed) to reorder, with a drop bar and edge scrolling; right-click offers Split document…, Extract pages, Cut, Copy, Paste after and Delete pages (also the Delete key over the panel). Not yet: Rotate, Insert and Page labels in the menu, dragging pages between documents, or dropping files onto the panel."
 
 [[feature]]
 id = "view.bookmarks-panel"
@@ -2811,8 +2811,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["page.extract"]
 tools = ["page_extract"]
-evidence = ["crates/ui-egui/tests/it/editing.rs::extract_button_copies_selected_pages_to_a_new_tab", "crates/automation/tests/it/automation.rs::combine_extract_and_split", "crates/organize/src/tests.rs::extract_and_split_keep_the_pdfx_output_intent_and_identification"]
-notes = "Carries the PDF/X output intent and identification (#263) in a new XMP packet; the source XMP (dates, other schemas) is not copied."
+evidence = ["crates/ui-egui/tests/it/editing.rs::extract_button_copies_selected_pages_to_a_new_tab", "crates/automation/tests/it/automation.rs::combine_extract_and_split", "crates/organize/src/tests.rs::extract_and_split_keep_the_pdfx_output_intent_and_identification", "crates/ui-egui/tests/it/pickers.rs::extract_pages_takes_the_page_ranges_typed_in_the_dialog"]
+notes = "Carries the PDF/X output intent and identification (#263) in a new XMP packet; the source XMP (dates, other schemas) is not copied. The dialog's Pages field takes page ranges (\"1-5, 8, 11-13\", in the order typed, each page once) instead of the selection (#3593); page labels are not accepted there yet."
 
 [[feature]]
 id = "organize.extract-separate-files"
@@ -2943,7 +2943,7 @@ milestone = "M4"
 status = "shipped"
 commands = ["page.split"]
 tools = ["doc_split"]
-evidence = ["crates/ui-egui/tests/it/editing.rs::split_before_selected_pages"]
+evidence = ["crates/ui-egui/tests/it/editing.rs::split_before_selected_pages", "crates/ui-egui/tests/it/editing.rs::split_from_organize_grid_context_menu"]
 notes = ""
 
 [[feature]]
@@ -8000,8 +8000,8 @@ milestone = "M10"
 status = "shipped"
 commands = ["print.dialog"]
 tools = ["doc_print", "printers"]
-evidence = ["crates/ui-egui/tests/it/print.rs::paper_choice_survives_cancel_and_settings_restore", "crates/ui-egui/tests/it/print.rs::restored_paper_keeps_preview_and_saved_sheet_dimensions", "crates/ui-egui/tests/it/print.rs::print_dialog_lays_out_sheets_and_saves_a_pdf", "crates/engine/src/tests.rs::printing_lays_out_sheets_that_render", "crates/ui-egui/src/web_print.rs::a_job_draws_every_sheet_at_its_planned_resolution_then_builds_the_page", "crates/ui-egui/src/web_print.rs::the_print_page_turns_sideways_sheets_names_other_sizes_and_ends_without_a_blank_page"]
-notes = "⌘P; settings and live sheet preview; on the web the same dialog prints through the browser's print dialog; last paper selection, including cancelled Print dialogs, persists by canonical name; this change does not alter persistence of other print preferences"
+evidence = ["crates/ui-egui/tests/it/print.rs::paper_choice_survives_cancel_and_settings_restore", "crates/ui-egui/tests/it/print.rs::restored_paper_keeps_preview_and_saved_sheet_dimensions", "crates/ui-egui/tests/it/print.rs::print_dialog_lays_out_sheets_and_saves_a_pdf", "crates/engine/src/tests.rs::printing_lays_out_sheets_that_render", "crates/ui-egui/src/web_print.rs::a_job_draws_every_sheet_at_its_planned_resolution_then_builds_the_page", "crates/ui-egui/src/web_print.rs::the_print_page_turns_sideways_sheets_names_other_sizes_and_ends_without_a_blank_page", "crates/print/src/tests.rs::every_paper_reaches_the_spooler_by_a_name_of_its_size", "crates/automation/src/printing.rs::printing_to_a_printer_feeds_the_laid_out_paper"]
+notes = "⌘P; settings and live sheet preview; on the web the same dialog prints through the browser's print dialog; last paper selection, including cancelled Print dialogs, persists by canonical name; this change does not alter persistence of other print preferences. CUPS jobs from the dialog and doc_print ask for the chosen paper (media) in every size: PPD keywords for the common ones, PWG 5101.1 names for A6, A0–A2, ARCH and ANSI C–E, checked against a synthetic PPD with cupsfilter, not on a physical large-format printer (#3752). On macOS jobs still take the PPD's default paper tray until craft-print sends Auto Select (#3752)"
 
 [[feature]]
 id = "print.printer-selection"
@@ -8108,8 +8108,8 @@ milestone = "M10"
 status = "shipped"
 commands = ["print.dialog"]
 tools = ["doc_print"]
-evidence = ["crates/print/src/tests.rs::booklets_pair_pages_for_folding"]
-notes = "both/front/back, left/right binding"
+evidence = ["crates/print/src/tests.rs::booklets_pair_pages_for_folding", "crates/ui-egui/tests/it/print.rs::a_booklet_decides_two_sided_itself", "crates/automation/src/printing.rs::a_booklet_decides_two_sided_itself", "crates/print/src/tests.rs::a_booklet_prints_both_sides_on_the_short_edge"]
+notes = "both/front/back, left/right binding; a booklet decides two-sided itself, as Acrobat does (its Print dialog hides Two-sided while Booklet is chosen; Using Acrobat X Pro: Acrobat automatically enables duplex printing for booklet printing): both sides flip on the short edge, front or back only prints one-sided, and the Two-sided choice is kept for the other layouts (#2707)"
 
 [[feature]]
 id = "print.poster"
@@ -8144,8 +8144,8 @@ milestone = "M10"
 status = "shipped"
 commands = ["print.dialog"]
 tools = ["doc_print"]
-evidence = ["crates/print/src/tests.rs::imposed_pdf_has_the_sheets_and_honours_comments_and_forms"]
-notes = "Print flag honoured"
+evidence = ["crates/print/src/tests.rs::imposed_pdf_has_the_sheets_and_honours_comments_and_forms", "crates/print/src/tests/appearances.rs::annotation_appearances_do_not_replace_page_xobjects"]
+notes = "Print flag honoured; appearance resource names preserve existing page XObjects and distinct annotations, including inherited resources"
 
 [[feature]]
 id = "print.print-with-comment-summary"
