@@ -6638,3 +6638,238 @@ fn a_flatten_refused_on_a_later_page_changes_nothing() {
     assert!(matches!(flatten(&mut doc, &[0, 1], true, false), Err(EditError::Invalid(_))));
     assert_eq!((*doc.get(first)).clone(), before, "the first page keeps its comment and content");
 }
+
+/// How each glyph-showing operator on page 0 is painted, read the way a renderer reads the page:
+/// its text, `Tr`, stroke colour operators, line width (from `w` or an ExtGState's `/LW`) and
+/// the ExtGStates selected before it, following `q`/`Q`.
+#[derive(Clone, Debug, PartialEq)]
+struct Painted {
+    text: String,
+    render_mode: i64,
+    stroke: Vec<String>,
+    line_width: f64,
+    gs: Vec<String>,
+}
+
+fn painted_shows(doc: &Document) -> Vec<Painted> {
+    let (_, ops) = joined_ops(doc);
+    let p = &pdfcraft_model::pages(doc)[0];
+    let res = doc.resolve(p.dict.get(b"Resources").unwrap());
+    let ext = res.as_dict().unwrap().get(b"ExtGState").map(|g| doc.resolve(g).as_dict().cloned().unwrap()).unwrap_or_default();
+    let mut state = Painted { text: String::new(), render_mode: 0, stroke: Vec::new(), line_width: 1.0, gs: Vec::new() };
+    let mut stack = Vec::new();
+    let mut out = Vec::new();
+    let show = |op: &pdfcraft_content::Op| String::from_utf8_lossy(&pdfcraft_content::serialize_ops(std::slice::from_ref(op))).trim().to_string();
+    for op in ops {
+        match op.op.as_slice() {
+            b"q" => stack.push(state.clone()),
+            b"Q" => state = stack.pop().unwrap(),
+            b"Tr" => state.render_mode = op.operands[0].as_int().unwrap(),
+            b"G" | b"RG" | b"K" | b"CS" => state.stroke = vec![show(&op)],
+            b"SC" | b"SCN" => state.stroke.push(show(&op)),
+            b"w" => state.line_width = op.num(0).unwrap(),
+            b"gs" => {
+                let name = op.name(0).unwrap();
+                state.gs.push(String::from_utf8_lossy(name).into_owned());
+                let lw = ext.get(name).and_then(|g| doc.resolve(g).as_dict().and_then(|g| g.get(b"LW")).and_then(|w| w.as_f64()));
+                state.line_width = lw.unwrap_or(state.line_width);
+            }
+            b"Tj" => {
+                let Some(Object::String(s)) = op.operands.last() else { continue };
+                if !s.bytes.is_empty() {
+                    out.push(Painted { text: String::from_utf8_lossy(&s.bytes).into_owned(), ..state.clone() });
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A page with Helvetica as /F1, /GS1, an ExtGState that paints at 20 % opacity, /GS2, one that
+/// sets the line width to 4, /GS3, another at 20 % opacity, and /GS4, at 20 % opacity and dashed.
+fn faint_page(content: &str) -> Document {
+    build(&[
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> /ExtGState << /GS1 6 0 R /GS2 7 0 R /GS3 8 0 R /GS4 9 0 R >> >> >>",
+        &format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        "<< /Type /ExtGState /ca 0.2 >>",
+        "<< /Type /ExtGState /LW 4 >>",
+        "<< /Type /ExtGState /ca 0.2 >>",
+        "<< /Type /ExtGState /ca 0.2 /D [[6 3] 0] >>",
+    ])
+}
+
+/// Rewriting a paragraph drew it before its text object, restating only the font, spacing and
+/// fill: a `1 Tr 1 0 0 RG 2 w` set inside `BT` was lost, and red outline text came back filled
+/// black, even with the text unchanged (#3508). Set before `BT` (the control), it already worked.
+#[test]
+fn a_rewritten_paragraph_keeps_the_rendering_mode_stroke_and_width_set_inside_its_text_object() {
+    let outline = |text: &str| Painted { text: text.into(), render_mode: 1, stroke: vec!["1 0 0 RG".into()], line_width: 2.0, gs: Vec::new() };
+    for content in ["BT /F1 72 Tf 1 Tr 1 0 0 RG 2 w 40 400 Td (OUTLINE) Tj ET\n", "1 Tr 1 0 0 RG 2 w BT /F1 72 Tf 40 400 Td (OUTLINE) Tj ET\n"] {
+        assert_eq!(painted_shows(&text_page(content)), [outline("OUTLINE")], "the fixture: {content}");
+        for new in ["OUTLINE", "OUTLINED"] {
+            let mut doc = text_page(content);
+            text::rewrite_block(&mut doc, 0, 0, Some(new), &BlockStyle::default()).unwrap();
+            let doc = reopen(&doc);
+            assert_eq!(painted_shows(&doc), [outline(new)], "{content} -> {new}: {}", streams(&doc, 0).join("\n"));
+        }
+    }
+}
+
+/// The same for transparency: `/GS1 gs` (`/ca 0.2`) inside `BT` was not in force for the
+/// rewritten paragraph, so 20 % blue text came back opaque (#3509).
+#[test]
+fn a_rewritten_paragraph_keeps_the_extgstate_selected_inside_its_text_object() {
+    for content in ["BT /GS1 gs /F1 72 Tf 0 0 1 rg 40 400 Td (FAINT) Tj ET\n", "/GS1 gs BT /F1 72 Tf 0 0 1 rg 40 400 Td (FAINT) Tj ET\n"] {
+        for new in ["FAINT", "FAINTER"] {
+            let mut doc = faint_page(content);
+            text::rewrite_block(&mut doc, 0, 0, Some(new), &BlockStyle::default()).unwrap();
+            let doc = reopen(&doc);
+            let shows = painted_shows(&doc);
+            assert_eq!(shows.len(), 1, "{content} -> {new}: {shows:?}");
+            assert_eq!(
+                (shows[0].text.as_str(), shows[0].gs.as_slice()),
+                (new, ["GS1".to_string()].as_slice()),
+                "{content} -> {new}: {}",
+                streams(&doc, 0).join("\n")
+            );
+        }
+    }
+}
+
+/// A paragraph of differently coloured runs goes through the styled rewrite, which draws each
+/// run in its own text object: each keeps the state its source set inside `BT`.
+#[test]
+fn a_styled_rewrite_keeps_the_paint_state_set_inside_the_text_object() {
+    let content = "BT /GS1 gs 1 Tr 1 0 0 RG 2 w /F1 72 Tf 40 400 Td (FAI) Tj 0 0 1 rg (NT) Tj ET\n";
+    let mut doc = faint_page(content);
+    assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].rows[0].len(), 2, "two runs on one row");
+    text::rewrite_block(&mut doc, 0, 0, Some("FAINTS"), &BlockStyle::default()).unwrap();
+    let doc = reopen(&doc);
+    let shows = painted_shows(&doc);
+    let joined = streams(&doc, 0).join("\n");
+    assert_eq!(shows.iter().map(|s| s.text.as_str()).collect::<String>(), "FAINTS", "{joined}");
+    for s in &shows {
+        assert_eq!((s.render_mode, s.stroke.as_slice(), s.line_width), (1, ["1 0 0 RG".to_string()].as_slice(), 2.0), "{s:?}: {joined}");
+        assert_eq!(s.gs, ["GS1"], "{s:?}: {joined}");
+    }
+}
+
+/// A `gs` has no inverse, so one run's ExtGState stayed in force for the runs the styled rewrite
+/// drew after it. Two ExtGStates at the same opacity paint the same (see `Paint`), so their runs
+/// share a paragraph, but either may set what that doesn't compare (a dash, a line cap): each run
+/// is drawn with only the ones its source selected.
+#[test]
+fn a_styled_rewrite_does_not_carry_one_runs_extgstate_into_the_next() {
+    // "FAI" ends at 40 + 72 * (0.611 + 0.667 + 0.278) = 152.032; "NT" is blue, so another run.
+    let content = "q BT /GS3 gs /F1 72 Tf 40 400 Td (FAI) Tj ET Q BT /GS1 gs /F1 72 Tf 0 0 1 rg 152.032 400 Td (NT) Tj ET
+";
+    for new in ["FAINT", "FAINTS"] {
+        let mut doc = faint_page(content);
+        assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].rows[0].len(), 2, "two runs on one row");
+        text::rewrite_block(&mut doc, 0, 0, Some(new), &BlockStyle::default()).unwrap();
+        let doc = reopen(&doc);
+        let shows = painted_shows(&doc);
+        let joined = streams(&doc, 0).join(
+            "
+",
+        );
+        assert_eq!(shows.iter().map(|s| s.text.as_str()).collect::<String>(), new, "{joined}");
+        let gs: Vec<_> = shows.iter().map(|s| (s.text.as_str(), s.gs.as_slice())).collect();
+        assert_eq!(gs.first(), Some(&("FAI", ["GS3".to_string()].as_slice())), "{gs:?}: {joined}");
+        assert!(gs.iter().skip(1).all(|(_, gs)| *gs == ["GS1"]), "{gs:?}: {joined}");
+    }
+}
+
+/// An ExtGState's `/LW` sets the line width as `w` does: `2 w /GS2 gs` (`/LW 4`) outlines at 4,
+/// and the rewrite replayed `/GS2 gs` and then `2 w`. `/GS2 gs 1 w` outlines at 1, and the
+/// rewrite replayed only `/GS2 gs`, since 1 is the initial width.
+#[test]
+fn a_rewritten_paragraph_keeps_the_line_width_an_extgstate_set() {
+    for (content, width) in [
+        ("BT /F1 72 Tf 1 Tr 2 w /GS2 gs 40 400 Td (OUTLINE) Tj ET\n", 4.0),
+        ("BT /F1 72 Tf 1 Tr /GS2 gs 2 w 40 400 Td (OUTLINE) Tj ET\n", 2.0),
+        ("BT /F1 72 Tf 1 Tr /GS2 gs 1 w 40 400 Td (OUTLINE) Tj ET\n", 1.0),
+    ] {
+        assert_eq!(painted_shows(&faint_page(content))[0].line_width, width, "the fixture: {content}");
+        for new in ["OUTLINE", "OUTLINED"] {
+            let mut doc = faint_page(content);
+            text::rewrite_block(&mut doc, 0, 0, Some(new), &BlockStyle::default()).unwrap();
+            let doc = reopen(&doc);
+            let shows = painted_shows(&doc);
+            assert_eq!(
+                shows.iter().map(|s| (s.text.as_str(), s.render_mode, s.line_width)).collect::<Vec<_>>(),
+                [(new, 1, width)],
+                "{content} -> {new}: {}",
+                streams(&doc, 0).join("\n")
+            );
+        }
+    }
+}
+
+/// A line is rewritten in the state of its first run, so outline text partway through a text
+/// object came back filled: "FAI" filled and "NT" a red outline came back all filled. The change
+/// of `Tr` now starts a run. (A `gs` partway already starts a paragraph; see `Paint`.)
+#[test]
+fn a_rendering_mode_partway_through_a_line_starts_a_run_of_its_own() {
+    let content = "BT /F1 72 Tf 40 400 Td (FAI) Tj 1 Tr 1 0 0 RG 2 w (NT) Tj ET
+";
+    for new in ["FAINT", "FAINTS"] {
+        let mut doc = faint_page(content);
+        assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].rows[0].len(), 2, "two runs on one row");
+        text::rewrite_block(&mut doc, 0, 0, Some(new), &BlockStyle::default()).unwrap();
+        let doc = reopen(&doc);
+        let shows = painted_shows(&doc);
+        let joined = streams(&doc, 0).join(
+            "
+",
+        );
+        assert_eq!(shows.iter().map(|s| s.text.as_str()).collect::<String>(), new, "{joined}");
+        let modes: Vec<_> = shows.iter().map(|s| (s.text.as_str(), s.render_mode, s.stroke.as_slice(), s.line_width)).collect();
+        assert_eq!(modes.first().map(|m| (m.0, m.1)), Some(("FAI", 0)), "{modes:?}: {joined}");
+        let outline = ["1 0 0 RG".to_string()];
+        assert!(modes.iter().skip(1).all(|m| (m.1, m.2, m.3) == (1, outline.as_slice(), 2.0)), "{modes:?}: {joined}");
+    }
+}
+
+/// Two ExtGStates at the same opacity paint text the same (see `Paint`), but one of them dashes
+/// its outline: a dashed outline after a solid one in the same text object joined its line and
+/// came back solid, drawn with the first run's selections. A different dash now starts a run.
+#[test]
+fn a_dash_partway_through_an_outlined_line_starts_a_run_of_its_own() {
+    let content = "BT /GS3 gs /F1 72 Tf 1 Tr 1 0 0 RG 2 w 40 400 Td (FAI) Tj /GS4 gs (NT) Tj ET
+";
+    for new in ["FAINT", "FAINTS"] {
+        let mut doc = faint_page(content);
+        assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].rows[0].len(), 2, "two runs on one row");
+        text::rewrite_block(&mut doc, 0, 0, Some(new), &BlockStyle::default()).unwrap();
+        let doc = reopen(&doc);
+        let shows = painted_shows(&doc);
+        let joined = streams(&doc, 0).join(
+            "
+",
+        );
+        assert_eq!(shows.iter().map(|s| s.text.as_str()).collect::<String>(), new, "{joined}");
+        let gs: Vec<_> = shows.iter().map(|s| (s.text.as_str(), s.gs.as_slice())).collect();
+        assert_eq!(gs.first(), Some(&("FAI", ["GS3".to_string()].as_slice())), "{gs:?}: {joined}");
+        assert!(gs.iter().skip(1).all(|(_, gs)| gs.last().is_some_and(|g| g == "GS4")), "{gs:?}: {joined}");
+    }
+}
+
+/// The dash and cap are compared as the operators set them too: `d` or `J` partway through an
+/// outlined line starts a run, and a malformed one (too long, not numbers, out of range) is ignored.
+#[test]
+fn a_dash_or_cap_operator_partway_through_an_outlined_line_starts_a_run() {
+    let long = format!("[{}] 0 d", "1 ".repeat(40));
+    for (change, runs) in [("[6 3] 0 d", 2), ("1 J", 2), (long.as_str(), 1), ("[(a) 3] 0 d", 1), ("[6 3] /x d", 1), ("7 J", 1), ("J", 1)] {
+        let content = format!("BT /F1 72 Tf 1 Tr 1 0 0 RG 2 w 40 400 Td (FAI) Tj {change} (NT) Tj ET\n");
+        let mut doc = faint_page(&content);
+        assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].rows[0].len(), runs, "{change}");
+        text::rewrite_block(&mut doc, 0, 0, Some("FAINTS"), &BlockStyle::default()).unwrap();
+        let shows = painted_shows(&reopen(&doc));
+        assert_eq!(shows.iter().map(|s| s.text.as_str()).collect::<String>(), "FAINTS", "{change}");
+    }
+}

@@ -223,6 +223,14 @@ struct TextState {
     fill: Vec<Op>,
     /// The text rendering mode (`Tr`); 3 is invisible text, as in an OCR layer over a scan.
     render_mode: i64,
+    /// The stroke colour operators, the line width and the ExtGStates selected (see [`Ts`]):
+    /// graphics state the text was painted with that [`TextState::ops`] doesn't restate.
+    stroke: Vec<Op>,
+    line_width: Option<f64>,
+    ext_gstate: Vec<Vec<u8>>,
+    /// The dash pattern and line cap in force (see [`Ts`]): compared, not restated.
+    dash: Dash,
+    line_cap: i64,
 }
 
 impl TextState {
@@ -236,7 +244,51 @@ impl TextState {
             rise: ts.rise,
             fill: ts.fill.clone(),
             render_mode: ts.render_mode,
+            stroke: ts.stroke.clone(),
+            line_width: ts.line_width,
+            ext_gstate: ts.ext_gstate.clone(),
+            dash: ts.dash.clone(),
+            line_cap: ts.line_cap,
         }
+    }
+
+    /// Operators that change how text is painted from `current` (the state where they run) to
+    /// this one: the ExtGStates, stroke colour, line width and a visible rendering mode. A
+    /// rewritten paragraph is drawn before its text object, so whatever that object set before
+    /// its first show (`/GS1 gs`, `1 Tr 1 0 0 RG 2 w` inside `BT`, #3508/#3509) must be stated
+    /// again. Empty when nothing differs.
+    ///
+    /// Only fill, stroke and fill-then-stroke (`Tr` 0–2) are restated: invisible text is revealed
+    /// by [`reveal_ops`] and clipping text is refused, so neither is ever drawn this way.
+    ///
+    /// A `gs` has no inverse, so a selection `current` has and this state doesn't stays in force:
+    /// run these inside a `q`/`Q` that starts from `current`, one per state drawn.
+    fn paint_ops(&self, current: &TextState) -> Vec<Op> {
+        let n = pdfcraft_content::num;
+        let mut v = Vec::new();
+        // The selections both share stay in force; the ones after them are selected again in order.
+        let shared = self.ext_gstate.iter().zip(&current.ext_gstate).take_while(|(a, b)| a == b).count();
+        for name in self.ext_gstate.iter().skip(shared) {
+            v.push(Op::new("gs", vec![Object::Name(name.clone())]));
+        }
+        // A reselected ExtGState may set `/LW`, so the width (already the effective one) follows it.
+        let reselected = !v.is_empty();
+        if self.stroke != current.stroke {
+            if self.stroke.is_empty() {
+                // The initial stroke colour: black in DeviceGray.
+                v.push(Op::new("G", vec![n(0.0)]));
+            } else {
+                v.extend(self.stroke.iter().cloned());
+            }
+        }
+        let width = self.line_width.unwrap_or(1.0);
+        if reselected || width != current.line_width.unwrap_or(1.0) {
+            v.push(Op::new("w", vec![n(width)]));
+        }
+        if (0..=2).contains(&self.render_mode) && self.render_mode != current.render_mode {
+            v.push(Op::new("Tr", vec![Object::Int(self.render_mode)]));
+        }
+        v
     }
 
     /// Operators that set this state (inside a text object).
@@ -616,6 +668,50 @@ struct Ts {
     /// Why the font's writing mode couldn't be read (a broken or cyclic CMap). Its text is then
     /// listed as horizontal, but the lines in it are refused for editing.
     unreadable: Option<Rc<str>>,
+    /// The operators that set the current stroke colour (`G`, `RG`, `K`, or `CS` + `SC`/`SCN`).
+    stroke: Vec<Op>,
+    /// The line width a `w` or an ExtGState's `/LW` set (`None`: the initial 1.0).
+    line_width: Option<f64>,
+    /// The ExtGState resources selected with `gs`, oldest first (see [`select_gs`]).
+    ext_gstate: Vec<Vec<u8>>,
+    /// The dash pattern a `d` or an ExtGState's `/D` set (initially solid: `[] 0`).
+    dash: Dash,
+    /// The line cap a `J` or an ExtGState's `/LC` set (initially 0, butt).
+    line_cap: i64,
+}
+
+/// A dash pattern (ISO 32000-2 §8.4.3.6): the dash array and the phase.
+type Dash = (Vec<f64>, f64);
+
+/// The most dash array entries a pattern keeps; a longer one is ignored, as is a malformed one.
+const MAX_DASH: usize = 32;
+
+/// The dash pattern `array phase`, as `d` takes it and an ExtGState's `/D` holds it.
+fn dash_pattern(doc: &Document, array: Option<&Object>, phase: Option<&Object>) -> Option<Dash> {
+    let array = doc.resolve(array?);
+    let items = array.as_array().filter(|a| a.len() <= MAX_DASH)?;
+    let finite = |o: &Object| doc.resolve(o).as_f64().filter(|v| v.is_finite());
+    Some((items.iter().map(finite).collect::<Option<Vec<_>>>()?, finite(phase?)?))
+}
+
+/// A line cap style, as `J` takes it and an ExtGState's `/LC` holds it: 0, 1 or 2.
+fn line_cap(doc: &Document, cap: Option<&Object>) -> Option<i64> {
+    doc.resolve(cap?).as_int().filter(|c| (0..=2).contains(c))
+}
+
+/// The most `gs` selections a state remembers. Repeating a selection moves it to the end, so
+/// this bounds the distinct ExtGStates in force, not the operators a hostile stream repeats.
+const MAX_GS: usize = 32;
+
+/// Record `gs /name` in `list`. A `gs` sets every parameter its dictionary names to an absolute
+/// value, so a later selection of the same dictionary overrides the earlier one completely: the
+/// earlier entry goes, which keeps replaying the list equivalent to replaying the stream.
+fn select_gs(list: &mut Vec<Vec<u8>>, name: &[u8]) {
+    list.retain(|n| n != name);
+    if list.len() >= MAX_GS {
+        list.remove(0);
+    }
+    list.push(name.to_vec());
 }
 
 /// The page's content streams as listed, each with its decoded data (empty when it doesn't
@@ -929,6 +1025,11 @@ impl Carry {
             gs: Gs::default(),
             vertical: None,
             unreadable: None,
+            stroke: Vec::new(),
+            line_width: None,
+            ext_gstate: Vec::new(),
+            dash: (Vec::new(), 0.0),
+            line_cap: 0,
         };
         Carry { ts, stack: Vec::new(), marked: Vec::new(), layers: Vec::new(), text_left: MAX_PAGE_TEXT }
     }
@@ -1042,6 +1143,14 @@ fn interpret(
                 ts.fill.retain(|o| o.is("cs"));
                 ts.fill.push(op.clone());
             }
+            b"G" | b"RG" | b"K" | b"CS" => ts.stroke = vec![op.clone()],
+            b"SC" | b"SCN" => {
+                ts.stroke.retain(|o| o.is("CS"));
+                ts.stroke.push(op.clone());
+            }
+            b"w" => ts.line_width = op.num(0).filter(|w| w.is_finite()).or(ts.line_width),
+            b"d" => ts.dash = dash_pattern(doc, op.operands.first(), op.operands.get(1)).unwrap_or_else(|| ts.dash.clone()),
+            b"J" => ts.line_cap = line_cap(doc, op.operands.first()).unwrap_or(ts.line_cap),
             b"Tf" => {
                 ts.size = op.num(1).unwrap_or(ts.size);
                 if let Some(name) = op.name(0) {
@@ -1069,9 +1178,21 @@ fn interpret(
             b"Ts" => ts.rise = op.num(0).unwrap_or(0.0),
             b"Tr" => ts.render_mode = op.operands.first().and_then(Object::as_int).unwrap_or(-1),
             b"gs" => {
+                if let Some(name) = op.name(0) {
+                    select_gs(&mut ts.ext_gstate, name);
+                }
                 let params = op.name(0).and_then(|name| states.get(name)).map(|p| doc.resolve(p));
                 if let Some(params) = params.as_deref().and_then(Object::as_dict) {
                     ts.gs.apply(doc, params);
+                    // `/LW` sets the line width as `w` does (ISO 32000-2 §8.4.5).
+                    let lw = params.get(b"LW").and_then(|w| doc.resolve(w).as_f64()).filter(|w| w.is_finite());
+                    ts.line_width = lw.or(ts.line_width);
+                    let dash = params.get(b"D").map(|d| doc.resolve(d));
+                    let dash = dash.as_deref().and_then(Object::as_array);
+                    if let Some(d) = dash.and_then(|d| dash_pattern(doc, d.first(), d.get(1))) {
+                        ts.dash = d;
+                    }
+                    ts.line_cap = line_cap(doc, params.get(b"LC")).unwrap_or(ts.line_cap);
                 }
             }
             b"Do" => {
@@ -1351,7 +1472,11 @@ fn text_lines_in(doc: &Document, p: &pdfcraft_model::Page, actual_text: bool) ->
                 && (s.text.trim().is_empty() || lines.last().is_some_and(|l| same_font(l, &s.font, &s.base_font, s.face.as_deref())))
                 && (s.text.trim().is_empty()
                     || lines.last().is_some_and(|l| {
-                        (s.size - l.size).abs() < 0.01 && s.bold == l.bold && s.italic == l.italic && fill_color(&s.state.fill) == l.color
+                        (s.size - l.size).abs() < 0.01
+                            && s.bold == l.bold
+                            && s.italic == l.italic
+                            && fill_color(&s.state.fill) == l.color
+                            && same_paint(l, &s.state)
                     }))
                 && near
                 // An OCR layer is one text object over the whole scan: its words continue a line
@@ -1457,7 +1582,11 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
             && (s.text.trim().is_empty() || lines.last().is_some_and(|l| same_font(l, &s.font, &s.base_font, s.face.as_deref())))
             && (s.text.trim().is_empty()
                 || lines.last().is_some_and(|l| {
-                    (s.size - l.size).abs() < 0.01 && s.bold == l.bold && s.italic == l.italic && fill_color(&s.state.fill) == l.color
+                    (s.size - l.size).abs() < 0.01
+                        && s.bold == l.bold
+                        && s.italic == l.italic
+                        && fill_color(&s.state.fill) == l.color
+                        && same_paint(l, &s.state)
                 }))
             && pen.continues(&s, if bt == s.bt { 3.0 } else { 1.5 }).0
     });
@@ -1815,6 +1944,24 @@ fn fonts_shown(doc: &Document, page: &Dict, resources: &Dict) -> Option<std::col
 /// another subset of the same face.
 fn same_font(line: &TextLine, font: &[u8], base_font: &str, face: Option<&str>) -> bool {
     line.font.as_bytes() == font || same_base_font(&line.base_font, base_font) || (line.face.is_some() && line.face.as_deref() == face)
+}
+
+/// Whether a run painted with `ts` continues `line` as it is painted: a line is rewritten in the
+/// state of its first run, so a `Tr`, stroke colour or line width that changes partway starts
+/// another run (see [`TextState::paint_ops`]; the `gs` parameters are compared as [`Paint`]).
+/// The stroke colour, width, dash and cap only count for text that is stroked, so a rule drawn
+/// between two words doesn't split their line. They are compared as values, wherever they were
+/// set: two ExtGStates with the same settings under other names still continue a line.
+///
+/// Only the visible modes (`Tr` 0–2) that `paint_ops` restates are compared: a line that goes on
+/// as invisible or clipping text stays one line, which the clipping refusal reads whole (#3447).
+fn same_paint(line: &TextLine, ts: &Ts) -> bool {
+    let a = &line.origin.state;
+    let visible = |m: i64| (0..=2).contains(&m);
+    let same_mode = a.render_mode == ts.render_mode || !visible(a.render_mode) || !visible(ts.render_mode);
+    let stroked = matches!((a.render_mode, ts.render_mode), (1 | 2, 1 | 2));
+    let outline = a.stroke == ts.stroke && a.line_width == ts.line_width && a.dash == ts.dash && a.line_cap == ts.line_cap;
+    same_mode && (!stroked || outline)
 }
 
 /// Whether two `/BaseFont` names name the same font: a subset's six-letter tag and `+` prefix do
@@ -2908,6 +3055,21 @@ fn rewrite_block_from(
         None => size * 1.2,
     };
     let n = pdfcraft_content::num;
+    // The paragraph's operators go, and so does another drawing on the same baseline (a fake-bold
+    // second copy, an invisible text layer): the new text is all that may show.
+    let drop = dropped;
+    // Text shown earlier in the same text object stays first: the paragraph then goes where its
+    // last row was, after any backgrounds between the rows, or between two halves of the text object.
+    let start = last.ops.first().copied().unwrap_or(emit.bt_op);
+    let split = ops
+        .get(emit.bt_op..start)
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .any(|(i, op)| matches!(op.op.as_slice(), b"Tj" | b"TJ" | b"'" | b"\"") && !drop.contains(&(emit.bt_op + i)));
+    // What the text after the paragraph expects, and what is in force where the paragraph is
+    // drawn: the state at its BT (or where it was split).
+    let after = if split { &emit.state } else { &emit.bt_state };
     // In its own graphics state, so a new colour (or anything else) stops at the paragraph.
     let mut block_ops = vec![Op::new("q", vec![])];
     block_ops.extend(reveal_ops(&b, &lines, style, emit.ctm)?);
@@ -2915,6 +3077,8 @@ fn rewrite_block_from(
     if let Some((ax, ay)) = movement {
         block_ops.push(Op::new("cm", vec![n(1.0), n(0.0), n(0.0), n(1.0), n(ax), n(ay)]));
     }
+    // Painted as the paragraph was, including what its text object set before the first show.
+    block_ops.extend(o_state.paint_ops(after));
     block_ops.push(Op::new("BT", vec![]));
     let mut state = o_state.clone();
     state.word_spacing = 0.0;
@@ -3019,21 +3183,6 @@ fn rewrite_block_from(
         block_ops.push(Op::new("Q", vec![]));
     }
     block_ops.push(Op::new("Q", vec![]));
-    // The paragraph's operators go, and so does another drawing on the same baseline (a fake-bold
-    // second copy, an invisible text layer): the new text is all that may show.
-    let mut drop = coincident_ops(&lines, &members);
-    drop.extend(members.iter().flat_map(|l| l.ops.iter().copied()));
-    // Text shown earlier in the same text object stays first: the paragraph then goes where its
-    // last row was, after any backgrounds between the rows, or between two halves of the text object.
-    let start = last.ops.first().copied().unwrap_or(emit.bt_op);
-    let split = ops
-        .get(emit.bt_op..start)
-        .unwrap_or_default()
-        .iter()
-        .enumerate()
-        .any(|(i, op)| matches!(op.op.as_slice(), b"Tj" | b"TJ" | b"'" | b"\"") && !drop.contains(&(emit.bt_op + i)));
-    // What the text after the paragraph expects: the state at its BT (or where it was split).
-    let after = if split { &emit.state } else { &emit.bt_state };
     block_ops.extend(after.ops().into_iter().filter(|op| !op.is("Tf") || after.font.is_some()));
     if split {
         block_ops.insert(0, Op::new("ET", vec![]));
