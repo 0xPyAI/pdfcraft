@@ -1520,6 +1520,203 @@ fn shared_field_snapshots_isolate_writes_errors_and_script_globals() {
     assert!(read.changed.is_empty());
 }
 
+mod scand {
+    use super::*;
+    use crate::xfa::{XfaDoc, XfaEvent, run_xfa};
+
+    /// Runs `util.scand(format, text)` for each case and checks the date it gives, written as
+    /// `yyyy-mm-dd HH:MM:ss`, or `null`.
+    fn assert_scand(cases: &[(&str, &str, &str)]) {
+        let list: Vec<String> = cases.iter().map(|(f, t, _)| format!("['{f}', '{t}']")).collect();
+        let script = format!(
+            "event.value = [{}].map(function (c) {{ var d = util.scand(c[0], c[1]); \
+             return d === null ? 'null' : util.printd('yyyy-mm-dd HH:MM:ss', d); }}).join('|');",
+            list.join(", ")
+        );
+        let o = go(&script, &Event::field("Calculate", "total", ""));
+        assert_eq!(o.error, None);
+        let got: Vec<&str> = o.value.split('|').collect();
+        assert_eq!(got.len(), cases.len());
+        for ((f, t, want), got) in cases.iter().zip(got) {
+            assert_eq!(got, *want, "util.scand('{f}', '{t}')");
+        }
+    }
+
+    // The cases below are another viewer's answers, observed black-box with a synthetic file.
+
+    /// Any separator may come between fields, whether the format has that one, another or none,
+    /// but a text with a space or a letter before or after the date reads nothing.
+    #[test]
+    fn scand_allows_separators_between_fields_but_nothing_before_or_after_them() {
+        assert_scand(&[
+            ("yyyymmdd", "20261018", "2026-10-18 00:00:00"),
+            ("yyyymmdd", "2026-10-18", "2026-10-18 00:00:00"),
+            ("yyyymmdd", "2026 10 18", "2026-10-18 00:00:00"),
+            ("mm/dd/yyyy", "10/18/2026", "2026-10-18 00:00:00"),
+            ("mm/dd/yyyy", "10-18-2026", "2026-10-18 00:00:00"),
+            ("yyyymmdd", " 20261018 ", "null"),
+            ("yyyymmdd", "20261018x", "null"),
+            ("yyyymmdd", "x20261018", "null"),
+        ]);
+    }
+
+    /// Digits typed together fill the joined fields with exactly as many digits as each field has
+    /// letters, so a run of any other length reads nothing.
+    #[test]
+    fn scand_splits_digits_typed_together_by_the_formats_letter_counts() {
+        assert_scand(&[
+            ("yyyymmdd", "261018", "null"),
+            ("yyyymmdd", "2026118", "null"),
+            ("yyyymmdd", "202610181", "null"),
+            ("yymmdd", "20261018", "null"),
+            ("yyyymdd", "2026118", "2026-01-18 00:00:00"),
+            ("yyyymmd", "2026118", "2026-11-08 00:00:00"),
+            ("yyyymd", "2026118", "null"),
+            ("yyyymd", "202618", "2026-01-08 00:00:00"),
+            ("yyyymd", "20261018", "null"),
+            ("yymd", "2618", "2026-01-08 00:00:00"),
+            ("yymd", "261018", "null"),
+        ]);
+    }
+
+    /// A month past 12, a day past the month's end and February 29 outside a leap year are
+    /// refused, while a month or day of 0 is read as 1.
+    #[test]
+    fn scand_refuses_impossible_dates_and_reads_a_zero_month_or_day_as_1() {
+        assert_scand(&[
+            ("yyyymmdd", "20261318", "null"),
+            ("yyyymmdd", "20260230", "null"),
+            ("yyyymmdd", "20260229", "null"),
+            ("yyyymmdd", "20240229", "2024-02-29 00:00:00"),
+            ("mm/dd/yyyy", "13/45/2026", "null"),
+            ("yyyymmdd", "20260018", "2026-01-18 00:00:00"),
+            ("yyyymmdd", "20261000", "2026-10-01 00:00:00"),
+        ]);
+    }
+
+    /// A field typed by itself may have one or two digits, but a `yyyy` year needs four; `yy` reads
+    /// as 1950–2049; month names may be full or three letters in any case; weekday names are read.
+    #[test]
+    fn scand_reads_lone_fields_two_digit_years_and_month_and_weekday_names() {
+        assert_scand(&[
+            ("mm/dd/yyyy", "1/5/2026", "2026-01-05 00:00:00"),
+            ("m/d/yyyy", "1/5/2026", "2026-01-05 00:00:00"),
+            ("m/d/yyyy", "01/05/2026", "2026-01-05 00:00:00"),
+            ("m/d/yy", "1/5/26", "2026-01-05 00:00:00"),
+            ("mm/dd/yyyy", "10/18/26", "null"),
+            ("yyyy/mm/dd", "26/10/18", "null"),
+            ("yymmdd", "261018", "2026-10-18 00:00:00"),
+            ("yymmdd", "491018", "2049-10-18 00:00:00"),
+            ("yymmdd", "501018", "1950-10-18 00:00:00"),
+            ("mmm d, yyyy", "Oct 18, 2026", "2026-10-18 00:00:00"),
+            ("mmm d, yyyy", "October 18, 2026", "2026-10-18 00:00:00"),
+            ("mmm d, yyyy", "oct 18, 2026", "2026-10-18 00:00:00"),
+            ("mmmm d, yyyy", "Oct 18, 2026", "2026-10-18 00:00:00"),
+            ("mmmm d, yyyy", "October 18, 2026", "2026-10-18 00:00:00"),
+            ("dd-mmm-yyyy", "18-Oct-2026", "2026-10-18 00:00:00"),
+            ("dddd, mmmm d, yyyy", "Sunday, October 18, 2026", "2026-10-18 00:00:00"),
+        ]);
+    }
+
+    /// A time is read along with a date, but a format with only time fields reads nothing.
+    #[test]
+    fn scand_reads_a_time_only_with_a_date() {
+        assert_scand(&[
+            ("mm/dd/yyyy HH:MM:ss", "10/18/2026 21:07:05", "2026-10-18 21:07:05"),
+            ("HH:MM", "09:07", "null"),
+            ("HH:MM", "9:07", "null"),
+            ("h:MM tt", "9:07 pm", "null"),
+            ("h:MM tt", "9:07 am", "null"),
+            ("h:MM tt", "12:07 am", "null"),
+            ("h:MM tt", "9:07pm", "null"),
+        ]);
+    }
+
+    /// An empty text reads as today at noon, and a text that is not a string (a number, or none
+    /// at all) reads nothing.
+    #[test]
+    fn scand_reads_only_text_and_an_empty_text_is_today_at_noon() {
+        let o = go(
+            "var d = util.scand('yyyymmdd', ''), n = new Date(); \
+             event.value = [d.toDateString() == n.toDateString(), d.getHours(), d.getMinutes(), d.getSeconds(), \
+             util.scand('yyyymmdd', 20261018), util.scand(), util.scand('yyyymmdd')].join('|');",
+            &Event::field("Calculate", "total", ""),
+        );
+        assert_eq!(o.error, None);
+        assert_eq!(o.value, "true|12|0|0|||");
+    }
+
+    // Not observed: the choices made where the other viewer wasn't asked.
+
+    /// A year left out is this year, `h:MM tt` reads a 12-hour time and refuses hours it cannot
+    /// have, and a letter the format writes must be typed there.
+    #[test]
+    fn scand_takes_this_year_when_none_is_given_and_reads_12_hour_times_and_written_letters() {
+        assert_scand(&[
+            ("mm/dd/yyyy h:MM tt", "10/18/2026 9:07 pm", "2026-10-18 21:07:00"),
+            ("mm/dd/yyyy h:MM tt", "10/18/2026 12:07 AM", "2026-10-18 00:07:00"),
+            ("mm/dd/yyyy h:MM tt", "10/18/2026 13:07 pm", "null"),
+            ("mm/dd/yyyy HH:MM", "10/18/2026 24:00", "null"),
+            ("yyyy-mm-ddTHH:MM", "2026-10-18T21:07", "2026-10-18 21:07:00"),
+            ("yyyy-mm-ddTHH:MM", "2026-10-18X21:07", "null"),
+        ]);
+        let o = go(
+            "var d = util.scand('mm/dd', '10/18'); event.value = [d.getFullYear() == new Date().getFullYear(), d.getMonth(), d.getDate()].join('|');",
+            &Event::field("Calculate", "total", ""),
+        );
+        assert_eq!(o.error, None);
+        assert_eq!(o.value, "true|9|18");
+    }
+
+    /// A format of 50,000 literal letters and one of 100,000 fields, with texts to match, are read
+    /// in linear time. The limit is generous so a loaded runner passes (it also covers starting
+    /// the engine and building the strings); a quadratic scan of inputs this size takes minutes.
+    #[test]
+    fn scand_reads_long_formats_and_texts_in_linear_time() {
+        // Scripts can pass anything; native code isn't bounded by the loop limit.
+        let started = std::time::Instant::now();
+        let o = go(
+            "var x = new Array(50001).join('x'), md = new Array(50001).join('md'), ones = new Array(100000).join('1 ') + '1'; \
+             event.value = [util.scand(x + 'yyyy', x + '2026') !== null, util.scand('yyyy' + md, '2026 ' + ones) !== null].join('|');",
+            &Event::field("Calculate", "total", ""),
+        );
+        assert_eq!(o.error, None);
+        assert_eq!(o.value, "true|true");
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
+    }
+
+    /// The check an XFA form runs on leaving a date field tries six formats with `util.scand` and
+    /// writes the first that reads the text back as `yyyymmdd`, or reports an invalid date.
+    #[test]
+    fn xfa_scripts_check_typed_dates_with_util_scand() {
+        // The check a form runs when a date field is left: the first of six formats that reads
+        // the typed text, written back as yyyymmdd; or an invalid date. Results as another viewer gives them.
+        let check = |typed: &str| {
+            let script = format!(
+                "var six = ['yyyymmdd', 'yymmdd', 'yyyymdd', 'yyyymmd', 'yyyymd', 'yymd'], out = 'invalid'; \
+                 for (var i = 0; i < six.length; i++) {{ var d = util.scand(six[i], '{typed}'); \
+                 if (d !== null) {{ out = util.printd('yyyymmdd', d); break; }} }} out"
+            );
+            let event = XfaEvent { activity: "exit".into(), target: "form1[0].page1[0].total[0]".into(), ..Default::default() };
+            run_xfa(&script, &event, &XfaDoc::default(), &super::xfa_model::form(), Limits::default())
+        };
+        for (typed, want) in [
+            ("20261018", "20261018"),
+            ("261018", "20261018"),
+            ("2026118", "20260118"),
+            ("202618", "20260108"),
+            ("2618", "20260108"),
+            ("2026-10-18", "20261018"),
+            ("20261318", "invalid"),
+            ("20260230", "invalid"),
+        ] {
+            let o = check(typed);
+            assert_eq!(o.error, None, "{typed}: {o:?}");
+            assert_eq!(o.result.as_deref(), Some(want), "{typed}");
+        }
+    }
+}
+
 /// The check XFA forms run on opening: without both globals, or with a version below 2.8, it
 /// alerts that the viewer can't show the form.
 const XFA_CHECK: &str = "if (typeof(xfa_installed) == 'undefined' || typeof(xfa_version) == 'undefined' || xfa_version < 2.8) app.alert('old viewer'); \
