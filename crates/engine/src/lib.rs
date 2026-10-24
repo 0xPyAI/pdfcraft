@@ -4177,6 +4177,13 @@ impl Session {
     /// Which derived lists a content-only edit can change: added content (`None`, from
     /// undo/redo, re-reads both: always correct, rarely paid).
     fn content_refresh_lists(edit: Option<&Edit>) -> (bool, bool) {
+        if let Some(Edit::Batch { edits, .. }) = edit {
+            // A batch of content edits (from a script, say) changes what its parts change.
+            return edits.iter().fold((false, false), |(added, marks), part| {
+                let (a, m) = Self::content_refresh_lists(Some(part));
+                (added || a, marks || m)
+            });
+        }
         let touches_added = edit.is_none_or(|e| {
             matches!(
                 e,
