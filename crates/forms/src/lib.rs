@@ -1304,9 +1304,8 @@ pub fn need_appearances(doc: &Document) -> bool {
 /// writer left the appearances to the viewer), and otherwise each widget without a normal
 /// appearance (`/AP /N`), as typing the value would draw it (#3470). Check boxes and radio buttons
 /// with no normal appearance for their state (`/AS`) are drawn from their `/MK` background, border
-/// and caption, and push buttons with none from their `/MK` and `/BS` (Table 192); the page view
-/// also shows a drawn combo box's drop-down button. `doc` is not changed: saving writes the file
-/// as it was.
+/// and caption, and push buttons with none from their `/MK` and `/BS` (Table 192). `doc` is not
+/// changed: saving writes the file as it was.
 pub fn with_field_appearances(doc: &Document) -> Option<Document> {
     with_field_appearances_cached(doc, &mut FieldAppearanceCache::default())
 }
@@ -1314,18 +1313,6 @@ pub fn with_field_appearances(doc: &Document) -> Option<Document> {
 /// [`with_field_appearances`], reusing the appearances `cache` drew for widgets whose inputs are
 /// the same objects as then (see [`FieldAppearanceCache`]).
 pub fn with_field_appearances_cached(doc: &Document, cache: &mut FieldAppearanceCache) -> Option<Document> {
-    fields_shown(doc, cache, true)
-}
-
-/// [`with_field_appearances`] for printing: the same, without the drop-down buttons of combo
-/// boxes, which are for clicking on screen and not part of a field's printed look.
-pub fn with_printed_field_appearances(doc: &Document) -> Option<Document> {
-    fields_shown(doc, &mut FieldAppearanceCache::default(), false)
-}
-
-/// [`with_field_appearances_cached`]; `screen` adds the on-screen parts (a combo box's button).
-/// One cache serves one of the two: the engine keeps one for the screen and prints uncached.
-fn fields_shown(doc: &Document, cache: &mut FieldAppearanceCache, screen: bool) -> Option<Document> {
     let all = need_appearances(doc);
     let mut copy: Option<Document> = None;
     for f in fields(doc) {
@@ -1365,7 +1352,6 @@ fn fields_shown(doc: &Document, cache: &mut FieldAppearanceCache, screen: bool) 
                     let stream = match f.kind {
                         FieldKind::CheckBox | FieldKind::Radio => appearance::button_state_shown(doc, &f, w, state.as_deref() != Some("Off")),
                         FieldKind::PushButton => appearance::push_button_shown(doc, &f, w),
-                        _ if screen => appearance::field_appearance_on_screen(doc, &f, w, &f.value, true).0,
                         _ => appearance::field_appearance_drawn(doc, &f, w, &f.value, true).0,
                     };
                     cache.insert(w.obj, inputs, &stream);

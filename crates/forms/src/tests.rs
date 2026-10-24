@@ -3098,8 +3098,8 @@ fn a_skipped_field_leaves_its_widget_to_the_next() {
     assert_eq!(widgets, [("b", 1)]);
 }
 
-/// Check boxes, radio buttons and push buttons whose file gives them no appearance, a comb field
-/// and a combo box, for the display copy.
+/// Check boxes, radio buttons and push buttons whose file gives them no appearance, a comb field,
+/// a combo box and a list box, for the display copy.
 fn left_buttons() -> Document {
     let widget = |n: &str, rest: &str| format!("<< /Type /Annot /Subtype /Widget /T ({n}) /F 4 /P 3 0 R {rest} >>");
     document(&[
@@ -3225,31 +3225,4 @@ fn comb_fields_show_their_cells() {
     .unwrap();
     let plain = saved_look(&doc, "d");
     assert!(!plain.contains(" m ") && plain.contains("(A) Tj"), "{plain}");
-}
-
-/// A combo box drawn for display shows its drop-down button at the right edge and keeps its text
-/// clear of it; a list box, a text field, the combo box's saved look and its printed one have none.
-#[test]
-fn combo_boxes_shown_on_screen_have_a_drop_down_button() {
-    let doc = left_buttons();
-    let screen = with_field_appearances(&doc).expect("fields to draw");
-    let printed = with_printed_field_appearances(&doc).expect("fields to draw");
-    let m = ap(&screen, &field(&fields(&screen), "m").widgets[0]);
-    // A 22 pt square inside the 1 pt border, a line in the border colour, a triangle.
-    assert!(m.contains("0.85 g\n97 1 22 22 re f\n0 0 0 RG\n1 w\n97 1 m 97 23 l S\n0 g\n"), "{m}");
-    // The text's clip stops at the button.
-    assert!(m.contains("1 1 96 22 re W n"), "{m}");
-    let printed_m = ap(&printed, &field(&fields(&printed), "m").widgets[0]);
-    assert!(!printed_m.contains("0.85 g") && printed_m.contains("1 1 118 22 re W n"), "{printed_m}");
-    let saved = saved_look(&doc, "m");
-    assert!(!saved.contains("0.85 g"), "{saved}");
-    // Right-aligned text moves left by the button's width.
-    let x = |s: &str| -> f64 {
-        s.split(" Tm ").next().and_then(|s| s.rsplit("1 0 0 1 ").next()).and_then(|s| s.split(' ').next()).and_then(|s| s.parse().ok()).unwrap()
-    };
-    assert!((x(&saved) - x(&m) - 22.0).abs() < 0.01, "{saved} / {m}");
-    for other in ["n", "d"] {
-        let s = ap(&screen, &field(&fields(&screen), other).widgets[0]);
-        assert!(!s.contains("0.85 g"), "{other}: {s}");
-    }
 }

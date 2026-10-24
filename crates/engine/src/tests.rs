@@ -7440,22 +7440,20 @@ fn a_page_truncated_for_forms_and_pictures_is_listed_once() {
 }
 
 /// ISO 32000-2 Table 192, 12.7.5.2.3 and Table 228 (Comb): a check box, a push button, a comb
-/// field and a combo box the file leaves to the viewer. The page as displayed shows the check
-/// box's caption symbol in its text colour, the button's grey face, the comb's cells in the border
-/// colour and the combo box's drop-down button; printing leaves that button out, and saving
-/// writes the file as it was.
+/// field the file leaves to the viewer. The page as displayed and printed as an image shows the
+/// check box's caption symbol in its text colour, the button's grey face and the comb's cells in
+/// the border colour, and saving writes the file as it was.
 #[test]
 fn buttons_and_combs_left_to_the_viewer_are_displayed() {
     let pdf = b"%PDF-1.7\n\
         1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >> endobj\n\
         2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n\
-        3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 400 200] /Annots [6 0 R 7 0 R 8 0 R 9 0 R] >> endobj\n\
-        4 0 obj << /Fields [6 0 R 7 0 R 8 0 R 9 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >> endobj\n\
+        3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 400 200] /Annots [6 0 R 7 0 R 8 0 R] >> endobj\n\
+        4 0 obj << /Fields [6 0 R 7 0 R 8 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >> endobj\n\
         5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> endobj\n\
         6 0 obj << /Type /Annot /Subtype /Widget /FT /Btn /T (k) /V /Yes /AS /Yes /DA (/ZaDb 0 Tf 1 0 0 rg) /MK << /CA (8) /BC [0 0 0] >> /Rect [20 150 60 190] /F 4 /P 3 0 R >> endobj\n\
         7 0 obj << /Type /Annot /Subtype /Widget /FT /Btn /Ff 65536 /T (o) /DA (/Helv 12 Tf 0 g) /MK << /CA (Press) /BG [0.8 0.8 0.8] /BC [0 0 0] >> /BS << /W 2 /S /B >> /Rect [100 150 220 190] /F 4 /P 3 0 R >> endobj\n\
         8 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /Ff 16777216 /MaxLen 4 /T (d) /V (AB) /DA (/Helv 12 Tf 0 g) /MK << /BC [0 0 1] >> /Rect [20 80 220 110] /F 4 /P 3 0 R >> endobj\n\
-        9 0 obj << /Type /Annot /Subtype /Widget /FT /Ch /Ff 131072 /T (m) /Opt [(Apple) (Banana)] /V (Apple) /DA (/Helv 12 Tf 0 g) /MK << /BC [0 0 0] >> /Rect [20 20 220 50] /F 4 /P 3 0 R >> endobj\n\
         trailer << /Root 1 0 R >>\n%%EOF"
         .to_vec();
     let render = |bytes: Arc<Vec<u8>>| {
@@ -7484,15 +7482,12 @@ fn buttons_and_combs_left_to_the_viewer_are_displayed() {
         assert!(count(&shown, (x - 1, 84, x + 1, 106), &blue) >= 20, "a cell line at {x}");
     }
     assert_eq!(count(&shown, (95, 84, 97, 106), &blue), 0, "no line inside a cell");
-    // The combo box's drop-down button: a 28 pt square inside the right edge.
-    let button = (193, 22, 218, 48);
-    assert!(count(&shown, button, &grey) > 300, "the drop-down button on screen");
     // Print as Image: the page as a picture, at 72 dpi so it is the size of the page here.
     let raster = pdfcraft_print::Raster { dpi: 72.0, grayscale: false };
     let pictures = crate::print_raster::rasterize(s.get(id).unwrap(), &[0], &raster, pdfcraft_print::Content::Document).unwrap();
     let printed = render(Arc::new(pictures));
-    assert_eq!(count(&printed, button, &grey), 0, "not on paper");
     assert!(count(&printed, (24, 154, 56, 186), &red) > 60, "the check box prints");
+    assert!(count(&printed, (104, 154, 216, 186), &grey) > 1000, "and the push button");
     // The file is saved as it was: no widget has an appearance.
     let saved = pdfcraft_cos::Document::open(s.save_bytes(id).unwrap()).unwrap();
     for f in pdfcraft_forms::fields(&saved) {

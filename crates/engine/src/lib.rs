@@ -934,16 +934,6 @@ fn display_bytes(editor: Option<&mut Editor>, bytes: &Arc<Vec<u8>>) -> Arc<Vec<u
     }
 }
 
-/// The display copy as it prints ([`print_raster`]): [`display_bytes`] without what is only for the
-/// screen, a drawn combo box's drop-down button. `None` when it would be the display copy itself
-/// (no field is drawn for display, or the document is not open for editing) or cannot be written.
-pub(crate) fn printed_display_bytes(doc: &Document) -> Option<Arc<Vec<u8>>> {
-    let e = doc.editor.as_ref()?;
-    let comments = pdfcraft_annot::with_missing_appearances(&e.cos);
-    let fields = pdfcraft_forms::with_printed_field_appearances(comments.as_ref().unwrap_or(&e.cos))?;
-    write_incremental(&fields, &SaveOptions::default()).ok().map(Arc::new)
-}
-
 /// `comments` (the display copy with comment appearances, if it needed any; else the document
 /// itself) with its form fields drawn from their values where the file leaves that to the viewer.
 fn with_field_appearances(comments: Option<pdfcraft_cos::Document>, doc: &pdfcraft_cos::Document) -> Option<pdfcraft_cos::Document> {

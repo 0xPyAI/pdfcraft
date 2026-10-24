@@ -390,25 +390,6 @@ fn comb_dividers(doc: &Document, wd: &Dict, w: f64, h: f64, cells: usize) -> Str
     c
 }
 
-/// A combo box's drop-down button for the screen: a `size`-wide light grey face at the right
-/// edge inside the `bw` border of a `w` × `h` widget, parted from the text by a line in the
-/// border's colour, with a downward triangle.
-fn drop_down_button(doc: &Document, wd: &Dict, w: f64, h: f64, bw: f64, size: f64) -> String {
-    let mk = wd.get(b"MK").map(|m| doc.resolve(m)).and_then(|m| m.as_dict().cloned());
-    let (x0, y0, x1, y1) = (w - bw - size, bw, w - bw, h - bw);
-    let mut c = format!("0.85 g\n{} {} {} {} re f\n", n(x0), n(y0), n(size), n(y1 - y0));
-    let lw = line_width(doc, wd);
-    if let Some(bc) = color_array(doc, mk.as_ref(), b"BC")
-        && lw > 0.0
-        && lw.is_finite()
-    {
-        c.push_str(&format!("{}\n{} w\n{} {} m {} {} l S\n", stroke_op(&bc), n(lw), n(x0), n(y0), n(x0), n(y1)));
-    }
-    let (cx, cy, d) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0, size * 0.22);
-    c.push_str(&format!("0 g\n{} {} m {} {} l {} {} l h f\n", n(cx - d), n(cy + d / 2.0), n(cx + d), n(cy + d / 2.0), n(cx), n(cy - d / 2.0)));
-    c
-}
-
 /// Where a list box draws its options: one row per option from the top, starting with option
 /// `top` (`/TI`, §12.7.4.4). The appearance PdfCraft writes and the viewer's in-place list share
 /// it, so a click picks the option drawn under the pointer (#1524).
@@ -499,19 +480,6 @@ pub fn field_appearance_as(doc: &Document, f: &Field, w: &Widget, values: &[Stri
 /// hold it: the form's font is a simple (WinAnsi) font, Helvetica stands in for one PdfCraft can't
 /// write with (an embedded subset, `Identity-H`), or a UCS-2 CMap meets a character beyond U+FFFF.
 pub fn field_appearance_drawn(doc: &Document, f: &Field, w: &Widget, values: &[String], format: bool) -> (Stream, Option<char>) {
-    field_look(doc, f, w, values, format, false)
-}
-
-/// [`field_appearance_drawn`] as the page view shows a field the file leaves to the viewer: a
-/// combo box also gets its drop-down button at the right edge, which the text keeps clear of.
-/// The button is something to click on screen, not part of the field's printed look, so it is
-/// drawn only here and never into an appearance PdfCraft saves or prints.
-pub(crate) fn field_appearance_on_screen(doc: &Document, f: &Field, w: &Widget, values: &[String], format: bool) -> (Stream, Option<char>) {
-    field_look(doc, f, w, values, format, true)
-}
-
-/// The appearance of a text or choice field, with a combo box's drop-down button when `screen`.
-fn field_look(doc: &Document, f: &Field, w: &Widget, values: &[String], format: bool, screen: bool) -> (Stream, Option<char>) {
     // The Format event: what is shown, not what is stored.
     let formatted: Vec<String>;
     let values = if format
@@ -552,15 +520,7 @@ fn field_look(doc: &Document, f: &Field, w: &Widget, values: &[String], format: 
     let width_of = |text: &str, size: f64| enc.width(text, size);
     let (mut c, bw) = frame(doc, &wd, width, height);
     let pad = 2.0 + bw;
-    // A combo box's drop-down button on screen: a square as tall as the room inside the border,
-    // never wider than that room.
-    let button = if screen && f.kind == FieldKind::Combo { (height - 2.0 * bw).min(width - 2.0 * bw).max(0.0) } else { 0.0 };
-    if button > 0.0 {
-        c.push_str(&drop_down_button(doc, &wd, width, height, bw, button));
-    }
-    // The text and its clip keep to the room left of the button.
-    let text_w = width - button;
-    let inner_w = (text_w - 2.0 * pad).max(1.0);
+    let inner_w = (width - 2.0 * pad).max(1.0);
     let q = wd.get(b"Q").and_then(|o| doc.resolve(o).as_int()).unwrap_or(f.quadding);
     let mut body: Vec<u8> = Vec::new();
     // The first character drawn that the font can't hold (drawn as `?`), for the caller to report.
@@ -579,7 +539,7 @@ fn field_look(doc: &Document, f: &Field, w: &Widget, values: &[String], format: 
         let tw = width_of(text, size);
         match q {
             1 => pad + (inner_w - tw) / 2.0,
-            2 => text_w - pad - tw,
+            2 => width - pad - tw,
             _ => pad,
         }
     };
@@ -649,7 +609,7 @@ fn field_look(doc: &Document, f: &Field, w: &Widget, values: &[String], format: 
         "/Tx BMC\nq\n{c}{} {} {} {} re W n\nBT\n/{} {} Tf\n{}\n",
         n(bw),
         n(bw),
-        n(text_w - 2.0 * bw),
+        n(width - 2.0 * bw),
         n(height - 2.0 * bw),
         font_name,
         n(size),

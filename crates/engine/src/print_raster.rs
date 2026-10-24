@@ -23,9 +23,7 @@ pub fn rasterize(doc: &Document, pages: &[usize], raster: &Raster, content: Cont
     // The copy below holds only what prints, so the viewer's own comment hiding plays no part.
     config.hide_comments = false;
     let printed = guard(|| -> Result<Vec<u8>, String> {
-        // The display copy, less what it shows only on screen.
-        let shown = crate::printed_display_bytes(doc).unwrap_or_else(|| src.bytes.clone());
-        let mut cos = pdfcraft_cos::Document::open_with_password(shown, config.password.as_deref()).map_err(|e| e.to_string())?;
+        let mut cos = pdfcraft_cos::Document::open_with_password(src.bytes.clone(), config.password.as_deref()).map_err(|e| e.to_string())?;
         pdfcraft_print::keep_printed(&mut cos, content);
         write_incremental(&cos, &SaveOptions::default()).map_err(|e| e.to_string())
     })??;
