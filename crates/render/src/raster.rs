@@ -3343,6 +3343,40 @@ trailer << /Root 1 0 R >>
         assert_eq!(px(&hidden, 20, 80), vec![255, 0, 0, 255], "fields stay");
     }
 
+    /// ISO 32000-2 Table 167: Invisible hides an annotation of a type that isn't standard and
+    /// nothing else; §12.5.6.14: a popup has no appearance of its own, so its `/AP` isn't painted.
+    #[test]
+    fn invisible_unknown_annotations_and_popups_paint_nothing() {
+        let annots = [
+            "/Subtype /MyCustomType /F 0",
+            "/Subtype /MyCustomType /F 1",
+            "/Subtype /MyCustomType /F 5",
+            "/F 1",
+            "/Subtype /Square /F 1",
+            "/Subtype /Popup /F 4 /Open true",
+        ];
+        let mut pdf = String::from("%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
+        pdf.push_str("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n");
+        let refs: Vec<String> = (0..annots.len()).map(|i| format!("{} 0 R", 10 + i)).collect();
+        pdf.push_str(&format!("3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 50] /Annots [{}] >> endobj\n", refs.join(" ")));
+        pdf.push_str("4 0 obj << /Type /XObject /Subtype /Form /BBox [0 0 30 30] /Length 24 >> stream\n0 1 0 rg 0 0 30 30 re f\nendstream endobj\n");
+        for (i, a) in annots.iter().enumerate() {
+            let x = 10 + 50 * i;
+            pdf.push_str(&format!("{} 0 obj << /Type /Annot {a} /Rect [{x} 10 {} 40] /AP << /N 4 0 R >> >> endobj\n", 10 + i, x + 30));
+        }
+        pdf.push_str("trailer << /Root 1 0 R >>\n%%EOF");
+        let mut r = PageRenderer::new(Arc::new(pdf.into_bytes()), RenderConfig::default());
+        let p = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 1.0, tag: 0, ..Default::default() });
+        let px = |x: u32| p.rgba[((25 * p.width + x) * 4) as usize..][..4].to_vec();
+        let (green, white) = (vec![0, 255, 0, 255], vec![255, 255, 255, 255]);
+        assert_eq!(px(25), green, "an unknown type without Invisible is drawn");
+        assert_eq!(px(75), white, "Invisible hides an unknown type");
+        assert_eq!(px(125), white, "even with the Print flag");
+        assert_eq!(px(175), white, "no Subtype is no standard type");
+        assert_eq!(px(225), green, "Invisible means nothing for a standard type");
+        assert_eq!(px(275), white, "a popup's appearance is not painted on the page");
+    }
+
     #[test]
     fn inline_pool_renders_in_priority_order() {
         let pool = RenderPool::new_inline(Arc::new(ONE_PAGE.to_vec()), RenderConfig::default());
