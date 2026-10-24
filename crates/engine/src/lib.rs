@@ -4413,6 +4413,13 @@ impl Session {
             }
         }
         note_warnings(&mut info.warnings, &doc.xfa_warnings);
+        // As in `build_document`: the inspection reads only `/Info`, so fields stated only in XMP
+        // are filled in again after every full refresh.
+        for (field, value) in info_fields(&mut info, &editor.cos) {
+            if field.is_none() {
+                *field = value;
+            }
+        }
         doc.info = info;
         doc.fonts_stale = false;
         let mut form = pdfcraft_forms::fields(&editor.cos);

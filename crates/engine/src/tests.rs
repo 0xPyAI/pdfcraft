@@ -555,6 +555,14 @@ fn document_information_stated_only_in_xmp_is_shown() {
     assert_eq!((doc.info.title.as_deref(), doc.info.author.as_deref(), doc.info.subject.as_deref()), (Some("Quarterly report"), Some("Ada"), None));
     assert_eq!(doc.info_value("Title").as_deref(), Some("Quarterly report"));
     assert_eq!(doc.info_value("Author").as_deref(), Some("Ada"));
+
+    // A full refresh (any structural edit, undo, redo) reads /Info again and must not lose them.
+    s.apply(id, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    let doc = s.get(id).unwrap();
+    assert_eq!((doc.info.title.as_deref(), doc.info.author.as_deref()), (Some("Quarterly report"), Some("Ada")), "after an edit");
+    s.undo(id).unwrap();
+    let doc = s.get(id).unwrap();
+    assert_eq!((doc.info.title.as_deref(), doc.info.author.as_deref()), (Some("Quarterly report"), Some("Ada")), "after undo");
 }
 
 #[test]
