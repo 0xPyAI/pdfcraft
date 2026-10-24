@@ -405,6 +405,9 @@ pub struct OutlineItem {
     /// Where on `page` the bookmark goes ([`DestView::Top`] for a bookmark without a page).
     pub view: DestView,
     pub children: Vec<OutlineItem>,
+    /// Whether the bookmark starts open: only a positive `/Count` says so (ISO 32000-2 §12.3.3,
+    /// Table 151). A negative one is closed, and so is a missing one, which a bookmark with
+    /// children should not have.
     pub open: bool,
     /// The title's colour (`/C`, DeviceRGB, ISO 32000-2 §12.3.3 Table 151), or `None` for the
     /// default black or a value that isn't three numbers.

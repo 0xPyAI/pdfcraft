@@ -1748,6 +1748,18 @@ fn bookmarks_add_rename_move_delete() {
     assert_eq!(crate::move_bookmark(&mut d, &[0], &[2], 9).unwrap(), vec![1, 1]);
     assert_eq!(titles(&crate::bookmarks(&d)), ["Intro", "Results[Table,Figure 1]"]);
     assert_eq!(crate::move_bookmark(&mut d, &[1], &[1, 0], 0), Err(crate::OutlineError::IntoItself));
+    // Into a bookmark with no children yet (Indent): it opens, so the moved one shows.
+    assert_eq!(crate::move_bookmark(&mut d, &[1, 1], &[0], 0).unwrap(), vec![0, 0]);
+    let intro = crate::bookmarks(&d)[0].obj;
+    assert_eq!(count_of(&d, intro), Some(1));
+    // Reordering inside a closed parent leaves it closed.
+    crate::add_bookmark(&mut d, &[0], 1, "Second", 0).unwrap();
+    crate::set_bookmark_open(&mut d, &[0], false).unwrap();
+    crate::move_bookmark(&mut d, &[0, 1], &[0], 0).unwrap();
+    assert_eq!(count_of(&d, intro), Some(-2));
+    crate::delete_bookmark(&mut d, &[0, 0]).unwrap();
+    crate::move_bookmark(&mut d, &[0, 0], &[1], 9).unwrap();
+    assert_eq!(titles(&crate::bookmarks(&d)), ["Intro", "Results[Table,Figure 1]"]);
     crate::delete_bookmark(&mut d, &[1, 0]).unwrap();
     assert_eq!(titles(&crate::bookmarks(&d)), ["Intro", "Results[Figure 1]"]);
 

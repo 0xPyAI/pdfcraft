@@ -3363,8 +3363,8 @@ milestone = "M4"
 status = "shipped"
 commands = ["file.properties"]
 tools = []
-evidence = ["crates/ui-egui/tests/it/bookmarks.rs::expanding_and_collapsing_all_bookmarks"]
-notes = "Bookmarks panel options: expand all, expand top-level, collapse all"
+evidence = ["crates/ui-egui/tests/it/bookmarks.rs::expanding_and_collapsing_all_bookmarks", "crates/ui-egui/tests/it/bookmarks.rs::a_closed_top_level_bookmark_opens_closed", "crates/organize/src/tests.rs::bookmarks_add_rename_move_delete"]
+notes = "Bookmarks panel options: expand all, expand top-level, collapse all. Each bookmark, top level included, opens as its /Count says (positive open; negative or missing closed, ISO 32000-2 Table 151); the triangle toggles it for the session and a search shows matches inside closed ones. Adding or moving a bookmark into another opens that one. Missing: the open/closed state the reader sets is not written back to /Count on save"
 
 [[feature]]
 id = "organize.bookmarks-from-structure"
