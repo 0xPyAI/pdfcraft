@@ -3747,3 +3747,87 @@ fn a_password_field_missing_from_the_field_list_is_still_cleared() {
         assert!(fields(&doc).iter().all(|f| f.value.iter().all(|v| v.is_empty())), "{what}: {:?}", fields(&doc));
     }
 }
+
+/// #4018: a value that doesn't fit its box at the field's font size is reported (it is drawn cut
+/// at the box). An auto-sized field shrinks to fit, and a short or empty value fits.
+#[test]
+fn a_value_wider_or_taller_than_its_box_is_reported() {
+    let long = "Doe, Jane (represented by John Doe)";
+    let field = |name: &str, rect: &str, extra: &str, value: &str| {
+        format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /V ({value}) /Rect [{rect}] /P 3 0 R {extra} >>")
+    };
+    let doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R] >>".into(),
+        "<< /Fields [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R] /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        field("single", "50 700 190 718", "", long),
+        field("multi", "50 650 190 668", "/Ff 4096", long),
+        field("auto", "50 600 190 618", "/DA (/Helv 0 Tf 0 g)", long),
+        field("wide", "50 550 350 568", "", long),
+        field("short", "50 500 190 518", "/Ff 4096", "Ada"),
+    ]);
+    let overflow = |name: &str| {
+        let f = fields(&doc).into_iter().find(|f| f.name == name).unwrap();
+        appearance::value_overflow(&doc, &f, &f.widgets[0])
+    };
+    match overflow("single") {
+        Some(appearance::Overflow::Wide { width, room, size }) => {
+            assert_eq!(size, 12.0);
+            assert!((width - 201.4).abs() < 1.0 && room < 140.0, "{width} in {room}");
+        }
+        other => panic!("single: {other:?}"),
+    }
+    assert_eq!(overflow("multi"), Some(appearance::Overflow::Tall { lines: 2, room: 1, size: 12.0 }));
+    assert_eq!(overflow("auto"), None, "auto size shrinks to fit");
+    assert_eq!(overflow("wide"), None);
+    assert_eq!(overflow("short"), None);
+}
+
+/// #4018: a single line taller than its box is cut at the top and bottom, and a character wider
+/// than a multiline box is a line of its own that is still cut at the sides; both are reported.
+/// An empty value draws nothing, so nothing is cut however small the box.
+#[test]
+fn a_line_taller_than_its_box_or_a_character_wider_than_it_is_reported() {
+    let field = |name: &str, rect: &str, extra: &str, value: &str| {
+        format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /V ({value}) /Rect [{rect}] /P 3 0 R {extra} >>")
+    };
+    let doc = document(&[
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 11 0 R] >>".into(),
+        "<< /Fields [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 11 0 R] /DA (/Helv 12 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        field("low", "50 700 190 708", "", "Ada"),
+        field("comb", "50 650 190 658", "/Ff 16777216 /MaxLen 5", "Ada"),
+        field("narrow", "50 500 56 560", "/Ff 4096", "WW"),
+        field("roomy", "50 400 190 418", "", "Ada"),
+        field("empty", "50 350 190 358", "", ""),
+        field("empty-multi", "50 300 190 304", "/Ff 4096", ""),
+    ]);
+    let overflow = |name: &str| {
+        let f = fields(&doc).into_iter().find(|f| f.name == name).unwrap();
+        appearance::value_overflow(&doc, &f, &f.widgets[0])
+    };
+    for name in ["low", "comb"] {
+        match overflow(name) {
+            Some(o @ appearance::Overflow::High { height, room, size }) => {
+                assert_eq!(size, 12.0);
+                assert!((height - 11.1).abs() < 0.01 && room <= 8.0, "{name}: {height} in {room}");
+                assert!(o.to_string().starts_with("the value does not fit: 11.1 pt high at 12 pt"), "{o}");
+            }
+            other => panic!("{name}: {other:?}"),
+        }
+    }
+    match overflow("narrow") {
+        Some(appearance::Overflow::Wide { width, room, size }) => {
+            assert_eq!(size, 12.0);
+            assert!(width > room && (width - 11.32).abs() < 0.1, "{width} in {room}");
+        }
+        other => panic!("narrow: {other:?}"),
+    }
+    assert_eq!(overflow("roomy"), None);
+    assert_eq!(overflow("empty"), None);
+    assert_eq!(overflow("empty-multi"), None);
+}
