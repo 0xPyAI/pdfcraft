@@ -6930,6 +6930,18 @@ fn text_blocks_stay_cached_after_an_edit_and_follow_undo_and_redo() {
     assert!(Arc::ptr_eq(&redone, &blocks(&session)));
 }
 
+/// #4199, #3797: the spaces typed into a paragraph are all there after saving and reopening.
+#[test]
+fn edited_text_keeps_every_space_typed_through_save_and_reopen() {
+    let (mut s, id) = session_with(1);
+    let typed = "  A   b  c";
+    s.apply(id, Edit::EditTextBlock { page: 0, block: 0, text: typed.into(), style: pdfcraft_edit::BlockStyle::default() }).unwrap();
+    let saved = s.save_bytes(id).unwrap();
+    let reopened = s.open("saved.pdf", None, saved, None).unwrap();
+    let blocks = s.get(reopened).unwrap().editor.as_ref().unwrap().text_blocks(0).unwrap();
+    assert_eq!(blocks[0].editor_text, typed);
+}
+
 /// A new document, or one restored from recovery, has never been written where it belongs: undo
 /// back to the bytes it was opened from must not make it clean, or closing it would discard the
 /// whole document without asking. Saving makes it clean; Revert of a saved one too.
