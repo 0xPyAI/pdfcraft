@@ -99,6 +99,7 @@ mod home;
 mod icon_data;
 pub mod icons;
 pub mod last_session;
+pub mod last_view;
 pub mod motion;
 mod page_selection_ui;
 mod pageboxes;
@@ -584,6 +585,11 @@ pub struct PdfCraftApp {
     pub recent: Vec<RecentFile>,
     /// Preferences: reopen the files that were open when PdfCraft last closed (#442).
     pub reopen_last_session: bool,
+    /// Restore last view settings when reopening documents (Preferences ▸ Documents and view;
+    /// #1767): the page, zoom and page display a file was last shown with. On by default.
+    pub restore_last_view: bool,
+    /// How files were last shown, most recent first (see `last_view`).
+    pub last_views: Vec<last_view::LastView>,
     /// The files open when PdfCraft last closed, read from the settings for
     /// [`PdfCraftApp::reopen_last_files`].
     pub last_session: last_session::LastSession,
@@ -591,6 +597,9 @@ pub struct PdfCraftApp {
     quit_session: Option<last_session::LastSession>,
     /// Preferences: reload a document when its file changes on disk (#431).
     pub reload_changed_files: bool,
+    /// Preferences: tell the user, above the pages, that a document is secured (its security
+    /// settings restrict changes). Off only hides that notice (#4035); kept in the settings.
+    pub show_secured_notice: bool,
     /// Preferences: open every document at Default zoom and Default page display, whatever
     /// layout or zoom it asks for (#1618).
     pub always_default_view: bool,
@@ -965,7 +974,8 @@ impl PdfCraftApp {
             full_screen_tool: None,
             comment_prefs: Default::default(),
             theme: ThemeKind::Light,
-            theme_preference: ThemePreference::Light,
+            // A fresh install follows the desktop's appearance (#1248); saved settings override.
+            theme_preference: ThemePreference::System,
             reading_colors: Default::default(),
             #[cfg(target_os = "linux")]
             desktop_theme: None,
@@ -991,9 +1001,12 @@ impl PdfCraftApp {
             all_tools_expanded: false,
             recent: Vec::new(),
             reopen_last_session: false,
+            restore_last_view: true,
+            last_views: Vec::new(),
             last_session: Default::default(),
             quit_session: None,
             reload_changed_files: true,
+            show_secured_notice: true,
             always_default_view: false,
             #[cfg(not(target_arch = "wasm32"))]
             watch: Default::default(),
@@ -1412,7 +1425,9 @@ impl PdfCraftApp {
             self.active = Some(self.views.len() - 1);
         }
         self.apply_initial_view(self.views.len() - 1, &initial);
-        // After the document's own initial view, so leaving full screen comes back to it.
+        // Where the reader left off wins over the file's own initial view (#1767).
+        self.apply_last_view(self.views.len() - 1);
+        // After both, so full screen shows one fitted page and leaving it comes back to them.
         if self.full_screen
             && let Some(view) = self.views.last_mut()
         {
@@ -2015,6 +2030,7 @@ impl PdfCraftApp {
         if index >= self.views.len() {
             return;
         }
+        self.remember_view(index);
         let id = self.views.remove(index).id;
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(path) = self.session.get(id).and_then(|d| d.path.clone()) {
@@ -2378,6 +2394,8 @@ impl PdfCraftApp {
             "docking_right": self.right,
             "recent": self.recent,
             "reopen_last_session": self.reopen_last_session,
+            "restore_last_view": self.restore_last_view,
+            "last_views": self.last_views_to_save(),
             // Kept only while the preference is on.
             "last_session": self.reopen_last_session.then(|| self.session_to_save()),
             "reload_changed_files": self.reload_changed_files,
@@ -2438,6 +2456,7 @@ impl PdfCraftApp {
         v["redact_prefs"] = self.redact_defaults.to_json();
         // Set outside json! above, which is at serde_json's macro recursion limit.
         v["hide_empty_highlight_hover"] = serde_json::Value::Bool(self.comment_prefs.hide_empty_highlight_hover);
+        v["show_secured_notice"] = serde_json::Value::Bool(self.show_secured_notice);
         v["organize_zoom"] = serde_json::json!(self.organize_zoom);
         // Canonical names survive changes to the order of PAPERS and do not depend on UI language.
         v["print_paper"] = serde_json::json!(pdfcraft_engine::print::PAPERS.get(self.print_draft.paper).map(|(name, _)| *name));
@@ -2476,12 +2495,19 @@ impl PdfCraftApp {
         if let Some(on) = v["reopen_last_session"].as_bool() {
             self.reopen_last_session = on;
         }
+        if let Some(on) = v["restore_last_view"].as_bool() {
+            self.restore_last_view = on;
+        }
+        self.restore_last_views(&v["last_views"]);
         self.last_session = last_session::LastSession::from_json(&v["last_session"]);
         if let Some(on) = v["system_title_bar"].as_bool() {
             self.system_title_bar = on;
         }
         if let Some(on) = v["reload_changed_files"].as_bool() {
             self.reload_changed_files = on;
+        }
+        if let Some(on) = v["show_secured_notice"].as_bool() {
+            self.show_secured_notice = on;
         }
         self.pinned.restore(&v["pinned_folders"]);
         if let Ok(preference) = serde_json::from_value::<ThemePreference>(v["theme"].clone()) {
@@ -2911,6 +2937,14 @@ impl PdfCraftApp {
                 };
             }
             ("ui-scale", _) => self.ui_scale = ui_scale::parse(value)?,
+            // `--secured-notice false`: no notice above the pages that a document is secured.
+            ("secured-notice", _) => {
+                self.show_secured_notice = match value {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err("secured-notice must be true or false".into()),
+                };
+            }
             ("system-title-bar", _) => {
                 self.system_title_bar = match value {
                     "true" => true,
@@ -3036,6 +3070,8 @@ impl PdfCraftApp {
             {
                 object_ui::nudge_keys(ctx, &mut self.views[i], doc);
                 object_ui::delete_keys(ctx, &mut self.views[i]);
+            } else if let Some(doc) = self.session.get(self.views[i].id).filter(|d| d.allows_annotation()) {
+                comments::nudge_keys(ctx, &mut self.views[i], &doc.info);
             }
             // A selected field moves with the arrows too (Prepare a form, #2608), before the view
             // turns the page with them.
@@ -3134,6 +3170,8 @@ impl eframe::App for PdfCraftApp {
     /// would keep the place the pointer entered at: tell it where the pointer really is, so the
     /// page grid can show (and use) the gap under it.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        // The button's release a window move or resize kept from egui.
+        window_controls::release_after_desktop_grab(ctx, raw);
         // Before egui reads this frame's wheel input.
         self.scroll_speed.apply(ctx, raw);
         if raw.hovered_files.is_empty() && raw.dropped_files.is_empty() {

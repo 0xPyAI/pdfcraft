@@ -8753,3 +8753,53 @@ fn bookmark_list_reports_colour_and_style() {
     let re = ok(&mut b, "doc_open", json!({ "path": "restyled.pdf" }))["doc"].as_u64().unwrap();
     assert_eq!(style(&ok(&mut b, "bookmark_list", json!({ "doc": re }))["bookmarks"]), style(&set), "saved");
 }
+
+/// `page_render`'s pixels show a rubber stamp written without an appearance as the stamp its
+/// `/Name` names (ISO 32000-2 Table 184), and one with an unknown name as a grey placeholder.
+#[test]
+fn page_render_draws_stamps_without_an_appearance() {
+    let dir = workdir("stamps-without-appearance");
+    let objects: Vec<&[u8]> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 100] >>",
+        b"<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R] >>",
+        b"<< /Type /Annot /Subtype /Stamp /Rect [10 20 130 80] /Name /Approved >>",
+        b"<< /Type /Annot /Subtype /Stamp /Rect [170 20 290 80] /Name /MyCustomStamp >>",
+    ];
+    let mut bytes = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, object) in objects.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        bytes.extend_from_slice(object);
+        bytes.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+    for o in offsets {
+        bytes.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+    std::fs::write(dir.join("stamps.pdf"), bytes).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "stamps.pdf" }))["doc"].as_u64().unwrap();
+    let (width, _, pixels) = a.render_pixels(doc, 1, 1.0).unwrap();
+    let pixels = pixels.as_ref();
+    // Ink in columns `x0..x1` of rows 20..80, which are the stamps' rows whether counted from the top or the bottom.
+    let ink = |x0: u32, x1: u32| -> Vec<[u8; 3]> {
+        (20..80u32)
+            .flat_map(|y| (x0..x1).map(move |x| (y, x)))
+            .map(|(y, x)| {
+                let i = ((y * width + x) * 4) as usize;
+                [pixels[i], pixels[i + 1], pixels[i + 2]]
+            })
+            .filter(|p| p.iter().any(|v| *v < 200))
+            .collect()
+    };
+    let approved = ink(10, 130);
+    let green = approved.iter().filter(|p| p[1] > p[0] && p[1] > p[2]).count();
+    assert!(green > 300 && green * 10 > approved.len() * 9, "Approved is drawn green: {green} of {}", approved.len());
+    let custom = ink(170, 290);
+    let grey = custom.iter().filter(|p| p[0].abs_diff(p[1]) < 24 && p[1].abs_diff(p[2]) < 24).count();
+    assert!(grey > 100 && grey == custom.len(), "an unknown name is a grey placeholder: {grey} of {}", custom.len());
+}

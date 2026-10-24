@@ -1963,6 +1963,10 @@
 	Perimeter	Периметр
 	Area	Аудан
 	Drawing scale	Сызба масштабы
+	Scale	Масштаб
+	Common scales	Жиі қолданылатын масштабтар
+	Enter a scale such as 1:50.	1:50 сияқты масштабты енгізіңіз.
+	Applying a scale switches units to m / mm.	Масштабты қолдану өлшем бірліктерін m / mm етіп ауыстырады.
 	Snapping	Түйістіру
 	Export measurements	Өлшемдерді экспорттау
 	Open a PDF to measure it.	Өлшеу үшін PDF құжатын ашыңыз.
@@ -2114,6 +2118,7 @@ calendar date	October	Қазан
 calendar date	November	Қараша
 calendar date	December	Желтоқсан
 	Reopen the files that were open when PdfCraft last closed	PdfCraft соңғы рет жабылғанда ашық болған файлдарды қайта ашу
+	Restore the last view (page, zoom and page display) when a document is opened again	Құжат қайта ашылғанда соңғы көріністі (бет, масштаб және бет көрсетілімі) қалпына келтіру
 	Clear Recent Files	Соңғы файлдарды тазарту
 	Remove from Recent	Соңғылардан алып тастау
 	Remove {name} from Recent	{name} дегенді соңғылардан алып тастау
@@ -2319,6 +2324,8 @@ key	Space	Бос орын
 	Printer paper and scaling may differ. Check driver settings.	Принтер қағазы мен масштабы өзгеше болуы мүмкін. Драйвер параметрлерін тексеріңіз.
 	Drawing scale changes. Use Actual size for full-scale plans.	Сызба масштабы өзгереді. Толық масштабты жоспарлар үшін Нақты өлшемді пайдаланыңыз.
 	Reload documents when their files change on disk	Дискідегі файлдары өзгергенде құжаттарды қайта жүктеу
+	Don't show again	Қайта көрсетпеу
+	Show a notice when a document is secured	Құжат қорғалған кезде хабарландыру көрсету
 	Always use my default zoom and page layout	Әрқашан әдепкі масштаб пен бет орналасуын пайдалану
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Бұл файл дискіде өзгертілді. «Қайта жүктеу» жаңа нұсқаны көрсетіп, сақталмаған өзгерістеріңізді тастайды; «Сақтау» оны осы нұсқамен алмастырады.
 	Reload	Қайта жүктеу
