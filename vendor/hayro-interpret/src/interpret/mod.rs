@@ -157,6 +157,10 @@ pub enum InterpreterWarning {
     ImageDecodeFailure,
     /// PdfCraft patch (18): a page content stream was skipped after exhausting its safety budget.
     ContentTruncated,
+    /// PdfCraft patch (55): a colour could not be computed (a colour space that cannot be
+    /// read, or a Separation or DeviceN tint transform that cannot be evaluated) and was painted
+    /// in a fallback colour. Reported at most once per content stream.
+    ColorFallback,
 }
 
 /// interpret the contents of the page and render them into the device.
@@ -184,6 +188,15 @@ pub fn interpret_page<'a>(
             // Annotation should be hidden (Hidden = bit 2, NoView = bit 6).
             // PdfCraft patch: NoView was not honoured upstream.
             if flags & (2 | 32) != 0 {
+                continue;
+            }
+            // PdfCraft patch (56): Invisible (bit 1) hides an annotation of a type that isn't one
+            // of the standard ones (ISO 32000-2 Table 167), and a popup has no appearance of its
+            // own (§12.5.6.14): the viewer shows it as a window for its parent, not on the page.
+            let subtype = annot.get::<hayro_syntax::object::Name<'_>>(SUBTYPE);
+            if subtype.as_deref() == Some(b"Popup")
+                || (flags & 1 != 0 && !subtype.as_deref().is_some_and(is_standard_annotation_type))
+            {
                 continue;
             }
             // PdfCraft patch: "Hide all comments" keeps widgets and links.
@@ -280,6 +293,42 @@ pub fn interpret_page<'a>(
         }
         device.end_annotations();
     }
+}
+
+/// PdfCraft patch (56): whether `subtype` is one of the standard annotation types of
+/// ISO 32000-2 Table 171.
+fn is_standard_annotation_type(subtype: &[u8]) -> bool {
+    matches!(
+        subtype,
+        b"Text"
+            | b"Link"
+            | b"FreeText"
+            | b"Line"
+            | b"Square"
+            | b"Circle"
+            | b"Polygon"
+            | b"PolyLine"
+            | b"Highlight"
+            | b"Underline"
+            | b"Squiggly"
+            | b"StrikeOut"
+            | b"Caret"
+            | b"Stamp"
+            | b"Ink"
+            | b"Popup"
+            | b"FileAttachment"
+            | b"Sound"
+            | b"Movie"
+            | b"Screen"
+            | b"Widget"
+            | b"PrinterMark"
+            | b"TrapNet"
+            | b"Watermark"
+            | b"3D"
+            | b"Redact"
+            | b"Projection"
+            | b"RichMedia"
+    )
 }
 
 /// PdfCraft patch: the normal appearance of a Highlight annotation that has none (ISO 32000-2
@@ -562,8 +611,13 @@ fn interpret_window<'a>(
             }
             TypedInstruction::ColorSpaceStroke(c) => {
                 // PdfCraft patch (38): see `named_color_space`.
+                // PdfCraft patch (55): a space that cannot be read is drawn in DeviceGray, as
+                // before, and the fallback is reported.
                 let cs = named_color_space(c.0, resources, &defaults, context)
-                    .unwrap_or(ColorSpace::device_gray());
+                    .unwrap_or_else(|| {
+                        crate::color::note_color_fallback();
+                        ColorSpace::device_gray()
+                    });
 
                 if !cs.is_pattern() {
                     context.get_mut().graphics_state.stroke_pattern = None;
@@ -573,8 +627,13 @@ fn interpret_window<'a>(
             }
             TypedInstruction::ColorSpaceNonStroke(c) => {
                 // PdfCraft patch (38): see `named_color_space`.
+                // PdfCraft patch (55): a space that cannot be read is drawn in DeviceGray, as
+                // before, and the fallback is reported.
                 let cs = named_color_space(c.0, resources, &defaults, context)
-                    .unwrap_or(ColorSpace::device_gray());
+                    .unwrap_or_else(|| {
+                        crate::color::note_color_fallback();
+                        ColorSpace::device_gray()
+                    });
 
                 if !cs.is_pattern() {
                     context.get_mut().graphics_state.non_stroke_pattern = None;
@@ -932,6 +991,10 @@ pub fn interpret<'a>(
     if crate::context::content_was_truncated() {
         (context.settings.warning_sink)(InterpreterWarning::ContentTruncated);
     }
+    // PdfCraft patch (55): and that a colour was painted in a fallback colour.
+    if crate::color::take_color_fallback() {
+        (context.settings.warning_sink)(InterpreterWarning::ColorFallback);
+    }
 }
 
 /// PdfCraft patch: the bytes of a window of page content. A window grows only while an instruction
@@ -989,5 +1052,9 @@ fn interpret_content<'a>(
     // PdfCraft patch (18): say that content was skipped, so a truncated page isn't a clean render.
     if cut || content.truncated() || crate::context::content_was_truncated() {
         (context.settings.warning_sink)(InterpreterWarning::ContentTruncated);
+    }
+    // PdfCraft patch (55): and that a colour was painted in a fallback colour.
+    if crate::color::take_color_fallback() {
+        (context.settings.warning_sink)(InterpreterWarning::ColorFallback);
     }
 }

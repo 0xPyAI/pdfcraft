@@ -1910,6 +1910,7 @@
 	Update watermark…	Përditëso filigranin…
 	Use 72 DPI (one point per pixel)	Përdor 72 DPI (një pikë për piksel)
 	Use Flate to encode streams that are not encoded	Përdor Flate për të koduar rrjedhat që nuk janë të koduara
+	In streams that use LZW encoding, use Flate instead	Në rrjedhat që përdorin kodimin LZW, përdor Flate në vend të tij
 	Use JavaScript	Përdor JavaScript
 	Use a Digital ID from a file	Përdor një ID dixhitale nga një skedar
 	Use a certificate	Përdor një certifikatë

@@ -3003,6 +3003,43 @@ fn editing_existing_text_through_tools() {
     assert_eq!(p["lines"].as_array().map(Vec::len), Some(2), "{p}");
 }
 
+#[test]
+fn styled_cyrillic_fallback_is_batched_through_tools_and_reopen() {
+    if pdfcraft_fonts::document_japanese_font().is_none() {
+        eprintln!("skipping: built without craft-fonts");
+        return;
+    }
+    let dir = workdir("styled-fallback");
+    std::fs::write(
+        dir.join("mixed.pdf"),
+        helvetica_page(
+            "BT /F1 12 Tf 14.4 TL 72 700 Td (The quick brown fox jumps over the lazy dog) Tj T* (and keeps running through the long field.) Tj ET",
+        ),
+    )
+    .unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({"path": "mixed.pdf"}))["doc"].as_u64().unwrap();
+    let replacement = "The quick brown fox jumps over the lazy dog шалом\nand keeps running through the long field.";
+    ok(&mut a, "text_edit", json!({"doc":doc,"page":1,"paragraph":1,"text":replacement,"width":520}));
+    ok(&mut a, "doc_save", json!({"doc":doc,"path":"saved.pdf"}));
+    let saved = pdfcraft_cos::Document::open(std::sync::Arc::new(std::fs::read(dir.join("saved.pdf")).unwrap())).unwrap();
+    let page = pdfcraft_model::pages(&saved).swap_remove(0);
+    let resources = saved.dict(page.dict.get(b"Resources").unwrap()).unwrap();
+    let fonts = saved.dict(resources.get(b"Font").unwrap()).unwrap();
+    let fallback_count = fonts.iter().filter(|(name, _)| name.starts_with(b"PCJp")).count();
+    assert_eq!(fallback_count, 1, "one shared fallback font for the new word");
+    ok(&mut a, "edit_undo", json!({"doc":doc}));
+    assert!(!page_text(&mut a, doc)[0].contains("шалом"));
+    ok(&mut a, "edit_redo", json!({"doc":doc}));
+    assert!(page_text(&mut a, doc)[0].contains("шалом"));
+    let reopened = ok(&mut a, "doc_open", json!({"path":"saved.pdf"}))["doc"].as_u64().unwrap();
+    let lines = ok(&mut a, "text_lines", json!({"doc":reopened,"page":1}));
+    let runs = lines["lines"].as_array().unwrap();
+    assert!(runs.iter().any(|l| l["text"].as_str().is_some_and(|t| t.starts_with("The quick")) && l["font"] == "Helvetica"), "{lines}");
+    assert_eq!(runs.iter().filter(|l| l["text"] == "шалом").count(), 1, "{lines}");
+    assert!(page_text(&mut a, reopened)[0].contains("шалом"));
+}
+
 /// #2593: a paragraph whose own font cannot show a character is written from PdfCraft's fallback
 /// faces. The Cyrillic the craft-fonts faces lack (Uzbek қ ғ ҳ, Kazakh ә ө ү ұ һ) comes from the
 /// bundled Inter face, so the edit is not refused even without `CRAFT_FONTS_DIR`, and the words
@@ -5876,11 +5913,83 @@ fn optimizing_through_tools() {
     assert!(reduced["bytes_after"].as_u64().unwrap() < reduced["bytes_before"].as_u64().unwrap());
     assert_eq!(reduced["written"], true);
     assert_eq!(std::fs::metadata(dir.join("reduced.pdf")).unwrap().len(), reduced["bytes_after"].as_u64().unwrap());
+
+    // Target PDF 1.4 (disables object streams) and PDF 2.0 (with object_streams toggled off).
+    let v14 = ok(&mut a, "doc_optimize", json!({ "doc": doc, "path": "v14.pdf", "compatibility": "1.4" }));
+    assert_eq!((v14["pdf_version"].as_str(), v14["object_streams"].as_bool()), (Some("1.4"), Some(false)), "{v14}");
+    let v14_bytes = std::fs::read(dir.join("v14.pdf")).unwrap();
+    assert!(v14_bytes.starts_with(b"%PDF-1.4\n") && !v14_bytes.windows(7).any(|w| w == b"/ObjStm"));
+
+    let v20 = ok(&mut a, "doc_optimize", json!({ "doc": doc, "path": "v20.pdf", "compatibility": "2.0", "object_streams": false }));
+    assert_eq!((v20["pdf_version"].as_str(), v20["object_streams"].as_bool()), (Some("2.0"), Some(false)), "{v20}");
+    assert!(std::fs::read(dir.join("v20.pdf")).unwrap().starts_with(b"%PDF-2.0\n"));
+
+    // In retain mode, a catalog /Version override is reported as the effective PDF version.
+    let mut cos14 = pdfcraft_cos::Document::open(std::sync::Arc::new(v14_bytes)).unwrap();
+    let root = cos14.root().unwrap();
+    cos14.update_dict(root, |c| c.set(b"Version".to_vec(), pdfcraft_cos::Object::name("1.6"))).unwrap();
+    let cat16 = pdfcraft_cos::write_full(&cos14, &pdfcraft_cos::SaveOptions { object_streams: false, ..Default::default() }).unwrap();
+    std::fs::write(dir.join("cat16.pdf"), &cat16).unwrap();
+    let cat_doc = ok(&mut a, "doc_open", json!({ "path": "cat16.pdf" }))["doc"].as_u64().unwrap();
+    let retained = ok(&mut a, "doc_optimize", json!({ "doc": cat_doc, "path": "retained.pdf", "compatibility": "retain", "object_streams": false }));
+    assert_eq!(retained["pdf_version"].as_str(), Some("1.6"), "{retained}");
+
+    assert!(matches!(a.call("doc_optimize", &json!({ "doc": doc, "path": "x.pdf", "compatibility": "1.3" })), Err(ToolError::InvalidArgs(_))));
     assert!(matches!(
         a.call("doc_optimize", &json!({ "doc": doc, "path": "x.pdf", "color": { "compression": "gif" } })),
         Err(ToolError::InvalidArgs(_))
     ));
     assert!(matches!(a.call("doc_optimize", &json!({ "doc": doc, "path": "x.pdf", "discard": ["everything"] })), Err(ToolError::InvalidArgs(_))));
+}
+
+/// `data` as LZW with one 9-bit literal code per byte (clear-table first, EOD last): valid for
+/// fewer than 250 bytes, before the code width grows.
+fn lzw_literals(data: &[u8]) -> Vec<u8> {
+    let codes: Vec<u16> = std::iter::once(256).chain(data.iter().map(|&b| u16::from(b))).chain([257]).collect();
+    let bits: Vec<bool> = codes.iter().flat_map(|c| (0..9).rev().map(move |i| c >> i & 1 == 1)).collect();
+    bits.chunks(8).map(|byte| byte.iter().enumerate().fold(0u8, |acc, (i, &b)| acc | (u8::from(b) << (7 - i)))).collect()
+}
+
+#[test]
+fn lzw_streams_are_stored_with_flate_through_tools() {
+    use pdfcraft_cos::{Dict, Document, Object, SaveOptions, Stream, write_full};
+    let dir = workdir("optimize-lzw");
+    let ops = b"0.2 0.4 0.8 rg 72 72 200 100 re f 0 0 1 RG 72 300 m 400 500 l S".to_vec();
+    let mut doc = Document::new_empty();
+    let pages = doc.get(doc.root().unwrap()).as_dict().unwrap().reference(b"Pages").unwrap();
+    let lzw = Stream::from_raw(Dict::from_iter([(b"Filter".to_vec(), Object::name("LZWDecode"))]), lzw_literals(&ops));
+    assert_eq!(lzw.decoded_strict().unwrap(), ops);
+    let content = doc.add(Object::Stream(lzw));
+    let page = doc.add(Object::Dict(Dict::from_iter([
+        (b"Type".to_vec(), Object::name("Page")),
+        (b"Parent".to_vec(), Object::Ref(pages)),
+        (b"MediaBox".to_vec(), Object::Array(vec![0.into(), 0.into(), 612.into(), 792.into()])),
+        (b"Contents".to_vec(), Object::Ref(content)),
+    ])));
+    doc.update_dict(pages, |d| {
+        d.set(b"Kids".to_vec(), Object::Array(vec![Object::Ref(page)]));
+        d.set(b"Count".to_vec(), Object::Int(1));
+    })
+    .unwrap();
+    std::fs::write(dir.join("lzw.pdf"), write_full(&doc, &SaveOptions::default()).unwrap()).unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "lzw.pdf" }))["doc"].as_u64().unwrap();
+    let filters = |name: &str| {
+        let saved = pdfcraft_cos::Document::open(std::sync::Arc::new(std::fs::read(dir.join(name)).unwrap())).unwrap();
+        let catalog = saved.get(saved.root().unwrap()).as_dict().cloned().unwrap();
+        let pages = saved.get(catalog.reference(b"Pages").unwrap()).as_dict().cloned().unwrap();
+        let page = saved.get(pages.get(b"Kids").and_then(|k| k.as_array()?.first()?.as_ref()).unwrap()).as_dict().cloned().unwrap();
+        match &*saved.get(page.reference(b"Contents").unwrap()) {
+            Object::Stream(s) => (s.dict.get(b"Filter").cloned(), s.decoded_strict().unwrap()),
+            _ => panic!("the page content is not a stream"),
+        }
+    };
+    let r = ok(&mut a, "doc_optimize", json!({ "doc": doc, "path": "flate.pdf" }));
+    assert_eq!(r["lzw_streams"].as_u64(), Some(1), "{r}");
+    assert_eq!(filters("flate.pdf"), (Some(Object::name("FlateDecode")), ops.clone()));
+    let off = ok(&mut a, "doc_optimize", json!({ "doc": doc, "path": "kept.pdf", "lzw_to_flate": false }));
+    assert_eq!(off["lzw_streams"].as_u64(), Some(0), "{off}");
+    assert_eq!(filters("kept.pdf"), (Some(Object::name("LZWDecode")), ops));
 }
 
 /// A one-page PDF whose page picture is drawn as `rows` grey images one pixel row high, 600 px

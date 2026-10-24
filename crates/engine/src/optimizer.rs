@@ -68,7 +68,11 @@ impl Session {
             cos: editor.cos.clone(),
             settings: settings.clone(),
             discard: discard.to_vec(),
-            opts: SaveOptions { mod_date: self.now().map(pdfcraft_cos::pdf_date), ..SaveOptions::default() },
+            opts: SaveOptions {
+                mod_date: self.now().map(pdfcraft_cos::pdf_date),
+                object_streams: settings.effective_object_streams(),
+                ..SaveOptions::default()
+            },
         })
     }
 }

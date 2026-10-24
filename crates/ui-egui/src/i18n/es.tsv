@@ -607,6 +607,7 @@
 	Discard private data of other applications	Descartar datos privados de otras aplicaciones
 	Discard hidden text	Descartar texto oculto
 	Use Flate to encode streams that are not encoded	Usar Flate para codificar las secuencias sin codificar
+	In streams that use LZW encoding, use Flate instead	En las secuencias con codificación LZW, usar Flate en su lugar
 	Remove invalid links and bookmarks	Quitar enlaces y marcadores no válidos
 	Remove unreferenced named destinations	Quitar destinos con nombre sin referencias
 	Compress document structure (object streams)	Comprimir la estructura del documento (secuencias de objetos)

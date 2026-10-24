@@ -688,6 +688,10 @@ fn render(args: &[String]) -> Result<(), CliError> {
             pdfcraft_render::RenderWarning::ContentTruncated => {
                 let _ = writeln!(std::io::stderr().lock(), "warning: page {page}: content past the page's safety budget was skipped");
             }
+            pdfcraft_render::RenderWarning::ColourFallback => {
+                let _ =
+                    writeln!(std::io::stderr().lock(), "warning: page {page}: a colour that could not be computed was painted in a fallback colour");
+            }
         }
     }
     Ok(())

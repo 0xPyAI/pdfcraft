@@ -574,6 +574,7 @@
 	Discard private data of other applications	Descarta les dades privades d'altres aplicacions
 	Discard hidden text	Descarta el text ocult
 	Use Flate to encode streams that are not encoded	Utilitza Flate per codificar els fluxos que no estan codificats
+	In streams that use LZW encoding, use Flate instead	Als fluxos que utilitzen codificació LZW, utilitza Flate
 	Remove invalid links and bookmarks	Elimina els enllaços i marcadors no vàlids
 	Remove unreferenced named destinations	Elimina les destinacions amb nom sense referència
 	Compress document structure (object streams)	Comprimeix l'estructura del document (fluxos d'objectes)

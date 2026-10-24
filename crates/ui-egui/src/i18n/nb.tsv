@@ -1228,6 +1228,7 @@
 	Update	Oppdater
 	Use 72 DPI (one point per pixel)	Bruk 72 DPI (ett punkt per piksel)
 	Use Flate to encode streams that are not encoded	Bruk Flate til å kode strømmer som ikke er kodet
+	In streams that use LZW encoding, use Flate instead	Bruk Flate i stedet for LZW i strømmer som er LZW-kodet
 	Use a Digital ID from a file	Bruk en digital ID fra en fil
 	Use custom DPI	Bruk egendefinert DPI
 	Use each image's embedded DPI; use 72 DPI when it is absent.	Bruk hvert bildes innebygde DPI; bruk 72 DPI når den mangler.
