@@ -2328,6 +2328,18 @@ pub fn is_comment_subtype(subtype: &str) -> bool {
     !matches!(subtype, "Link" | "Widget" | "Popup" | "Screen" | "Movie" | "RichMedia" | "3D" | "PrinterMark" | "TrapNet" | "Watermark")
 }
 
+/// Where a reference to a reference (`5 0 obj 6 0 R endobj`) ends, as `pdfcraft_render::inspect`
+/// follows it, within a few steps (a cycle stops there).
+fn final_ref(doc: &Document, mut r: ObjRef) -> ObjRef {
+    for _ in 0..8 {
+        match &*doc.get(r) {
+            Object::Ref(next) => r = *next,
+            _ => break,
+        }
+    }
+    r
+}
+
 /// Every comment (see [`is_comment_subtype`]), ordered by page and then top edge.
 pub fn summaries(doc: &Document) -> Vec<Summary> {
     let mut out = Vec::new();
@@ -2338,13 +2350,13 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
     for (page, list) in lists.iter().enumerate() {
         for (index, entry) in list.iter().enumerate() {
             if let Some(r) = entry.as_ref() {
-                slots.entry(r).or_insert((page, index));
+                slots.entry(final_ref(doc, r)).or_insert((page, index));
             }
         }
     }
     for (page, list) in lists.iter().enumerate() {
         for (index, entry) in list.iter().enumerate() {
-            let obj = doc.resolve(entry);
+            let obj = entry.as_ref().map_or_else(|| doc.resolve(entry), |r| doc.get(final_ref(doc, r)));
             let Some(d) = obj.as_dict() else { continue };
             let Some(subtype) = d.name(b"Subtype").map(|s| String::from_utf8_lossy(s).into_owned()) else { continue };
             if !is_comment_subtype(&subtype) {
@@ -2378,8 +2390,9 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
                 "PolyLine" | "Polygon" => nums(b"Vertices").as_chunks::<2>().0.to_vec(),
                 _ => Vec::new(),
             };
-            let in_reply_to = d.get(b"IRT").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).and_then(|p| text_value(doc, &p, b"NM"));
-            let parent = d.get(b"IRT").and_then(Object::as_ref).and_then(|r| slots.get(&r).copied());
+            let irt = d.get(b"IRT").map(|o| o.as_ref().map_or_else(|| doc.resolve(o), |r| doc.get(final_ref(doc, r))));
+            let in_reply_to = irt.and_then(|o| o.as_dict().cloned()).and_then(|p| text_value(doc, &p, b"NM"));
+            let parent = d.get(b"IRT").and_then(Object::as_ref).and_then(|r| slots.get(&final_ref(doc, r)).copied());
             out.push(Summary {
                 page,
                 index,
