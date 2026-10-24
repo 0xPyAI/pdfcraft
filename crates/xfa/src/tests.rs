@@ -2897,3 +2897,43 @@ fn long_names_repeated_by_an_index_are_capped() {
     let data = build_data(&doc, &fields);
     assert!(data.len() < 2_000_000, "{} bytes of data built", data.len());
 }
+
+/// Text is measured in the standard-14 face it is drawn in, at the widths ISO 32000-2 Annex D
+/// gives: bold and Times are no longer Helvetica scaled, and the horizontal scale still applies.
+#[test]
+fn faces_measure_text_at_their_standard_14_widths() {
+    use pdfcraft_fonts::Std14;
+    let face = |family: text::Family, bold: bool, italic: bool| text::Face {
+        family,
+        bold,
+        italic,
+        size: 10.0,
+        color: [0.0; 3],
+        underline: false,
+        h_scale: 1.0,
+    };
+    let sample = "Mill Wax 0123 Departure Date";
+    for (family, bold, italic, std14) in [
+        (text::Family::Helvetica, false, false, Std14::Helvetica),
+        (text::Family::Helvetica, true, false, Std14::HelveticaBold),
+        (text::Family::Helvetica, true, true, Std14::HelveticaBoldOblique),
+        (text::Family::Times, false, false, Std14::TimesRoman),
+        (text::Family::Times, true, false, Std14::TimesBold),
+        (text::Family::Times, false, true, Std14::TimesItalic),
+        (text::Family::Times, true, true, Std14::TimesBoldItalic),
+        (text::Family::Courier, true, false, Std14::CourierBold),
+    ] {
+        let f = face(family, bold, italic);
+        assert!(
+            (f.width(sample) - std14.text_width(sample, 10.0)).abs() < 1e-9,
+            "{std14:?}: {} vs {}",
+            f.width(sample),
+            std14.text_width(sample, 10.0)
+        );
+        assert_eq!(f.family.std14(bold, italic), std14);
+        assert_eq!(f.family.base_font(bold, italic), std14.base_font());
+    }
+    // A condensed face is narrower by its scale.
+    let condensed = text::Face { h_scale: 0.8, ..face(text::Family::Times, true, false) };
+    assert!((condensed.width(sample) - 0.8 * Std14::TimesBold.text_width(sample, 10.0)).abs() < 1e-9);
+}
