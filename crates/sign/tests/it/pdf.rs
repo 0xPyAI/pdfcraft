@@ -732,6 +732,35 @@ fn cached_discovery_still_validates_current_timestamp_bytes_ranges_and_trust() {
 }
 
 #[test]
+fn ltv_writers_may_declare_the_esic_extension_but_not_change_a_signed_one() {
+    let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    let trust = TrustStore { certs: vec![id.certificate.clone()] };
+    let check = |bytes: &[u8]| signatures(&open(bytes), bytes, &trust).into_iter().find(|s| s.signed).unwrap();
+    let ext = |base: &[u8], level: i64| {
+        let mut esic = pdfcraft_cos::Dict::new();
+        esic.set(b"BaseVersion".to_vec(), Object::name("1.7"));
+        esic.set(b"ExtensionLevel".to_vec(), Object::Int(level));
+        let mut e = pdfcraft_cos::Dict::new();
+        e.set(b"ESIC".to_vec(), Object::Dict(esic));
+        edit_after(base, |doc| {
+            let root = doc.root().unwrap();
+            doc.update_dict(root, |c| c.set(b"Extensions".to_vec(), Object::Dict(e))).unwrap();
+        })
+    };
+    // As PAdES LTV writers save it: the store and the ESIC declaration in one revision.
+    let signed = pdfcraft_sign::sign(&open(&fixture()), &id, &opts()).unwrap();
+    let evidence = pdfcraft_sign::dss::Evidence { certs: vec![id.certificate.raw.clone()], ocsps: Vec::new(), crls: Vec::new() };
+    let ltv = pdfcraft_sign::dss::embed(&open(&ext(&signed, 2)), &evidence).unwrap();
+    let s = check(&ltv);
+    assert_eq!(s.status, Status::Valid, "{:?}", s.details);
+    assert!(matches!(&s.modification, Modification::Allowed(k) if !k.contains(&kind::STRUCTURE)), "{:?}", s.modification);
+    // A declaration that was signed may not change afterwards.
+    let signed_with = pdfcraft_sign::sign(&open(&ext(&fixture(), 2)), &id, &opts()).unwrap();
+    let s = check(&ext(&signed_with, 3));
+    assert_eq!((s.status, s.modification), (Status::Invalid, Modification::Disallowed(vec![kind::STRUCTURE])));
+}
+
+#[test]
 fn embedding_ltv_evidence_adds_a_dss_and_keeps_signatures_valid() {
     use pdfcraft_sign::dss::{self, Evidence};
     let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
