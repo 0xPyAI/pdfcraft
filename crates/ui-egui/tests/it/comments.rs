@@ -1407,6 +1407,22 @@ fn replies_that_lead_nowhere_stay_comments_and_deeper_replies_join_their_thread(
     assert_eq!(h.state().views[0].comments.selected, None);
 }
 
+/// The arrow keys move a comment, not a reply: also not a reply to a comment with no `/NM`.
+#[test]
+fn arrow_keys_leave_a_reply_to_an_unnamed_comment_where_it_is() {
+    let mut h = harness_with_bytes(THREAD_EDGES.to_vec(), |app| app.set_option("quick", "select").unwrap());
+    let rect = |h: &Harness<'static, PdfCraftApp>, text: &str| comments(h).into_iter().find(|a| a.contents.as_deref() == Some(text)).unwrap().rect;
+    let (reply, parent) = (rect(&h, "Direct reply"), rect(&h, "Unnamed parent"));
+    h.state_mut().views[0].comments.selected = Some((0, 1));
+    h.key_press(egui::Key::ArrowRight);
+    h.run_steps(3);
+    assert_eq!(rect(&h, "Direct reply"), reply, "the reply stays");
+    h.state_mut().views[0].comments.selected = Some((0, 0));
+    h.key_press(egui::Key::ArrowRight);
+    h.run_steps(3);
+    assert_ne!(rect(&h, "Unnamed parent"), parent, "its comment moves");
+}
+
 // Contributor-original PDF: a comment, a reply, and a checkmark and a status set on the reply.
 const CHECKED_REPLY: &[u8] = b"%PDF-1.7
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj

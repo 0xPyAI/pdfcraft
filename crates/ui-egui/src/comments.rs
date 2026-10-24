@@ -1881,8 +1881,7 @@ pub(crate) fn nudge_keys(ctx: &egui::Context, view: &mut DocView, info: &DocInfo
         return;
     }
     let Some((page, index)) = cv.selected else { return };
-    let movable =
-        info.annotations.iter().any(|a| a.page == page && a.index == index && a.in_reply_to.is_none() && !is_markup(&a.subtype) && !a.locked);
+    let movable = info.annotations.iter().any(|a| a.page == page && a.index == index && !a.is_reply() && !is_markup(&a.subtype) && !a.locked);
     let (Some(xf), Some(p)) = (view.page_xform(page), info.pages.get(page)) else { return };
     if !movable {
         return;
