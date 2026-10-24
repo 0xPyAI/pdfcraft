@@ -674,7 +674,7 @@ fn a_sticky_note_on_a_turned_page_is_picked_where_it_is_drawn() {
         app.apply_edit(pdfcraft_engine::Edit::RotatePages { pages: vec![0], degrees: 90 });
         app.set_option("quick", "note").unwrap();
     });
-    settle(&mut h);
+    crate::support::settle(&mut h);
     let page = h.state().views[0].page_screen_rect(0).expect("page 1 on screen");
     // Screen pixels per point of the displayed page (300 × 200 pt turned to 200 × 300).
     let k = page.width() / 200.0;
@@ -684,7 +684,7 @@ fn a_sticky_note_on_a_turned_page_is_picked_where_it_is_drawn() {
     h.run_steps(2);
     h.get_by_label("Post").click();
     h.run_steps(3);
-    settle(&mut h);
+    crate::support::settle(&mut h);
     let c = comments(&h);
     assert_eq!(c.len(), 1);
     assert_eq!((c[0].subtype.as_str(), c[0].no_rotate), ("Text", true));
@@ -1398,7 +1398,7 @@ fn flatten_comments_from_the_page_menu_and_the_panel_menu() {
         author: "Tester".into(),
     }));
     h.state_mut().views[0].comments.selected = None;
-    settle(&mut h);
+    crate::support::settle(&mut h);
     assert_eq!(comments(&h).len(), 1);
 
     // Right-click on the page, away from the comment.
