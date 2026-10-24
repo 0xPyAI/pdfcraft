@@ -200,6 +200,11 @@ impl crate::Document {
         self.editor.as_ref().and_then(|e| pdfcraft_forms::field_actions(&e.cos, name).ok()).unwrap_or_default()
     }
 
+    /// Field Properties ▸ Actions: how many actions are chained after each trigger's first one.
+    pub fn field_action_chains(&self, name: &str) -> Vec<(pdfcraft_forms::Trigger, usize)> {
+        self.editor.as_ref().and_then(|e| pdfcraft_forms::field_action_chains(&e.cos, name).ok()).unwrap_or_default()
+    }
+
     /// Document JavaScripts (name, source), in name order.
     pub fn document_scripts(&self) -> Vec<(String, String)> {
         self.editor.as_ref().map(|e| document_scripts(&e.cos)).unwrap_or_default()

@@ -4956,8 +4956,8 @@ milestone = "M6"
 status = "shipped"
 commands = ["form.prepare"]
 tools = ["form_actions", "form_set_actions"]
-evidence = ["crates/forms/src/tests.rs::field_actions_round_trip_on_every_trigger", "crates/automation/tests/it/automation.rs::field_actions_through_tools", "crates/ui-egui/tests/it/prepare.rs::actions_tab_adds_and_removes_actions"]
-notes = "Six triggers; Run a JavaScript, Open a web link, Reset a form, Execute a menu item, Go to a page view, Show/hide a field, Submit a form. Other action types are kept."
+evidence = ["crates/forms/src/tests.rs::field_actions_round_trip_on_every_trigger", "crates/automation/tests/it/automation.rs::field_actions_through_tools", "crates/ui-egui/tests/it/prepare.rs::actions_tab_adds_and_removes_actions", "crates/ui-egui/tests/it/prepare.rs::actions_tab_edits_the_script_of_an_existing_action", "crates/forms/src/tests.rs::editing_one_script_keeps_the_other_actions_and_the_chain", "crates/forms/src/tests.rs::replacing_a_chained_action_with_another_type_keeps_the_chain", "crates/ui-egui/tests/it/prepare.rs::actions_tab_shows_a_chain_and_keeps_it_when_the_first_action_is_replaced"]
+notes = "Six triggers; Run a JavaScript, Open a web link, Reset a form, Execute a menu item, Go to a page view, Show/hide a field, Submit a form. Other action types are kept. Edit opens the script of an existing Run a JavaScript action; unchanged actions are kept as they are, and replacing a trigger's first action keeps the actions chained after it, which the row counts. Edit for the other action types, and editing the chained actions, are missing."
 
 [[feature]]
 id = "form.props-format"
