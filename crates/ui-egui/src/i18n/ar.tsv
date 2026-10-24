@@ -2193,6 +2193,7 @@ calendar date	October	أكتوبر
 calendar date	November	نوفمبر
 calendar date	December	ديسمبر
 	Reopen the files that were open when PdfCraft last closed	إعادة فتح الملفات التي كانت مفتوحة عند آخر إغلاق لـ PdfCraft
+	Restore the last view (page, zoom and page display) when a document is opened again	استعادة آخر عرض (الصفحة والتكبير وعرض الصفحات) عند فتح المستند مرة أخرى
 	Clear Recent Files	مسح الملفات الأخيرة
 	Remove from Recent	إزالة من الأخيرة
 	Remove {name} from Recent	إزالة {name} من الأخيرة

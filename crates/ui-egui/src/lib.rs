@@ -99,6 +99,7 @@ mod home;
 mod icon_data;
 pub mod icons;
 pub mod last_session;
+pub mod last_view;
 pub mod motion;
 mod page_selection_ui;
 mod pageboxes;
@@ -584,6 +585,11 @@ pub struct PdfCraftApp {
     pub recent: Vec<RecentFile>,
     /// Preferences: reopen the files that were open when PdfCraft last closed (#442).
     pub reopen_last_session: bool,
+    /// Restore last view settings when reopening documents (Preferences ▸ Documents and view;
+    /// #1767): the page, zoom and page display a file was last shown with. On by default.
+    pub restore_last_view: bool,
+    /// How files were last shown, most recent first (see `last_view`).
+    pub last_views: Vec<last_view::LastView>,
     /// The files open when PdfCraft last closed, read from the settings for
     /// [`PdfCraftApp::reopen_last_files`].
     pub last_session: last_session::LastSession,
@@ -989,6 +995,8 @@ impl PdfCraftApp {
             all_tools_expanded: false,
             recent: Vec::new(),
             reopen_last_session: false,
+            restore_last_view: true,
+            last_views: Vec::new(),
             last_session: Default::default(),
             quit_session: None,
             reload_changed_files: true,
@@ -1409,7 +1417,9 @@ impl PdfCraftApp {
             self.active = Some(self.views.len() - 1);
         }
         self.apply_initial_view(self.views.len() - 1, &initial);
-        // After the document's own initial view, so leaving full screen comes back to it.
+        // Where the reader left off wins over the file's own initial view (#1767).
+        self.apply_last_view(self.views.len() - 1);
+        // After both, so full screen shows one fitted page and leaving it comes back to them.
         if self.full_screen
             && let Some(view) = self.views.last_mut()
         {
@@ -2012,6 +2022,7 @@ impl PdfCraftApp {
         if index >= self.views.len() {
             return;
         }
+        self.remember_view(index);
         let id = self.views.remove(index).id;
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(path) = self.session.get(id).and_then(|d| d.path.clone()) {
@@ -2375,6 +2386,8 @@ impl PdfCraftApp {
             "docking_right": self.right,
             "recent": self.recent,
             "reopen_last_session": self.reopen_last_session,
+            "restore_last_view": self.restore_last_view,
+            "last_views": self.last_views_to_save(),
             // Kept only while the preference is on.
             "last_session": self.reopen_last_session.then(|| self.session_to_save()),
             "reload_changed_files": self.reload_changed_files,
@@ -2474,6 +2487,10 @@ impl PdfCraftApp {
         if let Some(on) = v["reopen_last_session"].as_bool() {
             self.reopen_last_session = on;
         }
+        if let Some(on) = v["restore_last_view"].as_bool() {
+            self.restore_last_view = on;
+        }
+        self.restore_last_views(&v["last_views"]);
         self.last_session = last_session::LastSession::from_json(&v["last_session"]);
         if let Some(on) = v["system_title_bar"].as_bool() {
             self.system_title_bar = on;

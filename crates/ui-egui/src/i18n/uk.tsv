@@ -2191,6 +2191,7 @@ calendar date	October	жовтня
 calendar date	November	листопада
 calendar date	December	грудня
 	Reopen the files that were open when PdfCraft last closed	Знову відкривати файли, які були відкриті під час останнього закриття PdfCraft
+	Restore the last view (page, zoom and page display) when a document is opened again	Відновлювати останній вигляд (сторінку, масштаб і показ сторінок) під час повторного відкриття документа
 	Clear Recent Files	Очистити список нещодавніх файлів
 	Remove from Recent	Вилучити з нещодавніх
 	Remove {name} from Recent	Вилучити {name} з нещодавніх

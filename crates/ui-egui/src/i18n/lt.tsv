@@ -989,6 +989,7 @@
 	Remove {n} pages	Pašalinti puslapių: {n}
 	Reopen Closed Tab	Vėl atverti užvertą kortelę
 	Reopen the files that were open when PdfCraft last closed	Vėl atverti failus, kurie buvo atverti paskutinį kartą užveriant „PdfCraft“
+	Restore the last view (page, zoom and page display) when a document is opened again	Iš naujo atidarant dokumentą atkurti paskutinį rodinį (puslapį, mastelį ir puslapių rodymą)
 	Repair log	Taisymo žurnalas
 	Repeat overlay text	Kartoti perdangos tekstą
 	Replace Image…	Pakeisti paveikslėlį…

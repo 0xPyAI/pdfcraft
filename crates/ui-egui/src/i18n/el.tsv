@@ -1467,6 +1467,7 @@
 	Couldn't import the signature image: {e}	Δεν ήταν δυνατή η εισαγωγή της εικόνας υπογραφής: {e}
 	Go to page…	Μετάβαση στη σελίδα…
 	Reopen the files that were open when PdfCraft last closed	Εκ νέου άνοιγμα των αρχείων που ήταν ανοιχτά κατά τον τελευταίο τερματισμό του PdfCraft
+	Restore the last view (page, zoom and page display) when a document is opened again	Επαναφορά της τελευταίας προβολής (σελίδα, ζουμ και εμφάνιση σελίδων) όταν ένα έγγραφο ανοίγει ξανά
 	The PDF text fonts can't draw “{c}” ({code}). Choose supported text.	Οι γραμματοσειρές κειμένου PDF δεν μπορούν να εμφανίσουν τον χαρακτήρα «{c}» ({code}). Επιλέξτε κείμενο που υποστηρίζεται.
 	Open arrow	Ανοιχτή αιχμή βέλους
 	Closed arrow	Κλειστή αιχμή βέλους

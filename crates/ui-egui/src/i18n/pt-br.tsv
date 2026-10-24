@@ -81,6 +81,7 @@
 	PdfCraft is drawing without a graphics processor, so it may be slow. Updating the graphics driver may help.	O PdfCraft está desenhando sem processador gráfico, por isso pode ficar lento. Atualizar o driver de vídeo pode ajudar.
 	Go to page…	Ir para a página…
 	Reopen the files that were open when PdfCraft last closed	Reabrir os arquivos que estavam abertos quando o PdfCraft foi fechado pela última vez
+	Restore the last view (page, zoom and page display) when a document is opened again	Restaurar a última visualização (página, zoom e exibição de páginas) ao reabrir um documento
 	Margins	Margens
 	For page sizes and margins.	Para tamanhos de página e margens.
 	Open	Abrir
