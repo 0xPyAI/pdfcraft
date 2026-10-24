@@ -1082,6 +1082,28 @@ fn form_fields_come_along_and_are_registered() {
     assert_eq!(out.get(kid).as_dict().unwrap().reference(b"P"), Some(pages(&out).unwrap()[0].obj));
 }
 
+/// #4020: Extract keeps the bookmarks that go to the pages it copies, mapped to the copies. One whose
+/// page was left out goes, unless a bookmark under it stays.
+#[test]
+fn extract_keeps_the_bookmarks_of_the_pages_it_copies() {
+    let mut src = doc_a();
+    crate::add_bookmark(&mut src, &[], 0, "One", 0).unwrap();
+    crate::add_bookmark(&mut src, &[], 1, "Two", 1).unwrap();
+    crate::add_bookmark(&mut src, &[1], 0, "Two.a", 2).unwrap();
+    crate::add_bookmark(&mut src, &[], 2, "Three", 2).unwrap();
+    let marks = |d: &Document| -> Vec<(String, usize, Option<usize>)> { bookmarks(d).into_iter().map(|b| (b.title, b.path.len(), b.page)).collect() };
+    let s = |t: &str| t.to_string();
+
+    let all = full_roundtrip(&extract_pages(&src, &[0, 1, 2]).unwrap());
+    assert_eq!(marks(&all), [(s("One"), 1, Some(0)), (s("Two"), 1, Some(1)), (s("Two.a"), 2, Some(2)), (s("Three"), 1, Some(2))]);
+
+    let last = full_roundtrip(&extract_pages(&src, &[2]).unwrap());
+    assert_eq!(marks(&last), [(s("Two"), 1, None), (s("Two.a"), 2, Some(0)), (s("Three"), 1, Some(0))], "One's page was left out");
+
+    let none = full_roundtrip(&extract_pages(&doc_a(), &[0]).unwrap());
+    assert!(!none.get(none.root().unwrap()).as_dict().unwrap().contains(b"Outlines"), "no bookmarks, no outline");
+}
+
 #[test]
 fn popup_cycles_copy_once_and_structure_links_are_removed() {
     let out = full_roundtrip(&extract_pages(&doc_a(), &[2]).unwrap());
