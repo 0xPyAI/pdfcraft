@@ -826,7 +826,7 @@ fn page_form(
     }
     let annots = page.dict.get(b"Annots").and_then(|a| doc.resolve(a).as_array().cloned()).unwrap_or_default();
     let mut xobjects = res.get(b"XObject").and_then(|x| doc.resolve(x).as_dict().cloned()).unwrap_or_default();
-    let mut k = 0;
+    let mut k = 0usize;
     for a in annots {
         let Some(d) = doc.resolve(&a).as_dict().cloned() else { continue };
         if !prints(doc, &d, content) {
@@ -858,8 +858,15 @@ fn page_form(
         } else {
             ap
         };
-        let name = format!("PCPrA{k}");
-        k += 1;
+        // Keep the page's own XObjects, including names previous print operations generated.
+        // Check the growing map so each appearance also keeps the name just assigned to it.
+        let name = loop {
+            let name = format!("PCPrA{k}");
+            k = k.checked_add(1).ok_or_else(|| PrintError::Invalid("too many annotation appearance resources".into()))?;
+            if !xobjects.contains(name.as_bytes()) {
+                break name;
+            }
+        };
         let [a0, b0, c0, d0, e0, f0] = m.0;
         body.extend(format!("q {} {} {} {} {} {} cm /{name} Do Q\n", n(a0), n(b0), n(c0), n(d0), n(e0), n(f0)).bytes());
         xobjects.set(name.into_bytes(), Object::Ref(ap));
