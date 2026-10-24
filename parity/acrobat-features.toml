@@ -7277,7 +7277,7 @@ milestone = "M11"
 status = "partial"
 commands = ["optimize.advanced"]
 tools = ["doc_optimize"]
-evidence = ["crates/optimize/tests/optimize.rs::compatibility_level_sets_version_unpacks_for_1_4_and_checks_encryption", "crates/automation/tests/automation.rs::optimizing_through_tools", "crates/ui-egui/tests/create.rs::the_pdf_optimizer_dialog_picks_a_preset"]
+evidence = ["crates/optimize/tests/optimize.rs::compatibility_level_sets_version_unpacks_for_1_4_and_checks_encryption", "crates/automation/tests/it/automation.rs::optimizing_through_tools", "crates/ui-egui/tests/it/create.rs::the_pdf_optimizer_dialog_picks_a_preset"]
 notes = "Retain existing (default), PDF 1.4, 1.5, 1.6, 1.7 or 2.0 in PDF Optimizer and doc_optimize; writes the chosen %PDF- header, clears any overriding catalog /Version, disables and unpacks object streams and cross-reference streams for PDF 1.4, and refuses when the document's encryption requires a newer PDF version (#3090). Partial compatibility only: content newer than the target is neither detected nor converted (including optional content, JPX images, 16-bit images, OpenType fonts and PDF 2.0 features); the chosen header does not guarantee compatibility with older readers"
 
 [[feature]]
