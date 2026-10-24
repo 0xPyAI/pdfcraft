@@ -445,7 +445,11 @@ fn a_text_field_says_what_fits_it_as_its_appearance_draws_it() {
 #[test]
 fn a_short_multiline_field_takes_the_one_line_it_draws() {
     let tx = |name: &str, extra: &str, h: i32| {
-        format!("<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /DA (/Helv 12 Tf 0 g) /Ff {}{extra} /Rect [50 {} 150 700] /P 3 0 R >>", flags::MULTILINE, 700 - h)
+        format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T ({name}) /DA (/Helv 12 Tf 0 g) /Ff {}{extra} /Rect [50 {} 150 700] /P 3 0 R >>",
+            flags::MULTILINE,
+            700 - h
+        )
     };
     let objs: Vec<String> = vec![
         "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
