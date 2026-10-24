@@ -1914,8 +1914,8 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text"]
 tools = ["text_edit"]
-evidence = ["crates/edit/src/tests.rs::missing_glyphs_substitute_helvetica_and_impossible_text_is_refused", "crates/fonts/src/pdf.rs::subset_fonts_only_encode_the_glyphs_they_have", "crates/fonts/src/pdf.rs::composite_fonts_use_to_unicode"]
-notes = "the line's font is reused when every character has a code and a glyph (ToUnicode, encodings, Differences; subset glyph checks); otherwise Helvetica (WinAnsi) is used and reported; text no font can show is refused"
+evidence = ["crates/edit/src/tests.rs::missing_glyphs_substitute_helvetica_and_impossible_text_is_refused", "crates/edit/src/tests.rs::a_bold_stand_in_font_leaves_an_earlier_regular_one_alone", "crates/fonts/src/pdf.rs::subset_fonts_only_encode_the_glyphs_they_have", "crates/fonts/src/pdf.rs::composite_fonts_use_to_unicode"]
+notes = "the line's font is reused when every character has a code and a glyph (ToUnicode, encodings, Differences; subset glyph checks); otherwise a standard face of the source font's family (Helvetica, Times or Courier, in its weight and slant; WinAnsi) is used and reported; text no font can show is refused. Each standard stand-in has a resource of its own face (PCEdTimesBold, ...), so a bold paragraph's stand-in no longer turns paragraphs set earlier in a regular one bold (#4280); pages already saved with the shared PCEdHelv name by older builds are not repaired"
 
 [[feature]]
 id = "edit.text-format-font"
