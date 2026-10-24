@@ -3751,8 +3751,8 @@ milestone = "M5"
 status = "shipped"
 commands = ["comment.line"]
 tools = ["comment_add"]
-evidence = ["crates/annot/src/tests.rs::every_tool_creates_a_drawable_comment"]
-notes = ""
+evidence = ["crates/annot/src/tests.rs::every_tool_creates_a_drawable_comment", "crates/annot/src/tests.rs::a_positive_leader_length_puts_the_line_above_a_left_to_right_line_and_a_negative_one_below", "crates/annot/src/tests.rs::an_inline_caption_breaks_the_line_around_its_text"]
+notes = "A line without an appearance is drawn with its leader lines (/LL, /LLE, /LLO: the line sits |LL| + LLO from /L, on the left of travel for a positive /LL) and its caption (/Cap, /CP Inline or Top, /CO), endings at the line itself (ISO 32000-2 Table 178). Not yet: the tool can't add leader lines or a caption, the caption is always black Helvetica 10 (no /DS or rich-text styling), and drawing past /Rect is clipped (/Rect isn't grown)."
 
 [[feature]]
 id = "comment.arrow"
