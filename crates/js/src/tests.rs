@@ -862,6 +862,14 @@ mod formcalc {
         o.result.unwrap_or_default()
     }
 
+    /// A negative value that rounds to zero under the picture prints without a minus sign.
+    #[test]
+    fn format_does_not_print_negative_zero() {
+        assert_eq!(calc(r#"Format("9.9", -0.04)"#), "0.0");
+        assert_eq!(calc(r#"Format("99", -0.2)"#), "00");
+        assert_eq!(calc(r#"Format("9.9", -1.5)"#), "-1.5");
+    }
+
     /// Assigning one long value to many fields at once stops at the run's byte budget and is
     /// charged per copy, and a reset list names each field once.
     #[test]
