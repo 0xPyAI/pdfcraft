@@ -317,6 +317,28 @@ fn stamp_cursor_stays_off_the_command_palette() {
     assert_eq!(cursor_at(&mut h, beside), egui::CursorIcon::Crosshair);
 }
 
+/// A link beside the open palette shows no tip: tips draw above the palette.
+#[test]
+fn link_tip_stays_off_while_the_palette_is_open() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = open(link_pdf(), "300", false);
+    h.state_mut().palette_open = true;
+    h.run_steps(4);
+    let palette = h.ctx.memory(|m| m.area_rect(egui::Id::new("palette"))).expect("palette shown");
+    let beside = [60.0, 100.0, 150.0, 200.0, 240.0]
+        .into_iter()
+        .flat_map(|x| [305.0, 325.0, 345.0].map(|y| at(&h, x, y)))
+        .find(|p| page(&h).contains(*p) && !palette.expand(40.0).contains(*p))
+        .unwrap_or_else(|| panic!("no point of the link beside the palette {palette:?}, page {:?}", page(&h)));
+    h.hover_at(beside);
+    h.run_steps(3);
+    assert!(h.query_by_label("https://example.org/").is_none(), "no tip beside the palette");
+    h.state_mut().palette_open = false;
+    h.hover_at(beside);
+    h.run_steps(3);
+    h.get_by_label("https://example.org/");
+}
+
 fn wheel(h: &mut Harness<'_, PdfCraftApp>, delta: egui::Vec2) {
     h.hover_at(egui::pos2(800.0, 500.0));
     h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, modifiers: egui::Modifiers::NONE, phase: egui::TouchPhase::Move });

@@ -3884,8 +3884,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     }
                 }
             }
-            // Fill & Sign keeps its placement cursor clear of link/comment hover feedback.
+            // Fill & Sign keeps its placement cursor clear of link/comment hover feedback. Tips
+            // draw above the palette, so none shows while it is open, even beside it.
             if !matches!(tool, QuickTool::Fill(_))
+                && unobstructed
                 && let Some(p) = pointer
             {
                 for l in info.links.iter().filter(|l| l.page == i) {
