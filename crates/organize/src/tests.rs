@@ -528,6 +528,29 @@ fn custom_document_properties_are_listed_set_removed_and_their_names_checked() {
     assert!(custom_info(&doc).is_empty());
 }
 
+/// An `/Info` dictionary written directly in the trailer: a cleared entry is removed, and the
+/// other entries are kept.
+#[test]
+fn document_info_entries_are_cleared_from_an_info_dictionary_in_the_trailer() {
+    let b = build(
+        &[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>".into(),
+            body("X"),
+        ],
+        "/Root 1 0 R /Info << /Title (Report) /Project (Apollo) /Revision (7) >>",
+    );
+    let mut doc = open(b);
+    set_info(&mut doc, "Missing", "").unwrap();
+    assert!(matches!(doc.trailer().get(b"Info"), Some(Object::Dict(_))), "clearing an absent entry changes nothing");
+    set_info(&mut doc, "Project", "").unwrap();
+    set_info(&mut doc, "Title", "").unwrap();
+    let doc = save_and_reopen(&doc);
+    assert_eq!(custom_info(&doc), [("Revision".to_string(), "7".to_string())]);
+    assert_eq!(info(&doc, "Title"), None);
+}
+
 /// Padding is not part of a custom value, in any mix of NULs and whitespace, a value that is only
 /// padding is not listed, and such entries don't count towards the 256 listed: a real property
 /// after 300 blank ones is still there.

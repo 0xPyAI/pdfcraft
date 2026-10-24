@@ -374,7 +374,17 @@ pub enum PropsTab {
     InitialView,
     Security,
     Fonts,
+    Custom,
     Advanced,
+}
+
+/// Document Properties ▸ Custom being edited: the properties as they will be after OK, in order,
+/// and the Name and Value fields.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CustomDraft {
+    pub props: Vec<(String, String)>,
+    pub name: String,
+    pub value: String,
 }
 
 /// Duplicate Field: the field and the pages (all, or a range, 1-based).
@@ -782,6 +792,8 @@ pub struct PdfCraftApp {
     pub props_draft: Option<(DocId, [String; 4])>,
     /// Document Properties ▸ Initial View (and reading options) being edited.
     pub view_draft: Option<(DocId, pdfcraft_engine::InitialView)>,
+    /// Document Properties ▸ Custom being edited.
+    pub custom_draft: Option<(DocId, CustomDraft)>,
     /// Files picked asynchronously for combine / insert (web).
     pub requests: files::Requests,
     /// Native file pickers in flight (they never block the frame; see `pickers`).
@@ -1161,6 +1173,7 @@ impl PdfCraftApp {
             save_override: None,
             props_draft: None,
             view_draft: None,
+            custom_draft: None,
             requests: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             pickers: Default::default(),
@@ -2885,6 +2898,7 @@ impl PdfCraftApp {
                     "properties" => Some(Dialog::Properties(PropsTab::Description)),
                     "security" => Some(Dialog::Properties(PropsTab::Security)),
                     "fonts" => Some(Dialog::Properties(PropsTab::Fonts)),
+                    "custom" => Some(Dialog::Properties(PropsTab::Custom)),
                     "advanced" => Some(Dialog::Properties(PropsTab::Advanced)),
                     "shortcuts" => Some(Dialog::Shortcuts),
                     "split" => Some(Dialog::Split),
