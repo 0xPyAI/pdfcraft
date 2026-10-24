@@ -307,20 +307,45 @@ pub const PAPERS: [(&str, (f64, f64)); 21] = [
 pub const LABEL_PAPER: usize = 19;
 
 /// The CUPS media name for `PAPERS[index]`, so the spooler feeds the sheet the PDF was laid out
-/// on rather than the queue's default (PPD keywords; `w288h432` is the usual 4×6 label, `Env10`
-/// the US #10 envelope).
+/// on rather than the queue's default; `None` only past the end of `PAPERS`. The common sizes
+/// use their PPD keywords (`w288h432` is the usual 4×6 label, `Env10` the US #10 envelope).
+/// The rest use PWG 5101.1 names (ARCH E1 is its `wide-format` size), spelled exactly as the
+/// spec and the IANA registry have them: a driverless printer may take only the names it
+/// advertises. They carry their dimensions, so CUPS feeds the PPD size of those dimensions
+/// whatever the driver calls it (`ARCHD`, `AnsiD`) (#3752).
 pub fn cups_media(index: usize) -> Option<&'static str> {
-    match PAPERS.get(index)?.0 {
-        "US Letter" => Some("Letter"),
-        "US Legal" => Some("Legal"),
-        "Tabloid" => Some("Tabloid"),
-        "A3" => Some("A3"),
-        "A4" => Some("A4"),
-        "A5" => Some("A5"),
-        "US #10 Envelope (4.125 x 9.5 in)" => Some("Env10"),
-        _ if index == LABEL_PAPER => Some("w288h432"),
-        _ => None,
-    }
+    Some(match PAPERS.get(index)?.0 {
+        "US Letter" => "Letter",
+        "US Legal" => "Legal",
+        "Tabloid" => "Tabloid",
+        "A3" => "A3",
+        "A4" => "A4",
+        "A5" => "A5",
+        "A6" => "iso_a6_105x148mm",
+        "ARCH A (9 x 12 in)" => "na_arch-a_9x12in",
+        "ARCH B (12 x 18 in)" => "na_arch-b_12x18in",
+        "ARCH C (18 x 24 in)" => "na_arch-c_18x24in",
+        "ARCH D (24 x 36 in)" => "na_arch-d_24x36in",
+        "ARCH E1 (30 x 42 in)" => "na_wide-format_30x42in",
+        "ARCH E (36 x 48 in)" => "na_arch-e_36x48in",
+        "ANSI C (17 x 22 in)" => "na_c_17x22in",
+        "ANSI D (22 x 34 in)" => "na_d_22x34in",
+        "ANSI E (34 x 44 in)" => "na_e_34x44in",
+        "A2" => "iso_a2_420x594mm",
+        "A1" => "iso_a1_594x841mm",
+        "A0" => "iso_a0_841x1189mm",
+        "US #10 Envelope (4.125 x 9.5 in)" => "Env10",
+        _ if index == LABEL_PAPER => "w288h432",
+        // A size added to PAPERS without a name here: its tests fail, and meanwhile the queue's
+        // paper stands, as it did for every size before #1583.
+        _ => return None,
+    })
+}
+
+/// The job option that feeds `PAPERS[index]` (`media`, see [`cups_media`]), for the Print
+/// dialog's jobs and `doc_print`'s alike.
+pub fn media_option(index: usize) -> Option<(String, String)> {
+    cups_media(index).map(|m| ("media".to_string(), m.to_string()))
 }
 
 /// Whether most of page `index`'s text runs bottom-to-top as the page displays (a label laid
