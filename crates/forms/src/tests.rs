@@ -1753,6 +1753,49 @@ fn check_box_styles_change_the_mark() {
 }
 
 #[test]
+fn check_mark_takes_the_fields_text_colour() {
+    // #4261: Appearance ▸ Text Color is written to /DA; the mark of a check box or radio button
+    // is drawn in it (Acrobat does the same), black when the /DA has no colour.
+    let mut doc = one_page();
+    let check = add_field(&mut doc, 0, [50.0, 700.0, 70.0, 720.0], &NewField::CheckBox, None).unwrap();
+    let radio = add_field(&mut doc, 0, [50.0, 600.0, 70.0, 620.0], &NewField::Radio { group: None, export: "A".into() }, None).unwrap();
+    let on_ap = |doc: &Document, name: &str| {
+        let all = fields(doc);
+        let w = &field(&all, name).widgets[0];
+        let on = w.on_state.clone().unwrap();
+        let n = doc
+            .get(w.obj)
+            .as_dict()
+            .unwrap()
+            .get(b"AP")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .get(b"N")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .reference(on.as_bytes())
+            .unwrap();
+        let Object::Stream(s) = &*doc.get(n) else { panic!() };
+        String::from_utf8_lossy(&s.decoded().unwrap()).into_owned()
+    };
+    assert!(on_ap(&doc, &check).contains("0 G"), "black by default");
+    let blue = FieldProps { appearance: Some(LookPatch { text: Some([0.0, 0.0, 1.0]), ..Default::default() }), ..Default::default() };
+    for name in [&check, &radio] {
+        set_props(&mut doc, name, &blue).unwrap();
+        let ap = on_ap(&reopen(&doc), name);
+        // The check strokes, the radio's default circle fills.
+        let op = if name == &check { "0 0 1 RG" } else { "0 0 1 rg" };
+        assert!(ap.contains(op), "{name}: the mark is blue: {ap}");
+        assert!(!ap.contains("0 G\n") && !ap.contains("0 g\n"), "{name}: no black left: {ap}");
+    }
+    // A style change redraws too, and keeps the colour.
+    set_props(&mut doc, &check, &FieldProps { check_style: Some(CheckStyle::Square), ..FieldProps::default() }).unwrap();
+    assert!(on_ap(&doc, &check).contains("0 0 1 rg"), "a square is blue as well");
+}
+
+#[test]
 fn ordering_tabs_manually() {
     let mut doc = one_page();
     let text = NewField::Text { multiline: false };

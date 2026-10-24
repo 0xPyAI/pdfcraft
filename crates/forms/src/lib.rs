@@ -1192,7 +1192,7 @@ fn set_states(doc: &mut Document, f: &Field, on: Option<&str>) -> Result<(), For
         let has_ap = doc.get(w.obj).as_dict().and_then(|d| d.get(b"AP").cloned()).is_some();
         if !has_ap {
             let on_name = w.on_state.clone().unwrap_or_else(|| on.unwrap_or("Yes").to_string());
-            let ap = appearance::check_box_states(doc, w, f.kind, &on_name);
+            let ap = appearance::check_box_states(doc, w, f.kind, &on_name, &f.da);
             doc.update_dict(w.obj, |d| d.set(b"AP".to_vec(), Object::Dict(ap)))?;
         }
         doc.update_dict(w.obj, |d| d.set(b"AS".to_vec(), name_obj(state)))?;
