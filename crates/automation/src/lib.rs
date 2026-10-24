@@ -837,6 +837,25 @@ impl Automation {
             "content_delete" => self.content_delete(&a)?,
             "content_copy" => self.content_copy(&a)?,
             "doc_print" => self.doc_print(&a)?,
+            "attachment_add" => {
+                let path = self.resolve(a.str("path")?, false)?;
+                let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+                let name = match a.opt_str("name")? {
+                    Some(n) => n.to_string(),
+                    None => path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                };
+                let mime = pdfcraft_engine::mime_for_name(&name).map(str::to_string);
+                let description = a.opt_str("description")?.map(str::to_string);
+                // Only the document-level keys: an annotation attachment of the same name is not the new one.
+                let before = document_attachment_keys(self.doc(&a)?);
+                let out = self.apply(&a, Edit::AddAttachment { name, bytes, description, mime })?;
+                let key = document_attachment_keys(self.doc(&a)?).into_iter().find(|n| !before.contains(n)).unwrap_or_default();
+                json!({ "name": key, "document": out })
+            }
+            "attachment_delete" => {
+                let edit = Edit::DeleteAttachment { key: a.str("name")?.into() };
+                self.apply(&a, edit)?
+            }
             "doc_remove_hidden" => self.doc_remove_hidden(&a)?,
             "doc_audit_redactions" => self.doc_audit_redactions(&a)?,
             "fill_sign_add" => self.fill_sign_add(&a)?,
@@ -2483,6 +2502,18 @@ impl Args<'_> {
         let arr = v.as_array().ok_or_else(|| Self::wrong(key, "an array of strings"))?;
         arr.iter().map(|x| x.as_str().ok_or_else(|| Self::wrong(key, "an array of strings"))).collect()
     }
+}
+
+/// The name-tree keys of a document's own attachments, leaving out the files attached to pages as comments.
+fn document_attachment_keys(doc: &Document) -> Vec<String> {
+    doc.info
+        .attachments
+        .iter()
+        .filter_map(|x| match &x.source {
+            pdfcraft_render::AttachmentSource::Document { key } => Some(key.clone()),
+            pdfcraft_render::AttachmentSource::Annotation { .. } => None,
+        })
+        .collect()
 }
 
 /// Bookmark rows in listing order as JSON: a row holds the rows that follow it on the page at the

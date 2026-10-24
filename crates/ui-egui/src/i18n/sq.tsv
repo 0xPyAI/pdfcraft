@@ -2513,3 +2513,8 @@ animation effects	Off	Joaktiv
 
 # AI-assisted additions for restoring the last view (#1767) (2026-10-22); not reviewed by a native speaker.
 	Restore the last view (page, zoom and page display) when a document is opened again	Rikthe pamjen e fundit (faqen, zmadhimin dhe shfaqjen e faqeve) kur një dokument hapet përsëri
+	Attach a file…	Bashkëngjit një skedar…
+	Attach {name}	Bashkëngjit {name}
+	Attaching files is not available on the web yet	Bashkëngjitja e skedarëve nuk është ende e disponueshme në ueb
+	Delete attachment	Fshi bashkëngjitjen
+	Delete attachment {key}	Fshi bashkëngjitjen {key}
