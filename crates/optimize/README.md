@@ -32,7 +32,11 @@ let report = optimize_with_progress(&mut doc, &settings, &mut |stage| keep_going
 - **Discard objects:** thumbnails, alternate images, document tags, print settings.
 - **Clean up:** Flate for streams with no filter; for streams with an outer ASCII85 or ASCIIHex
   layer, that layer is removed when the result is smaller (the inner filters keep their encoded
-  bytes). Streams with `/DecodeParms`, images and object streams are left alone.
+  bytes; streams with `/DecodeParms`, images and object streams keep their ASCII layer. LZW-compressed
+  streams, content and images alike, are decoded and stored with Flate instead (Acrobat's "In
+  streams that use LZW encoding, use Flate instead"): a predictor carries over to Flate without
+  `EarlyChange`, filters applied before the LZW one go with it and those after it keep their
+  bytes. A stream whose LZW data doesn't decode cleanly is left as it is. Not yet: inline images.
 
 The engine runs Remove Hidden Information (`pdfcraft-redact`) for the user-data categories,
 then this, then merges identical objects and writes a full, compressed save
