@@ -10,7 +10,7 @@ use pdfcraft_fonts::{literal, win_ansi};
 use crate::XfaError;
 use crate::layout::{Action, BorderShape, Form, Item, Page, Widget, WidgetKind};
 use crate::model::Rect;
-use crate::text::{Face, Family};
+use crate::text::{Face, Family, Span};
 
 /// Private key on generated fields: the template's SOM path, so data can be put back.
 pub const SOM_KEY: &[u8] = b"PCSom";
@@ -590,8 +590,8 @@ impl Emitter<'_> {
     }
 
     /// Write one laid-out page under `pages_ref`: its fills, lines, text and pictures in a
-    /// content stream, the fonts and images it uses as resources, and its widgets as
-    /// annotations. Returns the page object.
+    /// content stream, the fonts and images it uses as resources, and its widgets and the links
+    /// in its text as annotations. Returns the page object.
     fn page(&mut self, page: &Page, pages_ref: ObjRef) -> Result<ObjRef, XfaError> {
         let page_ref = self.doc.add(Object::Dict(Dict::new()));
         let mut content: Vec<u8> = Vec::new();
@@ -599,7 +599,22 @@ impl Emitter<'_> {
         let mut xobjects = Dict::new();
         let mut annots = Vec::new();
         let h = page.height;
+        // The link the text before ended in, which a next piece of it on the line widens.
+        let mut last_link: Option<LinkPiece> = None;
         for (i, item) in page.items.iter().enumerate() {
+            // A link's pieces join only across text and the underline drawn just before it: a fill,
+            // picture, field or any other line (a rule) between them ends the link there.
+            let keeps_link = match item {
+                Item::Text(_) => true,
+                Item::Line { from, to, .. } => matches!(page.items.get(i + 1), Some(Item::Text(s))
+                    if (from.1 - to.1).abs() < 0.01
+                        && (from.0 - s.x).abs() < 0.01
+                        && (from.1 - (s.baseline + s.face.size * crate::layout::UNDERLINE_DROP)).abs() < 0.01),
+                _ => false,
+            };
+            if !keeps_link {
+                last_link = None;
+            }
             match item {
                 Item::Fill { rect, color } => {
                     content.extend(format!("{} rg {} {} {} {} re f\n", rgb(*color), n(rect.x), n(h - rect.bottom()), n(rect.w), n(rect.h)).bytes());
@@ -645,6 +660,9 @@ impl Emitter<'_> {
                     );
                     content.extend(literal(&win_ansi(&s.text)));
                     content.extend_from_slice(format!(" Tj{close}\n").as_bytes());
+                    if let Some(r) = self.text_link(s, h, page_ref, &mut last_link)? {
+                        annots.push(Object::Ref(r));
+                    }
                 }
                 Item::Image { rect, data, content_type } => {
                     let Some(r) = self.image_xobject(data, content_type) else { continue };
@@ -684,6 +702,108 @@ impl Emitter<'_> {
         self.doc.set(page_ref, Object::Dict(pd));
         Ok(page_ref)
     }
+
+    /// A link annotation over span `s` (on a page `page_height` tall), when its text links
+    /// somewhere: over the text it draws, without the spaces around it, and opening its address.
+    /// A span that goes on the link `last` ended in, on the same line, widens that annotation
+    /// instead (a link whose text changes style partway is one link). An address PdfCraft
+    /// wouldn't open from a document leaves the text as plain text, with one warning for the form.
+    fn text_link(&mut self, s: &Span, page_height: f64, page_ref: ObjRef, last: &mut Option<LinkPiece>) -> Result<Option<ObjRef>, XfaError> {
+        let piece = self.link_piece(s, page_height);
+        let Some((target, rect)) = piece else {
+            *last = None;
+            return Ok(None);
+        };
+        if let Some(prev) = last.as_mut()
+            && prev.uri == target
+            && (prev.baseline - s.baseline).abs() < 0.01
+            && (-0.01..=s.face.size).contains(&(rect[0] - prev.rect[2]))
+        {
+            prev.rect = [prev.rect[0].min(rect[0]), prev.rect[1].min(rect[1]), prev.rect[2].max(rect[2]), prev.rect[3].max(rect[3])];
+            let r = prev.rect;
+            self.doc.update_dict(prev.annot, |d| d.set(b"Rect".to_vec(), Object::Array(r.iter().map(|v| Object::Real(*v)).collect())))?;
+            return Ok(None);
+        }
+        let mut action = Dict::new();
+        action.set(b"S".to_vec(), Object::name("URI"));
+        action.set(b"URI".to_vec(), Object::String(PdfString::literal(target.as_bytes().to_vec())));
+        let mut d = Dict::new();
+        d.set(b"Type".to_vec(), Object::name("Annot"));
+        d.set(b"Subtype".to_vec(), Object::name("Link"));
+        d.set(b"Rect".to_vec(), Object::Array(rect.iter().map(|v| Object::Real(*v)).collect()));
+        d.set(b"P".to_vec(), Object::Ref(page_ref));
+        d.set(b"F".to_vec(), Object::Int(4));
+        d.set(b"Border".to_vec(), Object::Array(vec![Object::Int(0), Object::Int(0), Object::Int(0)]));
+        d.set(b"A".to_vec(), Object::Dict(action));
+        let annot = self.doc.add(Object::Dict(d));
+        *last = Some(LinkPiece { annot, uri: target, baseline: s.baseline, rect });
+        Ok(Some(annot))
+    }
+
+    /// Where span `s` links to and the rectangle (PDF user space, on a page `page_height` tall)
+    /// over the text it draws, without the spaces around it. `None` for text that links nowhere,
+    /// draws nothing, or links to an address PdfCraft wouldn't open from a document, which is
+    /// warned about once for the form.
+    fn link_piece(&mut self, s: &Span, page_height: f64) -> Option<(String, [f64; 4])> {
+        let href = s.link.as_deref()?;
+        let shown = s.text.trim();
+        if shown.is_empty() {
+            return None;
+        }
+        let Some(target) = link_target(href) else {
+            if !self.warnings.iter().any(|w| w.starts_with(LINK_LEFT_OUT)) {
+                self.warnings.push(format!("{LINK_LEFT_OUT}: PdfCraft makes links only of web (http, https) and email (mailto) addresses"));
+            }
+            return None;
+        };
+        let lead = s.text.len() - s.text.trim_start().len();
+        let x = s.x + s.face.width(s.text.get(..lead).unwrap_or_default());
+        let w = s.face.width(shown);
+        // The text's ascent and descent, as the layout measures a span's extent.
+        let rect = pdf_rect(Rect::new(x, s.baseline - s.face.size * 0.8, w, s.face.size), page_height);
+        (rect.iter().all(|v| v.is_finite()) && w > 0.0).then(|| (target.to_string(), rect))
+    }
+}
+
+/// The link annotation a page's text last ended in: the next piece of the same link on the same
+/// line widens it.
+struct LinkPiece {
+    annot: ObjRef,
+    uri: String,
+    baseline: f64,
+    rect: [f64; 4],
+}
+
+/// How the layout warning about a link left out starts.
+const LINK_LEFT_OUT: &str = "a link in the form's text was left as plain text";
+
+/// The longest link address kept, in characters: as long as PdfCraft opens from a document.
+const MAX_LINK: usize = 2048;
+
+/// `href` as the address of a link PdfCraft makes from a form's text: a web (http, https) or
+/// email (mailto) address, trimmed, of at most [`MAX_LINK`] characters and without control
+/// characters. `None` for anything else (scripts, files, data, relative paths). Opening it still
+/// goes through the app's own checks and prompt.
+fn link_target(href: &str) -> Option<&str> {
+    let href = href.trim();
+    if href.is_empty() || href.chars().count() > MAX_LINK || href.chars().any(char::is_control) {
+        return None;
+    }
+    let (scheme, rest) = href.split_once(':')?;
+    let web = scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https");
+    let ok = if web { rest.strip_prefix("//").is_some_and(has_host) } else { scheme.eq_ignore_ascii_case("mailto") && !rest.is_empty() };
+    ok.then_some(href)
+}
+
+/// Whether `after` (a web address past its `//`) names a host: what comes before the path (which a
+/// backslash starts too, as web addresses read it), query or fragment, past any user name and
+/// before any port, isn't empty.
+fn has_host(after: &str) -> bool {
+    let authority = after.split(['/', '\\', '?', '#']).next().unwrap_or_default();
+    let host = authority.rsplit('@').next().unwrap_or_default();
+    // An IPv6 host is bracketed and holds colons of its own.
+    let host = if host.starts_with('[') { host } else { host.split(':').next().unwrap_or_default() };
+    !host.is_empty()
 }
 
 /// Replace the document's pages with the laid-out form and add its fields to the AcroForm. The

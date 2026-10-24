@@ -396,6 +396,177 @@ fn round_check_buttons_are_marked_for_a_round_appearance() {
     assert_eq!(round, expected);
 }
 
+/// A template whose one draw holds `body` as rich text, in a box `w` wide.
+fn rich_draw_form(w: &str, body: &str) -> String {
+    format!(
+        r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"><subform name="form" layout="tb">
+ <pageSet><pageArea name="page"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <draw name="note" w="{w}"><font typeface="Arial" size="10pt"/><value><exData contentType="text/html"><body xmlns="http://www.w3.org/1999/xhtml"><p>{body}</p></body></exData></value></draw>
+</subform></template></xdp:xdp>"##
+    )
+}
+
+/// The link annotations on the pages of `doc`: each one's URI and rectangle.
+fn text_links(doc: &Document) -> Vec<(String, [f64; 4])> {
+    let catalog = doc.get(doc.root().unwrap());
+    let pages = doc.resolve(catalog.as_dict().unwrap().get(b"Pages").unwrap());
+    let kids = doc.resolve(pages.as_dict().unwrap().get(b"Kids").unwrap()).as_array().unwrap().clone();
+    let mut out = Vec::new();
+    for page in &kids {
+        let page = doc.resolve(page);
+        let Some(annots) = page.as_dict().unwrap().get(b"Annots").map(|a| doc.resolve(a).as_array().unwrap().clone()) else { continue };
+        for a in &annots {
+            let a = doc.resolve(a);
+            let d = a.as_dict().unwrap();
+            if d.name(b"Subtype") != Some(&b"Link"[..]) {
+                continue;
+            }
+            let action = doc.resolve(d.get(b"A").unwrap());
+            let uri =
+                action.as_dict().unwrap().get(b"URI").and_then(Object::as_string).map(|s| String::from_utf8_lossy(&s.bytes).into_owned()).unwrap();
+            let r: Vec<f64> = doc.resolve(d.get(b"Rect").unwrap()).as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+            out.push((uri, [r[0], r[1], r[2], r[3]]));
+        }
+    }
+    out
+}
+
+/// An `<a href>` in rich text keeps where it links to on every run of its text, styled or not;
+/// the text around it and a named anchor without an address link nowhere.
+#[test]
+fn rich_text_links_keep_their_address() {
+    let (tpl, _) = crate::parse(&rich_draw_form(
+        "4in",
+        r#"Write to <a href=" mailto:forms@example.com ">forms@<b>example</b>.com</a> or see <a name="top">the top</a>."#,
+    ))
+    .unwrap();
+    let Node::Draw(d) = &tpl.root.children[0] else { panic!("the draw") };
+    let Value::Rich(rich) = &d.value else { panic!("rich text") };
+    let runs: Vec<(&str, Option<&str>)> = rich.paragraphs.iter().flat_map(|p| &p.runs).map(|r| (r.text.as_str(), r.link.as_deref())).collect();
+    assert_eq!(
+        runs,
+        [
+            ("Write to ", None),
+            ("forms@", Some("mailto:forms@example.com")),
+            ("example", Some("mailto:forms@example.com")),
+            (".com", Some("mailto:forms@example.com")),
+            (" or see ", None),
+            ("the top", None),
+            (".", None),
+        ]
+    );
+}
+
+/// A link's address is held once, however many runs, words and lines its text takes: every
+/// piece shares it rather than copying it, so a long address over many words stays one string.
+#[test]
+fn a_links_pieces_share_one_address() {
+    let words = "one two three four five six seven eight nine ten ".repeat(8);
+    let href = format!("https://example.com/{}", "x".repeat(1500));
+    let xdp = rich_draw_form("2in", &format!(r#"<a href="{href}">{words}<b>bold</b> {words}</a>"#));
+    let form = layout_xml(&xdp).unwrap();
+    let links: Vec<std::sync::Arc<str>> =
+        form.pages.iter().flat_map(|p| &p.items).filter_map(|i| if let Item::Text(s) = i { s.link.clone() } else { None }).collect();
+    assert!(links.len() > 10, "the link's text takes many lines: {}", links.len());
+    assert!(links.iter().all(|l| std::sync::Arc::ptr_eq(l, &links[0]) && **l == *href), "every piece shares one address");
+}
+
+/// A link's text becomes a link annotation on the page, one over each line it takes when it
+/// wraps, each over its own text; a second layout replaces them rather than adding more.
+#[test]
+fn links_in_rich_text_become_link_annotations_one_per_line() {
+    let body = r#"See <a href="https://example.com/forms/help">the help pages for this form, which explain every block</a> first."#;
+    let mut doc = Document::open(Arc::new(shell(&rich_draw_form("2in", body)))).unwrap();
+    let report = render_into(&mut doc).unwrap();
+    assert!(report.warnings.iter().all(|w| !w.contains("link")), "{:?}", report.warnings);
+    let links = text_links(&doc);
+    assert!(links.len() >= 2, "the link wraps onto at least two lines: {links:?}");
+    assert!(links.iter().all(|(uri, _)| uri == "https://example.com/forms/help"));
+    // One per line: each below the one before, all inside the 2-inch box (from x = 36pt).
+    for pair in links.windows(2) {
+        assert!(pair[1].1[3] <= pair[0].1[1] + 0.01, "a line below the one before: {pair:?}");
+    }
+    for (_, r) in &links {
+        assert!(r[0] >= 36.0 - 0.01 && r[2] <= 36.0 + 144.0 + 0.01 && r[2] > r[0] && r[3] > r[1], "{r:?}");
+    }
+    // The first line's link starts after "See ", not at the box's edge.
+    assert!(links[0].1[0] > 36.0 + 5.0, "{:?}", links[0].1);
+    // A second layout replaces the pages, and their links with them.
+    let tpl = crate::script::template_of(&doc).unwrap();
+    rerender(&mut doc, &tpl).unwrap();
+    assert_eq!(text_links(&doc), links, "laid out again: the same links, not twice as many");
+    // Saved and opened again, they are still there.
+    let bytes = write_incremental(&doc, &SaveOptions::default()).unwrap();
+    assert_eq!(text_links(&Document::open(Arc::new(bytes)).unwrap()), links);
+
+    // A link whose text changes style partway is one link on its line, over all its text.
+    let mut doc =
+        Document::open(Arc::new(shell(&rich_draw_form("4in", r#"Write to <a href="mailto:forms@example.com">forms@<b>example</b>.com</a> today."#))))
+            .unwrap();
+    render_into(&mut doc).unwrap();
+    let links = text_links(&doc);
+    assert_eq!(links.len(), 1, "{links:?}");
+    let arial = Font { typeface: "Arial".into(), size: 10.0, ..Default::default() };
+    let plain = crate::text::Face::of(&arial);
+    let bold = crate::text::Face::of(&Font { bold: true, ..arial.clone() });
+    let width = plain.width("forms@") + bold.width("example") + plain.width(".com");
+    let r = links[0].1;
+    assert!((r[2] - r[0] - width).abs() < 0.01, "over the whole address: {} against {width}", r[2] - r[0]);
+}
+
+/// Two pieces of one link side by side on a line join into one link, but a rule drawn between
+/// them keeps them apart, so the link never covers what lies between its pieces; an underline
+/// (a level line drawn with its text) doesn't.
+#[test]
+fn a_rule_between_two_pieces_of_a_link_keeps_them_apart() {
+    let piece = |name: &str, x: &str, underline: bool| {
+        let u = if underline { ";text-decoration:underline" } else { "" };
+        format!(
+            r#"<draw name="{name}" x="{x}" y="0in" w="0.4in" h="0.3in"><font typeface="Arial" size="10pt"/><value><exData contentType="text/html"><body xmlns="http://www.w3.org/1999/xhtml"><p style="margin:0{u}"><a href="https://example.com/form">Go</a></p></body></exData></value></draw>"#
+        )
+    };
+    let rule = r#"<draw name="rule" x="0.21in" y="0in" w="0in" h="0.3in"><value><line><edge/></line></value></draw>"#;
+    let level_rule = r#"<draw name="dash" x="0.2in" y="0.1in" w="0.04in" h="0in"><value><line><edge/></line></value></draw>"#;
+    let form = |between: &str, underline: bool| {
+        format!(
+            r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/"><template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"><subform name="form" layout="position">
+ <pageSet><pageArea name="page"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ {}{between}{}
+</subform></template></xdp:xdp>"##,
+            piece("first", "0in", underline),
+            piece("second", "0.25in", underline)
+        )
+    };
+    let links = |xdp: &str| {
+        let mut doc = Document::open(Arc::new(shell(xdp))).unwrap();
+        render_into(&mut doc).unwrap();
+        text_links(&doc).len()
+    };
+    assert_eq!(links(&form("", false)), 1, "side by side, the pieces join");
+    assert_eq!(links(&form("", true)), 1, "an underline doesn't part them");
+    assert_eq!(links(&form(rule, false)), 2, "a rule between them does");
+    assert_eq!(links(&form(level_rule, false)), 2, "and so does a level one, which isn't an underline");
+}
+
+/// Only web and email addresses become links. Scripts, files, data, relative paths, web
+/// addresses without a host, and empty or overlong addresses stay plain text (still drawn), with
+/// one warning for the form.
+#[test]
+fn links_to_anything_but_web_and_email_addresses_stay_plain_text() {
+    let long = format!("https://example.com/{}", "a".repeat(2100));
+    let body = format!(
+        r#"<a href="javascript:app.alert(1)">one</a> <a href="file:///etc/passwd">two</a> <a href="data:text/html,x">three</a> <a href="help.html">four</a> <a href="HTTPS:">five</a> <a href="{long}">six</a> <a href="MailTo:a@example.com">seven</a> <a href="https:///path">eight</a> <a href="https://user@:8080/x">nine</a> <a href="https://\example.com/path">nine and a half</a> <a href="https://user@example.com:8443/x">ten</a>"#
+    );
+    let mut doc = Document::open(Arc::new(shell(&rich_draw_form("7in", &body)))).unwrap();
+    let report = render_into(&mut doc).unwrap();
+    assert_eq!(text_links(&doc).into_iter().map(|(u, _)| u).collect::<Vec<_>>(), ["MailTo:a@example.com", "https://user@example.com:8443/x"]);
+    let warned: Vec<&String> = report.warnings.iter().filter(|w| w.contains("link")).collect();
+    assert_eq!(warned.len(), 1, "one warning for the form: {:?}", report.warnings);
+    assert!(warned[0].contains("http, https") && warned[0].contains("mailto"), "{warned:?}");
+}
+
 #[test]
 fn documents_without_xfa_are_not_touched() {
     let mut doc = Document::new_empty();
