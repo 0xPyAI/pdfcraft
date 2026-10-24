@@ -665,6 +665,8 @@ pub enum ViewAction {
     Save,
     Extract,
     Split,
+    /// Split before each selected page: opens Split on that mode.
+    SplitBeforeSelected,
     /// Copy the selected pages (Cut also deletes them).
     CopyPages {
         cut: bool,
@@ -1126,6 +1128,35 @@ impl DocView {
         Some((*page, at))
     }
 
+    /// The user-space `[left, top]` at the window's top-left (where `/XYZ` puts its point), on the
+    /// page showing there: what a destination's null coordinate keeps (ISO 32000-2 §12.3.2.2).
+    /// Acrobat keeps the place this way across pages, so a CAD sheet's cross-reference opens the
+    /// next sheet where the reader was looking. A coordinate is `None` along a screen axis the
+    /// page fits, which keeps the layout's own placement (centred, or the page's top); the whole
+    /// place is `None` before the first frame has laid pages out.
+    fn place_at_corner(&self, info: &DocInfo) -> Option<[Option<f32>; 2]> {
+        let area = self.viewport_screen;
+        if !area.is_positive() {
+            return None;
+        }
+        let corner = area.min + vec2(SIDE, 0.0);
+        let (page, xf) = self
+            .screen_xforms
+            .iter()
+            .filter(|(_, xf)| xf.rect.is_positive())
+            .min_by(|a, b| a.1.rect.distance_sq_to_pos(corner).total_cmp(&b.1.rect.distance_sq_to_pos(corner)).then(a.0.cmp(&b.0)))?;
+        let p = info.pages.get(*page)?;
+        let (x, y) = xf.screen_to_view(corner.clamp(xf.rect.min, xf.rect.max));
+        // `max` drops a NaN size, so the bounds stay ordered and `clamp` can't panic.
+        let (x, y) = (x.clamp(0.0, p.width.max(0.0)), y.clamp(0.0, p.height.max(0.0)));
+        // The page counts with its side gutters, as the layout places it.
+        let wide = xf.rect.width() + 2.0 * SIDE > area.width();
+        let tall = xf.rect.height() > area.height();
+        // The view's x runs across the screen unless the view is turned a quarter.
+        let (keep_x, keep_y) = if xf.rot.is_multiple_of(180) { (wide, tall) } else { (tall, wide) };
+        Some(p.xyz_for_view(keep_x.then_some(x), keep_y.then_some(y)))
+    }
+
     /// A page's thumbnail texture, when rendered.
     pub(crate) fn thumb_id(&self, page: usize) -> Option<egui::TextureId> {
         self.thumbs.get(&page).map(|t| t.tex.id())
@@ -1328,10 +1359,16 @@ impl DocView {
     /// and zoomed as `dest` asks, as Acrobat does. `/XYZ` puts (left, top) at the window's
     /// top-left at its zoom (null or 0 keeps the zoom); `/Fit`, `/FitH` and `/FitV` switch to fit
     /// page, width and height with `top` or `left` at the window's edge; `/FitR` zooms so the
-    /// rectangle fits, centred. The `B` (content box) forms are read as the page. A null
-    /// coordinate keeps that scroll position (null `top` on a new page: its top), and a point
-    /// past the end of the document scrolls as far as it can.
+    /// rectangle fits, centred. The `B` (content box) forms are read as the page. A null `/XYZ`
+    /// coordinate keeps the reader's place: the same user-space point stays at the window's
+    /// top-left on the new page, as Acrobat does. A point past the end of the document scrolls
+    /// as far as it can.
     pub fn go_to_dest(&mut self, page: usize, dest: DestView, info: &DocInfo) {
+        // Read before the jump: it is where the reader is now.
+        let kept = match dest {
+            DestView::Xyz { left, top, .. } if left.is_none() || top.is_none() => self.place_at_corner(info),
+            _ => None,
+        };
         self.go_to_page(page);
         let page = self.current;
         self.goto_point = None;
@@ -1348,7 +1385,8 @@ impl DocView {
                     self.fit = Fit::None;
                     self.zoom_anchor = None;
                 }
-                let [fx, fy] = point(left, top);
+                let [kept_left, kept_top] = kept.unwrap_or([None, None]);
+                let [fx, fy] = point(left.or(kept_left), top.or(kept_top));
                 (fx, fy, corner)
             }
             DestView::Fit => {
@@ -1512,6 +1550,17 @@ impl DocView {
         self.fit = saved.fit;
         self.zoom = saved.zoom;
         self.goto = Some((self.current, 0.0));
+    }
+
+    /// The display shown outside full screen: the one presenting replaced, or the current one.
+    pub fn normal_display(&self) -> SavedDisplay {
+        self.presentation.unwrap_or(SavedDisplay {
+            layout: self.layout,
+            continuous: self.continuous,
+            cover: self.cover,
+            fit: self.fit,
+            zoom: self.zoom,
+        })
     }
 
     /// Whether the view is in full screen's one-page-at-a-time display.
@@ -2658,9 +2707,12 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let editing_content =
         (app.left_open && app.left == crate::LeftPanel::Tool("edit")) || matches!(app.quick_tool, QuickTool::AddText | QuickTool::EditText);
     let text_style = app.text_style.clone();
+    let show_secured_notice = app.show_secured_notice;
     let view = &mut app.views[index];
-    // Opened without the owner password and something is restricted.
-    let secured = doc.security_summary().is_some_and(|s| !(s.owner || (s.permissions.modify() && s.permissions.assemble())));
+    // Opened without the owner password and something is restricted. The notice says so unless
+    // the user turned it off (#4035): the restrictions themselves, and Document Properties ▸
+    // Security, stay as they are.
+    let secured = show_secured_notice && doc.security_summary().is_some_and(|s| !(s.owner || (s.permissions.modify() && s.permissions.assemble())));
     let repaired = !doc.repair_log().is_empty();
     match notices(view, doc, secured, repaired, crate::sign_ui::banner(&doc.signatures), ui, &t) {
         #[cfg(not(target_arch = "wasm32"))]
@@ -2680,6 +2732,8 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         Some(Notice::Signatures) => app.right = Some(RightPanel::Signatures),
         Some(Notice::FieldHighlights(on)) => app.view_defaults.highlight_fields = on,
         Some(Notice::Console) => app.dialog = Some(crate::Dialog::JsConsole),
+        // Back on in Preferences ▸ General.
+        Some(Notice::HideSecured) => app.show_secured_notice = false,
         None => {}
     }
     // No dialog, close prompt or palette over the page: only then does page input count.
@@ -4032,7 +4086,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     ui.separator();
                 }
             }
-            canvas_action = comments::context_menu(ui, view, info, prefs, allowed).or(copy_image);
+            canvas_action = comments::context_menu(ui, view, info, prefs, allowed, can_modify).or(copy_image);
         });
         (wanted, visible_now)
     });
@@ -4756,6 +4810,8 @@ enum Notice {
     Unlock,
     /// Close this historical snapshot tab (View signed version / View revision).
     Close,
+    /// Stop showing the secured-document notice, in every document (#4035).
+    HideSecured,
 }
 
 /// The notice bar above the pages: a file changed on disk first, then what a historical
@@ -4833,6 +4889,7 @@ fn notices(
     }
     let mut open_security = false;
     let mut unlock = false;
+    let mut hide_secured = false;
     let mut open_repairs = false;
     let mut open_console = false;
     let mut toggled = None;
@@ -4918,6 +4975,10 @@ fn notices(
         if secured && doc.can_unlock() && crate::widgets::pill_button(ui, tl!("Unlock…"), true).clicked() {
             unlock = true;
         }
+        // Only when the bar shows the security message: a form's stopped scripts come first.
+        if secured && !scripts_off && crate::widgets::pill_button(ui, tl!("Don't show again"), false).clicked() {
+            hide_secured = true;
+        }
         if repaired && !secured && info.fields.is_empty() && crate::widgets::pill_button(ui, tl!("Details"), false).clicked() {
             open_repairs = true;
         }
@@ -4930,6 +4991,9 @@ fn notices(
     }
     if unlock {
         return Some(Notice::Unlock);
+    }
+    if hide_secured {
+        return Some(Notice::HideSecured);
     }
     open_security.then_some(Notice::Security).or(toggled)
 }
@@ -5494,6 +5558,10 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, editable: bool, dirty: bool
                         view.pending_action = Some(ViewAction::Extract);
                         ui.close();
                     }
+                    if ui.button(tl!("Split document…")).clicked() {
+                        view.pending_action = Some(ViewAction::SplitBeforeSelected);
+                        ui.close();
+                    }
                     if ui.add_enabled(editable, egui::Button::new(tl!("Replace pages…"))).clicked() {
                         view.pending_action = Some(ViewAction::ReplacePages);
                         ui.close();
@@ -5750,6 +5818,7 @@ mod tests {
             locked: false,
             intent: None,
             fill_sign,
+            no_rotate: false,
             points: Vec::new(),
         }
     }
@@ -6840,6 +6909,47 @@ trailer << /Root 1 0 R >>
         }
         assert_eq!(PageLayout::try_parse(" Two-Up "), Some(PageLayout::TwoUp));
         assert_eq!(PageLayout::try_parse("facing"), None);
+    }
+
+    #[test]
+    fn a_null_xyz_coordinate_keeps_the_readers_place_on_the_new_page() {
+        // CAD exports link each cross-reference as `/XYZ null null 0`. Acrobat keeps the
+        // point at the window's top-left (and the zoom) when following one to another sheet.
+        let info = pdfcraft_render::DocInfo {
+            pages: (0..3)
+                .map(|_| pdfcraft_render::PageInfo { width: 842.0, height: 595.0, label: String::new(), crop: [0.0, 0.0, 842.0, 595.0], rotation: 0 })
+                .collect(),
+            ..Default::default()
+        };
+        // Page 1 at 400 %, scrolled so its point 200 pt across and 125 pt down is at the corner
+        // where /XYZ puts its point.
+        let zoomed = |rot: u16, size: Vec2| {
+            let mut v = view(3, PageLayout::Single, true);
+            v.rotation = rot;
+            v.viewport_screen = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 600.0));
+            v.screen_xforms = vec![(0, PageXform { rect: Rect::from_min_size(pos2(SIDE - 800.0, -500.0), size), rot, pw: 842.0, ph: 595.0 })];
+            v
+        };
+        let near = |a: Option<f32>, b: f32| a.is_some_and(|a| (a - b).abs() < 1e-4);
+        let mut v = zoomed(0, vec2(4.0 * 842.0, 4.0 * 595.0));
+        v.go_to_dest(1, DestView::Xyz { left: None, top: None, zoom: None }, &info);
+        let (page, fx, fy, rel) = v.goto_point.expect("the place is kept");
+        assert_eq!((v.current, page, rel), (1, 1, vec2(SIDE, 0.0)));
+        assert!(near(fx, 200.0 / 842.0) && near(fy, 125.0 / 595.0), "{fx:?} {fy:?}");
+        // A coordinate the destination gives wins; only the null one is kept.
+        let mut v = zoomed(0, vec2(4.0 * 842.0, 4.0 * 595.0));
+        v.go_to_dest(2, DestView::Xyz { left: Some(421.0), top: None, zoom: Some(4.0) }, &info);
+        let (_, fx, fy, _) = v.goto_point.expect("the place is kept");
+        assert!(near(fx, 0.5) && near(fy, 125.0 / 595.0), "{fx:?} {fy:?}");
+        // With the view turned a quarter, the point under the corner is still the one kept.
+        let mut v = zoomed(90, vec2(4.0 * 595.0, 4.0 * 842.0));
+        v.go_to_dest(1, DestView::Xyz { left: None, top: None, zoom: None }, &info);
+        let (_, fx, fy, _) = v.goto_point.expect("the place is kept");
+        assert!(near(fx, 800.0 / (4.0 * 595.0)) && near(fy, 500.0 / (4.0 * 842.0)), "{fx:?} {fy:?}");
+        // A page that fits the window keeps the layout's placement: no point, as before.
+        let mut v = zoomed(0, vec2(800.0, 565.0));
+        v.go_to_dest(1, DestView::Xyz { left: None, top: None, zoom: None }, &info);
+        assert_eq!((v.current, v.goto, v.goto_point), (1, Some((1, 0.0)), None));
     }
 
     #[test]

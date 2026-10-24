@@ -645,6 +645,10 @@
 	Draw your {what} below.	Vizato {what} më poshtë.
 	Drawing	Vizatim
 	Drawing scale	Shkalla e vizatimit
+	Scale	Shkalla
+	Common scales	Shkalla të zakonshme
+	Enter a scale such as 1:50.	Shkruani një shkallë si 1:50.
+	Applying a scale switches units to m / mm.	Zbatimi i një shkalle i kalon njësitë në m / mm.
 	Drop PDFs or folders here, or choose them.	Hidh PDF ose dosje këtu, ose zgjidh ato.
 	Drop-down list	Listë rënëse
 	Dropdown Properties	Vetitë e listës rënëse
@@ -2264,6 +2268,8 @@ key	Space	Hapësirë
 	Printer paper and scaling may differ. Check driver settings.	Letra dhe shkallëzimi i printerit mund të ndryshojnë. Kontrolloni cilësimet e drajverit.
 	Drawing scale changes. Use Actual size for full-scale plans.	Shkalla e vizatimit ndryshon. Përdorni Madhësinë aktuale për planet në shkallë të plotë.
 	Reload documents when their files change on disk	Ringarko dokumentet kur skedarët e tyre ndryshojnë në disk
+	Don't show again	Mos e shfaq më
+	Show a notice when a document is secured	Shfaq një njoftim kur një dokument është i siguruar
 	This file changed on disk. Reload it to see the new version; your unsaved changes will be lost.	Ky skedar ndryshoi në disk. Ringarkojeni për të parë versionin e ri; ndryshimet tuaja të paruajtura do të humbasin.
 	Reload	Ringarko
 	Couldn't reload {name}: {e}	Nuk u ringarkua {name}: {e}
@@ -2504,3 +2510,6 @@ animation effects	Off	Joaktiv
 
 # Date picker: Today button (#4274) (AI-assisted, not separately native-reviewed)
 	Today	Sot
+
+# AI-assisted additions for restoring the last view (#1767) (2026-10-22); not reviewed by a native speaker.
+	Restore the last view (page, zoom and page display) when a document is opened again	Rikthe pamjen e fundit (faqen, zmadhimin dhe shfaqjen e faqeve) kur një dokument hapet përsëri

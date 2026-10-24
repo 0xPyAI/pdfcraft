@@ -2042,6 +2042,10 @@
 	Perimeter	Периметр
 	Area	Площадь
 	Drawing scale	Масштаб чертежа
+	Scale	Масштаб
+	Common scales	Распространённые масштабы
+	Enter a scale such as 1:50.	Введите масштаб, например 1:50.
+	Applying a scale switches units to m / mm.	При применении масштаба единицы переключаются на м / мм.
 	Snapping	Привязка
 	Export measurements	Экспортировать измерения
 	Open a PDF to measure it.	Откройте PDF для измерения.
@@ -2109,7 +2113,10 @@
 	Default zoom	Масштаб по умолчанию
 	Used when a PDF doesn't ask for a layout or zoom. Continuous scrolling never snaps between pages.	Используется, когда PDF не запрашивает макет или масштаб. Непрерывная прокрутка никогда не привязывается между страницами.
 	Reopen the files that were open when PdfCraft last closed	Повторно открывать файлы, которые были открыты при последнем закрытии PdfCraft
+	Restore the last view (page, zoom and page display) when a document is opened again	Восстанавливать последний вид (страницу, масштаб и показ страниц) при повторном открытии документа
 	Reload documents when their files change on disk	Перезагружать документы при изменении их файлов на диске
+	Don't show again	Больше не показывать
+	Show a notice when a document is secured	Показывать уведомление, когда документ защищён
 	Always use my default zoom and page layout	Всегда использовать мой масштаб и макет страницы по умолчанию
 	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	Этот файл был изменён на диске. «Перезагрузить» покажет новую версию и отбросит несохранённые изменения; «Сохранить» заменит её этой версией.
 	Reload	Перезагрузить
