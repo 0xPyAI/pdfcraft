@@ -3942,6 +3942,28 @@ fn redacting_through_tools() {
     assert!(matches!(a.call("redact_mark", &json!({ "doc": doc })), Err(ToolError::InvalidArgs(_))));
 }
 
+#[test]
+/// Mark, apply and save remove the complete international number while retaining labels and controls.
+fn redacting_italian_international_slash_numbers_through_tools() {
+    let dir = workdir("redact-italian-international-slash");
+    std::fs::write(dir.join("phones.txt"), "A tel. +39 0426/123456\nB tel. 0426/123456\nC protocol 2024/123456\nD on 01/10/2026").unwrap();
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "text", "path": "phones.txt" }))["doc"].as_u64().unwrap();
+    let marked = ok(&mut a, "redact_mark", json!({ "doc": doc, "pattern": "phone" }));
+    assert_eq!(marked["marked"], 2, "both complete phone numbers need marks");
+    assert!(page_text(&mut a, doc)[0].contains("+39 0426/123456"), "marks alone remove nothing");
+    assert_eq!(ok(&mut a, "redact_apply", json!({ "doc": doc }))["applied"], 2);
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "redacted.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "redacted.pdf" }))["doc"].as_u64().unwrap();
+    let text = &page_text(&mut a, reopened)[0];
+    assert!(!text.contains("+39") && !text.contains("0426"), "{text}");
+    for label in ["A tel.", "B tel."] {
+        assert!(text.lines().any(|line| line.trim() == label), "only the surrounding label remains: {text}");
+    }
+    assert!(text.contains("protocol 2024/123456") && text.contains("on 01/10/2026"), "unrelated digit runs remain: {text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// One page with the text "Secret 1234" and a Redact annotation that has neither a usable
 /// QuadPoints array nor a Rect, so there is no area to redact.
 fn redact_pdf_with_unreadable_mark() -> Vec<u8> {
