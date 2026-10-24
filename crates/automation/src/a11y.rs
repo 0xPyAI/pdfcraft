@@ -575,6 +575,8 @@ impl Automation {
 }
 
 impl Automation {
+    /// Recognition settings from the arguments: `dpi` (clamped to 72–600), `language` (refused
+    /// unless the models read it) and `skip_text_pages`, each left at its default when absent.
     pub(crate) fn ocr_settings(&self, a: &Args) -> Result<pdfcraft_engine::ocr::OcrSettings> {
         let mut settings = pdfcraft_engine::ocr::OcrSettings::default();
         if let Some(d) = a.opt_num("dpi")? {
@@ -592,6 +594,9 @@ impl Automation {
         Ok(settings)
     }
 
+    /// Recognizes text in each of `paths` and writes the result under the same file name in
+    /// `folder`, reporting per file its output, word count and skipped pages, or its error. A
+    /// path outside the root refuses the whole call before any work starts.
     pub(crate) fn ocr_recognize_files(&mut self, a: &Args) -> Result<Value> {
         let settings = self.ocr_settings(a)?;
         let folder = self.resolve(a.str("folder")?, true)?;
@@ -623,6 +628,8 @@ impl Automation {
         Ok(json!({ "files": out }))
     }
 
+    /// Recognizes text on the open document's `pages` (every page when absent) and adds it,
+    /// reporting the total word count and, per page, why it was skipped or what it found.
     pub(crate) fn ocr_recognize(&mut self, a: &Args) -> Result<Value> {
         let settings = self.ocr_settings(a)?;
         let pages = if a.opt_ints("pages")?.is_some() { self.pages(a, "pages")? } else { Vec::new() };
@@ -642,6 +649,8 @@ impl Automation {
         Ok(json!({ "words": found.iter().map(|p| p.words.len()).sum::<usize>(), "pages": list }))
     }
 
+    /// Whether text recognition's models are installed, the directories searched for them (in
+    /// order), and the languages it reads, each as a code and a name.
     pub(crate) fn ocr_status(&self) -> Result<Value> {
         use pdfcraft_engine::ocr;
         let dirs: Vec<String> = ocr::Models::search_dirs().iter().map(|d| d.to_string_lossy().into_owned()).collect();
@@ -650,6 +659,8 @@ impl Automation {
     }
 }
 
+/// A script's request to the viewer as the JSON that running a script reports; a side panel
+/// goes by its fixed id.
 fn request_json(r: &pdfcraft_engine::js::Request) -> Value {
     use pdfcraft_engine::js::Request as R;
     match r {
@@ -661,6 +672,7 @@ fn request_json(r: &pdfcraft_engine::js::Request) -> Value {
         R::Focus(f) => json!({ "focus": f }),
         R::Beep => json!({ "beep": true }),
         R::SaveAs => json!({ "save_as": true }),
+        R::ShowPanel(p) => json!({ "panel": p.id() }),
     }
 }
 

@@ -7557,6 +7557,60 @@ fn a_date_its_validate_script_refuses_is_not_tried_again() {
     assert!(value(&s, "name").is_empty(), "nothing the refused run changed is kept: {:?}", value(&s, "name"));
 }
 
+/// An XFA button's click script may show the attachments panel; a text field's exit script
+/// asking the same is noted on the console and ignored.
+#[test]
+fn an_xfa_button_may_show_a_side_panel_and_other_events_may_not() {
+    let xdp = r##"<?xml version="1.0" encoding="UTF-8"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
+<subform name="form" layout="tb">
+ <pageSet><pageArea name="front"><contentArea x="0.5in" y="0.5in" w="7.5in" h="10in"/><medium short="8.5in" long="11in"/></pageArea></pageSet>
+ <field name="files" w="2in" h="0.3in"><ui><button/></ui><caption><value><text>Attachments</text></value></caption>
+  <event activity="click"><script contentType="application/x-javascript">app.execMenuItem("ShowHideFileAttachment");</script></event></field>
+ <field name="note" w="2in" h="0.3in"><ui><textEdit/></ui>
+  <event activity="exit"><script contentType="application/x-javascript">app.execMenuItem("ShowHideFileAttachment");</script></event></field>
+</subform>
+</template>
+</xdp:xdp>
+"##;
+    let mut s = Session::new();
+    let id = s.open("files.pdf", None, Arc::new(pdfcraft_xfa::fixtures::shell(xdp)), None).expect("opens");
+    s.take_js_output(id);
+    s.apply(id, Edit::XfaEvent { som: "form[0].files[0]".into(), activity: "click".into() }).unwrap();
+    let out = s.take_js_output(id);
+    assert_eq!(out.requests, [pdfcraft_js::Request::ShowPanel(pdfcraft_js::Panel::Attachments)], "{out:?}");
+    s.apply(id, Edit::SetFieldValue { name: "note".into(), value: FieldValue::Text("x".into()) }).unwrap();
+    let out = s.take_js_output(id);
+    assert!(out.requests.is_empty(), "only a click shows a panel: {out:?}");
+    assert!(out.console.iter().any(|c| c.contains("show a side panel")), "{:?}", out.console);
+}
+
+/// A validate script that asks for Save As and a side panel gets neither, with a console note
+/// for each; a button's script may still open Save As.
+#[test]
+fn a_fields_own_script_may_not_save_as_or_show_a_panel() {
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("order.pdf", None, Arc::new(scripted_form()), None).unwrap();
+    s.apply(
+        id,
+        Edit::SetFieldScript {
+            name: "qty".into(),
+            event: "validate".into(),
+            script: Some("app.execMenuItem('SaveAs'); app.execMenuItem('ShowHideFileAttachment');".into()),
+        },
+    )
+    .unwrap();
+    s.take_js_output(id);
+    s.apply(id, Edit::SetFieldValue { name: "qty".into(), value: FieldValue::Text("4".into()) }).unwrap();
+    let out = s.take_js_output(id);
+    assert!(out.requests.is_empty(), "a validate script runs unasked: {out:?}");
+    assert_eq!(out.console.iter().filter(|c| c.contains("only a button may")).count(), 2, "{:?}", out.console);
+    // A button's script may.
+    let o = s.run_javascript(id, "app.execMenuItem('SaveAs');", Some("go")).unwrap();
+    assert_eq!(o.requests, [js::Request::SaveAs]);
+}
+
 /// A page whose forms go past the reading limit and whose picture goes past the image budget is
 /// listed once among the truncated pages.
 #[test]

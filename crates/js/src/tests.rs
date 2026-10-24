@@ -1393,6 +1393,8 @@ mod session {
     use crate::xfa::*;
     use crate::xfa_session::{Script, XfaSession};
 
+    /// A JavaScript or FormCalc script for `activity` on `target`, against the test form with
+    /// default limits and a 3 s timeout.
     fn script(source: &str, formcalc: bool, target: &str, activity: &str) -> Script {
         Script {
             source: source.into(),
@@ -1404,6 +1406,9 @@ mod session {
         }
     }
 
+    /// JavaScript and FormCalc scripts run in turn in one session, each on the form the caller
+    /// sends: nothing an earlier script changed or defined leaks into the next, a failing script
+    /// doesn't end the session, and hundreds of scripts run on its one thread.
     #[test]
     fn scripts_of_one_event_run_on_one_thread_each_on_the_form_the_caller_sends() {
         let mut s = XfaSession::new(XfaDoc { page_count: 3, ..Default::default() });
@@ -1443,6 +1448,8 @@ mod session {
         assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
     }
 
+    /// A JavaScript or FormCalc script whose engine takes longer to be ready than the script's
+    /// time limit still runs and returns its result, and the session stays alive.
     #[test]
     fn a_scripts_time_starts_when_its_context_is_ready() {
         // The engine made slow to be ready (300 ms) under a 50 ms script limit: the script is
@@ -1463,6 +1470,9 @@ mod session {
         assert_eq!(s.dead(), None);
     }
 
+    /// An endless JavaScript loop past its 200 ms limit is abandoned within 2 s and leaves the
+    /// session dead, so nothing more runs in it; an endless FormCalc loop is abandoned or
+    /// reported as running too long.
     #[test]
     fn a_script_past_its_time_is_abandoned_and_the_session_is_dead_after_it() {
         let mut s = XfaSession::new(XfaDoc::default());
@@ -1714,6 +1724,52 @@ mod scand {
             assert_eq!(o.error, None, "{typed}: {o:?}");
             assert_eq!(o.result.as_deref(), Some(want), "{typed}");
         }
+    }
+}
+
+mod menu_items {
+    use super::*;
+    use crate::xfa::{XfaDoc, XfaEffect, XfaEvent, run_xfa};
+
+    /// Every side panel has a fixed id in automation output.
+    #[test]
+    fn each_panel_has_a_fixed_id_for_automation() {
+        let ids = [Panel::Bookmarks, Panel::Pages, Panel::Attachments, Panel::Signatures, Panel::Layers].map(Panel::id);
+        assert_eq!(ids, ["bookmarks", "pages", "attachments", "signatures", "layers"]);
+    }
+
+    /// Each side panel item, Print and SaveAs make their request, in order; an unknown item
+    /// makes none and is not an error.
+    #[test]
+    fn exec_menu_item_shows_side_panels_prints_and_saves() {
+        let o = go(
+            "app.execMenuItem('ShowHideFileAttachment'); app.execMenuItem('ShowHideBookmarks'); app.execMenuItem('ShowHideThumbnails'); \
+             app.execMenuItem('ShowHideSignatures'); app.execMenuItem('ShowHideOptCont'); app.execMenuItem('Print'); \
+             app.execMenuItem('SaveAs'); app.execMenuItem('NoSuchItem');",
+            &Event::field("Mouse Up", "total", ""),
+        );
+        assert_eq!(o.error, None);
+        assert_eq!(
+            o.requests,
+            [
+                Request::ShowPanel(Panel::Attachments),
+                Request::ShowPanel(Panel::Bookmarks),
+                Request::ShowPanel(Panel::Pages),
+                Request::ShowPanel(Panel::Signatures),
+                Request::ShowPanel(Panel::Layers),
+                Request::Print,
+                Request::SaveAs,
+            ]
+        );
+    }
+
+    /// `app.execMenuItem` works in XFA scripts too: a click shows the attachments panel.
+    #[test]
+    fn xfa_scripts_show_the_attachments_panel() {
+        let event = XfaEvent { activity: "click".into(), target: "form1[0].page1[0].go[0]".into(), ..Default::default() };
+        let o = run_xfa("app.execMenuItem('ShowHideFileAttachment')", &event, &XfaDoc::default(), &super::xfa_model::form(), Limits::default());
+        assert_eq!(o.error, None, "{o:?}");
+        assert!(o.effects.contains(&XfaEffect::ShowPanel(Panel::Attachments)), "{:?}", o.effects);
     }
 }
 

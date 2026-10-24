@@ -2,7 +2,7 @@
 //! the JavaScript console (⌘J), Document JavaScripts, and Preferences ▸ JavaScript.
 
 use egui::{Align, Layout};
-use pdfcraft_engine::js::{JsOutput, Request};
+use pdfcraft_engine::js::{JsOutput, Panel, Request};
 use pdfcraft_engine::{DocId, Edit};
 
 use crate::theme::{self, Tokens};
@@ -67,6 +67,17 @@ impl PdfCraftApp {
                     &[("u", &u)],
                 ),
                 Request::SaveAs => self.run_command("file.save_as"),
+                Request::ShowPanel(p) => {
+                    let panel = match p {
+                        Panel::Bookmarks => crate::RightPanel::Bookmarks,
+                        Panel::Pages => crate::RightPanel::Pages,
+                        Panel::Attachments => crate::RightPanel::Attachments,
+                        Panel::Signatures => crate::RightPanel::Signatures,
+                        Panel::Layers => crate::RightPanel::Layers,
+                    };
+                    // Show/Hide: a panel already showing closes.
+                    self.right = (self.right != Some(panel)).then_some(panel);
+                }
                 Request::Focus(_) | Request::Beep | Request::Reset(_) => {}
             }
         }

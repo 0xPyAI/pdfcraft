@@ -7,7 +7,7 @@
 //! off, scripts don't run and AF calls keep working natively.
 
 use pdfcraft_forms::{Field, FieldChange, FieldEvent, FieldKind, FieldProps, ScriptResult, Scripts};
-pub use pdfcraft_js::{Limits, Outcome, Request};
+pub use pdfcraft_js::{Limits, Outcome, Panel, Request};
 
 use crate::{DocId, Edit, EditError, Session};
 
@@ -26,14 +26,28 @@ pub struct JsOutput {
 }
 
 impl JsOutput {
+    /// Whether scripts produced nothing: no alerts, console lines, requests or errors.
     pub fn is_empty(&self) -> bool {
         self.alerts.is_empty() && self.console.is_empty() && self.requests.is_empty() && self.errors.is_empty()
     }
 
+    /// Adds what a field's own script produced: its alerts, console lines, errors and requests,
+    /// except a request to show a side panel or open Save As, which is noted on the console
+    /// and dropped.
     fn absorb(&mut self, o: &Outcome) {
         self.alerts.extend(o.alerts.iter().cloned());
         self.console.extend(o.console.iter().cloned());
-        self.requests.extend(o.requests.iter().cloned());
+        // A field's own scripts (keystroke, format, validate, calculate) run unasked: only a
+        // button's may show or hide a side panel, or open Save As.
+        for r in &o.requests {
+            match r {
+                Request::ShowPanel(_) => self.console.push("A field script asked to show a side panel; only a button may show a side panel".into()),
+                Request::SaveAs => {
+                    self.console.push("A field script asked to save the document as a new file; only a button may open Save As".into())
+                }
+                r => self.requests.push(r.clone()),
+            }
+        }
         self.errors.extend(o.error.iter().cloned());
         // The document scripts run before every field script, so a failing one would repeat
         // once per calculation; it is reported once.
