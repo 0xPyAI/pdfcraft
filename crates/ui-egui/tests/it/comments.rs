@@ -942,6 +942,50 @@ fn line_ends_are_dragged_to_change_length_and_angle() {
     assert!((p[1][0] - 200.0).abs() < 1.0 && (p[1][1] - 160.0).abs() < 1.0, "{p:?}");
 }
 
+/// The arrow keys move the selected comment a screen pixel, ⌘/Ctrl or Shift and an arrow ten,
+/// instead of scrolling or turning the page; each press is one undo step. Without a selection
+/// the arrows scroll and turn pages as before.
+#[test]
+fn arrow_keys_nudge_the_selected_comment() {
+    use egui::{Key, Modifiers};
+    let mut h = harness(|app| app.set_option("quick", "square").unwrap());
+    drag_pt(&mut h, (40.0, 100.0), (140.0, 40.0));
+    h.state_mut().set_option("quick", "select").unwrap();
+    click_pt(&mut h, (90.0, 70.0));
+    assert_eq!(h.state().views[0].comments.selected, Some((0, 0)));
+    // One screen pixel in user space, at this zoom.
+    let pixel = 300.0 / h.state().views[0].page_screen_rect(0).unwrap().width();
+    let before = comments(&h)[0].rect;
+    h.key_press(Key::ArrowRight);
+    h.run_steps(3);
+    let r = comments(&h)[0].rect;
+    assert!((r[0] - before[0] - pixel).abs() < 0.01 && (r[1] - before[1]).abs() < 0.01, "one pixel right: {r:?} from {before:?}");
+    assert_eq!(h.state().views[0].current, 0, "the page didn't turn");
+    let id = h.state().views[0].id;
+    assert_eq!(h.state().session.get(id).unwrap().can_undo(), Some("Move comment"));
+    // ⌘/Ctrl and Shift: ten pixels (down on screen is down in user space here).
+    h.key_press_modifiers(Modifiers::COMMAND, Key::ArrowDown);
+    h.run_steps(3);
+    let r2 = comments(&h)[0].rect;
+    assert!((r[1] - r2[1] - 10.0 * pixel).abs() < 0.01 && (r2[0] - r[0]).abs() < 0.01, "ten pixels down: {r2:?} from {r:?}");
+    h.key_press_modifiers(Modifiers::SHIFT, Key::ArrowLeft);
+    h.run_steps(3);
+    let r3 = comments(&h)[0].rect;
+    assert!((r2[0] - r3[0] - 10.0 * pixel).abs() < 0.01, "ten pixels left: {r3:?} from {r2:?}");
+    h.state_mut().undo();
+    h.run_steps(2);
+    assert!((comments(&h)[0].rect[0] - r2[0]).abs() < 0.01, "each press is one undo step");
+    // Nothing selected: → turns the page again.
+    h.key_press(Key::Escape);
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].comments.selected, None);
+    let rect = comments(&h)[0].rect;
+    h.key_press(Key::ArrowRight);
+    h.run_steps(3);
+    assert_eq!(comments(&h)[0].rect, rect, "the comment stays");
+    assert_eq!(h.state().views[0].current, 1, "and the view goes to the next page");
+}
+
 #[test]
 fn a_shape_just_drawn_resizes_from_its_handles_without_the_select_tool() {
     // #2338: the new shape showed its handles, but only the Select tool answered them.
