@@ -2021,6 +2021,8 @@ fn repeating_rows_in_a_wrapped_container_get_the_instances_the_data_holds() {
     assert_eq!(form.pages.iter().flat_map(widgets).filter(|w| w.name.starts_with("what")).count(), 1);
 }
 
+/// A multi-line field with a minimum height and no fixed one grows to hold its text, moving
+/// what follows down; one with a fixed height keeps it.
 #[test]
 fn a_multi_line_field_without_a_height_grows_to_hold_its_text() {
     let place = |data: &str| {

@@ -155,6 +155,8 @@ impl Ctx {
         Ctx { font: self.font.apply(&c.font), para: self.para.apply(&c.para), som: self.som.clone() }
     }
 
+    /// [`Self::child`] for object `c`, its SOM path extended by its name and `index` among the
+    /// siblings of that name (an unnamed object adds nothing).
     fn with_som(&self, c: &Common, index: usize) -> Ctx {
         let mut out = self.child(c);
         if let Some(n) = &c.name {
@@ -619,6 +621,8 @@ impl Layouter<'_> {
         self.new_page()
     }
 
+    /// The current content area, how far down it the flow is, and whether anything has been
+    /// placed in it; before the first page, an empty letter-size page from its top.
     fn cursor(&self) -> (Rect, f64, bool) {
         match &self.cur {
             Some(c) => (c.rect, c.y, c.placed),
