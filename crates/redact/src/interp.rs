@@ -41,7 +41,6 @@ pub(crate) const MAX_DEPTH: usize = 50;
 /// at 50 is a hang rather than a limit. Edit text's reader pairs its depth limit with the same
 /// budget, and this is that constant, so the two cannot drift apart. Running out is treated as a
 /// form that cannot be read: removed in Apply, counted as unreadable in Verify.
-pub(crate) const MAX_FORM_VISITS: usize = pdfcraft_edit::text::MAX_FORM_VISITS;
 
 // A form a reader still shows must be walkable here, or a redaction removes content that is
 // visible; the build says so rather than a test, so the two limits cannot drift apart.
@@ -129,8 +128,6 @@ pub(crate) struct Scope<'a> {
     /// shared forms drawn from other shared forms would otherwise multiply the work with every
     /// level.
     budget: DecodeBudget,
-    /// Forms entered so far in this pass ([`MAX_FORM_VISITS`]).
-    visits: usize,
 }
 
 impl<'a> Scope<'a> {
@@ -152,7 +149,6 @@ impl<'a> Scope<'a> {
             used_names: Vec::new(),
             depth: 0,
             budget,
-            visits: 0,
         }
     }
 
@@ -1291,10 +1287,10 @@ fn xobject(
             {
                 return None;
             }
-            // Too deep, or too many forms for one page: either way this form cannot be read, so
-            // it goes (Apply) or the page is left alone (Verify), as a form that will not decode
-            // does. The budget is what keeps a fan-out or a cycle from costing 2^50 walks.
-            if scope.depth >= MAX_DEPTH || scope.visits >= MAX_FORM_VISITS {
+            // Too deep: this form cannot be read, so it goes (Apply) or the page is left alone
+            // (Verify), as a form that will not decode does. The page's decode budget below is what
+            // keeps a fan-out or a cycle from costing 2^50 walks.
+            if scope.depth >= MAX_DEPTH {
                 if scope.mode == Mode::Verify {
                     // Sanitization removes a Form it cannot enter, so the verification scan
                     // must count that conservative removal or it may decide to skip the pass.
@@ -1308,7 +1304,6 @@ fn xobject(
                 out.doomed.push(r);
                 return Some(None);
             }
-            scope.visits += 1;
             // Strict, like page content: a Form read only in part counts as undecodable.
             let data = if scope.budget.enter_form() {
                 scope.budget.decode_strict(s)
