@@ -3167,7 +3167,8 @@ fn pasted_added_content_keeps_its_style_and_picture() {
         bold: true,
         italic: true,
         size: 12.0,
-        color: [0.8, 0.1, 0.2],
+        align: TextAlign::Center,
+        char_spacing: 0.0,
         align: TextAlign::Center,
     };
     s.apply(id, Edit::AddText { page: 0, text: text.clone() }).unwrap();
