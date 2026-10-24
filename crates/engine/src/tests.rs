@@ -2178,6 +2178,22 @@ fn password_field_values_are_kept_in_memory_but_written_to_no_file() {
     assert!(t.get(reopened).unwrap().form.iter().find(|f| f.name == "name").unwrap().value.iter().all(|v| v.is_empty()));
 }
 
+/// #3943 review: recording a save rebases editing on the saved file, which carries no Password
+/// value; the typed value stays in the open document all the same, and a later save still omits it.
+#[test]
+fn a_typed_password_value_survives_save_and_mark_saved() {
+    let fixture = String::from_utf8(form_fixture()).unwrap().replace("/T (name)", "/T (name) /Ff 8192");
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("form.pdf", None, Arc::new(fixture.into_bytes()), None).unwrap();
+    s.apply(id, Edit::SetFieldValue { name: "name".into(), value: FieldValue::Text("hunter2".into()) }).unwrap();
+    let saved = s.save_bytes(id).unwrap();
+    s.mark_saved(id, saved, Some("saved.pdf".into())).unwrap();
+    let value = |s: &Session| s.get(id).unwrap().form.iter().find(|f| f.name == "name").unwrap().value.clone();
+    assert_eq!(value(&s), ["hunter2"], "the open document keeps the value after Save");
+    assert!(!s.get(id).unwrap().dirty, "restoring it is not an unsaved change");
+    assert!(!appears_in_pdf(&s.save_bytes(id).unwrap(), "hunter2"), "the next save still omits it");
+}
+
 /// #3926 / #3943 review: signing writes the signed file from the same copy a save does, so a
 /// typed Password-field value is not signed into the file either.
 #[test]
