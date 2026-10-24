@@ -547,9 +547,18 @@ pub(super) fn rewrite_styled_block(
     let mut programs: HashMap<String, Option<std::sync::Arc<Vec<u8>>>> = HashMap::new();
     for (range, index) in styled_spans {
         let source = lines.get(index).unwrap_or(first);
-        for ch in draft.get(range).unwrap_or_default().chars() {
+        let start = range.start;
+        for (offset, ch) in draft.get(range).unwrap_or_default().char_indices() {
             if ch == '\n' {
                 chars.push((ch, index, source.font.clone()));
+                continue;
+            }
+            // A carriage return breaks the row too. Before `\n` the pair is one break, so the
+            // CR stays a `\r` the rows skip. Either way it keeps its place among the draft's
+            // characters, which rows are counted in.
+            if ch == '\r' {
+                let crlf = start.checked_add(offset).and_then(|at| draft.get(at.saturating_add(1)..)).is_some_and(|rest| rest.starts_with('\n'));
+                chars.push((if crlf { '\r' } else { '\n' }, index, source.font.clone()));
                 continue;
             }
             let s = ch.to_string();
@@ -735,6 +744,11 @@ pub(super) fn rewrite_styled_block(
     let mut at = 0;
     while at < chars.len() {
         let Some(item) = chars.get(at) else { break };
+        // The CR of a CRLF: the `\n` after it breaks the row.
+        if item.0 == '\r' {
+            at += 1;
+            continue;
+        }
         if item.0 == '\n' {
             row_ranges.push(row_start..row_start + row.len());
             rows.push(std::mem::take(&mut row));
@@ -800,6 +814,17 @@ pub(super) fn rewrite_styled_block(
         }
     };
     let o = &lead.origin;
+    let mut drop = coincident_ops(lines, &members);
+    drop.extend(members.iter().flat_map(|l| l.ops.iter().copied()));
+    let start = lead.ops.first().copied().unwrap_or(o.bt_op);
+    let split = ops
+        .get(o.bt_op..start)
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .any(|(i, op)| matches!(op.op.as_slice(), b"Tj" | b"TJ" | b"'" | b"\"") && !drop.contains(&(o.bt_op + i)));
+    // What is in force where the rewrite is drawn, and what the text after it expects.
+    let after = if split { &o.state } else { &o.bt_state };
     for (row, _) in rows.iter().zip(&kept).filter(|(_, k)| !**k) {
         let text: String = row.iter().map(|v| v.0).collect();
         if pdfcraft_fonts::source_shaping::required(&text) && row.first().is_some_and(|first| row.iter().any(|v| v.1 != first.1 || v.2 != first.2)) {
@@ -910,6 +935,11 @@ pub(super) fn rewrite_styled_block(
             tm[4] += ax;
             tm[5] += ay;
             let mut segment_width = segment_advances.get(&(row_index, pos)).copied().unwrap_or(0.0);
+            // Each run in its own graphics state, restating what its source set inside its text
+            // object (`gs`, stroke, line width, `Tr`; #3508/#3509) from the state the rewrite is
+            // drawn in: a `gs` has no inverse, so one run's ExtGState would stay for the next.
+            block_ops.push(Op::new("q", vec![]));
+            block_ops.extend(state.paint_ops(after));
             if let Some((_, shaped, _)) = shaped_runs.get(&(row_index, pos)) {
                 let resource = glyph_resources.get(&(row_index, pos)).ok_or_else(|| EditError::Invalid("shaped font is missing".into()))?;
                 let mut properties = Dict::new();
@@ -996,6 +1026,7 @@ pub(super) fn rewrite_styled_block(
                 block_ops.push(Op::new("l", vec![n(x1), n(y1)]));
                 block_ops.push(Op::new("S", vec![]));
             }
+            block_ops.push(Op::new("Q", vec![]));
             x += segment_width;
             pos = end;
         }
@@ -1006,16 +1037,6 @@ pub(super) fn rewrite_styled_block(
         };
     }
     block_ops.push(Op::new("Q", vec![]));
-    let mut drop = coincident_ops(lines, &members);
-    drop.extend(members.iter().flat_map(|l| l.ops.iter().copied()));
-    let start = lead.ops.first().copied().unwrap_or(o.bt_op);
-    let split = ops
-        .get(o.bt_op..start)
-        .unwrap_or_default()
-        .iter()
-        .enumerate()
-        .any(|(i, op)| matches!(op.op.as_slice(), b"Tj" | b"TJ" | b"'" | b"\"") && !drop.contains(&(o.bt_op + i)));
-    let after = if split { &o.state } else { &o.bt_state };
     block_ops.extend(after.ops());
     if split {
         block_ops.insert(0, Op::new("ET", vec![]));

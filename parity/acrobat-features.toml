@@ -1914,8 +1914,8 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.edit_text"]
 tools = ["text_edit"]
-evidence = ["crates/edit/src/tests.rs::missing_glyphs_substitute_helvetica_and_impossible_text_is_refused", "crates/fonts/src/pdf.rs::subset_fonts_only_encode_the_glyphs_they_have", "crates/fonts/src/pdf.rs::composite_fonts_use_to_unicode"]
-notes = "the line's font is reused when every character has a code and a glyph (ToUnicode, encodings, Differences; subset glyph checks); otherwise Helvetica (WinAnsi) is used and reported; text no font can show is refused"
+evidence = ["crates/edit/src/tests.rs::missing_glyphs_substitute_helvetica_and_impossible_text_is_refused", "crates/edit/src/tests.rs::a_bold_stand_in_font_leaves_an_earlier_regular_one_alone", "crates/fonts/src/pdf.rs::subset_fonts_only_encode_the_glyphs_they_have", "crates/fonts/src/pdf.rs::composite_fonts_use_to_unicode"]
+notes = "the line's font is reused when every character has a code and a glyph (ToUnicode, encodings, Differences; subset glyph checks); otherwise a standard face of the source font's family (Helvetica, Times or Courier, in its weight and slant; WinAnsi) is used and reported; text no font can show is refused. Each standard stand-in has a resource of its own face (PCEdTimesBold, ...), so a bold paragraph's stand-in no longer turns paragraphs set earlier in a regular one bold (#4280); pages already saved with the shared PCEdHelv name by older builds are not repaired"
 
 [[feature]]
 id = "edit.text-format-font"
@@ -1984,10 +1984,10 @@ area = "C"
 tier = "P1"
 milestone = "M7"
 status = "shipped"
-commands = ["edit.edit_text"]
-tools = ["text_edit"]
-evidence = ["crates/edit/src/tests.rs::justify_underline_and_spacing", "crates/edit/src/tests.rs::paragraphs_take_new_formatting", "crates/ui-egui/tests/it/editing.rs::the_format_panel_restyles_the_paragraph_being_edited", "crates/ui-egui/tests/it/editing.rs::the_format_panel_takes_any_scale_and_character_spacing"]
-notes = "character spacing in points (-5 to 50) and horizontal scaling in percent (10 to 400) for a paragraph (Tc, Tz), rewrapped; Format text takes any value in those ranges typed, or a common one from its list"
+commands = ["edit.edit_text", "edit.text"]
+tools = ["text_edit", "page_add_text", "content_update"]
+evidence = ["crates/edit/src/tests.rs::justify_underline_and_spacing", "crates/edit/src/tests.rs::paragraphs_take_new_formatting", "crates/ui-egui/tests/it/editing.rs::the_format_panel_restyles_the_paragraph_being_edited", "crates/ui-egui/tests/it/editing.rs::the_format_panel_takes_any_scale_and_character_spacing", "crates/edit/src/tests.rs::added_text_character_spacing_is_drawn_and_reopens", "crates/edit/src/tests.rs::added_text_character_spacing_widens_its_layout", "crates/automation/tests/it/automation.rs::added_text_takes_character_spacing"]
+notes = "character spacing in points (-5 to 50) and horizontal scaling in percent (10 to 400) for a paragraph (Tc, Tz), rewrapped; Format text takes any value in those ranges typed, or a common one from its list. Added text takes character spacing too (Tc, kept in /PCAdded and rewrapped); horizontal scaling for added text is not there yet"
 
 [[feature]]
 id = "edit.lists"
@@ -2072,6 +2072,17 @@ commands = ["edit.image"]
 tools = ["page_add_image"]
 evidence = ["crates/ui-egui/tests/it/content.rs::typing_moving_styling_and_deleting_added_content", "crates/ui-egui/tests/it/content.rs::a_picture_on_the_clipboard_is_pasted_onto_the_page", "crates/automation/tests/it/automation.rs::adding_content_through_tools", "crates/edit/src/tests.rs::added_text_and_images_are_page_content_that_stays_editable", "crates/engine/src/tests.rs::added_text_and_images_render_and_stay_editable"]
 notes = "PNG, JPEG, TIFF, GIF, BMP; centred at natural size or in a rect. ⌘V / Ctrl+V pastes a picture from the system clipboard onto the current page the same way (desktop only)"
+
+[[feature]]
+id = "edit.cut-copy-paste-objects"
+title = "Cut, copy and paste text boxes and images"
+area = "C"
+tier = "P1"
+milestone = "M7"
+status = "partial"
+tools = ["content_copy"]
+evidence = ["crates/automation/tests/it/automation.rs::copying_added_content_through_tools", "crates/engine/src/tests.rs::pasted_added_content_keeps_its_style_and_picture", "crates/engine/src/tests.rs::an_added_jpeg_2000_image_is_copied_as_its_file", "crates/edit/src/tests.rs::a_paste_lands_where_the_copy_was_offset_per_paste_and_stays_on_the_page", "crates/edit/src/tests.rs::a_paste_steps_past_copies_of_itself_only"]
+notes = "Issue #2636, engine and automation part. Edit::PasteContent pastes an added text box or image copied in the same document or another, as one undo step, and `content_copy` drives it headlessly. A copy keeps a text box's text, font, size, colour, alignment and box, and an image's picture, box, turns, flips and crop. It lands where the item was, stepped 18 pt down and to the right past each copy already on the page, or at a given point, and stays on the page. Within a document a pasted image draws the same image object; into another document its picture goes as its JPEG or JPEG 2000 file, or else a PNG, so a colour profile is dropped and CMYK colours in a PNG are turned to RGB, and later pastes there reuse the first one's picture. The copy permission is honoured. Missing: the desktop app's ⌘X / ⌘C / ⌘V, Edit ▸ Cut and Paste and the right-click menu (follow-up PRs), the original document's paragraphs and images (open PRs #1625 and #2251), several items at once, and a check of Acrobat's own clipboard format (not observed)."
 
 [[feature]]
 id = "edit.image-replace"
@@ -2202,8 +2213,8 @@ milestone = "M11"
 status = "partial"
 commands = ["edit.edit_text"]
 tools = ["object_list", "object_move"]
-evidence = ["crates/ui-egui/tests/it/object_selection.rs::marquee_and_mixed_group_drag_move_once_and_undo_together", "crates/automation/tests/it/automation.rs::mixed_objects_move_through_tools_with_generation_and_one_undo", "crates/edit/src/tests.rs::group_moves_preserve_glyph_bytes_and_unselected_text_state", "crates/engine/src/tests.rs::mixed_object_moves_are_one_undo_step_and_survive_save_reopen"]
-notes = "Same-page mixed selection (#844): Shift/Ctrl/Command-click toggles, empty-space marquee (additive with modifiers), drag previews and one atomic undo step for existing paragraphs, Image/Form XObjects and added text/images. Source glyph bytes, fonts and kerning retained; unselected text and shared Form resources stay put. Generation-scoped references with optional automation guard; count and geometry bounded; unsupported vertical/clipping text refused without partial changes. Still missing: arbitrary paths, inline images, cross-page movement, group resizing, arrange/align and a general object editor. See docs/editing-multiple-objects.md."
+evidence = ["crates/ui-egui/tests/it/object_selection.rs::marquee_and_mixed_group_drag_move_once_and_undo_together", "crates/automation/tests/it/automation.rs::mixed_objects_move_through_tools_with_generation_and_one_undo", "crates/edit/src/tests.rs::group_moves_preserve_glyph_bytes_and_unselected_text_state", "crates/engine/src/tests.rs::mixed_object_moves_are_one_undo_step_and_survive_save_reopen", "crates/ui-egui/tests/it/editing.rs::a_paragraph_selected_by_its_frame_deletes_with_one_key"]
+notes = "Same-page mixed selection (#844): Shift/Ctrl/Command-click toggles, empty-space marquee (additive with modifiers), drag previews and one atomic undo step for existing paragraphs, Image/Form XObjects and added text/images. Source glyph bytes, fonts and kerning retained; unselected text and shared Form resources stay put. Delete or Backspace removes the selection (a paragraph selected by its frame, or a group) as one undo step. Generation-scoped references with optional automation guard; count and geometry bounded; unsupported vertical/clipping text refused without partial changes. Still missing: arbitrary paths, inline images, cross-page movement, group resizing, arrange/align and a general object editor. See docs/editing-multiple-objects.md."
 
 [[feature]]
 id = "edit.object-properties"
@@ -2400,8 +2411,8 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.header_footer"]
 tools = ["doc_header_footer"]
-evidence = ["crates/ui-egui/tests/it/marks.rs::header_and_footer_dialog_inserts_tokens_and_applies_to_a_subset", "crates/edit/src/tests.rs::header_and_footer_are_drawn_in_display_space_and_wrap_the_original_content", "crates/engine/src/tests.rs::headers_footers_watermarks_and_backgrounds_show_update_and_remove"]
-notes = "Standard faces only: Helvetica, Times or Courier (#3754; no bold, italic or embedded fonts yet); drawn in display space on rotated pages; artifact-tagged"
+evidence = ["crates/ui-egui/tests/it/marks.rs::header_and_footer_dialog_inserts_tokens_and_applies_to_a_subset", "crates/edit/src/tests.rs::header_and_footer_are_drawn_in_display_space_and_wrap_the_original_content", "crates/engine/src/tests.rs::headers_footers_watermarks_and_backgrounds_show_update_and_remove", "crates/ui-egui/tests/it/marks.rs::the_preview_shows_the_page_the_range_selects_under_the_marks"]
+notes = "Standard faces only: Helvetica, Times or Courier (#3754; no bold, italic or embedded fonts yet); drawn in display space on rotated pages; artifact-tagged; the dialog previews the text over the page's own thumbnail (the current page, or the first one the range selects), in the interface font and with tokens unexpanded"
 
 [[feature]]
 id = "edit.header-footer-update-remove"
@@ -2460,8 +2471,8 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.watermark"]
 tools = ["doc_watermark"]
-evidence = ["crates/edit/src/tests.rs::watermarks_rotate_fade_and_can_go_behind", "crates/ui-egui/tests/it/marks.rs::watermark_and_background_dialogs", "crates/automation/tests/it/automation.rs::headers_watermarks_and_backgrounds_through_tools"]
-notes = "Helvetica; fit-to-page or a size"
+evidence = ["crates/edit/src/tests.rs::watermarks_rotate_fade_and_can_go_behind", "crates/ui-egui/tests/it/marks.rs::watermark_and_background_dialogs", "crates/automation/tests/it/automation.rs::headers_watermarks_and_backgrounds_through_tools", "crates/ui-egui/tests/it/marks.rs::the_preview_shows_the_page_the_range_selects_under_the_marks"]
+notes = "Helvetica; fit-to-page or a size; the dialog previews it over the page's own thumbnail, always on top (a watermark behind the page is not drawn under its content there)"
 
 [[feature]]
 id = "edit.watermark-add-file"
@@ -2473,7 +2484,7 @@ status = "shipped"
 commands = ["edit.watermark"]
 tools = ["doc_watermark"]
 evidence = ["crates/engine/src/tests.rs::backgrounds_and_watermarks_from_files"]
-notes = "an image or a page of a PDF, scaled relative to the page, rotated, with opacity, behind or on top"
+notes = "an image or a page of a PDF, scaled relative to the page, rotated, with opacity, behind or on top; the dialog's preview shows its frame and file name over the page, not the picture itself"
 
 [[feature]]
 id = "edit.watermark-update-remove"
@@ -2508,8 +2519,8 @@ milestone = "M7"
 status = "shipped"
 commands = ["edit.background"]
 tools = ["doc_background"]
-evidence = ["crates/ui-egui/tests/it/marks.rs::watermark_and_background_dialogs", "crates/engine/src/tests.rs::headers_footers_watermarks_and_backgrounds_show_update_and_remove", "crates/engine/src/tests.rs::backgrounds_and_watermarks_from_files", "crates/ui-egui/tests/it/marks.rs::backgrounds_and_watermarks_from_a_file", "crates/organize/src/tests.rs::a_page_becomes_a_form_xobject_upright"]
-notes = "colour, or a picture from a file (an image or a page of a PDF) scaled relative to the page"
+evidence = ["crates/ui-egui/tests/it/marks.rs::watermark_and_background_dialogs", "crates/engine/src/tests.rs::headers_footers_watermarks_and_backgrounds_show_update_and_remove", "crates/engine/src/tests.rs::backgrounds_and_watermarks_from_files", "crates/ui-egui/tests/it/marks.rs::backgrounds_and_watermarks_from_a_file", "crates/organize/src/tests.rs::a_page_becomes_a_form_xobject_upright", "crates/ui-egui/tests/it/marks.rs::the_preview_shows_the_page_the_range_selects_under_the_marks"]
+notes = "colour, or a picture from a file (an image or a page of a PDF) scaled relative to the page; the dialog previews a colour as a tint of the page's own thumbnail (opaque pictures on the page are tinted there too, not in the result), a file as its frame and name"
 
 [[feature]]
 id = "edit.background-update-remove"
@@ -2605,7 +2616,7 @@ status = "shipped"
 commands = ["edit.edit_text"]
 tools = ["text_edit"]
 evidence = ["crates/edit/src/tests.rs::paragraphs_take_new_formatting", "crates/ui-egui/tests/it/editing.rs::the_format_panel_restyles_the_paragraph_being_edited", "crates/automation/tests/it/automation.rs::editing_existing_text_through_tools", "crates/ui-egui/tests/it/content.rs::format_text_panel_sets_alignment_and_lists_planned_controls_disabled", "crates/ui-egui/tests/it/content.rs::format_text_rows_line_up_and_fit_the_panel"]
-notes = "Edit a PDF ▸ Format text, laid out as Acrobat's panel, for the paragraph being edited and for added text: font (the source font kept, the document's fonts, families, installed or loaded font files), size, colour, alignment, bold and italic, line spacing, horizontal scale and character spacing; each change applies at once as one undo step, keeping the paragraph open. Shown disabled with a Planned tooltip until they exist: bulleted and numbered lists (edit.lists), superscript and subscript (edit.text-super-subscript), paragraph spacing, and underline on added text."
+notes = "Edit a PDF ▸ Format text, laid out as Acrobat's panel, for the paragraph being edited and for added text: font (the source font kept, the document's fonts, families, installed or loaded font files), size, colour, alignment, bold and italic, line spacing, horizontal scale and character spacing; each change applies at once as one undo step, keeping the paragraph open. Shown disabled with a Planned tooltip until they exist: bulleted and numbered lists (edit.lists), superscript and subscript (edit.text-super-subscript), paragraph spacing, and underline, line spacing and horizontal scale on added text."
 
 [[feature]]
 id = "edit.adobe-express-edits"
@@ -5637,8 +5648,8 @@ milestone = "M8"
 status = "shipped"
 commands = ["redact.search"]
 tools = ["redact_mark"]
-evidence = ["crates/redact/src/patterns.rs::phone_numbers", "crates/redact/src/patterns.rs::slashed_and_labelled_unseparated_phone_numbers", "crates/redact/src/patterns.rs::credit_cards_need_a_valid_checksum", "crates/automation/tests/it/automation.rs::redacting_through_tools"]
-notes = "phone (North American, E.164 with + country code, national with trunk 0, a slash after a trunk-0 area code; numbers without separators only after a phone label such as Tel. or cell.), e-mail, credit card (Luhn), SSN, dates (English US forms); text drawn in a font whose built-in encoding we hold no table for (Symbol, ZapfDingbats, MacExpert) has no Unicode mapping, so a pattern search cannot see it -- it is skipped rather than mis-decoded"
+evidence = ["crates/redact/src/patterns.rs::labelled_italian_international_slash_numbers_match_whole", "crates/automation/tests/it/automation.rs::redacting_italian_international_slash_numbers_through_tools", "crates/redact/src/patterns.rs::phone_numbers", "crates/redact/src/patterns.rs::slashed_and_labelled_unseparated_phone_numbers", "crates/redact/src/patterns.rs::credit_cards_need_a_valid_checksum", "crates/automation/tests/it/automation.rs::redacting_through_tools"]
+notes = "phone (North American, E.164 with + country code, national with trunk 0, a slash after a trunk-0 area code; labelled Italian +39 geographic numbers with one slash after the area code match with their complete country code (#3205 follow-up), with or without one space after +39; international slash numbers without a phone label, or with country codes other than +39, remain unsupported; numbers without separators only after a phone label such as Tel. or cell.), e-mail, credit card (Luhn), SSN, dates (English US forms); text drawn in a font whose built-in encoding we hold no table for (Symbol, ZapfDingbats, MacExpert) has no Unicode mapping, so a pattern search cannot see it -- it is skipped rather than mis-decoded"
 
 [[feature]]
 id = "protect.redact-pattern-locales"
@@ -5842,7 +5853,7 @@ status = "partial"
 commands = []
 tools = ["doc_audit_redactions"]
 evidence = ["crates/audit/src/tests.rs::faux_redaction_is_found", "crates/audit/src/tests.rs::background_before_text_is_not_flagged", "crates/audit/src/tests.rs::light_shading_after_text_is_not_flagged", "crates/audit/src/tests.rs::graphics_state_carries_across_streams", "crates/audit/src/tests.rs::audit_fails_closed_on_undecodable_stream", "crates/audit/src/tests.rs::unapplied_redact_mark_is_found", "crates/audit/src/tests.rs::applied_redaction_at_the_end_of_a_line_is_not_flagged", "crates/audit/src/tests.rs::faux_redaction_at_the_end_of_a_line_is_found", "crates/audit/src/tests.rs::faux_redaction_over_a_short_value_after_a_long_label_is_found", "crates/audit/src/tests.rs::faux_redaction_over_mirrored_text_is_found", "crates/audit/src/tests.rs::faux_redaction_over_a_partial_value_after_a_long_label_is_found", "crates/audit/src/tests.rs::faux_redaction_over_a_partial_value_after_a_long_label_on_a_rotated_page_is_found", "crates/audit/src/tests.rs::faux_redactions_with_multiple_covers_lines_and_spacing_are_found", "crates/audit/src/tests.rs::a_cover_over_one_word_of_a_long_line_is_found", "crates/audit/src/tests.rs::a_box_grazing_a_word_is_not_flagged", "crates/automation/tests/it/automation.rs::auditing_faux_redactions_through_tools", "crates/automation/tests/it/automation.rs::an_applied_redaction_at_the_end_of_a_line_audits_clean", "crates/audit/src/tests.rs::rectangle_drawn_as_a_path_covers_text_like_re", "crates/audit/src/tests.rs::non_rectangular_path_is_not_a_cover", "apps/pdfcraft-cli/tests/it/audit.rs::audit_rectangles_match_the_tool_in_top_left_points", "crates/audit/src/tests.rs::rectangle_filled_after_restore_is_a_cover", "crates/audit/src/tests.rs::later_text_on_the_line_does_not_clear_an_earlier_cover", "crates/audit/src/tests.rs::indirect_subtype_is_resolved", "crates/audit/src/tests.rs::copy_restricted_documents_withhold_covered_text", "crates/audit/src/tests.rs::cover_and_line_comparisons_are_bounded", "crates/audit/src/tests.rs::covered_text_across_findings_is_bounded"]
-notes = "New pdfcraft-audit crate. A filled rectangle (re + fill, or a single m/l subpath whose corners form an axis-aligned rectangle, #1510; opaque) counts as a cover only when painted after the start of the text line it overlaps and dark enough to hide it (WCAG contrast < 3.0); page backgrounds, table shading and highlights are not flagged. Coverage is measured on the words a line draws, not its box, so the gap an applied redaction leaves is not counted as hidden text; a cover over 40% of the line's box still counts when it has a positive-area intersection with one word, so a short value after a long label is found. A cover hiding half of any one word counts too (#2662), so a box over one number in a long line, or an unapplied mark over it, is found; a sliver under half of every word it touches and under 40% of the line is not flagged. Graphics state carries across a page's content streams. Fails closed: undecodable content, or more than 50 million cover-against-word comparisons on a page or 64 MiB of covered text in the report, is an error, never a clean bill. A document that withholds copying gets every finding with the covered text left out. Also flags /Redact annotations never applied. CLI: pdfcraft-cli audit (fails when findings exist). Tool and CLI report rectangles in points from the top-left of the displayed page, after /Rotate and rounded to 0.01 pt, like the other tools."
+notes = "New pdfcraft-audit crate. A filled rectangle (re + fill, or a single m/l subpath whose corners form an axis-aligned rectangle, #1510; opaque) counts as a cover only when painted after the start of the text line it overlaps and dark enough to hide it (WCAG contrast < 3.0); page backgrounds, table shading and highlights are not flagged. Coverage is measured on the words a line draws, not its box, so the gap an applied redaction leaves is not counted as hidden text; a cover over 40% of the line's box still counts when it has a positive-area intersection with one word, so a short value after a long label is found. A cover hiding half of any one word counts too (#2662), so a box over one number in a long line, or an unapplied mark over it, is found; a sliver under half of every word it touches and under 40% of the line is not flagged. Graphics state carries across a page's content streams. Fails closed: undecodable content, or more than 50 million cover-against-word comparisons on a page or 64 MiB of covered text in the report, is an error, never a clean bill. A finding's covered text is the runs of the line whose words the cover overlaps, not the words of the line painted beside it (#4164); a line of one run, a right-to-left or visual-order line, or a cover over none of its words reports the whole line. A document that withholds copying gets every finding with the covered text left out. Also flags /Redact annotations never applied. CLI: pdfcraft-cli audit (fails when findings exist). Tool and CLI report rectangles in points from the top-left of the displayed page, after /Rotate and rounded to 0.01 pt, like the other tools."
 
 [[feature]]
 id = "protect.remove-hidden-on-close"

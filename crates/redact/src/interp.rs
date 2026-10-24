@@ -26,7 +26,26 @@ use pdfcraft_cos::{CosError, DecodeBudget, Dict, Document, MAX_PAGE_FORMS, ObjRe
 use crate::{RedactError, Report, image, page_streams, tags};
 use pdfcraft_fonts::pdf::Metrics;
 
-const MAX_DEPTH: usize = 12;
+/// How deep this pass follows form XObjects. A form past it is removed rather than walked, which
+/// is the fail-safe choice for a redaction -- marked content inside a form we cannot read would
+/// otherwise survive -- but it also removes whatever else that form drew, marked or not. So the
+/// limit has to reach as deep as anything the reader can see: the renderer follows forms to 50
+/// (`MAX_NESTED_INTERPRETATION_DEPTH`) and so does Edit text's reader (`text::MAX_FORM_DEPTH`).
+/// At 12, a page with a 13-deep chain lost the text of its innermost form even with nothing in it
+/// marked (#3645); past 50 nothing is drawn by any of the three, so removing it costs nothing
+/// visible.
+pub(crate) const MAX_DEPTH: usize = 50;
+
+/// How many forms one pass enters. The depth limit alone bounded the walk while it was 12: a form
+/// that draws the next level twice, or a cycle of two forms, costs 2^depth interpretations, which
+/// at 50 is a hang rather than a limit. Edit text's reader pairs its depth limit with the same
+/// budget, and this is that constant, so the two cannot drift apart. Running out is treated as a
+/// form that cannot be read: removed in Apply, counted as unreadable in Verify.
+pub(crate) const MAX_FORM_VISITS: usize = pdfcraft_edit::text::MAX_FORM_VISITS;
+
+// A form a reader still shows must be walkable here, or a redaction removes content that is
+// visible; the build says so rather than a test, so the two limits cannot drift apart.
+const _: () = assert!(MAX_DEPTH >= pdfcraft_edit::text::MAX_FORM_DEPTH);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Mode {
@@ -110,6 +129,8 @@ pub(crate) struct Scope<'a> {
     /// shared forms drawn from other shared forms would otherwise multiply the work with every
     /// level.
     budget: DecodeBudget,
+    /// Forms entered so far in this pass ([`MAX_FORM_VISITS`]).
+    visits: usize,
 }
 
 impl<'a> Scope<'a> {
@@ -131,6 +152,7 @@ impl<'a> Scope<'a> {
             used_names: Vec::new(),
             depth: 0,
             budget,
+            visits: 0,
         }
     }
 
@@ -1269,7 +1291,10 @@ fn xobject(
             {
                 return None;
             }
-            if scope.depth >= MAX_DEPTH {
+            // Too deep, or too many forms for one page: either way this form cannot be read, so
+            // it goes (Apply) or the page is left alone (Verify), as a form that will not decode
+            // does. The budget is what keeps a fan-out or a cycle from costing 2^50 walks.
+            if scope.depth >= MAX_DEPTH || scope.visits >= MAX_FORM_VISITS {
                 if scope.mode == Mode::Verify {
                     // Sanitization removes a Form it cannot enter, so the verification scan
                     // must count that conservative removal or it may decide to skip the pass.
@@ -1283,6 +1308,7 @@ fn xobject(
                 out.doomed.push(r);
                 return Some(None);
             }
+            scope.visits += 1;
             // Strict, like page content: a Form read only in part counts as undecodable.
             let data = if scope.budget.enter_form() {
                 scope.budget.decode_strict(s)

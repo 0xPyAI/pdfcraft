@@ -537,17 +537,44 @@ impl PdfCraftApp {
             self.notify(crate::content_ui::undrawable_message(c));
             return false;
         }
-        let typing = self
-            .views
-            .get(i)
-            .is_some_and(|v| v.pending_edit.is_some() || v.forms.focus.is_some() || v.fill_text.as_ref().is_some_and(|t| !t.text.trim().is_empty()));
+        let typing = self.views.get(i).is_some_and(|v| {
+            v.pending_edit.is_some()
+                || v.forms.focus.is_some()
+                || v.content.draft.is_some()
+                || v.line_editor.as_ref().is_some_and(|ed| ed.has_changes())
+                || v.fill_text.as_ref().is_some_and(|t| !t.text.trim().is_empty())
+        });
         if self.active != Some(i) {
             if !typing {
                 return true;
             }
             self.active = Some(i);
         }
-        self.commit_form_typing() && self.commit_open_fill_text(id)
+        self.commit_form_typing() && self.commit_open_fill_text(id) && self.commit_open_text_edits(id)
+    }
+
+    /// The Edit a PDF ▸ Text boxes (new text, and a paragraph open for editing) commit on
+    /// click-away. Save does that first, so the typed text is in the file instead of being left
+    /// open on the screen (#3496).
+    fn commit_open_text_edits(&mut self, id: pdfcraft_engine::DocId) -> bool {
+        let Some(doc) = self.session.get(id) else { return true };
+        let Some(view) = self.views.iter_mut().find(|v| v.id == id) else { return true };
+        // Both are taken out of the view before either edit runs, so keep what is needed to put
+        // back whichever one the document refuses: typed text must not be lost.
+        let (draft, select_added, editor) = (view.content.draft.clone(), view.content.select_added, view.line_editor.clone());
+        let added = view.content.finish_draft(doc.added());
+        let paragraph = view.line_editor.take_if(|ed| ed.has_changes()).and_then(crate::edit_text_ui::finished_edit);
+        let added_ok = added.is_none_or(|edit| self.apply_edit(edit));
+        let paragraph_ok = paragraph.is_none_or(|edit| self.apply_edit(edit));
+        if let Some(view) = self.views.iter_mut().find(|v| v.id == id) {
+            if !added_ok {
+                (view.content.draft, view.content.select_added) = (draft, select_added);
+            }
+            if !paragraph_ok {
+                view.line_editor = editor;
+            }
+        }
+        added_ok && paragraph_ok
     }
 
     /// The Fill & Sign type box commits on click-away. Save does that first, so the text is in
@@ -1472,6 +1499,32 @@ mod tests {
         }
         out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
         out
+    }
+
+    #[test]
+    fn save_commits_the_open_text_box() {
+        let dir = staging_dir("open-text-box");
+        let dest = dir.join("out.pdf");
+        let mut app = crate::PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("a.pdf", None, one_page_pdf()).unwrap();
+        app.save_override = Some(dest.to_string_lossy().into_owned());
+        let style = crate::content_ui::default_style();
+        app.views[0].content.draft = Some(crate::content_ui::TextDraft {
+            page: 0,
+            index: None,
+            rect: [20.0, 20.0, 120.0, 40.0],
+            text: "Typed text".into(),
+            style,
+            focus: true,
+        });
+
+        assert!(app.save_active(SaveTarget::InPlace));
+        let id = app.views[0].id;
+        let added = app.session.get(id).unwrap().added();
+        assert_eq!(added.len(), 1, "the open text box was committed before the save");
+        assert!(app.views[0].content.draft.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
