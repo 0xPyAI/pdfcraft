@@ -500,8 +500,13 @@ fn wait_for_file(h: &mut Harness<'static, PdfCraftApp>, path: &std::path::Path) 
     h.run_steps(1);
 }
 
+/// A fresh folder of its own for one test. The tests of this binary share one process id and run
+/// in parallel, and two of them name their folder "same-frame": a number taken per call keeps one
+/// test from clearing the folder another is saving into.
 fn scratch(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("pdfcraft-forms-{name}-{}", std::process::id()));
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("pdfcraft-forms-{name}-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
