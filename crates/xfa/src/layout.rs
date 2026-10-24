@@ -646,16 +646,6 @@ impl Layouter<'_> {
         self.pages.get(page).is_some_and(|p| p.items.len() > at)
     }
 
-    /// Before placing a child `h` tall inside flowed subforms: when it doesn't fit what is left
-    /// of the content area but would fit a fresh one, break there ([`Self::break_frames`]).
-    fn break_before(&mut self, h: f64) -> Result<(), XfaError> {
-        let (rect, y, placed) = self.cursor();
-        if self.frames.is_empty() || !placed || y + h <= rect.bottom() + 0.01 || h > rect.h + 0.01 {
-            return Ok(());
-        }
-        self.break_frames(h)
-    }
-
     /// Break the flowed subforms being laid out ([`Self::frames`]) across content areas, as
     /// another viewer breaks such a section on a synthetic form: each one's part here ends after
     /// its content and its bottom margin (the innermost first, each inside the next), the flow
@@ -757,13 +747,19 @@ impl Layouter<'_> {
     }
 
     /// Make room for `h`: stay, or move to the next content area / page. Returns whether a
-    /// break happened.
+    /// break happened. Something that fits a fresh area breaks the flowed subforms it is in with
+    /// it ([`Self::break_frames`]), a table's rows included; one taller than an area just moves
+    /// on, and those subforms are drawn without their border ([`Self::finish_frame`]).
     fn make_room(&mut self, h: f64) -> Result<bool, XfaError> {
         let (rect, y, placed) = self.cursor();
         if y + h <= rect.bottom() + 0.01 || !placed {
             return Ok(false);
         }
-        self.next_area()?;
+        if h <= rect.h + 0.01 {
+            self.break_frames(h)?;
+        } else {
+            self.next_area()?;
+        }
         Ok(true)
     }
 
@@ -966,7 +962,6 @@ impl Layouter<'_> {
                             continue;
                         }
                         let (cw, ch) = self.size_of(child, inner_w, &ctx, depth + 1);
-                        self.break_before(ch)?;
                         self.flow_block(child, inner_x, (cw, ch), &ctx, depth + 1, csib)?;
                     }
                 }

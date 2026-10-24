@@ -2131,6 +2131,40 @@ fn a_flowed_subform_is_drawn_with_its_border_under_its_content() {
     assert!(form.warnings.is_empty(), "{:?}", form.warnings);
 }
 
+/// A flowed table a page break cuts between its rows gets a closed border round its part on
+/// each page, as a flowed subform does: its margins repeat, and its overflow leader starts the
+/// second part after the top margin.
+#[test]
+fn a_flowed_table_cut_between_its_rows_keeps_its_border_on_each_page() {
+    let row = |name: &str, text: &str| {
+        format!(
+            r#"<subform name="{name}" layout="row"><draw name="{name}a" h="0.3in"><value><text>{text}</text></value></draw><draw name="{name}b" h="0.3in"><value><text>-</text></value></draw></subform>"#
+        )
+    };
+    let rows: String = (0..40).map(|i| row(&format!("r{i}"), &format!("Row {i}"))).collect();
+    let table = format!(
+        r#"<subform name="grid" layout="table" columnWidths="2in 2in" w="4in"><border><edge/><fill><color value="230,230,230"/></fill></border><margin topInset="0.1in" bottomInset="0.2in"/><overflow leader="head"/>{}{rows}</subform>"#,
+        row("head", "Head")
+    );
+    let body = format!(r#"<subform name="body" layout="tb" w="7.5in">{table}</subform>"#);
+    let form = layout_xml(&one_area_form(r#"layout="tb""#, &body)).unwrap();
+    assert_eq!(form.pages.len(), 2);
+    let fills = |page: usize| -> Vec<Rect> {
+        form.pages[page].items.iter().filter_map(|i| if let Item::Fill { rect, .. } = i { Some(*rect) } else { None }).collect()
+    };
+    let lines = |page: usize| form.pages[page].items.iter().filter(|i| matches!(i, Item::Line { .. })).count();
+    let (first, second) = (fills(0), fills(1));
+    assert_eq!((first.len(), second.len()), (1, 1), "a part on each page");
+    assert_eq!((lines(0), lines(1)), (4, 4), "each part's border is closed");
+    // Page 1: 0.1in of margin, the leader and 32 rows of 0.3in fill the area to its bottom.
+    assert!((first[0].y - 36.0).abs() < 0.01 && (first[0].bottom() - 756.0).abs() < 0.01, "{:?}", first[0]);
+    // Page 2: the top margin again, the leader, the other 8 rows, the bottom margin.
+    assert!((second[0].y - 36.0).abs() < 0.01 && (second[0].bottom() - (36.0 + 7.2 + 9.0 * 21.6 + 14.4)).abs() < 0.01, "{:?}", second[0]);
+    let head = form.pages[1].items.iter().find_map(|i| if let Item::Text(t) = i { (t.text == "Head").then_some(t.baseline) } else { None });
+    assert!(head.is_some_and(|b| b > 43.2 && b < 64.8), "the leader starts the second part after its top margin: {head:?}");
+    assert!(form.warnings.is_empty(), "{:?}", form.warnings);
+}
+
 #[test]
 fn a_page_break_keeps_a_fields_border_with_the_field() {
     // 6in of heading, then a bordered 5in field: it doesn't fit the 10in area and moves to
