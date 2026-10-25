@@ -364,7 +364,7 @@ pub enum Edit {
         activity: String,
     },
     /// Scan & OCR ▸ Recognize text: put recognised words on `page` as invisible text over the
-    /// image (from [`ocr::OcrJob::run`]).
+    /// image (from [`ocr::OcrJob::run`](crate::ocr::OcrJob::run)).
     AddOcrText {
         page: usize,
         words: Vec<pdfcraft_ocr::PlacedWord>,
@@ -409,7 +409,7 @@ pub enum Edit {
         earlier: bool,
     },
     /// Set the calculation order: these calculated fields first, in this order, then the others
-    /// in their current order (see [`Document::calculation_order`]). The form recalculates.
+    /// in their current order (see [`Document::calculation_order`](crate::Document::calculation_order)). The form recalculates.
     SetCalculationOrder {
         names: Vec<String>,
     },
@@ -469,7 +469,7 @@ pub enum Edit {
     },
     /// Edit ▸ Paste: an added item copied in this document or another, as it was: text with its
     /// style, an image in its box (display space) with its turns, flips and crop. An image's
-    /// picture is `file` (from [`Document::added_image_file`]): the copied image object is reused
+    /// picture is `file` (from [`Document::added_image_file`](crate::Document::added_image_file)): the copied image object is reused
     /// while it is still that picture in this document, else one an added image here already draws
     /// it from, else the file is embedded.
     PasteContent {

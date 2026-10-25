@@ -169,7 +169,7 @@ impl Editor {
 /// the two cannot drift apart.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Label {
-    /// The wording, with one named hole (`{name}`) where `value` goes. Listed in [`EDIT_LABELS`].
+    /// The wording, with one named hole (`{name}`) where `value` goes. Listed in [`EDIT_LABELS`](crate::EDIT_LABELS).
     pub wording: &'static str,
     /// What the document supplies, when the wording has a hole for it.
     pub value: Option<String>,
