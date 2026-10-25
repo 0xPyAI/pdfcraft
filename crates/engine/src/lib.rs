@@ -59,51 +59,17 @@ pub mod word_count;
 pub mod xfa;
 mod xfa_form;
 
+use std::sync::Arc;
+
+pub use links::{
+    MAX_REMOTE_DOCUMENT_BYTES, RemoteDocumentPathError, read_remote_document, remote_document_path_is_absolute, resolve_remote_document_path,
+};
 pub use signature_image::{ImageSignaturePreview, SignatureImage};
 pub use signature_scan::{PhotoRect, ScanError, SignaturePhoto, Turn};
 pub use stamp_preview::StampPreview;
 pub use text_preview::TextEditPreview;
 
 pub use reexports::*;
-
-/// A change to an existing page image.
-#[derive(Clone, Debug, PartialEq)]
-pub enum ImageEdit {
-    /// Move and resize it to this box (user space).
-    Move([f64; 4]),
-    /// Quarter turns clockwise about its centre.
-    Rotate(i32),
-    /// Any angle in degrees clockwise about its centre (the unit is degrees, not quarter turns).
-    RotateBy(f64),
-    Flip {
-        horizontal: bool,
-    },
-    /// Show only this box of it (user space), the pixels staying where they are.
-    Crop([f64; 4]),
-    /// Draw this image file (PNG, JPEG, TIFF, GIF, BMP, JPEG 2000) in its place.
-    Replace {
-        name: String,
-        bytes: Arc<Vec<u8>>,
-    },
-    Delete,
-}
-
-pub use links::{
-    MAX_REMOTE_DOCUMENT_BYTES, RemoteDocumentPathError, read_remote_document, remote_document_path_is_absolute, resolve_remote_document_path,
-};
-
-/// Forms ▸ Merge data files into spreadsheet: the field values of each file (FDF, XFDF or a
-/// filled-in PDF form), as CSV with one row per file.
-pub fn merge_data_files(files: &[(String, Vec<u8>)]) -> Result<String, String> {
-    let rows =
-        files.iter().map(|(name, bytes)| pdfcraft_xfdf::data_values(bytes).map_err(|e| format!("{name}: {e}"))).collect::<Result<Vec<_>, _>>()?;
-    Ok(pdfcraft_xfdf::merge_csv(&rows))
-}
-
-/// One file produced by a split: (1-based first page, last page, PDF bytes).
-pub type SplitPart = (usize, usize, Arc<Vec<u8>>);
-
-use std::sync::Arc;
 
 use bookmarks::outline_rows;
 pub use bookmarks::{BookmarkPage, BookmarkRow};
@@ -131,6 +97,39 @@ use xfa_form::{
     XFA_REMOVED_PREFIX, XFA_SCRIPTS_OFF, decode_data_file, image_content_type, is_xfa_data_file, note_warnings, strip_xfa, sync_xfa_state,
     undrawn_field_warnings, xfa_after_data_change, xfa_layout, xfa_redraw, xfa_sync_datasets, xfa_values_from_datasets,
 };
+
+/// A change to an existing page image.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ImageEdit {
+    /// Move and resize it to this box (user space).
+    Move([f64; 4]),
+    /// Quarter turns clockwise about its centre.
+    Rotate(i32),
+    /// Any angle in degrees clockwise about its centre (the unit is degrees, not quarter turns).
+    RotateBy(f64),
+    Flip {
+        horizontal: bool,
+    },
+    /// Show only this box of it (user space), the pixels staying where they are.
+    Crop([f64; 4]),
+    /// Draw this image file (PNG, JPEG, TIFF, GIF, BMP, JPEG 2000) in its place.
+    Replace {
+        name: String,
+        bytes: Arc<Vec<u8>>,
+    },
+    Delete,
+}
+
+/// Forms ▸ Merge data files into spreadsheet: the field values of each file (FDF, XFDF or a
+/// filled-in PDF form), as CSV with one row per file.
+pub fn merge_data_files(files: &[(String, Vec<u8>)]) -> Result<String, String> {
+    let rows =
+        files.iter().map(|(name, bytes)| pdfcraft_xfdf::data_values(bytes).map_err(|e| format!("{name}: {e}"))).collect::<Result<Vec<_>, _>>()?;
+    Ok(pdfcraft_xfdf::merge_csv(&rows))
+}
+
+/// One file produced by a split: (1-based first page, last page, PDF bytes).
+pub type SplitPart = (usize, usize, Arc<Vec<u8>>);
 
 /// Stable identifier of an open document within a session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
