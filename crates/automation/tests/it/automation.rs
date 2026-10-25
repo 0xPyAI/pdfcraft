@@ -252,6 +252,19 @@ fn doc_info_reports_the_open_destination() {
         "{open}"
     );
     assert_eq!(open["destination"]["zoom"].as_f64(), Some(2.0));
+    // The initial view reads the named destination's page, and choosing page 1 replaces it (ISO
+    // 32000-2 §12.3.2.4): one undo step, kept by the save.
+    let page = |a: &mut Automation, doc: u64| ok(a, "doc_info", json!({ "doc": doc }))["open_destination"]["page"].clone();
+    assert_eq!(ok(&mut a, "doc_initial_view", json!({ "doc": doc }))["initial_view"]["page"], 2);
+    assert_eq!(ok(&mut a, "doc_initial_view", json!({ "doc": doc, "page": 1 }))["initial_view"]["page"], 1);
+    assert_eq!(page(&mut a, doc), 1);
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert_eq!(page(&mut a, doc), 2);
+    ok(&mut a, "edit_redo", json!({ "doc": doc }));
+    assert_eq!(page(&mut a, doc), 1);
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "named-page1.pdf" }));
+    let saved = ok(&mut a, "doc_open", json!({ "path": "named-page1.pdf" }))["doc"].as_u64().unwrap();
+    assert_eq!(page(&mut a, saved), 1);
     let doc = ok(&mut a, "doc_open", json!({ "path": "script.pdf" }))["doc"].as_u64().unwrap();
     assert!(ok(&mut a, "doc_info", json!({ "doc": doc }))["open_destination"].is_null());
 }
