@@ -1,7 +1,7 @@
 //! Window chrome: tab strip (with the integrated macOS title bar), mode bar, right rail.
 
 use craft_ui::panes::{Edge, Rail, RailItem, RailRequest};
-use egui::{Align, Align2, Color32, CornerRadius, Layout, Rect, Sense, Stroke, vec2};
+use egui::{Align, Color32, CornerRadius, Layout, Rect, Sense, Stroke, vec2};
 
 use crate::canvas::{DocView, Fit, PageLayout};
 use crate::theme::{self, ThemePreference, Tokens};
@@ -27,6 +27,8 @@ const TAB_STRIP: f32 = 38.0;
 const TAB_HEIGHT: f32 = 30.0;
 const STRIP_BUTTON: f32 = 28.0;
 
+/// Draw the window's tab strip: home and open controls, shrinkable and scrollable document tabs with drag
+/// reordering, and platform window controls.
 pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     // macOS: the strip is the 28 pt title bar, so the traffic lights are centred in it; tabs and
@@ -39,7 +41,7 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
         .frame(egui::Frame::NONE.fill(t.titlebar).inner_margin(egui::Margin { left, right: 10, top: 0, bottom: 0 }))
         .show(ui, |ui| {
             let full = ui.max_rect();
-            let drag = ui.interact(full, ui.id().with("titledrag"), Sense::click_and_drag());
+            let drag = ui.interact(full, ui.scope_id().with("titledrag"), Sense::click_and_drag());
             if drag.drag_started() {
                 window_controls::desktop_grab(ui.ctx(), egui::ViewportCommand::StartDrag);
             }
@@ -93,7 +95,7 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 }
                 let cap = tab_cap(&natural, tabs_width, gap, TAB_MIN_WIDTH);
                 // Where the tabs were scrolled to last frame, and how far they can go.
-                let scroll_id = ui.id().with("tab_scroll");
+                let scroll_id = ui.scope_id().with("tab_scroll");
                 let (offset, max_offset) = ui.data(|d| d.get_temp::<(f32, f32)>(scroll_id)).unwrap_or((0.0, 0.0));
                 let mut scroll_to = None;
                 if overflow && arrow(ui, "chevron-left", offset > 0.5, tl!("Scroll tabs left")) {
@@ -103,7 +105,7 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 // the strip jumping to it.
                 let state = (app.active_ids().map(|(_, id)| id), app.views.len(), app.combine_showing());
                 let changed = ui.data_mut(|data| {
-                    let id = ui.id().with("active_tab");
+                    let id = ui.scope_id().with("active_tab");
                     let changed = data.get_temp::<(Option<pdfcraft_engine::DocId>, usize, bool)>(id) != Some(state);
                     data.insert_temp(id, state);
                     changed
@@ -132,7 +134,7 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                                 let file = (name != doc.name).then_some(doc.name.as_str());
                                 let response = tab(
                                     ui,
-                                    ui.id().with(("document-tab", app.views[i].id)),
+                                    ui.scope_id().with(("document-tab", app.views[i].id)),
                                     &t,
                                     "file-text",
                                     &name,
@@ -214,7 +216,7 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                                 let mut close = None;
                                 let response = tab(
                                     ui,
-                                    ui.id().with("combine-tab"),
+                                    ui.scope_id().with("combine-tab"),
                                     &t,
                                     "files",
                                     tl!("Combine files"),
@@ -240,7 +242,7 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                         });
                     });
                     let max = (out.content_size.x - out.inner_rect.width()).max(0.0);
-                    ui.data_mut(|d| d.insert_temp(scroll_id, (out.state.offset.x, max)));
+                    ui.data_mut(|d| d.insert_temp(scroll_id, (out.state.clamped_offset().x, max)));
                     // A tab dragged to either edge of a strip that scrolls brings the hidden tabs in.
                     if let Some(x) = drag_x
                         && max > 0.0
@@ -253,7 +255,7 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                             0.0
                         };
                         if step != 0.0 {
-                            ui.data_mut(|d| d.insert_temp(scroll_id.with("to"), (out.state.offset.x + step).clamp(0.0, max)));
+                            ui.data_mut(|d| d.insert_temp(scroll_id.with("to"), (out.state.clamped_offset().x + step).clamp(0.0, max)));
                             ui.ctx().request_repaint();
                         }
                     }
@@ -384,7 +386,7 @@ fn tab_name(name: &str) -> String {
 
 /// The width a tab takes when nothing has to shrink.
 fn tab_natural_width(ui: &egui::Ui, t: &Tokens, name: &str) -> f32 {
-    let label = crate::bidi::visual(&tab_name(name)).into_owned();
+    let label = tab_name(name);
     ui.fonts_mut(|f| f.layout_no_wrap(label, theme::regular(13.0), t.text).size().x) + TAB_CHROME
 }
 
@@ -412,6 +414,8 @@ fn tab_cap(natural: &[f32], budget: f32, gap: f32, min: f32) -> Option<f32> {
     None
 }
 
+/// Draw one tab with its icon, elided label, close button and unsaved dot; records a close request and
+/// returns the tab response for drag handling.
 #[allow(clippy::too_many_arguments)]
 fn tab(
     ui: &mut egui::Ui,
@@ -433,13 +437,13 @@ fn tab(
     // A shrunk tab shows as much of its name as fits (the tooltip has all of it).
     if let Some(cap) = cap {
         let room = (cap - TAB_CHROME).max(0.0);
-        label = ui.fonts_mut(|f| {
-            crate::panels::ellipsized_prefix(&label, |s| f.layout_no_wrap(crate::bidi::visual(s).into_owned(), font.clone(), t.text).size().x <= room)
-        });
+        label = crate::panels::ellipsized_prefix(&label, |s| crate::bidi::layout_ltr(ui, s.to_owned(), font.clone(), t.text).size().x <= room);
     }
-    // Painted text only: the accessibility name below keeps the logical order.
-    let label = crate::bidi::visual(&label).into_owned();
-    let text_w = ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), font.clone(), t.text).size().x);
+    // Logical text, laid out explicitly left to right: the fork shapes and reorders it once,
+    // and an Arabic file name keeps its extension at the visual end. AccessKit names stay logical.
+    let label_color = if active { t.text } else { t.text_muted };
+    let label_galley = crate::bidi::layout_ltr(ui, label.clone(), font.clone(), label_color);
+    let text_w = label_galley.size().x;
     let width = cap.map_or(text_w + TAB_CHROME, |cap| (text_w + TAB_CHROME).min(cap));
     // Full strip height so the active tab sits on the mode bar instead of floating in the title bar.
     let height = ui.available_height().max(height);
@@ -463,7 +467,7 @@ fn tab(
             15.0,
             if active { t.accent } else { t.text_muted },
         );
-        ui.painter().text(rect.min + vec2(28.0, rect.height() / 2.0), Align2::LEFT_CENTER, label, font, if active { t.text } else { t.text_muted });
+        ui.painter().galley(rect.min + vec2(28.0, (rect.height() - label_galley.size().y) / 2.0), label_galley.clone(), label_color);
     });
     let x_rect = Rect::from_center_size(rect.right_center() - vec2(16.0, 0.0), vec2(20.0, 20.0));
     let x = ui.interact(x_rect, id.with("close"), Sense::click());
@@ -479,14 +483,10 @@ fn tab(
         *close = Some(index);
     }
     let shown = match file {
-        Some(file) => std::borrow::Cow::Owned(format!("{}\n{}", crate::bidi::visual(name), crate::bidi::visual(file))),
-        None => crate::bidi::visual(name),
+        Some(file) => format!("{name}\n{file}"),
+        None => name.to_string(),
     };
-    theme::hand(resp).on_hover_text(if dirty {
-        crate::i18n::fmt(tl!("{name} — unsaved changes"), &[("name", shown.as_ref())])
-    } else {
-        shown.into_owned()
-    })
+    theme::hand(resp).on_hover_text(if dirty { crate::i18n::fmt(tl!("{name} — unsaved changes"), &[("name", &shown)]) } else { shown })
 }
 
 pub fn mode_bar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
@@ -637,6 +637,8 @@ fn main_menu(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     });
 }
 
+/// Draw the right tool rail with page navigation, history, zoom, rotation and page-display controls for the
+/// active view.
 pub fn right_rail(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let Some((index, id)) = app.active_ids() else { return };
@@ -675,7 +677,7 @@ pub fn right_rail(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     items.push(item(RightPanel::Tags, "tag", "Tags", None));
     let view = &mut app.views[index];
     let mut page_display = None;
-    let rail = Rail::new("rail")
+    let rail = Rail::new(egui::Id::unique("rail"))
         .edge(Edge::End)
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(6, 8)).stroke(Stroke::new(1.0, t.divider)))
         .show(ui, &items, app.right.as_ref(), |ui| {
@@ -710,13 +712,13 @@ pub fn right_rail(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                     view.fit = if view.fit == Fit::Width { Fit::Page } else { Fit::Width };
                     view.goto = Some((view.current, 0.0));
                 }
-                let id = egui::Id::new("zoom-input");
+                let id = egui::Id::unique("zoom-input");
                 let draft = id.with("draft");
                 let mut typed = ui.data(|d| d.get_temp::<String>(draft)).unwrap_or_else(|| format!("{:.0}%", view.zoom * 100.0));
                 let edit = egui::TextEdit::singleline(&mut typed)
                     .id(id)
                     .desired_width(40.0)
-                    .horizontal_align(Align::Center)
+                    .align(egui::Align2::CENTER_TOP)
                     .font(theme::medium(11.0))
                     .text_color(t.text_muted)
                     .frame(egui::Frame::NONE)
@@ -782,7 +784,7 @@ pub fn right_rail(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 let edit = egui::TextEdit::singleline(&mut view.page_input)
                     .id(page_input_id)
                     .desired_width(34.0)
-                    .horizontal_align(Align::Center)
+                    .align(egui::Align2::CENTER_TOP)
                     .font(theme::medium(12.0))
                     .margin(vec2(2.0, 4.0));
                 let r = egui::Frame::NONE
@@ -791,7 +793,8 @@ pub fn right_rail(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                     .corner_radius(CornerRadius::same(5))
                     .show(ui, |ui| ui.add(edit))
                     .inner
-                    .on_hover_text(tl!("Current page — type a page number or label (such as iv) and press Enter"));
+                    .on_hover_text(tl!("Current page — type a page number or label (such as iv) and press Enter"))
+                    .accessible_name(tl!("Current page"));
                 if r.lost_focus() {
                     if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         // A page label first (logical page numbers, as Acrobat), then a number.

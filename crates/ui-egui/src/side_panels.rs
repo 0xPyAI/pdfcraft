@@ -322,7 +322,7 @@ impl PaneContent<Pane> for Content<'_> {
         match pane {
             Pane::Tools => crate::panels::left_panel(self.app, ui),
             Pane::Side => {
-                ui.data_mut(|data| data.insert_temp(egui::Id::new("pdfcraft-inspector-body"), ui.max_rect()));
+                ui.data_mut(|data| data.insert_temp(egui::Id::unique("pdfcraft-inspector-body"), ui.max_rect()));
                 crate::panels::right_panel(self.app, ui);
             }
         }
@@ -389,7 +389,7 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
     let labels = PaneLabels { resize: crate::i18n::t("Resize panels").to_owned(), ..PaneLabels::default() };
     let panels = app.side_panels;
     // Columns: both panes may share the right edge, Tools outermost, as `open` lists them.
-    let output = PaneHost::new("pdfcraft-side-panels")
+    let output = PaneHost::new(egui::Id::unique("pdfcraft-side-panels"))
         .policy(SidePolicy::Columns)
         .f6(false)
         .labels(labels)

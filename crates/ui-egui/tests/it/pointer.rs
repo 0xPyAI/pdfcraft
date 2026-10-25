@@ -300,13 +300,15 @@ fn a_paragraph_edge_resizes_wherever_it_shows_the_resize_cursor() {
 // ---------------------------------------------------------------------------------------------
 // Things drawn over the page keep the page's cursor, tips and presses off.
 
+/// Check that the command palette's frame keeps the default cursor over the page while the page beside it
+/// still shows the stamp tool.
 #[test]
 fn stamp_cursor_stays_off_the_command_palette() {
     let mut h = open(link_pdf(), "300", false);
     stamp_tool(&mut h);
     h.state_mut().palette_open = true;
     h.run_steps(4);
-    let palette = h.ctx.memory(|m| m.area_rect(egui::Id::new("palette"))).expect("palette shown");
+    let palette = h.ctx.memory(|m| m.area_rect(egui::Id::unique("palette"))).expect("palette shown");
     // On the palette's frame margin, where none of its widgets sets a cursor, over the page.
     let p = egui::pos2(palette.left() + 4.0, palette.bottom() - 4.0);
     assert!(page(&h).contains(p), "the palette must lie over the page here");
@@ -324,7 +326,7 @@ fn link_tip_stays_off_while_the_palette_is_open() {
     let mut h = open(link_pdf(), "300", false);
     h.state_mut().palette_open = true;
     h.run_steps(4);
-    let palette = h.ctx.memory(|m| m.area_rect(egui::Id::new("palette"))).expect("palette shown");
+    let palette = h.ctx.memory(|m| m.area_rect(egui::Id::unique("palette"))).expect("palette shown");
     let beside = [60.0, 100.0, 150.0, 200.0, 240.0]
         .into_iter()
         .flat_map(|x| [305.0, 325.0, 345.0].map(|y| at(&h, x, y)))
@@ -392,21 +394,30 @@ fn a_dragged_panel_edge_passes_over_a_link_without_its_tip() {
     assert!(tip_shown(&h), "and shows its tip");
 }
 
+/// Send one wheel event over the page and let its scrolling settle.
 fn wheel(h: &mut Harness<'_, PdfCraftApp>, delta: egui::Vec2) {
     h.hover_at(egui::pos2(800.0, 500.0));
-    h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, modifiers: egui::Modifiers::NONE, phase: egui::TouchPhase::Move });
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta,
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+    });
     for _ in 0..10 {
         h.run_steps(2);
     }
 }
 
+/// Check that the quick bar's frame keeps the default cursor over the page while the page below it still
+/// shows the stamp tool.
 #[test]
 fn stamp_cursor_stays_off_the_quick_bar() {
     let mut h = open(link_pdf(), "400", true);
     stamp_tool(&mut h);
     // Bring the page under the quick bar's left end.
     wheel(&mut h, egui::vec2(-200.0, 0.0));
-    let bar = h.ctx.memory(|m| m.area_rect(egui::Id::new("quick-bar"))).expect("quick bar shown");
+    let bar = h.ctx.memory(|m| m.area_rect(egui::Id::unique("quick-bar"))).expect("quick bar shown");
     // Inside the bar's frame margin: no button there.
     let p = egui::pos2(bar.left() + 3.0, bar.bottom() - 3.0);
     assert!(page(&h).contains(p), "the quick bar must lie over the page here");
@@ -435,7 +446,7 @@ fn stamp_cursor_stays_off_the_chrome_above_a_page_scrolled_under_it() {
 
 /// Whether the page's hover tip was drawn in the last frame.
 fn tip_shown(h: &Harness<'_, PdfCraftApp>) -> bool {
-    let tip = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("canvas-hover"));
+    let tip = egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("canvas-hover"));
     h.ctx.memory(|m| m.areas().is_visible(&tip))
 }
 
@@ -445,6 +456,7 @@ fn open_unlock_prompt(h: &mut Harness<'_, PdfCraftApp>) {
     h.state_mut().unlock_prompt = Some(UnlockPrompt { doc, name: "test.pdf".into(), input: String::new(), error: None, then: None });
 }
 
+/// Check that the link tip and pointing cursor disappear under the Unlock prompt.
 #[test]
 fn link_tip_stays_under_the_unlock_prompt() {
     let mut h = open(link_pdf(), "300", true);
@@ -461,18 +473,19 @@ fn link_tip_stays_under_the_unlock_prompt() {
     for _ in 0..4 {
         h.run_steps(2);
     }
-    let card = h.ctx.memory(|m| m.area_rect(egui::Id::new("unlock")));
+    let card = h.ctx.memory(|m| m.area_rect(egui::Id::unique("unlock")));
     assert!(card.is_none_or(|c| !c.contains(on_link)), "the point must be on the backdrop, not the card: {card:?}");
     assert!(!tip_shown(&h), "the link's tip must not float over the Unlock prompt");
     assert_ne!(h.output().platform_output.cursor_icon, egui::CursorIcon::PointingHand);
 }
 
+/// Check that moving onto a link's floating tip still reports the link's pointing-hand cursor.
 #[test]
 fn the_link_tip_lets_the_pointer_through_to_the_link() {
     let mut h = open(link_pdf(), "150", false);
     let p = at(&h, 100.0, 340.0);
     assert_eq!(cursor_at(&mut h, p), egui::CursorIcon::PointingHand);
-    let tip = h.ctx.memory(|m| m.area_rect(egui::Id::new("canvas-hover"))).expect("the link's tip");
+    let tip = h.ctx.memory(|m| m.area_rect(egui::Id::unique("canvas-hover"))).expect("the link's tip");
     // A quick move lands on the tip, drawn beside where the pointer was, and still on the link.
     let onto = tip.min + egui::vec2(6.0, 6.0);
     assert!(egui::Rect::from_two_pos(at(&h, 50.0, 350.0), at(&h, 250.0, 300.0)).contains(onto), "the point must be on the link");
