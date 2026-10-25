@@ -118,6 +118,9 @@ pub struct Widget {
     pub caption: Option<String>,
     /// List boxes: where the options are drawn, so a click can pick the one under the pointer.
     pub list: Option<appearance::ListRows>,
+    /// Drawn round: a radio button, or a check box laid out for a round XFA check button
+    /// (`/PCXfaRound true`).
+    pub round: bool,
 }
 
 /// A terminal form field.
@@ -882,6 +885,7 @@ fn walk(
                     })
                     .flatten(),
                 list: (kind == FieldKind::List).then(|| appearance::list_rows_of(doc, inh.da.as_deref().unwrap_or("/Helv 0 Tf 0 g"), Some(d), wd)),
+                round: kind == FieldKind::Radio || (kind == FieldKind::CheckBox && appearance::is_round(doc, wd)),
             })
         })
         .collect();
