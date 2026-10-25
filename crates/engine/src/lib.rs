@@ -23,6 +23,7 @@ pub mod commands;
 pub mod compare;
 mod copy_image;
 pub mod dates;
+mod error;
 pub mod export;
 pub mod field_table;
 mod history;
@@ -227,6 +228,7 @@ fn record_link_scan() {
     });
 }
 
+pub use error::{EditError, SourceProblem};
 pub use history::Label;
 use history::{Editor, Keys, MAX_UNDO, Scope, TextBlocksCache, keys_after, scope_of, uses_scripts};
 use pdfcraft_cos::{SaveOptions, write_full, write_incremental};
@@ -2889,19 +2891,6 @@ fn open_source_with(name: &str, bytes: &Arc<Vec<u8>>, password: Option<&str>) ->
     source_document(bytes, password).map_err(|p| EditError::Source(format!("{name}: {p}")))
 }
 
-/// Why a file can't be a source for Combine Files (or Insert / Replace pages).
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum SourceProblem {
-    #[error("it is password-protected")]
-    Password,
-    #[error("the password is wrong")]
-    WrongPassword,
-    #[error("its security settings don't allow copying pages")]
-    NotPermitted,
-    #[error("{0}")]
-    Unreadable(String),
-}
-
 fn source_document(bytes: &Arc<Vec<u8>>, password: Option<&str>) -> Result<pdfcraft_cos::Document, SourceProblem> {
     match std::panic::catch_unwind(|| pdfcraft_cos::Document::open_with_password(bytes.clone(), password)) {
         Ok(Ok(d)) if d.permissions().is_some_and(|p| !p.assemble()) => Err(SourceProblem::NotPermitted),
@@ -2931,70 +2920,6 @@ pub fn source_page_count(bytes: &Arc<Vec<u8>>, password: Option<&str>) -> Option
 /// its own way, and `one` and `many` may differ in more than an "s".
 fn plural(one: &'static str, many: &'static str, n: usize) -> Label {
     Label::of(if n == 1 { one } else { many })
-}
-
-#[derive(Debug, thiserror::Error, PartialEq)]
-pub enum EditError {
-    #[error("no such document")]
-    NoDocument,
-    #[error("this document can't be edited: {0}")]
-    ReadOnly(String),
-    #[error("the document's security settings don't allow {0}; open it with the owner password to make this change")]
-    NotPermitted(&'static str),
-    #[error("{0}")]
-    Organize(#[from] pdfcraft_organize::OrganizeError),
-    #[error("{0}")]
-    Bookmark(#[from] pdfcraft_organize::OutlineError),
-    #[error("{0}")]
-    Comment(#[from] pdfcraft_annot::AnnotError),
-    #[error(transparent)]
-    Measure(#[from] measure::MeasureError),
-    #[error("{0}")]
-    Protection(String),
-    #[error("the password is incorrect")]
-    WrongPassword,
-    #[error("{0}")]
-    Form(#[from] pdfcraft_forms::FormError),
-    #[error(transparent)]
-    Redact(#[from] pdfcraft_redact::RedactError),
-    #[error("{0}")]
-    Print(String),
-    #[error("{0}")]
-    Accessibility(String),
-    #[error(transparent)]
-    Data(#[from] pdfcraft_xfdf::DataError),
-    #[error("{0}")]
-    Edit(#[from] pdfcraft_edit::EditError),
-    #[error("{0}")]
-    Create(#[from] pdfcraft_create::CreateError),
-    #[error("the edited document could not be written: {0}")]
-    Write(String),
-    #[error("the edited document could not be reopened: {0}")]
-    Reopen(String),
-    #[error("couldn't use {0}")]
-    Source(String),
-    #[error("nothing to undo")]
-    NothingToUndo,
-    #[error("nothing to redo")]
-    NothingToRedo,
-    #[error("{0}")]
-    Sign(String),
-    #[error("{0}")]
-    Optimize(String),
-    #[error("cancelled")]
-    Cancelled,
-    #[error("{0} isn't possible in a signed document: it would rewrite the file and invalidate the signatures")]
-    SignedRewrite(String),
-    #[error("this document is signed: rewriting it would invalidate its signatures (save it incrementally instead)")]
-    Signed,
-    #[error("{0}")]
-    Invalid(String),
-}
-
-impl From<pdfcraft_sign::SignError> for EditError {
-    fn from(e: pdfcraft_sign::SignError) -> Self {
-        EditError::Sign(e.to_string())
-    }
 }
 
 #[derive(Default)]
