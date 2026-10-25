@@ -1253,6 +1253,7 @@ fn redraw(doc: &mut Document, f: &Field, values: &[String], scripts: &mut dyn Sc
         [one] if matches!(f.kind, FieldKind::Text | FieldKind::Combo) => scripting::formatted(doc, f, one, scripts),
         _ => None,
     };
+    let in_place = f.kind == FieldKind::Text && f.has(flags::PASSWORD);
     let mut undrawn = false;
     for w in &f.widgets {
         let (stream, missing) = match &shown {
@@ -1260,7 +1261,23 @@ fn redraw(doc: &mut Document, f: &Field, values: &[String], scripts: &mut dyn Sc
             None => appearance::field_appearance_drawn(doc, f, w, values, true),
         };
         undrawn |= missing.is_some();
-        let ap = doc.add(Object::Stream(stream));
+        let existing_ap = in_place
+            .then(|| {
+                doc.get(w.obj)
+                    .as_dict()
+                    .and_then(|d| d.get(b"AP").map(|a| doc.resolve(a)))
+                    .and_then(|a| a.as_dict().and_then(|a| a.get(b"N").cloned()))
+                    .and_then(|n| n.as_ref())
+                    .filter(|r| doc.is_edited(r.num) && matches!(&*doc.get(*r), Object::Stream(_)))
+            })
+            .flatten();
+        let ap = match existing_ap {
+            Some(r) => {
+                doc.set(r, Object::Stream(stream));
+                r
+            }
+            None => doc.add(Object::Stream(stream)),
+        };
         let mut fresh = Dict::new();
         fresh.set(b"N".to_vec(), Object::Ref(ap));
         let apd = merged_appearance(doc, w.obj, &fresh);
