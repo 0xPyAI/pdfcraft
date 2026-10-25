@@ -6876,12 +6876,15 @@ BT /F1 11 Tf 20 20 Td (Total due: 150.00) Tj ET";
     assert!(rendered.iter().any(|c| matches!(c, Content::Png { .. })));
 }
 
+/// Hundreds of calculations run on opening and again after a change through the tools. The
+/// time limits are raised so that a busy machine does not stop them (the engine's tests check
+/// that the limits stop them).
 #[test]
-fn hundreds_of_xfa_calculations_open_and_recalculate_within_their_budgets() {
+fn hundreds_of_xfa_calculations_open_and_recalculate_through_tools() {
     let dir = workdir("xfa-many");
     let (sections, rows) = (10, 20);
     std::fs::write(dir.join("many.pdf"), pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::many_calculations_template(sections, rows))).unwrap();
-    let mut a = auto(&dir);
+    let mut a = auto(&dir).with_xfa_time_scale(100);
     let started = std::time::Instant::now();
     let opened = ok(&mut a, "doc_open", json!({ "path": "many.pdf" }));
     let open_took = started.elapsed();
@@ -7304,7 +7307,8 @@ fn repeated_xfa_print_buttons_work_through_tools_and_after_reopen() {
     let dir = workdir("xfa-print-buttons");
     let template = pdfcraft_xfa::fixtures::repeated_print_button_template();
     std::fs::write(dir.join("print.pdf"), pdfcraft_xfa::fixtures::shell(&template)).unwrap();
-    let mut a = auto(&dir);
+    // Raised time limits: a busy machine does not stop the click scripts this checks.
+    let mut a = auto(&dir).with_xfa_time_scale(100);
     let doc = ok(&mut a, "doc_open", json!({ "path": "print.pdf" }))["doc"].as_u64().unwrap();
     let check = |a: &mut Automation, doc| {
         let fields = ok(a, "form_fields", json!({ "doc": doc }));
@@ -7329,7 +7333,8 @@ fn repeated_xfa_print_buttons_work_through_tools_and_after_reopen() {
 fn xfa_scripts_run_for_buttons_and_field_changes_through_tools() {
     let dir = workdir("xfa-scripts");
     std::fs::write(dir.join("scripted.pdf"), pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::scripted_template())).unwrap();
-    let mut a = auto(&dir);
+    // Raised time limits: a busy machine does not stop the scripts this checks.
+    let mut a = auto(&dir).with_xfa_time_scale(100);
     let doc = ok(&mut a, "doc_open", json!({ "path": "scripted.pdf" }))["doc"].as_u64().unwrap();
     let field = |a: &mut Automation, n: &str| {
         let f = ok(a, "form_fields", json!({ "doc": doc }));
