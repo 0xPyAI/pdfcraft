@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use super::document::is_placeholder_title;
 use super::edit::check_permission;
 use super::*;
 use pdfcraft_render::{OpenError, ReadingColors};
