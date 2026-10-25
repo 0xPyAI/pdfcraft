@@ -944,19 +944,28 @@ pub(crate) fn image_panel(ui: &mut egui::Ui, t: &Tokens, img: &pdfcraft_engine::
         }
     });
     ui.label(egui::RichText::new(tl!("Crop (% trimmed from each side)")).small().color(t.text_muted));
-    let mut crop = img.crop.map(|v| (v * 100.0).round());
+    let most = (1.0 - pdfcraft_engine::AddedImage::MIN_CROP_KEEP) * 100.0;
+    // Unrounded: a side the user doesn't touch keeps its stored value, also one read from a file.
+    let shown = img.crop.map(|v| v * 100.0);
+    let mut crop = shown;
     let mut changed = false;
     ui.horizontal(|ui| {
         for (k, label) in ["L", "B", "R", "T"].into_iter().enumerate() {
             ui.label(label);
-            // Applied when the drag ends, so a drag is one undo step.
-            let r = ui.add(egui::DragValue::new(&mut crop[k]).range(0.0..=45.0).speed(0.5).suffix("%"));
+            // Up to what the opposite side leaves. Applied when the drag ends: one undo step.
+            let room = (most - crop.get((k + 2) % 4).copied().unwrap_or(0.0)).max(0.0);
+            let Some(side) = crop.get_mut(k) else { continue };
+            let r = ui.add(egui::DragValue::new(side).range(0.0..=room).clamp_existing_to_range(false).speed(0.5).suffix("%"));
             changed |= r.drag_stopped() || (r.changed() && !r.dragged());
         }
     });
     if changed {
         let mut i = img.clone();
-        i.crop = crop.map(|v| v / 100.0);
+        for (stored, (now, was)) in i.crop.iter_mut().zip(crop.iter().zip(&shown)) {
+            if now != was {
+                *stored = now / 100.0;
+            }
+        }
         if i.crop != img.crop {
             out = Some(ImageAction::Update(AddedContent::Image(i)));
         }
