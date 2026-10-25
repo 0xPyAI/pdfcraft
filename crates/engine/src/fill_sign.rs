@@ -7,7 +7,7 @@ use crate::{Shape, script_outline, signature_image};
 ///
 /// Left, centred and upright are as displayed on a page turned by `rotation` (its `/Rotate`):
 /// the box runs along the displayed axes, like an image signature's
-/// ([`SignatureImage::rect`]), and the outlines are turned back so the name reads across.
+/// ([`SignatureImage::rect`](crate::SignatureImage::rect)), and the outlines are turned back so the name reads across.
 pub fn typed_signature_shape(at: [f64; 2], text: &str, height: f64, rotation: i64) -> Option<Shape> {
     let o = script_outline(text);
     let [left, bottom, right, top] = o.bounds();

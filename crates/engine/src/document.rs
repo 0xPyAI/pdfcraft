@@ -59,7 +59,7 @@ pub struct Document {
     /// XFA forms: what was approximated, rewritten or could not be written to the XFA data
     /// (also in `info.warnings`, kept there when the document is re-read).
     pub xfa_warnings: Vec<String>,
-    /// What the last successful [`Session::apply`] wrote that its fonts can't draw: kept as typed,
+    /// What the last successful [`Session::apply`](crate::Session::apply) wrote that its fonts can't draw: kept as typed,
     /// drawn with `?` in its place (see [`TextNotice`]). The interface shows it; tools return it.
     pub edit_notices: Vec<TextNotice>,
 }
@@ -440,7 +440,7 @@ impl Document {
     }
 
     /// A password restricts the document and it wasn't opened with the owner password: entering
-    /// that password ([`Session::unlock`]) lifts the restrictions.
+    /// that password ([`Session::unlock`](crate::Session::unlock)) lifts the restrictions.
     pub fn can_unlock(&self) -> bool {
         self.editable() && self.permissions().is_some_and(|p| !unrestricted(&p))
     }
@@ -629,7 +629,7 @@ pub fn display_bytes_for(bytes: Arc<Vec<u8>>, password: Option<&str>) -> Arc<Vec
 /// The password to give the renderer (`inspect`, `PageRenderer`) for `bytes` opened with
 /// `password`. The renderer authenticates only the user password of R2–R4 files, so for their
 /// owner password this is the user password that owner authentication recovers; otherwise it is
-/// `password` itself. Render paths outside a [`Session`], such as the CLI, use this so the owner
+/// `password` itself. Render paths outside a [`Session`](crate::Session), such as the CLI, use this so the owner
 /// password works there as it does in `doc_open`. A file that doesn't open with `password` keeps
 /// it, so the renderer reports the same error it always did.
 pub fn render_password_for(bytes: Arc<Vec<u8>>, password: Option<&str>) -> Option<String> {
