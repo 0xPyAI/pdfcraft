@@ -51,6 +51,8 @@ pub mod signature_image;
 pub mod signature_scan;
 mod sources;
 mod stamp_preview;
+#[cfg(test)]
+mod test_hooks;
 pub mod text_fonts;
 mod text_preview;
 pub mod word_count;
@@ -103,54 +105,6 @@ pub type SplitPart = (usize, usize, Arc<Vec<u8>>);
 
 use std::sync::Arc;
 
-#[cfg(test)]
-thread_local! {
-    static SECONDARY_SCAN_COUNTS: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
-    static REFRESH_PANICS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
-fn panic_on_refresh(count: usize) {
-    REFRESH_PANICS.with(|n| n.set(count));
-}
-
-#[cfg(test)]
-fn check_refresh_panic() {
-    REFRESH_PANICS.with(|n| {
-        let rem = n.get();
-        if rem > 0 {
-            n.set(rem - 1);
-            panic!("injected refresh panic");
-        }
-    });
-}
-
-#[cfg(test)]
-fn reset_secondary_scan_counts() {
-    SECONDARY_SCAN_COUNTS.with(|counts| counts.set((0, 0)));
-}
-
-#[cfg(test)]
-fn secondary_scan_counts() -> (usize, usize) {
-    SECONDARY_SCAN_COUNTS.with(std::cell::Cell::get)
-}
-
-#[cfg(test)]
-fn record_marker_scan() {
-    SECONDARY_SCAN_COUNTS.with(|counts| {
-        let (markers, links) = counts.get();
-        counts.set((markers + 1, links));
-    });
-}
-
-#[cfg(test)]
-fn record_link_scan() {
-    SECONDARY_SCAN_COUNTS.with(|counts| {
-        let (markers, links) = counts.get();
-        counts.set((markers, links + 1));
-    });
-}
-
 use bookmarks::outline_rows;
 pub use bookmarks::{BookmarkPage, BookmarkRow};
 use comments::comment_list;
@@ -171,6 +125,8 @@ pub use protection::{Changes, Printing, Protection, SecuritySummary};
 pub use session::Session;
 pub use sources::{CombineSource, Combined, combine_source_check, source_page_count};
 use sources::{open_source, open_source_with};
+#[cfg(test)]
+use test_hooks::{check_refresh_panic, panic_on_refresh, record_link_scan, record_marker_scan, reset_secondary_scan_counts, secondary_scan_counts};
 use xfa_form::{
     XFA_REMOVED_PREFIX, XFA_SCRIPTS_OFF, decode_data_file, image_content_type, is_xfa_data_file, note_warnings, strip_xfa, sync_xfa_state,
     undrawn_field_warnings, xfa_after_data_change, xfa_layout, xfa_redraw, xfa_sync_datasets, xfa_values_from_datasets,
