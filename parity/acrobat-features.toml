@@ -2448,7 +2448,7 @@ status = "shipped"
 commands = ["edit.header_footer"]
 tools = ["doc_header_footer"]
 evidence = ["crates/edit/src/tests.rs::tokens_expand", "crates/engine/src/tests.rs::headers_footers_watermarks_and_backgrounds_show_update_and_remove"]
-notes = "<<1>>, <<n>>, <<1 of n>>, <<Page 1 of n>>, dates, Bates"
+notes = "<<1>>, <<n>>, <<1 of n>>, <<Page 1 of n>>, dates (US, ISO, day-first with slashes and the dotted <<dd.mm.yyyy>>, <<d.m.yyyy>>, <<dd.mm.yy>>, <<d.m.yy>>), Bates. Month names are English only"
 
 [[feature]]
 id = "edit.header-footer-ranges"
