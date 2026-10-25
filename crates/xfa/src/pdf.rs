@@ -44,7 +44,7 @@ fn hex32(h: &[u8; 32]) -> Vec<u8> {
 
 fn parse_hex32(s: &[u8]) -> Option<[u8; 32]> {
     let mut out = [0u8; 32];
-    if s.len() != 64 {
+    if s.len() != 64 || !s.iter().all(u8::is_ascii_hexdigit) {
         return None;
     }
     for (o, pair) in out.iter_mut().zip(s.as_chunks::<2>().0) {
@@ -1293,4 +1293,21 @@ pub fn existing_layout(doc: &Document) -> Option<crate::Report> {
 /// The rectangle of a widget in PDF user space (for tests).
 pub fn pdf_rect(r: Rect, page_height: f64) -> [f64; 4] {
     [r.x, page_height - r.bottom(), r.right(), page_height - r.y]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_hex32;
+
+    #[test]
+    fn parse_hex32_rejects_non_hex_digits() {
+        for prefix in ["+f", "-f", " f"] {
+            let mut s = prefix.as_bytes().to_vec();
+            s.resize(64, b'0');
+            assert!(parse_hex32(&s).is_none(), "{prefix:?}");
+        }
+        let mut ok = b"Ff".to_vec();
+        ok.resize(64, b'0');
+        assert_eq!(parse_hex32(&ok).map(|h| h[0]), Some(0xff));
+    }
 }
