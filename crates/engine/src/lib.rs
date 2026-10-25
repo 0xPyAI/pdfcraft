@@ -36,6 +36,7 @@ pub mod optimizer;
 pub mod print_raster;
 pub mod printcheck;
 mod protection;
+mod reexports;
 mod scan_colours;
 mod scan_fields;
 pub mod signature_image;
@@ -51,36 +52,7 @@ pub use signature_scan::{PhotoRect, ScanError, SignaturePhoto, Turn};
 pub use stamp_preview::StampPreview;
 pub use text_preview::TextEditPreview;
 
-pub use pdfcraft_organize::{BoxSpec, FieldConflicts, PageBox, SplitBy, Transition, TransitionSpec, mime_for_name, split_ranges};
-
-/// One file produced by a split: (1-based first page, last page, PDF bytes).
-pub use pdfcraft_organize::LabelStyle;
-pub use pdfcraft_organize::Standard;
-pub use pdfcraft_organize::check_custom_key;
-pub use pdfcraft_organize::view::{InitialView, Layout as InitialLayout, Magnification, Navigation};
-
-pub use pdfcraft_cos::Algorithm;
-pub use pdfcraft_create::{CONVERTIBLE, CreateError, ImageResolution, SourceKind, decode_text, source_kind};
-pub use pdfcraft_edit::added::{
-    CHAR_SPACING_LIMIT as ADDED_CHAR_SPACING_LIMIT, paste_place as added_paste_place, paste_rect as added_paste_rect, text_rect as added_text_rect,
-    text_width as added_text_width,
-};
-pub use pdfcraft_edit::{
-    Added, AddedImage, AddedText, Align as TextAlign, Background, Content as AddedContent, Family as FontFamily, HeaderFooter, MarkKind, Watermark,
-};
-pub use pdfcraft_forms::{
-    BorderStyle, CalculatedField, CalculationIssue, CalculationOrder, CheckStyle, Field as FormField, FieldAction, FieldChange, FieldFont,
-    FieldKind as FormFieldKind, FieldProps, FieldValue, Look as FieldLook, LookPatch as FieldLookPatch, NewField, TabOrder, Trigger as FieldTrigger,
-    Widget as FormWidget, af as form_scripts, appearance as form_appearance, appearance::auto_text_size_by as field_auto_text_size_by,
-    calculations_changed as form_calculations_changed, flags as field_flags,
-};
-
-pub use pdfcraft_a11y as a11y;
-pub use pdfcraft_edit::{BlockKey, BlockStyle, PageImage, RangeStyle, TextBlock, TextLine, block_overlapping, first_undrawable};
-pub use pdfcraft_measure as measure;
-pub use pdfcraft_xfa::Report as XfaLayout;
-
-pub use pdfcraft_edit::{EditableObject, MAX_MOVE_OBJECTS, ObjectKind, ObjectTarget};
+pub use reexports::*;
 
 /// A change to an existing page image.
 #[derive(Clone, Debug, PartialEq)]
@@ -103,7 +75,6 @@ pub enum ImageEdit {
     },
     Delete,
 }
-pub use pdfcraft_fonts::{MAX_SIGNATURE_CHARS, ScriptOutline, script_missing, script_outline, undrawable_message};
 
 /// Fill & Sign: `text` in the script font as a typed signature, its left edge at `at` (user
 /// space, vertically centred) and `height` points tall. `None` for text with no outlines.
@@ -151,25 +122,6 @@ pub fn typed_signature_graphic(text: &str) -> Option<pdfcraft_sign::Graphic> {
 pub use links::{
     MAX_REMOTE_DOCUMENT_BYTES, RemoteDocumentPathError, read_remote_document, remote_document_path_is_absolute, resolve_remote_document_path,
 };
-/// Comment geometry helpers (text-box line breaking) for frontends.
-pub use pdfcraft_annot::appearance as annot_text;
-pub use pdfcraft_annot::links::{Highlight as LinkHighlight, LinkAction, LinkItem, LinkStyle};
-pub use pdfcraft_annot::{
-    AppearanceCache, AttachIcon, FillMark, LineEnding, Markup, NOTE_SIZE, NewAnnotation, NoteIcon, OverlayFont, OverlayLook, Props as CommentProps,
-    ReviewState, Rgb, Shape, StampGroup, StampKind, Style, rect_quad,
-};
-pub use pdfcraft_forms::detect;
-pub use pdfcraft_optimize as optimize;
-pub use pdfcraft_preflight as pdfa;
-pub use pdfcraft_print as print;
-pub use pdfcraft_redact::codes::{CODE_SETS as REDACTION_CODE_SETS, CodeSet as RedactionCodeSet};
-pub use pdfcraft_redact::patterns::{
-    MAX_WORDS as REDACT_MAX_WORDS, PATTERNS as REDACT_PATTERNS, Pattern as RedactPattern, find as find_pattern, word_list as redact_word_list,
-};
-pub use pdfcraft_redact::sanitize::{HIDDEN, Hidden};
-pub use pdfcraft_sign as sign;
-pub use pdfcraft_sign::{SignOptions, SignatureInfo, Status as SignatureStatus, TrustStore};
-pub use pdfcraft_xfdf::Format as DataFormat;
 
 /// Forms ▸ Merge data files into spreadsheet: the field values of each file (FDF, XFDF or a
 /// filled-in PDF form), as CSV with one row per file.
@@ -179,6 +131,7 @@ pub fn merge_data_files(files: &[(String, Vec<u8>)]) -> Result<String, String> {
     Ok(pdfcraft_xfdf::merge_csv(&rows))
 }
 
+/// One file produced by a split: (1-based first page, last page, PDF bytes).
 pub type SplitPart = (usize, usize, Arc<Vec<u8>>);
 
 use std::sync::{Arc, OnceLock};
