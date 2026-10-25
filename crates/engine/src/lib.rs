@@ -3533,9 +3533,14 @@ fn xfa_after_data_change(doc: &mut pdfcraft_cos::Document, cx: &mut EditCtx, cal
 fn xfa_values_from_datasets(doc: &mut pdfcraft_cos::Document) -> Result<Vec<String>, String> {
     let data = xfa_field_data(doc);
     let fields = pdfcraft_forms::fields(doc);
-    let mut changed = Vec::new();
+    // The first field of each name, as a lookup by name would find it.
+    let mut by_name = std::collections::HashMap::new();
+    for f in &fields {
+        by_name.entry(f.name.as_str()).or_insert(f);
+    }
+    let mut updates = Vec::new();
     for (name, value) in pdfcraft_xfa::read_values(doc, &data) {
-        let Some(f) = fields.iter().find(|f| f.name == name) else { continue };
+        let Some(f) = by_name.get(name.as_str()) else { continue };
         let new = match value {
             pdfcraft_xfa::FieldData::Text(t) if matches!(f.kind, pdfcraft_forms::FieldKind::Combo | pdfcraft_forms::FieldKind::List) => {
                 // Saved values, one per line for a multi-select list; shown text stands for
@@ -3553,13 +3558,14 @@ fn xfa_values_from_datasets(doc: &mut pdfcraft_cos::Document) -> Result<Vec<Stri
             pdfcraft_xfa::FieldData::Radio(sel) => (f.value.first() != sel.as_ref()).then_some(FieldValue::Radio(sel)),
             pdfcraft_xfa::FieldData::None => None,
         };
-        if let Some(v) = new
-            && pdfcraft_forms::set_value(doc, &name, &v).is_ok()
-        {
-            changed.push(name);
+        if let Some(v) = new {
+            updates.push((name, v));
         }
     }
-    Ok(changed)
+    // All at once: one by one, each value would read the whole form again, which took minutes
+    // on a form with thousands of fields.
+    let Ok(results) = pdfcraft_forms::set_values(doc, &updates) else { return Ok(Vec::new()) };
+    Ok(updates.into_iter().zip(results).filter(|(_, r)| r.is_ok()).map(|((name, _), _)| name).collect())
 }
 
 /// Validate the signature fields of `cos` (written as `bytes`).

@@ -5584,6 +5584,74 @@ fn static_xfa_forms_take_their_values_from_the_datasets_and_write_them_back() {
     assert!(!d2.info.warnings.iter().any(|w| w.contains("taken from this form's XFA data")), "nothing was rewritten");
 }
 
+/// A static XFA form whose values are only in its datasets takes every one on opening, as
+/// filling the fields one at a time would leave it: values, appearances and the note; a
+/// read-only field keeps its own value.
+#[test]
+fn a_static_xfa_form_takes_many_data_values_as_one_by_one() {
+    let n = 60;
+    let original = Arc::new(pdfcraft_xfa::fixtures::static_shell_many(n));
+    let mut s = Session::new().with_clock(|| 1_700_000_000);
+    let id = s.open("many.pdf", None, original.clone(), None).expect("opens");
+    let doc = s.get(id).unwrap();
+    assert_eq!(doc.info.xfa, Some(pdfcraft_render::Xfa::Static));
+    assert!(!doc.dirty && doc.bytes.starts_with(&original[..]), "the values are an appended revision");
+    // The read-only first field keeps its own (empty) value, and is not named.
+    let note = doc.info.warnings.iter().find(|w| w.contains("taken from this form's XFA data")).expect("a warning");
+    assert!(note.starts_with("59 form field values") && note.contains("form1[0].page1[0].f1[0]") && note.ends_with("and 54 more"), "{note}");
+    assert!(!note.contains("f0[0]"), "{note}");
+    // The same values filled one at a time.
+    let mut one_by_one = pdfcraft_cos::Document::open(original).unwrap();
+    for i in 0..n {
+        let r = pdfcraft_forms::set_value(&mut one_by_one, &format!("form1[0].page1[0].f{i}[0]"), &FieldValue::Text(format!("v{i}")));
+        assert_eq!(r.is_err(), i == 0, "field {i}: {r:?}");
+    }
+    let opened = &doc.editor.as_ref().unwrap().cos;
+    let shown = |d: &pdfcraft_cos::Document| -> Vec<(String, Vec<String>, String)> {
+        pdfcraft_forms::fields(d)
+            .into_iter()
+            .map(|f| {
+                let w = f.widgets.first().map(|w| w.obj).unwrap();
+                let ap = d.get(w).as_dict().and_then(|w| w.get(b"AP").cloned()).map(|a| d.resolve(&a));
+                let n = ap.and_then(|ap| ap.as_dict().and_then(|a| a.get(b"N").cloned())).map(|n| d.resolve(&n));
+                let look = match n.as_deref() {
+                    Some(pdfcraft_cos::Object::Stream(st)) => String::from_utf8_lossy(&st.decoded().unwrap()).into_owned(),
+                    _ => String::new(),
+                };
+                (f.name, f.value, look)
+            })
+            .collect()
+    };
+    let got = shown(opened);
+    assert_eq!(got.len(), n);
+    assert_eq!(got, shown(&one_by_one));
+    assert!(got[0].1.is_empty());
+    assert!(got.iter().enumerate().skip(1).all(|(i, (_, v, ap))| *v == [format!("v{i}")] && ap.contains(&format!("(v{i})"))));
+}
+
+/// Opening a static XFA form whose datasets fill thousands of fields took minutes: each value
+/// read the whole form again (twice), so the time grew with the square of the fields. Eight
+/// times the fields now takes at most about eight times as long (it took about fifty).
+#[test]
+fn opening_a_static_xfa_form_grows_linearly_with_its_data_values() {
+    let time = |n: usize| {
+        let bytes = Arc::new(pdfcraft_xfa::fixtures::static_shell_many(n));
+        (0..3)
+            .map(|_| {
+                let mut s = Session::new();
+                let start = std::time::Instant::now();
+                s.open("many.pdf", None, bytes.clone(), None).expect("opens");
+                start.elapsed()
+            })
+            .min()
+            .unwrap_or_default()
+    };
+    let small = time(100);
+    let large = time(800);
+    let ratio = large.as_secs_f64() / small.as_secs_f64().max(1e-6);
+    assert!(ratio < 16.0, "100 fields: {small:?}, 800 fields: {large:?} ({ratio:.1}x)");
+}
+
 /// A date goes into the XFA data in the field's data picture (`<bind><picture>`), as other
 /// viewers write and read it, and comes back from there when the form is opened again. It used
 /// to be written as an ISO date whatever the picture said.
