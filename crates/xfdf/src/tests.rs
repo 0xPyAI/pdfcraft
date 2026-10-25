@@ -1934,6 +1934,38 @@ fn annots_of(doc: &Document) -> Vec<Dict> {
         .collect()
 }
 
+/// An empty text field exports as a `<field>` with no `<value>`, and the import skipped such a
+/// field, so importing the data left the target's old text in place. FDF, XML, CSV and text
+/// carry the same empty value and clear the field.
+#[test]
+fn an_empty_field_in_xfdf_clears_the_field_it_is_imported_into() {
+    let src = one_field();
+    assert_eq!(values(&src), vec![("Name".to_string(), Vec::<String>::new())]);
+    let exports = [
+        ("xfdf", export_xfdf(&src, false, true, "form.pdf").into_bytes()),
+        ("fdf", export_fdf(&src, false, true, "form.pdf").unwrap()),
+        ("xml", export_data(&src, Format::Xml).into_bytes()),
+    ];
+    for (format, data) in exports {
+        let mut dst = one_field();
+        set_value(&mut dst, "Name", &FieldValue::Text("Ada".into())).unwrap();
+        let report = import(&mut dst, &data);
+        assert_eq!(values(&dst), values(&src), "{format}: {report:?}: {}", String::from_utf8_lossy(&data));
+    }
+}
+
+/// A leaf holding only `<value-richtext>` is not read by the import, so it must leave the field
+/// as it was rather than clear it like an empty `<field>`.
+#[test]
+fn a_richtext_only_field_in_xfdf_leaves_the_field_alone() {
+    let data = br#"<?xml version="1.0" encoding="UTF-8"?>
+<xfdf xmlns="http://ns.adobe.com/xfdf/"><fields><field name="Name"><value-richtext><body xmlns="http://www.w3.org/1999/xhtml"><p>Bo</p></body></value-richtext></field></fields></xfdf>"#;
+    let mut dst = one_field();
+    set_value(&mut dst, "Name", &FieldValue::Text("Ada".into())).unwrap();
+    let report = import(&mut dst, data);
+    assert_eq!(values(&dst), vec![("Name".to_string(), vec!["Ada".to_string()])], "{report:?}");
+}
+
 /// An FDF comment's pop-up is an annotation of its own (`/Popup` → a `/Subtype /Popup` object
 /// with `/Parent`). The import copied the pop-up's dictionary into the comment as a direct value,
 /// which ISO 32000-2 Table 172 says shall be an indirect reference to an annotation on the page.
