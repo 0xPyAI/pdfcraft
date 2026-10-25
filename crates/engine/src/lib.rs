@@ -44,6 +44,7 @@ mod scan_fields;
 mod session;
 pub mod signature_image;
 pub mod signature_scan;
+mod sources;
 mod stamp_preview;
 pub mod text_fonts;
 mod text_preview;
@@ -200,6 +201,8 @@ use pdfcraft_render::{Layer, LayerOp, RenderPool};
 use protection::unrestricted;
 pub use protection::{Changes, Printing, Protection, SecuritySummary};
 pub use session::Session;
+pub use sources::{CombineSource, Combined, combine_source_check, source_page_count};
+use sources::{open_source, open_source_with};
 use xfa_form::{
     XFA_REMOVED_PREFIX, XFA_SCRIPTS_OFF, decode_data_file, image_content_type, is_xfa_data_file, note_warnings, strip_xfa, sync_xfa_state,
     undrawn_field_warnings, xfa_after_data_change, xfa_layout, xfa_redraw, xfa_sync_datasets, xfa_values_from_datasets,
@@ -268,17 +271,6 @@ fn apply_layer_state(layers: &mut [Layer], groups: &[Vec<(u32, u16)>], changes: 
         }
     }
     layers.iter().zip(before).any(|(l, was)| l.visible != was)
-}
-
-/// A file to combine: its name (the bookmark title), bytes, and page range (`None`: all).
-pub type CombineSource = (String, Arc<Vec<u8>>, Option<String>);
-
-/// What a combine produced: the new PDF bytes, and the fields renamed to keep colliding names
-/// separate (old fully-qualified name → new one), in order across the sources.
-#[derive(Debug)]
-pub struct Combined {
-    pub bytes: Arc<Vec<u8>>,
-    pub renamed_fields: Vec<(String, String)>,
 }
 
 /// A bookmark as the bookmark list shows it.
@@ -405,41 +397,6 @@ pub fn guard<T>(f: impl FnOnce() -> T) -> Result<T, String> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|p| {
         p.downcast_ref::<&str>().map(|s| (*s).to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_else(|| "unknown error".into())
     })
-}
-
-/// Parse another PDF to copy pages from.
-pub(crate) fn open_source(name: &str, bytes: &Arc<Vec<u8>>) -> Result<pdfcraft_cos::Document, EditError> {
-    open_source_with(name, bytes, None)
-}
-
-/// [`open_source`], authenticating with `password` (user or owner) for an encrypted file.
-fn open_source_with(name: &str, bytes: &Arc<Vec<u8>>, password: Option<&str>) -> Result<pdfcraft_cos::Document, EditError> {
-    source_document(bytes, password).map_err(|p| EditError::Source(format!("{name}: {p}")))
-}
-
-fn source_document(bytes: &Arc<Vec<u8>>, password: Option<&str>) -> Result<pdfcraft_cos::Document, SourceProblem> {
-    match std::panic::catch_unwind(|| pdfcraft_cos::Document::open_with_password(bytes.clone(), password)) {
-        Ok(Ok(d)) if d.permissions().is_some_and(|p| !p.assemble()) => Err(SourceProblem::NotPermitted),
-        Ok(Ok(d)) => Ok(d),
-        Ok(Err(pdfcraft_cos::CosError::NeedsPassword)) => Err(SourceProblem::Password),
-        Ok(Err(pdfcraft_cos::CosError::WrongPassword)) => Err(SourceProblem::WrongPassword),
-        Ok(Err(e)) => Err(SourceProblem::Unreadable(e.to_string())),
-        Err(_) => Err(SourceProblem::Unreadable("the file could not be read".into())),
-    }
-}
-
-/// Whether `bytes` can be combined, opened with `password` (user or owner) if given, and if not
-/// why: what Combine would refuse it for, so the Combine files list can say so before Combine
-/// is pressed. The owner (permissions) password lifts the restriction on copying pages.
-pub fn combine_source_check(bytes: &Arc<Vec<u8>>, password: Option<&str>) -> Result<(), SourceProblem> {
-    source_document(bytes, password).map(|_| ())
-}
-
-/// The number of pages of `bytes`, opened with `password` (user or owner) if given, whatever
-/// its permissions allow; `None` when it can't be read.
-pub fn source_page_count(bytes: &Arc<Vec<u8>>, password: Option<&str>) -> Option<usize> {
-    let doc = std::panic::catch_unwind(|| pdfcraft_cos::Document::open_with_password(bytes.clone(), password)).ok()?.ok()?;
-    pdfcraft_organize::page_count(&doc).ok()
 }
 
 /// Validate the signature fields of `cos` (written as `bytes`).
