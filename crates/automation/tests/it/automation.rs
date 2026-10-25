@@ -5848,6 +5848,28 @@ fn signing_with_an_image_typed_or_drawn_graphic_through_tools() {
     assert!(inked(60, 110), "the strokes are drawn");
 }
 
+/// Signing a laid-out XFA form's signature box through the tools signs the field named by its
+/// SOM path, which is how another viewer, laying the form out again, finds the signature; the
+/// signed file reopens with the signature intact and on that field.
+#[test]
+fn a_dynamic_xfa_forms_signature_box_is_signed_under_its_som_path() {
+    let dir = workdir("xfa-sign");
+    std::fs::write(dir.join("form.pdf"), pdfcraft_xfa::fixtures::shell(&pdfcraft_xfa::fixtures::fields_template(""))).unwrap();
+    let mut a = auto(&dir);
+    ok(&mut a, "sign_id_create", json!({ "name": "Ada Lovelace", "key": "p256", "password": "secret12", "path": "ada.p12" }));
+    let doc = ok(&mut a, "doc_open", json!({ "path": "form.pdf" }))["doc"].as_u64().unwrap();
+    let som = "form[0].page1[0].sign[0]";
+    let fields = ok(&mut a, "form_fields", json!({ "doc": doc }));
+    assert!(fields["fields"].as_array().unwrap().iter().any(|f| f["name"] == som), "{fields}");
+    ok(&mut a, "sign_document", json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "field": som, "out": "signed.pdf" }));
+    let signed = ok(&mut a, "doc_open", json!({ "path": "signed.pdf" }))["doc"].as_u64().unwrap();
+    let list = ok(&mut a, "sign_list", json!({ "doc": signed }));
+    let s = list["signatures"].as_array().unwrap().iter().find(|s| s["signed"] == true).cloned().unwrap_or_else(|| panic!("{list}"));
+    assert_eq!(s["field"], som, "{s}");
+    assert_eq!(s["status"], "unknown", "intact, the signer not trusted: {s}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn digital_ids_signing_and_validation_through_tools() {
     let dir = workdir("signing");

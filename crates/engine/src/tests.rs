@@ -5667,6 +5667,8 @@ fn xfa_data_no_field_binds_to_survives_an_edit_and_save() {
     assert!(doc.xfa_warnings.iter().any(|w| w.contains("structured content")));
 }
 
+/// An XFA form's choice lists, signature and picture fields open as their kinds of field, take
+/// values that scripts read, and are saved into the datasets.
 #[test]
 fn xfa_choice_lists_signature_and_picture_fields_open_fill_script_and_save() {
     let data = "<form><page1><country>Japan</country><langs>English\nSpanish</langs></page1></form>";
@@ -5686,7 +5688,8 @@ fn xfa_choice_lists_signature_and_picture_fields_open_fill_script_and_save() {
     assert_eq!(langs.value, vec!["English".to_string(), "Spanish".to_string()]);
     assert!(field(&s, "other").has(pdfcraft_forms::flags::EDIT));
     assert!(field(&s, "pin").has(pdfcraft_forms::flags::PASSWORD));
-    assert_eq!(field(&s, "sign").kind, K::Signature);
+    // The signature field is named by its SOM path, as another viewer finds a signature.
+    assert_eq!(field(&s, "form[0].page1[0].sign[0]").kind, K::Signature);
     // Scripts read a choice list's saved value.
     assert_eq!(field(&s, "summary").value, vec!["Country: JP".to_string()], "{:?}", s.take_js_output(id));
     // Choosing another item recalculates; the list takes several values; a typed value is kept
