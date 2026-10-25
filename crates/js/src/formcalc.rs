@@ -2278,8 +2278,11 @@ impl Interp<'_> {
                         let mut i = 0;
                         while i < b.len() {
                             if b[i] == b'%'
-                                && let Some(h) =
-                                    b.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok())
+                                && let Some(h) = b
+                                    .get(i + 1..i + 3)
+                                    .filter(|h| h.iter().all(u8::is_ascii_hexdigit))
+                                    .and_then(|h| std::str::from_utf8(h).ok())
+                                    .and_then(|h| u8::from_str_radix(h, 16).ok())
                             {
                                 out.push(h);
                                 i += 3;
