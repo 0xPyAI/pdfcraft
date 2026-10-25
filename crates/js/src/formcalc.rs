@@ -2115,7 +2115,8 @@ impl Interp<'_> {
                 let a = self.arg_num(args, 0)?;
                 let places = if args.len() > 1 { self.arg_num(args, 1)?.clamp(0.0, 12.0) as i32 } else { 0 };
                 let k = 10f64.powi(places);
-                Val::Num((a * k).round() / k)
+                let scaled = a * k;
+                if scaled.is_finite() { Val::Num(scaled.round() / k) } else { Val::Num(a) }
             }
             "count" => {
                 // Non-null values and objects: an empty field doesn't count, a subform does.
