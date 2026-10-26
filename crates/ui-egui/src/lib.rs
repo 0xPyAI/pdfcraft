@@ -52,7 +52,6 @@ mod editing;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_watch;
 pub mod folders_ui;
-mod format_text_ui;
 mod home;
 mod icon_data;
 pub mod icons;
@@ -126,6 +125,7 @@ use dialogs::word_count_ui;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 use panels::all_tools_ui;
 use panels::comments_panel;
+use panels::format_text_ui;
 #[cfg(test)]
 use state::CopyPage;
 #[cfg(not(target_arch = "wasm32"))]
