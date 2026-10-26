@@ -39,7 +39,6 @@ mod macos_association;
 mod menus;
 mod search_ui;
 pub mod side_panels;
-mod standards_ui;
 /// Header & footer / watermark / background dialog types (tests and automation).
 pub mod marks {
     pub use crate::marks_ui::{MarksDraft, PageRange, Subset};
@@ -125,6 +124,7 @@ use dialogs::marks_ui;
 use dialogs::pageboxes;
 use dialogs::palette;
 use dialogs::protect;
+use dialogs::standards_ui;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;

@@ -15,6 +15,7 @@ pub(super) mod pageboxes;
 pub(super) mod palette;
 mod prompts;
 pub(super) mod protect;
+pub(super) mod standards_ui;
 
 pub(crate) use prompts::{PromptButton, save_prompt_key};
 use prompts::{full_screen_prompt, link_prompt, password, remote_link_prompt, save_prompt, unlock};
