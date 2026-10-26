@@ -206,3 +206,6 @@ pub(crate) fn prepare_gate() -> (Arc<PrepareGate>, Receiver<()>, Sender<()>, Rec
     let (finished, finished_rx) = mpsc::channel();
     (Arc::new(PrepareGate { started, release: Mutex::new(release), finished }), started_rx, release_tx, finished_rx)
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests;

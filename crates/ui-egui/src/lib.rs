@@ -52,9 +52,6 @@ pub mod i18n;
 pub mod theme;
 mod widgets;
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod open_worker_tests;
-
 use pdfcraft_engine::{DocId, Session};
 
 pub use canvas::{DocView, RasterMemory};
