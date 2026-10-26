@@ -63,7 +63,6 @@ pub mod side_panels;
 mod sign_ui;
 mod stamps_ui;
 mod standards_ui;
-mod zoom_snap;
 /// Header & footer / watermark / background dialog types (tests and automation).
 pub mod marks {
     pub use crate::marks_ui::{MarksDraft, PageRange, Subset};
@@ -155,6 +154,7 @@ pub use canvas::scroll_speed;
 use canvas::signature_drag;
 use canvas::wheel_boost;
 use canvas::wheel_pager;
+use canvas::zoom_snap;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;
