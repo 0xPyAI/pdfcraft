@@ -123,7 +123,6 @@ mod tab_context;
 pub mod theme;
 pub mod ui_scale;
 pub mod updates;
-mod wheel_boost;
 mod wheel_pager;
 mod widgets;
 pub mod window_controls;
@@ -155,6 +154,7 @@ use canvas::image_pick;
 use canvas::page_pointer;
 pub use canvas::scroll_speed;
 use canvas::signature_drag;
+use canvas::wheel_boost;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;
