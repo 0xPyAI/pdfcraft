@@ -76,7 +76,6 @@ pub mod i18n;
 mod open_worker;
 mod organize_panel;
 pub mod portable;
-mod protect;
 mod recovery;
 #[cfg(not(target_arch = "wasm32"))]
 mod system_fonts;
@@ -125,6 +124,7 @@ use dialogs::credits;
 use dialogs::marks_ui;
 use dialogs::pageboxes;
 use dialogs::palette;
+use dialogs::protect;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;
