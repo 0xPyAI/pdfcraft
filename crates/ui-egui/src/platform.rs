@@ -9,3 +9,4 @@ pub(super) mod open_worker;
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) mod pickers;
 pub mod portable;
+pub mod ui_scale;
