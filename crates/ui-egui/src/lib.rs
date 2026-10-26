@@ -30,7 +30,6 @@ mod a11y_ui;
 mod actions_ui;
 mod all_tools_ui;
 mod appearance;
-mod calc_order_ui;
 pub mod canvas;
 mod chrome;
 mod combine_grid;
@@ -166,6 +165,7 @@ pub use state::{
 };
 use state::{DocumentCopyJob, GridFile};
 pub use tools::bulk_fields;
+use tools::calc_order_ui;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
