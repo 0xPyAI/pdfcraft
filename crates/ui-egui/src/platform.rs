@@ -4,3 +4,5 @@ pub mod file_watch;
 #[cfg(target_os = "macos")]
 pub(super) mod macos_association;
 pub mod motion;
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) mod open_worker;
