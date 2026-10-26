@@ -161,31 +161,31 @@ const PAGE_MODULES: [&str; 35] = [
     "canvas/selection.rs",
     "canvas/xform.rs",
     "canvas/zoom.rs",
-    "comments.rs",
-    "comments/composer.rs",
-    "comments/geometry.rs",
-    "comments/input.rs",
-    "comments/menu.rs",
-    "comments/paint.rs",
-    "comments/state.rs",
-    "forms_ui.rs",
-    "prepare.rs",
-    "fill_sign.rs",
-    "fill_sign/scan.rs",
-    "sign_ui.rs",
-    "crop.rs",
-    "zoom_snap.rs",
-    "camera_ui.rs",
-    "measure_ui.rs",
-    "redact_ui.rs",
-    "link_ui.rs",
-    "content_ui.rs",
-    "edit_text_ui.rs",
-    "edit_text_ui/image.rs",
-    "object_ui.rs",
-    "image_pick.rs",
-    "signature_drag.rs",
-    "calc_order_ui.rs",
+    "tools/comments.rs",
+    "tools/comments/composer.rs",
+    "tools/comments/geometry.rs",
+    "tools/comments/input.rs",
+    "tools/comments/menu.rs",
+    "tools/comments/paint.rs",
+    "tools/comments/state.rs",
+    "tools/forms_ui.rs",
+    "tools/prepare.rs",
+    "tools/fill_sign.rs",
+    "tools/fill_sign/scan.rs",
+    "tools/sign_ui.rs",
+    "canvas/crop.rs",
+    "canvas/zoom_snap.rs",
+    "tools/camera_ui.rs",
+    "tools/measure_ui.rs",
+    "tools/redact_ui.rs",
+    "tools/link_ui.rs",
+    "tools/content_ui.rs",
+    "tools/edit_text_ui.rs",
+    "tools/edit_text_ui/image.rs",
+    "tools/object_ui.rs",
+    "canvas/image_pick.rs",
+    "canvas/signature_drag.rs",
+    "tools/calc_order_ui.rs",
 ];
 
 /// egui's raw pointer state: where the pointer is, and which buttons are down or went down.
@@ -223,11 +223,11 @@ const NOT_PAGE_INPUT: [(&str, &str, &str); 11] = [
     ("canvas/area.rs", "presentation_click", "full screen's click to turn the page, read before the pages' widget exists"),
     ("canvas/bars.rs", "page_size_hint", "the page size hint sits in the view's corner, not on a page"),
     ("canvas/organize.rs", "organize_grid", "Organize Pages shows thumbnails, not pages"),
-    ("comments/input.rs", "keys", "keyboard handling after the pages: a drag cancelled with Escape ends once no button is down"),
-    ("forms_ui.rs", "overlay", "the field editor is an Area of its own over the page"),
-    ("content_ui.rs", "editor", "the added-text editor is an Area of its own over the page"),
-    ("edit_text_ui.rs", "overlay", "the paragraph editor is an Area of its own over the page"),
-    ("fill_sign/scan.rs", "scan_tab", "the signature dialog's Scan tab"),
+    ("tools/comments/input.rs", "keys", "keyboard handling after the pages: a drag cancelled with Escape ends once no button is down"),
+    ("tools/forms_ui.rs", "overlay", "the field editor is an Area of its own over the page"),
+    ("tools/content_ui.rs", "editor", "the added-text editor is an Area of its own over the page"),
+    ("tools/edit_text_ui.rs", "overlay", "the paragraph editor is an Area of its own over the page"),
+    ("tools/fill_sign/scan.rs", "scan_tab", "the signature dialog's Scan tab"),
 ];
 
 /// The function a `fn` line declares, laid out as rustfmt does (`pub`, `const` and the like
@@ -315,7 +315,7 @@ fn page_modules_read_the_pointer_only_through_page_pointer() {
             let file =
                 path.strip_prefix(&src).expect("under src").components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
             let source = std::fs::read_to_string(&path).expect("source file");
-            if file != "page_pointer.rs" && source.contains("PagePointer") && !PAGE_MODULES.contains(&file.as_str()) {
+            if file != "canvas/page_pointer.rs" && source.contains("PagePointer") && !PAGE_MODULES.contains(&file.as_str()) {
                 problems.push(format!("src/{file} takes the page pointer: add it to PAGE_MODULES."));
             }
         }
