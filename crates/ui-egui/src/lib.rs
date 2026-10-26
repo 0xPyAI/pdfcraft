@@ -34,7 +34,6 @@ pub use combine_ui::{Columns as CombineColumns, CombineView, Lock as CombineLock
 mod commands;
 mod comment_props;
 mod comments_panel;
-mod compare_ui;
 pub mod control;
 mod create_multiple_ui;
 mod create_ui;
@@ -166,6 +165,7 @@ use workflows::a11y_ui;
 use workflows::actions_ui;
 use workflows::combine_grid;
 use workflows::combine_ui;
+use workflows::compare_ui;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
