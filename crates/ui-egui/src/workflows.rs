@@ -3,3 +3,4 @@ pub(super) mod actions_ui;
 pub(super) mod combine_grid;
 pub(super) mod combine_ui;
 pub(super) mod compare_ui;
+pub(super) mod create_multiple_ui;
