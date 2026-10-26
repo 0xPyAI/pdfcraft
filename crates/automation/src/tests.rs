@@ -207,8 +207,7 @@ fn dot_dot_resolves_by_name_and_never_climbs_above_the_start() {
 #[test]
 fn names_from_documents_become_one_plain_file_name() {
     let dir = std::env::temp_dir().join("out");
-    for name in ["../../x.png", "/abs/x.png", r"..\..\x.png", "C:x.png", r"\\host\share\x.png", "a:stream", "..", ".", "", "tab\there", "ok.png"]
-    {
+    for name in ["../../x.png", "/abs/x.png", r"..\..\x.png", "C:x.png", r"\\host\share\x.png", "a:stream", "..", ".", "", "tab\there", "ok.png"] {
         let p = child(&dir, name);
         assert_eq!(p.parent(), Some(dir.as_path()), "{name:?} -> {}", p.display());
         assert_eq!(p.components().count(), dir.components().count() + 1, "{name:?} -> {}", p.display());
