@@ -3,8 +3,8 @@
 //! Line-unit events from a wheel describe notches, not motion over time. A fixed
 //! distance per notch makes a fast spin feel slow, so this module derives a bounded
 //! multiplier from arrival time and direction. The state is constant-size and leaves
-//! isolated notches unchanged. Touchpads that report fractional lines are not wheels
-//! and are never accelerated (see [`FrameInput::notches`]).
+//! isolated notches unchanged. Touchpads that report fractions of a line are not
+//! wheels: their motion is applied 1:1, never eased or accelerated (#3234, #3665).
 
 use egui::Vec2;
 
@@ -86,28 +86,31 @@ pub(crate) fn cap_frame(delta: Vec2) -> Vec2 {
 
 /// One frame of wheel input, normalized in a single pass. Line motion is in
 /// points; page motion remains in native units until the viewport is known.
+/// `precise` holds point input and touchpad motion sent in lines, `line` only
+/// whole wheel notches.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct FrameInput {
     pub precise: Vec2,
     pub line: Vec2,
-    /// The part of `line` that came in whole wheel notches: the only motion accelerated.
-    pub notches: Vec2,
     pub page: Vec2,
 }
 
-/// The whole wheel notches in `lines` of line-unit motion from `source`, or zero. A wheel clicks
-/// in whole lines. Touchpads also send line events, in fractions of a line many times a second
-/// (X11 smooth scrolling, Windows precision touchpads, where egui reports the source as unknown).
-/// That rate looks like a fast spin, so boosting those events made touchpad scrolling jump (#3665).
-fn notches(lines: f32, source: egui::MouseWheelSource) -> f32 {
-    let touch = matches!(source, egui::MouseWheelSource::Trackpad | egui::MouseWheelSource::Momentum);
-    if touch || lines.fract() != 0.0 { 0.0 } else { lines }
+/// Whether line-unit motion `lines` from `source` is a touchpad's rather than a wheel's. A wheel
+/// clicks in whole lines. Touchpads send fractions of a line many times a second where winit has
+/// no pixel deltas for them (X11 smooth scrolling, and Windows precision touchpads and their
+/// inertia, all through `WM_MOUSEWHEEL`); egui reports their source as unknown. Eased as notches,
+/// the page lagged and stuttered behind the fingers (#3234); boosted as a fast spin, it jumped
+/// ahead of them (#3665).
+fn touchpad_lines(lines: Vec2, source: egui::MouseWheelSource) -> bool {
+    matches!(source, egui::MouseWheelSource::Trackpad | egui::MouseWheelSource::Momentum) || lines.x.fract() != 0.0 || lines.y.fract() != 0.0
 }
 
 /// Folds raw wheel events into frame totals without consulting time or UI state.
-/// Invalid scales contribute no line motion.
+/// Invalid scales contribute no line motion. Touchpad motion sent in lines goes
+/// to `precise` at the line distance, to be applied 1:1 like point input.
 pub(crate) fn accumulate(events: &[egui::Event], line_points: f32, single_paging: bool) -> FrameInput {
     let line_points = sanitize_scale(line_points);
+    let clamp = |v: f32| v.clamp(-MAX_EVENT_UNITS, MAX_EVENT_UNITS);
     let mut out = FrameInput::default();
     for event in events {
         let egui::Event::MouseWheel { unit, delta, modifiers, source, .. } = event else { continue };
@@ -126,58 +129,57 @@ pub(crate) fn accumulate(events: &[egui::Event], line_points: f32, single_paging
                 }
             }
             egui::MouseWheelUnit::Point => out.precise += *delta,
-            egui::MouseWheelUnit::Line if modifiers.shift => {
-                let sum = delta.x + delta.y;
-                if sum.is_finite() {
-                    let sum = sum.clamp(-MAX_EVENT_UNITS, MAX_EVENT_UNITS);
-                    out.line.x += sum * line_points;
-                    out.notches.x += notches(sum, *source) * line_points;
-                }
-            }
             egui::MouseWheelUnit::Line => {
-                let x = delta.x.clamp(-MAX_EVENT_UNITS, MAX_EVENT_UNITS);
-                out.line.x += x * line_points;
-                out.notches.x += notches(x, *source) * line_points;
-                if !single_paging {
-                    let y = delta.y.clamp(-MAX_EVENT_UNITS, MAX_EVENT_UNITS);
-                    out.line.y += y * line_points;
-                    out.notches.y += notches(y, *source) * line_points;
+                let lines = if modifiers.shift {
+                    let sum = delta.x + delta.y;
+                    if !sum.is_finite() {
+                        continue;
+                    }
+                    Vec2::new(clamp(sum), 0.0)
+                } else {
+                    Vec2::new(clamp(delta.x), clamp(delta.y))
+                };
+                if touchpad_lines(lines, *source) {
+                    out.precise += lines * line_points;
+                } else {
+                    out.line.x += lines.x * line_points;
+                    if !single_paging {
+                        out.line.y += lines.y * line_points;
+                    }
                 }
             }
             egui::MouseWheelUnit::Page if modifiers.shift => {
                 let sum = delta.x + delta.y;
                 if sum.is_finite() {
-                    out.page.x += sum.clamp(-MAX_EVENT_UNITS, MAX_EVENT_UNITS);
+                    out.page.x += clamp(sum);
                 }
             }
             egui::MouseWheelUnit::Page => {
-                out.page.x += delta.x.clamp(-MAX_EVENT_UNITS, MAX_EVENT_UNITS);
-                out.page.y += delta.y.clamp(-MAX_EVENT_UNITS, MAX_EVENT_UNITS);
+                out.page.x += clamp(delta.x);
+                out.page.y += clamp(delta.y);
             }
         }
     }
     // Bound batched events before acceleration is applied.
     out.precise = cap_frame(out.precise);
     out.line = cap_frame(out.line);
-    out.notches = cap_frame(out.notches);
     out.page = cap_frame(out.page);
     out
 }
 
-/// Converts the frame's whole notches to the extra scroll delta beyond egui's share.
+/// Converts the frame's wheel notches to the extra scroll delta beyond egui's share.
 ///
 /// egui applies the base distance through its own smoothing. This function
-/// returns only the accelerated surplus, so an isolated notch adds nothing, and
-/// touchpad motion (fractional lines) adds nothing and leaves the burst alone.
+/// returns only the accelerated surplus, so an isolated notch adds nothing.
 /// Each axis advances once per frame; events batched into one frame cannot
 /// accelerate one another. Output is frame-capped.
 pub(crate) fn boost_extra(input: FrameInput, boost_x: &mut WheelBoost, boost_y: &mut WheelBoost, now: f64) -> Vec2 {
     let mut extra = Vec2::ZERO;
-    if input.notches.x != 0.0 && input.notches.x.is_finite() {
-        extra.x += input.notches.x * (boost_x.multiplier(now, input.notches.x) - 1.0);
+    if input.line.x != 0.0 && input.line.x.is_finite() {
+        extra.x += input.line.x * (boost_x.multiplier(now, input.line.x) - 1.0);
     }
-    if input.notches.y != 0.0 && input.notches.y.is_finite() {
-        extra.y += input.notches.y * (boost_y.multiplier(now, input.notches.y) - 1.0);
+    if input.line.y != 0.0 && input.line.y.is_finite() {
+        extra.y += input.line.y * (boost_y.multiplier(now, input.line.y) - 1.0);
     }
     cap_frame(extra)
 }
@@ -380,21 +382,25 @@ mod tests {
         assert!(peak >= -MAX_FRAME_POINTS, "extra stays frame-capped, got {peak}");
     }
 
-    /// #3665: a touchpad on X11 or a Windows precision touchpad sends line events of a fraction
-    /// of a line every frame. They keep their smoothed base distance and gain nothing, however
-    /// fast they arrive, so the page moves with the fingers instead of jumping ahead of them.
+    /// #3234, #3665: a touchpad on X11 or a Windows precision touchpad sends line events of a
+    /// fraction of a line every frame. They go to the precise 1:1 path at the line distance, not
+    /// to egui's easing, and gain nothing however fast they arrive, so the page moves with the
+    /// fingers instead of lagging behind or jumping ahead of them.
     #[test]
-    fn touchpad_line_streams_are_not_boosted() {
+    fn touchpad_line_streams_scroll_one_to_one_unboosted() {
         use egui::MouseWheelUnit::Line;
         let mut bx = WheelBoost::default();
         let mut by = WheelBoost::default();
         for i in 0..60 {
             let input = accumulate(&[wheel(Line, 0.0, -0.15), wheel(Line, 0.05, -0.2)], 100.0, false);
-            assert!((input.line - egui::vec2(5.0, -35.0)).length() < 1e-3, "the base distance is kept: {:?}", input.line);
-            assert_eq!(input.notches, egui::Vec2::ZERO);
+            assert!((input.precise - egui::vec2(5.0, -35.0)).length() < 1e-3, "1:1 at the line distance: {:?}", input.precise);
+            assert_eq!(input.line, egui::Vec2::ZERO, "nothing is left to egui's easing");
             assert_eq!(boost_extra(input, &mut bx, &mut by, 1.0 + f64::from(i) / 60.0), egui::Vec2::ZERO, "frame {i}");
         }
-        // Whole lines a platform says came from a trackpad are not boosted either.
+        // Sideways with Shift, as for point input.
+        let input = accumulate(&[shifted(Line, 0.0, -0.25)], 100.0, false);
+        assert_eq!((input.precise, input.line), (egui::vec2(-25.0, 0.0), egui::Vec2::ZERO));
+        // Whole lines a platform says came from a trackpad are touchpad motion too.
         let trackpad = |dy| egui::Event::MouseWheel {
             unit: Line,
             delta: egui::vec2(0.0, dy),
@@ -404,7 +410,7 @@ mod tests {
         };
         for i in 0..30 {
             let input = accumulate(&[trackpad(-1.0)], 100.0, false);
-            assert_eq!(input.line, egui::vec2(0.0, -100.0));
+            assert_eq!((input.precise, input.line), (egui::vec2(0.0, -100.0), egui::Vec2::ZERO));
             assert_eq!(boost_extra(input, &mut bx, &mut by, 3.0 + f64::from(i) / 60.0), egui::Vec2::ZERO, "frame {i}");
         }
         // A wheel spun right after still starts from an unboosted burst, then accelerates.

@@ -3062,8 +3062,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
             ui.input_mut(|i| i.smooth_scroll_delta.y = 0.0);
         }
     }
-    // Point input bypasses egui smoothing for 1:1 motion. Line input keeps egui's configured,
-    // smoothed base and adds only the accelerated surplus. While point suppression is active,
+    // Point input, and touchpad motion sent as fractions of a line (#3234), bypasses egui
+    // smoothing for 1:1 motion. Wheel notches keep egui's configured, smoothed base and add only
+    // the accelerated surplus. While point suppression is active,
     // reconstruct line and page input here so current coarse events survive without exposing an
     // older eased tail.
     let now = ui.input(|i| i.time);
