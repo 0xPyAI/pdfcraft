@@ -36,7 +36,6 @@ pub mod control;
 mod drag_pointer;
 #[cfg(target_os = "macos")]
 mod macos_association;
-mod marks_ui;
 mod menus;
 mod search_ui;
 pub mod side_panels;
@@ -125,6 +124,7 @@ use canvas::zoom_snap;
 use dialogs::appearance;
 use dialogs::comment_props;
 use dialogs::credits;
+use dialogs::marks_ui;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;
