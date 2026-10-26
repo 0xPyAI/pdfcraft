@@ -8,6 +8,7 @@ use pdfcraft_engine::Edit;
 use crate::{CloseRequest, Dialog, PdfCraftApp, PropsTab, panels::human_size, widgets};
 
 pub(super) mod appearance;
+pub(super) mod comment_props;
 mod prompts;
 
 pub(crate) use prompts::{PromptButton, save_prompt_key};

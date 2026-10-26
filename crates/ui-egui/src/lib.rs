@@ -31,7 +31,6 @@ mod chrome;
 pub use combine_grid::ThumbState as CombineThumb;
 pub use combine_ui::{Columns as CombineColumns, CombineView, Lock as CombineLock, SortKey};
 mod commands;
-mod comment_props;
 mod comments_panel;
 pub mod control;
 mod credits;
@@ -125,6 +124,7 @@ use canvas::wheel_boost;
 use canvas::wheel_pager;
 use canvas::zoom_snap;
 use dialogs::appearance;
+use dialogs::comment_props;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;
