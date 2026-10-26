@@ -26,6 +26,7 @@ pub(super) mod fling;
 pub(super) mod image_pick;
 mod navigation;
 mod organize;
+pub(super) mod page_pointer;
 mod selection;
 mod xform;
 mod zoom;
