@@ -79,7 +79,6 @@ pub mod file_watch;
 mod files;
 pub mod folders_ui;
 mod format_text_ui;
-pub mod forms_ui;
 mod home;
 mod icon_data;
 pub mod icons;
@@ -166,6 +165,7 @@ use tools::content_ui;
 use tools::edit_text_ui;
 pub use tools::field_table_ui;
 pub use tools::fill_sign;
+pub use tools::forms_ui;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
