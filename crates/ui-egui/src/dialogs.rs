@@ -12,6 +12,7 @@ pub(super) mod comment_props;
 pub(super) mod credits;
 pub(super) mod marks_ui;
 pub(super) mod pageboxes;
+pub(super) mod palette;
 mod prompts;
 
 pub(crate) use prompts::{PromptButton, save_prompt_key};

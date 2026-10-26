@@ -63,7 +63,6 @@ pub mod last_session;
 pub mod last_view;
 pub mod motion;
 mod page_selection_ui;
-mod palette;
 mod panels;
 #[cfg(not(target_arch = "wasm32"))]
 mod pickers;
@@ -125,6 +124,7 @@ use dialogs::comment_props;
 use dialogs::credits;
 use dialogs::marks_ui;
 use dialogs::pageboxes;
+use dialogs::palette;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;
