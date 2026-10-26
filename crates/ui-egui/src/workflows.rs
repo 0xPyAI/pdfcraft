@@ -6,3 +6,4 @@ pub(super) mod compare_ui;
 pub(super) mod create_multiple_ui;
 pub(super) mod create_ui;
 pub(super) mod export_ui;
+pub(super) mod files;

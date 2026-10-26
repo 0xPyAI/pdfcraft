@@ -61,7 +61,6 @@ pub use edit_text_ui::CropMode;
 mod editing;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_watch;
-mod files;
 pub mod folders_ui;
 mod format_text_ui;
 mod home;
@@ -165,6 +164,7 @@ use workflows::combine_ui;
 use workflows::compare_ui;
 use workflows::create_ui;
 use workflows::export_ui;
+use workflows::files;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
