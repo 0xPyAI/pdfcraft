@@ -25,7 +25,6 @@ macro_rules! tl_ctx {
         $crate::i18n::tr_ctx($crate::i18n::current(), $context, $s)
     };
 }
-mod all_tools_ui;
 pub mod canvas;
 mod chrome;
 pub use combine_grid::ThumbState as CombineThumb;
@@ -126,6 +125,7 @@ use dialogs::protect;
 use dialogs::standards_ui;
 use dialogs::word_count_ui;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
+use panels::all_tools_ui;
 #[cfg(test)]
 use state::CopyPage;
 #[cfg(not(target_arch = "wasm32"))]
