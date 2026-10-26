@@ -31,6 +31,7 @@ pub mod scroll_speed;
 mod selection;
 pub(super) mod signature_drag;
 pub(super) mod wheel_boost;
+pub(super) mod wheel_pager;
 mod xform;
 mod zoom;
 

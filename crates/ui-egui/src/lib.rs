@@ -123,7 +123,6 @@ mod tab_context;
 pub mod theme;
 pub mod ui_scale;
 pub mod updates;
-mod wheel_pager;
 mod widgets;
 pub mod window_controls;
 #[cfg(not(target_arch = "wasm32"))]
@@ -155,6 +154,7 @@ use canvas::page_pointer;
 pub use canvas::scroll_speed;
 use canvas::signature_drag;
 use canvas::wheel_boost;
+use canvas::wheel_pager;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;
