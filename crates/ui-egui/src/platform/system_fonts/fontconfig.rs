@@ -160,7 +160,7 @@ mod tests {
         fn isolated(&self, test: &str) {
             // Environment selection is process-global: never mutate it in a parallel harness.
             let output = std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", &format!("system_fonts::fontconfig::tests::{test}"), "--nocapture"])
+                .args(["--exact", &format!("platform::system_fonts::fontconfig::tests::{test}"), "--nocapture"])
                 .env("FONTCONFIG_PATH", &self.0)
                 .env("FONTCONFIG_FILE", "fonts.conf")
                 .env("PDFCRAFT_FONTCONFIG_TEST_ROOT", &self.0)
