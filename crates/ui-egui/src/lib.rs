@@ -73,7 +73,6 @@ mod panels;
 #[cfg(not(target_arch = "wasm32"))]
 mod pickers;
 pub mod units;
-mod web_print;
 mod word_count_ui;
 pub use print_ui::{Handling as PrintHandling, OptionsSource, PrintDraft, PrinterSource, Which as PrintWhich, system_printers};
 pub use redact_ui::{HiddenDraft, PagesDraft as RedactPagesDraft, RedactPrefs, SearchDraft as RedactSearchDraft, SearchMode as RedactSearchMode};
@@ -165,6 +164,7 @@ use workflows::js_ui;
 use workflows::ocr_ui;
 use workflows::optimize_ui;
 use workflows::print_ui;
+use workflows::web_print;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
