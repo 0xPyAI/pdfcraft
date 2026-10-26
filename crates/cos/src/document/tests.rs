@@ -465,8 +465,7 @@ fn opening_an_exhausted_classic_xref_repairs_and_allocates() {
 
 #[test]
 fn opening_an_exhausted_xref_stream_repairs_and_allocates() {
-    let mut bytes =
-        b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n".to_vec();
+    let mut bytes = b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n".to_vec();
     let offset = bytes.len();
     bytes.extend_from_slice(b"3 0 obj\n<< /Type /XRef /Size 4 /Root 1 0 R /W [1 4 2] /Index [0 3 4294967295 1] /Length 28 >>\nstream\n");
     for (kind, position, generation) in [(0_u8, 0_u32, 65535_u16), (1, 9, 0), (1, 58, 0), (1, 58, 0)] {
@@ -752,12 +751,8 @@ fn streams_without_length_share_one_endstream_search() {
     }
     file.extend_from_slice(b"endstream\nendobj\n");
     file.extend_from_slice(
-        format!(
-            "{0} 0 obj\n<< /Type /Catalog /Pages {1} 0 R >>\nendobj\n{1} 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n",
-            n + 1,
-            n + 2
-        )
-        .as_bytes(),
+        format!("{0} 0 obj\n<< /Type /Catalog /Pages {1} 0 R >>\nendobj\n{1} 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n", n + 1, n + 2)
+            .as_bytes(),
     );
     file.extend_from_slice(format!("trailer\n<< /Root {} 0 R /Size {} >>\n%%EOF\n", n + 1, n + 3).as_bytes());
     let len = file.len();
@@ -950,9 +945,7 @@ fn a_hybrid_stream_named_by_many_revisions_is_read_once() {
     let revisions = 200;
     for _ in 0..revisions {
         let at = out.len();
-        out.extend_from_slice(
-            format!("xref\ntrailer << /Size 6 /Root 1 0 R /XRefStm {stream} /Prev {prev} >>\nstartxref\n{at}\n%%EOF\n").as_bytes(),
-        );
+        out.extend_from_slice(format!("xref\ntrailer << /Size 6 /Root 1 0 R /XRefStm {stream} /Prev {prev} >>\nstartxref\n{at}\n%%EOF\n").as_bytes());
         prev = at;
     }
     let doc = Document::open(Arc::new(out)).unwrap();
@@ -976,15 +969,11 @@ fn a_repeated_hybrid_stream_records_each_sections_conflicts() {
     // This section's table places object 3 at the catalog; the stream puts it in object stream 4.
     let older = out.len();
     out.extend_from_slice(
-        format!(
-            "xref\n3 1\n{catalog:010} 00000 n \ntrailer << /Size 6 /Root 1 0 R /XRefStm {stream} /Prev {base} >>\nstartxref\n{older}\n%%EOF\n"
-        )
-        .as_bytes(),
+        format!("xref\n3 1\n{catalog:010} 00000 n \ntrailer << /Size 6 /Root 1 0 R /XRefStm {stream} /Prev {base} >>\nstartxref\n{older}\n%%EOF\n")
+            .as_bytes(),
     );
     let newer = out.len();
-    out.extend_from_slice(
-        format!("xref\ntrailer << /Size 6 /Root 1 0 R /XRefStm {stream} /Prev {older} >>\nstartxref\n{newer}\n%%EOF\n").as_bytes(),
-    );
+    out.extend_from_slice(format!("xref\ntrailer << /Size 6 /Root 1 0 R /XRefStm {stream} /Prev {older} >>\nstartxref\n{newer}\n%%EOF\n").as_bytes());
     let doc = Document::open(Arc::new(out)).unwrap();
     assert_eq!(doc.xref_oddities(), [(older as u64, 3)]);
     assert_eq!(text_of(&doc, 3, b"Hidden").as_deref(), Some("yes"));
@@ -1062,14 +1051,8 @@ fn compressed_in_compressed_fixture() -> Document {
     let inner = "<< /Type /Outlines /Count 0 >>";
     at(&mut out, 3, &format!("<< /Type /ObjStm /N 1 /First 4 /Length {} >>\nstream\n4 0 {inner}\nendstream", 4 + inner.len()));
     // /W [1 2 1]: object 3 is said to live in stream 99 (which does not exist), 4 in stream 3.
-    let rows: Vec<[u8; 4]> = vec![
-        [0, 0, 0, 255],
-        [1, 0, o1 as u8, 0],
-        [1, 0, o2 as u8, 0],
-        [2, 0, 99, 0],
-        [2, 0, 3, 0],
-        [1, (out.len() >> 8) as u8, out.len() as u8, 0],
-    ];
+    let rows: Vec<[u8; 4]> =
+        vec![[0, 0, 0, 255], [1, 0, o1 as u8, 0], [1, 0, o2 as u8, 0], [2, 0, 99, 0], [2, 0, 3, 0], [1, (out.len() >> 8) as u8, out.len() as u8, 0]];
     let rows: Vec<u8> = rows.concat();
     let xref = out.len();
     out.extend_from_slice(
@@ -1141,10 +1124,8 @@ fn a_container_freed_in_a_saved_revision_is_not_found_by_its_header() {
 /// a full save wrote the three missing kids as null. The offset is read from the reference.
 #[test]
 fn a_prev_written_as_a_reference_still_reaches_the_earlier_sections() {
-    let base = build(
-        &["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R >>"],
-        "/Root 1 0 R",
-    );
+    let base =
+        build(&["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R >>"], "/Root 1 0 R");
     let prev = String::from_utf8_lossy(&base).rfind("xref\n0 4").unwrap();
     let update = |prev_entry: &str| {
         let mut bytes = base.clone();
@@ -1152,10 +1133,8 @@ fn a_prev_written_as_a_reference_still_reaches_the_earlier_sections() {
         bytes.extend_from_slice(b"4 0 obj\n<< /Title (Update) >>\nendobj\n");
         let xref = bytes.len();
         bytes.extend_from_slice(
-            format!(
-                "xref\n4 1\n{at:010} 00000 n \ntrailer\n<< /Size 5 /Root 1 0 R /Info 4 0 R /Prev {prev_entry} >>\nstartxref\n{xref}\n%%EOF\n"
-            )
-            .as_bytes(),
+            format!("xref\n4 1\n{at:010} 00000 n \ntrailer\n<< /Size 5 /Root 1 0 R /Info 4 0 R /Prev {prev_entry} >>\nstartxref\n{xref}\n%%EOF\n")
+                .as_bytes(),
         );
         Document::open(Arc::new(bytes)).unwrap()
     };
@@ -1177,10 +1156,8 @@ fn a_prev_written_as_a_reference_still_reaches_the_earlier_sections() {
 /// (inside the header), the chain broke and the file was rebuilt without its revisions.
 #[test]
 fn a_prev_reference_to_an_object_holding_the_offset_reads_that_offset() {
-    let mut bytes = build(
-        &["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R >>"],
-        "/Root 1 0 R",
-    );
+    let mut bytes =
+        build(&["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R >>"], "/Root 1 0 R");
     let prev = String::from_utf8_lossy(&bytes).rfind("xref\n0 4").unwrap();
     let mut at = Vec::new();
     for (num, body) in
