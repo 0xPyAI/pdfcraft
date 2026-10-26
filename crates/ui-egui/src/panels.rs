@@ -17,6 +17,7 @@ pub(super) mod organize_panel;
 pub(super) mod page_selection_ui;
 mod pages;
 mod right;
+pub(super) mod search_ui;
 mod tools;
 
 pub use bookmarks::BmAction;
