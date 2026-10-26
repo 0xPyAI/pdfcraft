@@ -150,7 +150,7 @@ fn edges_are_primary_finite_in_order_and_capped() {
 }
 
 /// The page modules: the per-page chain in `canvas::document_area` and what it calls.
-const PAGE_MODULES: [&str; 27] = [
+const PAGE_MODULES: [&str; 28] = [
     "canvas.rs",
     "canvas/area.rs",
     "canvas/bars.rs",
@@ -174,6 +174,7 @@ const PAGE_MODULES: [&str; 27] = [
     "link_ui.rs",
     "content_ui.rs",
     "edit_text_ui.rs",
+    "edit_text_ui/image.rs",
     "object_ui.rs",
     "image_pick.rs",
     "signature_drag.rs",
