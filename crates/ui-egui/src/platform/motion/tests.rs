@@ -46,8 +46,7 @@ fn a_touch_gesture_keeps_its_modifiers_and_ends_clean() {
     let options = egui::InputOptions::default();
     let point = |dy: f32, phase, modifiers| wheel(MouseWheelUnit::Point, vec2(0.0, dy), phase, modifiers);
     // ⌘ held as the fingers land, let go before the momentum: still zooming.
-    let began =
-        reader.read(&[point(0.0, TouchPhase::Start, Modifiers::COMMAND), point(20.0, TouchPhase::Move, Modifiers::COMMAND)], 600.0, &options);
+    let began = reader.read(&[point(0.0, TouchPhase::Start, Modifiers::COMMAND), point(20.0, TouchPhase::Move, Modifiers::COMMAND)], 600.0, &options);
     assert!(began.zoom > 1.0 && began.scroll == Vec2::ZERO, "{began:?}");
     let momentum = reader.read(&[point(20.0, TouchPhase::Move, Modifiers::NONE)], 600.0, &options);
     assert!(momentum.zoom > 1.0 && momentum.scroll == Vec2::ZERO, "{momentum:?}");
@@ -204,8 +203,7 @@ fn the_preference_overrides_the_system_for_every_animation() {
     let ctx = egui::Context::default();
     let mut motion = Motion::default();
     let mut time = 0.0;
-    for (effects, times) in [(Off, (0.0, ScrollAnimation::none())), (System, egui_times), (Off, (0.0, ScrollAnimation::none())), (On, egui_times)]
-    {
+    for (effects, times) in [(Off, (0.0, ScrollAnimation::none())), (System, egui_times), (Off, (0.0, ScrollAnimation::none())), (On, egui_times)] {
         pass(&ctx, &mut time, Vec::new(), |ctx| motion.begin_pass(ctx, effects));
         let style = ctx.global_style();
         assert_eq!((style.animation_time, style.scroll_animation), times, "{effects:?}");

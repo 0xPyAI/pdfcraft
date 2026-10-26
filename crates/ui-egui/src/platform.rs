@@ -3,3 +3,4 @@ pub(super) mod drag_pointer;
 pub mod file_watch;
 #[cfg(target_os = "macos")]
 pub(super) mod macos_association;
+pub mod motion;

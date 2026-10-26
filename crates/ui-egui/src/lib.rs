@@ -48,7 +48,6 @@ pub mod folders_ui;
 mod home;
 pub mod last_session;
 pub mod last_view;
-pub mod motion;
 mod panels;
 #[cfg(not(target_arch = "wasm32"))]
 mod pickers;
@@ -125,6 +124,7 @@ use platform::drag_pointer;
 pub use platform::file_watch;
 #[cfg(target_os = "macos")]
 use platform::macos_association;
+pub use platform::motion;
 #[cfg(test)]
 use state::CopyPage;
 #[cfg(not(target_arch = "wasm32"))]
