@@ -77,7 +77,6 @@ pub use create_ui::Clip;
 pub use link_ui::LinkDraft;
 pub use optimize_ui::{OptimizeDraft, OptimizeTab};
 pub use sign_ui::{DigitalIdEntry, SignDraft, SignGraphic, SignStep};
-mod autoscroll;
 mod bidi;
 pub mod bulk_fields;
 mod dialogs;
@@ -155,6 +154,7 @@ mod state;
 pub(crate) use app::{MAX_AUTHOR_CHARS, copy_refused, date_text_for_pdf, print_refused};
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use app::same_file;
+use canvas::autoscroll;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;

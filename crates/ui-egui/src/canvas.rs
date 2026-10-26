@@ -17,6 +17,7 @@ use crate::theme::{self, Tokens};
 use crate::{PdfCraftApp, QuickTool, RightPanel, comments, icons, widgets};
 
 mod area;
+pub(super) mod autoscroll;
 mod bars;
 mod cache;
 mod find;
