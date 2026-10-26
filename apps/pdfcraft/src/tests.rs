@@ -684,7 +684,7 @@ fn the_desktop_entry_names_the_window_class() {
 fn start_up_and_the_panic_hook_never_use_eprintln() {
     let source = include_str!("main.rs");
     // Everything before the top-level test module is product code.
-    let product = source.split("\n#[cfg(test)]\nmod tests {").next().unwrap_or(source);
+    let product = source.split("\n#[cfg(test)]\nmod tests;").next().unwrap_or(source);
     assert!(product.len() < source.len(), "found the end of the product code");
     let offenders: Vec<_> = product
         .lines()
