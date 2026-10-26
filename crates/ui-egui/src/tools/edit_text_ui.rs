@@ -779,7 +779,7 @@ mod tests {
         // face until the font was found again in the document-font menu (#2591).
         let (mut app, ed) = preview_app();
         app.views[0].line_editor = Some(ed);
-        let inter = include_bytes!("../../../assets/fonts/Inter-Regular.ttf").to_vec();
+        let inter = include_bytes!("../../../../assets/fonts/Inter-Regular.ttf").to_vec();
         app.use_files(crate::files::FilePurpose::TextFont { page: 0 }, vec![("Inter-Regular.ttf".into(), inter)]);
         let doc = app.session.get(app.views[0].id).unwrap();
         let lines = doc.text_lines(0);
