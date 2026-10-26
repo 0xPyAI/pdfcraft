@@ -164,12 +164,22 @@ pub static LANGUAGES: [LangInfo; 35] = [
     LangInfo { code: "ja", name: "日本語", source: include_str!("i18n/ja.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Simplified Chinese; `zh`, `zh-CN`, `zh-SG` and `zh-Hans-*` locales resolve here (see `candidates`).
     LangInfo {
-        code: "zh-hans", name: "简体中文", source: include_str!("i18n/zh-hans.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new()
+        code: "zh-hans",
+        name: "简体中文",
+        source: include_str!("i18n/zh-hans.tsv"),
+        plural: plural_none,
+        rtl: false,
+        catalog: OnceLock::new(),
     },
     // Traditional Chinese in the vocabulary used in Taiwan; `zh-TW`, `zh-HK`, `zh-MO` and `zh-Hant-*`
     // locales all resolve here (see `candidates`).
     LangInfo {
-        code: "zh-hant", name: "繁體中文", source: include_str!("i18n/zh-hant.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new()
+        code: "zh-hant",
+        name: "繁體中文",
+        source: include_str!("i18n/zh-hant.tsv"),
+        plural: plural_none,
+        rtl: false,
+        catalog: OnceLock::new(),
     },
     LangInfo { code: "cs", name: "Čeština", source: include_str!("i18n/cs.tsv"), plural: plural_cs, rtl: false, catalog: OnceLock::new() },
     // Brazilian Portuguese; `pt`, `pt-BR` and `pt-PT` locales all resolve here (see `candidates`).
@@ -188,9 +198,13 @@ pub static LANGUAGES: [LangInfo; 35] = [
     // French; every `fr-*` locale (`fr-FR`, `fr-CA`, `fr-BE` ...) resolves here.
     LangInfo { code: "fr", name: "Français", source: include_str!("i18n/fr.tsv"), plural: plural_fr, rtl: false, catalog: OnceLock::new() },
     // Russian; every `ru-*` locale (`ru-RU`, `ru-BY`, `ru-KZ` ...) resolves here.
-    LangInfo { code: "ru", name: "Русский", source: include_str!("i18n/ru.tsv"), plural: plural_russian, rtl: false, catalog: OnceLock::new() },
+    LangInfo {
+        code: "ru", name: "Русский", source: include_str!("i18n/ru.tsv"), plural: plural_russian, rtl: false, catalog: OnceLock::new()
+    },
     // Kazakh; every `kk-*` locale (`kk-KZ`, `kk-KZ.UTF-8`) resolves here.
-    LangInfo { code: "kk", name: "Қазақша", source: include_str!("i18n/kk.tsv"), plural: plural_one_other, rtl: false, catalog: OnceLock::new() },
+    LangInfo {
+        code: "kk", name: "Қазақша", source: include_str!("i18n/kk.tsv"), plural: plural_one_other, rtl: false, catalog: OnceLock::new()
+    },
     // Bulgarian; every `bg-*` locale (`bg-BG`) resolves here.
     LangInfo {
         code: "bg", name: "Български", source: include_str!("i18n/bg.tsv"), plural: plural_one_other, rtl: false, catalog: OnceLock::new()
@@ -213,7 +227,12 @@ pub static LANGUAGES: [LangInfo; 35] = [
     // Central Kurdish (Sorani); every `ckb-*` locale (`ckb-IQ`, `ckb-IR`) resolves here. Right to
     // left like Arabic: see `LangInfo::rtl`. CLDR `ckb` counts have two forms (one, other).
     LangInfo {
-        code: "ckb", name: "کوردیی ناوەندی", source: include_str!("i18n/ckb.tsv"), plural: plural_one_other, rtl: true, catalog: OnceLock::new()
+        code: "ckb",
+        name: "کوردیی ناوەندی",
+        source: include_str!("i18n/ckb.tsv"),
+        plural: plural_one_other,
+        rtl: true,
+        catalog: OnceLock::new(),
     },
     // Persian (Farsi); every `fa-*` locale (`fa-IR`, `fa_IR.UTF-8`, `fa-AF` ...) resolves here. Right
     // to left like Arabic: see `LangInfo::rtl`. CLDR `fa` counts have two forms (one: i = 0 or n = 1,
@@ -223,7 +242,9 @@ pub static LANGUAGES: [LangInfo; 35] = [
     LangInfo { code: "pl", name: "Polski", source: include_str!("i18n/pl.tsv"), plural: plural_polish, rtl: false, catalog: OnceLock::new() },
     // Slovene; every `sl-*` locale (`sl-SI`) resolves here. Four plural forms (one, two, few, other).
     LangInfo { code: "sl", name: "Slovenščina", source: include_str!("i18n/sl.tsv"), plural: plural_sl, rtl: false, catalog: OnceLock::new() },
-    LangInfo { code: "el", name: "Ελληνικά", source: include_str!("i18n/el.tsv"), plural: plural_one_other, rtl: false, catalog: OnceLock::new() },
+    LangInfo {
+        code: "el", name: "Ελληνικά", source: include_str!("i18n/el.tsv"), plural: plural_one_other, rtl: false, catalog: OnceLock::new()
+    },
     // Turkish; every `tr-*` locale (`tr-TR`, `tr_TR.UTF-8`) resolves here.
     LangInfo { code: "tr", name: "Türkçe", source: include_str!("i18n/tr.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Lithuanian; every `lt-*` locale (`lt-LT`, `lt_LT.UTF-8`) resolves here. Three plural forms (one, few, other).
@@ -246,17 +267,28 @@ pub static LANGUAGES: [LangInfo; 35] = [
     // Romanian; every `ro-*` locale (`ro-RO`, `ro_RO.UTF-8`, `ro-MD`) resolves here. Three plural forms (one, few, other).
     LangInfo { code: "ro", name: "Română", source: include_str!("i18n/ro.tsv"), plural: plural_ro, rtl: false, catalog: OnceLock::new() },
     // Lao; every `lo-*` locale (`lo-LA`, `lo_LA.UTF-8` ...) resolves here.
-    LangInfo { code: "lo", name: "ພາສາລາວ", source: include_str!("i18n/lo.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
+    LangInfo {
+        code: "lo", name: "ພາສາລາວ", source: include_str!("i18n/lo.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new()
+    },
     // Hindi; every `hi-*` locale (`hi-IN`, `hi_IN.UTF-8`) resolves here. CLDR `hi` has "one"
     // (0 and 1) and "other", but the catalog's nouns are the same in both ("{n} पृष्ठ"), so
     // `@plural` entries list a single form.
-    LangInfo { code: "hi", name: "हिन्दी", source: include_str!("i18n/hi.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
+    LangInfo {
+        code: "hi", name: "हिन्दी", source: include_str!("i18n/hi.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new()
+    },
     // Korean; every `ko-*` locale (`ko-KR`, `ko_KR.UTF-8`) resolves here. CLDR `ko` counts have
     // one form ("other"), so `@plural` entries list a single form.
     LangInfo { code: "ko", name: "한국어", source: include_str!("i18n/ko.tsv"), plural: plural_none, rtl: false, catalog: OnceLock::new() },
     // Norwegian Bokmål; every `nb-*` locale resolves here, and so do general Norwegian (`no-*`) and
     // Nynorsk (`nn-*`), which have no catalog of their own (see `candidates`).
-    LangInfo { code: "nb", name: "Norsk bokmål", source: include_str!("i18n/nb.tsv"), plural: plural_one_other, rtl: false, catalog: OnceLock::new() },
+    LangInfo {
+        code: "nb",
+        name: "Norsk bokmål",
+        source: include_str!("i18n/nb.tsv"),
+        plural: plural_one_other,
+        rtl: false,
+        catalog: OnceLock::new(),
+    },
 ];
 
 impl LangInfo {
