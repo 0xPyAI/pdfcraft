@@ -56,7 +56,6 @@ mod ocr_ui;
 mod optimize_ui;
 mod search_ui;
 pub mod side_panels;
-mod stamps_ui;
 mod standards_ui;
 /// Header & footer / watermark / background dialog types (tests and automation).
 pub mod marks {
@@ -166,6 +165,7 @@ use tools::object_ui;
 pub use tools::prepare;
 use tools::redact_ui;
 use tools::sign_ui;
+use tools::stamps_ui;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
