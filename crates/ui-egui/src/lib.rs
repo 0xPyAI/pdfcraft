@@ -46,8 +46,6 @@ mod bidi;
 mod dialogs;
 pub use edit_text_ui::CropMode;
 mod editing;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod file_watch;
 pub mod folders_ui;
 mod home;
 pub mod last_session;
@@ -125,6 +123,8 @@ use panels::page_selection_ui;
 use panels::search_ui;
 pub use panels::side_panels;
 use platform::drag_pointer;
+#[cfg(not(target_arch = "wasm32"))]
+pub use platform::file_watch;
 #[cfg(test)]
 use state::CopyPage;
 #[cfg(not(target_arch = "wasm32"))]
