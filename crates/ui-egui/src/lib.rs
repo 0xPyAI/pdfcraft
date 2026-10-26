@@ -35,7 +35,6 @@ mod commands;
 mod comment_props;
 mod comments_panel;
 pub mod control;
-mod create_ui;
 mod credits;
 mod drag_pointer;
 mod export_ui;
@@ -165,6 +164,7 @@ use workflows::actions_ui;
 use workflows::combine_grid;
 use workflows::combine_ui;
 use workflows::compare_ui;
+use workflows::create_ui;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
