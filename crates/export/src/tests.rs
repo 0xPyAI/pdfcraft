@@ -441,16 +441,7 @@ fn word_opens_tables_up_to_its_column_limit() {
 }
 
 fn block(t: &str, x0: f64, y0: f64, x1: f64, y1: f64) -> Block {
-    Block {
-        text: t.into(),
-        rect: [x0, y0, x1, y1],
-        size: 12.0,
-        bold: false,
-        italic: false,
-        color: [0.0; 3],
-        rotation: 0.0,
-        space_around: [false; 2],
-    }
+    Block { text: t.into(), rect: [x0, y0, x1, y1], size: 12.0, bold: false, italic: false, color: [0.0; 3], rotation: 0.0, space_around: [false; 2] }
 }
 
 /// #2806: a sentence whose link is set in another colour or font runs on as separate blocks
