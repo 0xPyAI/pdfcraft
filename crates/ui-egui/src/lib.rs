@@ -49,8 +49,6 @@ mod home;
 pub mod last_session;
 pub mod last_view;
 mod panels;
-#[cfg(not(target_arch = "wasm32"))]
-mod pickers;
 pub mod units;
 pub use print_ui::{Handling as PrintHandling, OptionsSource, PrintDraft, PrinterSource, Which as PrintWhich, system_printers};
 pub use redact_ui::{HiddenDraft, PagesDraft as RedactPagesDraft, RedactPrefs, SearchDraft as RedactSearchDraft, SearchMode as RedactSearchMode};
@@ -124,6 +122,8 @@ use platform::macos_association;
 pub use platform::motion;
 #[cfg(not(target_arch = "wasm32"))]
 use platform::open_worker;
+#[cfg(not(target_arch = "wasm32"))]
+use platform::pickers;
 #[cfg(test)]
 use state::CopyPage;
 #[cfg(not(target_arch = "wasm32"))]
