@@ -64,7 +64,6 @@ mod standards_ui;
 pub mod marks {
     pub use crate::marks_ui::{MarksDraft, PageRange, Subset};
 }
-mod link_ui;
 mod object_ui;
 pub use create_ui::Clip;
 pub use link_ui::LinkDraft;
@@ -166,6 +165,7 @@ use tools::edit_text_ui;
 pub use tools::field_table_ui;
 pub use tools::fill_sign;
 pub use tools::forms_ui;
+use tools::link_ui;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
