@@ -118,7 +118,6 @@ mod organize_panel;
 pub mod portable;
 mod protect;
 mod recovery;
-pub mod scroll_speed;
 #[cfg(not(target_arch = "wasm32"))]
 mod system_fonts;
 mod tab_context;
@@ -155,6 +154,7 @@ use canvas::crop;
 use canvas::fling;
 use canvas::image_pick;
 use canvas::page_pointer;
+pub use canvas::scroll_speed;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;

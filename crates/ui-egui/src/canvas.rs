@@ -27,6 +27,7 @@ pub(super) mod image_pick;
 mod navigation;
 mod organize;
 pub(super) mod page_pointer;
+pub mod scroll_speed;
 mod selection;
 mod xform;
 mod zoom;
