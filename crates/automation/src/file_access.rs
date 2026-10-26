@@ -396,10 +396,22 @@ mod tests {
         // discovered file again before `process` reads it or `publish` writes it.
         const RESOLVED_BY_CALLER: &[&str] =
             &["write_atomic", "write_atomic_with", "read_input", "read_input_bytes", "read_review_sidecar", "process", "linked", "walk", "publish"];
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut dirs = vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+        let mut files = vec![];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    if path.file_name().is_some_and(|n| !n.to_string_lossy().starts_with("tests")) {
+                        dirs.push(path);
+                    }
+                } else {
+                    files.push(path);
+                }
+            }
+        }
         let mut offenders = vec![];
-        for entry in std::fs::read_dir(&dir).unwrap() {
-            let path = entry.unwrap().path();
+        for path in files {
             if path.extension().is_none_or(|e| e != "rs")
                 || path.file_name().is_some_and(|n| n == "file_access.rs" || n.to_string_lossy().starts_with("tests"))
             {
