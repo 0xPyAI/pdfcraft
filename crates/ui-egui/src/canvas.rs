@@ -20,6 +20,7 @@ mod area;
 pub(super) mod autoscroll;
 mod bars;
 mod cache;
+pub(super) mod crop;
 mod find;
 mod navigation;
 mod organize;

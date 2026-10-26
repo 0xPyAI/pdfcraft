@@ -49,7 +49,6 @@ pub mod control;
 mod create_multiple_ui;
 mod create_ui;
 mod credits;
-mod crop;
 mod drag_pointer;
 mod export_ui;
 mod js_ui;
@@ -155,6 +154,7 @@ pub(crate) use app::{MAX_AUTHOR_CHARS, copy_refused, date_text_for_pdf, print_re
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use app::same_file;
 use canvas::autoscroll;
+use canvas::crop;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;
