@@ -5,6 +5,8 @@ use egui::{Align2, Color32, CornerRadius, Rect, Response, Sense, Stroke, vec2};
 use crate::theme::{self, Tokens};
 use crate::{PdfCraftApp, icons};
 
+pub(super) mod icon_data;
+
 /// Horizontal and vertical inset of a single-line field.
 const FIELD_MARGIN: egui::Margin = egui::Margin::symmetric(10, 6);
 /// Where text starts inside a [`line`] or [`block`] field, so plain values beside fields can line up with it.
