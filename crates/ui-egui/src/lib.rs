@@ -30,7 +30,6 @@ mod chrome;
 pub use combine_grid::ThumbState as CombineThumb;
 pub use combine_ui::{Columns as CombineColumns, CombineView, Lock as CombineLock, SortKey};
 mod commands;
-mod comments_panel;
 pub mod control;
 mod drag_pointer;
 #[cfg(target_os = "macos")]
@@ -126,6 +125,7 @@ use dialogs::standards_ui;
 use dialogs::word_count_ui;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 use panels::all_tools_ui;
+use panels::comments_panel;
 #[cfg(test)]
 use state::CopyPage;
 #[cfg(not(target_arch = "wasm32"))]

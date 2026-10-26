@@ -10,6 +10,7 @@ use crate::{LeftPanel, PdfCraftApp, RightPanel, icons, widgets};
 
 pub(super) mod all_tools_ui;
 mod bookmarks;
+pub(super) mod comments_panel;
 mod edit;
 mod pages;
 mod right;
