@@ -9,6 +9,7 @@ use crate::{CloseRequest, Dialog, PdfCraftApp, PropsTab, panels::human_size, wid
 
 pub(super) mod appearance;
 pub(super) mod comment_props;
+pub(super) mod credits;
 mod prompts;
 
 pub(crate) use prompts::{PromptButton, save_prompt_key};

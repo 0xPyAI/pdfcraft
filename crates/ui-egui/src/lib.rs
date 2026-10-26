@@ -33,7 +33,6 @@ pub use combine_ui::{Columns as CombineColumns, CombineView, Lock as CombineLock
 mod commands;
 mod comments_panel;
 pub mod control;
-mod credits;
 mod drag_pointer;
 #[cfg(target_os = "macos")]
 mod macos_association;
@@ -125,6 +124,7 @@ use canvas::wheel_pager;
 use canvas::zoom_snap;
 use dialogs::appearance;
 use dialogs::comment_props;
+use dialogs::credits;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;
