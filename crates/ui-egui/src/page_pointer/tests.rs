@@ -283,6 +283,11 @@ fn page_modules_read_the_pointer_only_through_page_pointer() {
     while let Some(dir) = dirs.pop() {
         for entry in std::fs::read_dir(dir).expect("source directory") {
             let path = entry.expect("source entry").path();
+            // Tests drive egui's input themselves, in test modules and in test files.
+            let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            if stem == "tests" || stem.ends_with("_tests") {
+                continue;
+            }
             if path.is_dir() {
                 dirs.push(path);
                 continue;
