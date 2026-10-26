@@ -33,7 +33,6 @@ mod appearance;
 pub mod canvas;
 mod chrome;
 mod combine_grid;
-mod tags_ui;
 pub use combine_grid::ThumbState as CombineThumb;
 mod combine_ui;
 pub use combine_ui::{Columns as CombineColumns, CombineView, Lock as CombineLock, SortKey};
@@ -166,6 +165,7 @@ pub use tools::prepare;
 use tools::redact_ui;
 use tools::sign_ui;
 use tools::stamps_ui;
+use tools::tags_ui;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
