@@ -25,8 +25,6 @@ macro_rules! tl_ctx {
         $crate::i18n::tr_ctx($crate::i18n::current(), $context, $s)
     };
 }
-
-mod a11y_ui;
 mod actions_ui;
 mod all_tools_ui;
 mod appearance;
@@ -125,6 +123,7 @@ mod app;
 mod hooks;
 mod state;
 mod tools;
+mod workflows;
 
 pub(crate) use app::{MAX_AUTHOR_CHARS, copy_refused, date_text_for_pdf, print_refused};
 #[cfg(not(target_arch = "wasm32"))]
@@ -166,6 +165,7 @@ use tools::redact_ui;
 use tools::sign_ui;
 use tools::stamps_ui;
 use tools::tags_ui;
+use workflows::a11y_ui;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
