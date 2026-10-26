@@ -472,7 +472,7 @@ mod tests {
     #[test]
     fn a_face_without_the_probe_is_rejected() {
         // Inter is Latin, Greek and Cyrillic only.
-        let inter = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+        let inter = include_bytes!("../../../../assets/fonts/Inter-Regular.ttf");
         assert_eq!(face_with(inter, PROBE), None);
         assert_eq!(face_with(inter, HANS_PROBE), None);
         assert_eq!(face_with(inter, HANT_PROBE), None);
@@ -561,7 +561,7 @@ mod tests {
             assert!(path.extension().is_some_and(|e| e == "ttf" || e == "ttc"), "{path:?}");
         }
         // Inter has no Hangul.
-        let inter = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+        let inter = include_bytes!("../../../../assets/fonts/Inter-Regular.ttf");
         assert_eq!(face_with(inter, HANGUL_PROBE), None);
     }
 
@@ -612,7 +612,7 @@ mod tests {
         std::fs::create_dir_all(&supplemental).expect("build a temp macOS-shaped font tree");
         let dirs = [root.to_string_lossy().to_string(), supplemental.to_string_lossy().to_string()];
         let names: Vec<&str> = dirs.iter().map(|d| d.as_str()).collect();
-        let inter: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+        let inter: &[u8] = include_bytes!("../../../../assets/fonts/Inter-Regular.ttf");
         let spaced = "Devanagari Sangam MN.ttc";
         std::fs::write(supplemental.join(spaced), inter).expect("place a face at the spaced path");
         let found = macos_families_in(&names, &[spaced]).iter().any(|p| read(p, 'A', MAX_BYTES).is_some());

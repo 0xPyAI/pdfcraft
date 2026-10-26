@@ -9,6 +9,8 @@ pub(super) mod open_worker;
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) mod pickers;
 pub mod portable;
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) mod system_fonts;
 pub mod ui_scale;
 pub mod updates;
 pub mod window_controls;
