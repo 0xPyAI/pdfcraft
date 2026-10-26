@@ -22,6 +22,7 @@ mod bars;
 mod cache;
 pub(super) mod crop;
 mod find;
+pub(super) mod fling;
 mod navigation;
 mod organize;
 mod selection;

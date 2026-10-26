@@ -87,7 +87,6 @@ mod editing;
 pub mod file_watch;
 mod files;
 pub mod fill_sign;
-mod fling;
 pub mod folders_ui;
 mod format_text_ui;
 pub mod forms_ui;
@@ -155,6 +154,7 @@ pub(crate) use app::{MAX_AUTHOR_CHARS, copy_refused, date_text_for_pdf, print_re
 pub(crate) use app::same_file;
 use canvas::autoscroll;
 use canvas::crop;
+use canvas::fling;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;
