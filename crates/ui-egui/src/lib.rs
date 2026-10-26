@@ -51,7 +51,6 @@ pub mod units;
 pub use print_ui::{Handling as PrintHandling, OptionsSource, PrintDraft, PrinterSource, Which as PrintWhich, system_printers};
 pub use redact_ui::{HiddenDraft, PagesDraft as RedactPagesDraft, RedactPrefs, SearchDraft as RedactSearchDraft, SearchMode as RedactSearchMode};
 pub mod i18n;
-mod recovery;
 #[cfg(not(target_arch = "wasm32"))]
 mod system_fonts;
 mod tab_context;
@@ -111,6 +110,7 @@ use panels::search_ui;
 pub use panels::side_panels;
 pub use persist::last_session;
 pub use persist::last_view;
+use persist::recovery;
 use platform::drag_pointer;
 #[cfg(not(target_arch = "wasm32"))]
 pub use platform::file_watch;
