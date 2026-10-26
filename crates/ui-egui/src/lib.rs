@@ -103,7 +103,6 @@ mod panels;
 mod pickers;
 pub mod prepare;
 mod print_ui;
-mod signature_drag;
 pub mod units;
 mod web_print;
 mod word_count_ui;
@@ -155,6 +154,7 @@ use canvas::fling;
 use canvas::image_pick;
 use canvas::page_pointer;
 pub use canvas::scroll_speed;
+use canvas::signature_drag;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;

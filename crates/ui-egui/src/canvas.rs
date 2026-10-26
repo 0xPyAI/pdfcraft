@@ -29,6 +29,7 @@ mod organize;
 pub(super) mod page_pointer;
 pub mod scroll_speed;
 mod selection;
+pub(super) mod signature_drag;
 mod xform;
 mod zoom;
 
