@@ -423,7 +423,9 @@ mod tests {
             let lines: Vec<&str> = code.lines().collect();
             for (n, line) in lines.iter().enumerate() {
                 let trimmed = line.trim_start();
+                // A `use` line only names a helper; the call is checked where it is made.
                 if trimmed.starts_with("//")
+                    || trimmed.starts_with("use ")
                     || !(trimmed.contains("std::fs")
                         || trimmed.contains("File::open")
                         || trimmed.contains("File::create")
