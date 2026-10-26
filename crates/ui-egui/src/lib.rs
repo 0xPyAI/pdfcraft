@@ -31,8 +31,6 @@ pub use combine_grid::ThumbState as CombineThumb;
 pub use combine_ui::{Columns as CombineColumns, CombineView, Lock as CombineLock, SortKey};
 mod commands;
 pub mod control;
-#[cfg(target_os = "macos")]
-mod macos_association;
 mod menus;
 /// Header & footer / watermark / background dialog types (tests and automation).
 pub mod marks {
@@ -125,6 +123,8 @@ pub use panels::side_panels;
 use platform::drag_pointer;
 #[cfg(not(target_arch = "wasm32"))]
 pub use platform::file_watch;
+#[cfg(target_os = "macos")]
+use platform::macos_association;
 #[cfg(test)]
 use state::CopyPage;
 #[cfg(not(target_arch = "wasm32"))]

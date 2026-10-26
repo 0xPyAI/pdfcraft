@@ -354,7 +354,7 @@ mod tests {
         let captured: Vec<u8> =
             hex.as_bytes().as_chunks::<2>().0.iter().map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap()).collect();
         assert!(points_to_this_app(&captured, Path::new("/Applications/PdfCraft.app")));
-        let package = plist::from_bytes::<plist::Value>(include_bytes!("../../../packaging/macos/Info.plist.in")).unwrap();
+        let package = plist::from_bytes::<plist::Value>(include_bytes!("../../../../packaging/macos/Info.plist.in")).unwrap();
         assert_eq!(package.as_dictionary().unwrap().get("CFBundleIdentifier").unwrap().as_string(), Some(BUNDLE_ID));
     }
 
