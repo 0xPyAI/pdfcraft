@@ -2,8 +2,8 @@
 
 use egui::{Align2, Color32, CornerRadius, Rect, Response, Sense, Stroke, vec2};
 
-use crate::theme::{self, Tokens};
 use crate::PdfCraftApp;
+use crate::theme::{self, Tokens};
 
 pub(super) mod icon_data;
 pub mod icons;

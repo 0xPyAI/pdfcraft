@@ -162,10 +162,8 @@ fn lookups_fall_back_to_english() {
 
 #[test]
 fn catalog_kinds_are_parsed_and_looked_up() {
-    let (c, errors) = Catalog::parse(
-        "# c\n\tHello\tこんにちは\n@id\tfile.save\t保存する\nmenu\tWindows\tウィンドウ群\n@plural\t{n} file|{n} files\t{n} 個\n\n",
-        1,
-    );
+    let (c, errors) =
+        Catalog::parse("# c\n\tHello\tこんにちは\n@id\tfile.save\t保存する\nmenu\tWindows\tウィンドウ群\n@plural\t{n} file|{n} files\t{n} 個\n\n", 1);
     assert!(errors.is_empty(), "{errors:?}");
     assert_eq!(c.plain("Hello"), Some("こんにちは"));
     assert_eq!(c.id("file.save"), Some("保存する"));
@@ -222,14 +220,8 @@ fn catalogs_handle_escapes_crlf_and_distinct_contexts() {
 
 #[test]
 fn broken_catalog_falls_back_to_english() {
-    static BROKEN: LangInfo = LangInfo {
-        code: "broken",
-        name: "Broken test catalog",
-        source: "malformed\n\\",
-        plural: plural_none,
-        rtl: false,
-        catalog: OnceLock::new(),
-    };
+    static BROKEN: LangInfo =
+        LangInfo { code: "broken", name: "Broken test catalog", source: "malformed\n\\", plural: plural_none, rtl: false, catalog: OnceLock::new() };
     assert_eq!(tr(Lang(&BROKEN), "File"), "File");
     assert_eq!(trn(Lang(&BROKEN), 2, "{n} page", "{n} pages"), "2 pages");
 }

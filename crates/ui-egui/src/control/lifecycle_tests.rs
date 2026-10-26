@@ -159,20 +159,8 @@ fn a_started_request_finishes_its_batches_after_focus_moves() {
             since: web_time::Instant::now(),
             release: Vec::new(),
             batches: VecDeque::from([
-                vec![egui::Event::Key {
-                    key: egui::Key::Tab,
-                    physical_key: None,
-                    pressed: true,
-                    repeat: false,
-                    modifiers: egui::Modifiers::NONE,
-                }],
-                vec![egui::Event::Key {
-                    key: egui::Key::Tab,
-                    physical_key: None,
-                    pressed: false,
-                    repeat: false,
-                    modifiers: egui::Modifiers::NONE,
-                }],
+                vec![egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }],
+                vec![egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: false, repeat: false, modifiers: egui::Modifiers::NONE }],
             ]),
         });
     }
@@ -811,11 +799,7 @@ fn completed_screenshots_obey_the_admission_deadline_before_success_or_retry() {
             callback: None,
             region: None,
             reply,
-            since: if expired {
-                web_time::Instant::now().checked_sub(std::time::Duration::from_secs(10)).unwrap()
-            } else {
-                web_time::Instant::now()
-            },
+            since: if expired { web_time::Instant::now().checked_sub(std::time::Duration::from_secs(10)).unwrap() } else { web_time::Instant::now() },
             geometry,
             reserved: geometry.image_bytes().unwrap(),
             attempts: 0,

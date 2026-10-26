@@ -35,26 +35,26 @@ use boa_engine::realm::Realm;
 use boa_engine::{Context, JsError, JsNativeError, JsObject, JsResult, JsString, JsValue, NativeFunction, Source, js_string};
 
 mod document;
+mod format;
 mod globals;
 mod host;
 mod model;
 mod run;
-mod format;
 
+#[cfg(test)]
+pub(crate) use format::PRINTD_SCANNED;
+use format::{printd, printf, printx, scand};
 pub(crate) use globals::menu_item;
 use globals::platform;
 use host::{arg, as_number, error, function, s, text};
 pub use model::{
     DISPLAY_HIDDEN, DISPLAY_NO_PRINT, DISPLAY_NO_VIEW, DISPLAY_VISIBLE, DocInfo, Event, FieldState, FieldType, Limits, Outcome, Panel, Request,
 };
-pub(crate) use run::{CheckedCodeFromStrings, MAX_SCRIPT_BYTES};
 #[cfg(not(target_arch = "wasm32"))]
 use run::SCRIPT_STACK;
 use run::refuse;
+pub(crate) use run::{CheckedCodeFromStrings, MAX_SCRIPT_BYTES};
 pub use run::{run, run_shared};
-#[cfg(test)]
-pub(crate) use format::PRINTD_SCANNED;
-use format::{printd, printf, printx, scand};
 
 pub mod formcalc;
 pub mod xfa;

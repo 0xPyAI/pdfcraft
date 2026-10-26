@@ -18,12 +18,7 @@ fn composite(doc: &mut Document, encoding: &str, w: Vec<Object>, to_unicode: &st
     let tu = Object::Ref(doc.add(Object::Stream(Stream::flate(Dict::new(), to_unicode.as_bytes()))));
     font(
         doc,
-        vec![
-            ("Subtype", Object::name("Type0")),
-            ("Encoding", enc),
-            ("DescendantFonts", Object::Array(vec![Object::Dict(desc)])),
-            ("ToUnicode", tu),
-        ],
+        vec![("Subtype", Object::name("Type0")), ("Encoding", enc), ("DescendantFonts", Object::Array(vec![Object::Dict(desc)])), ("ToUnicode", tu)],
     )
 }
 
@@ -273,13 +268,10 @@ fn standard_fonts_without_widths_measure_the_glyph_their_differences_name() {
     let mut doc = Document::new_empty();
     let mut enc = Dict::new();
     enc.set(b"BaseEncoding".to_vec(), Object::name("WinAnsiEncoding"));
-    let diffs =
-        vec![Object::Int(65), Object::name("W"), Object::Int(87), Object::name("A"), Object::name("uni03A9"), Object::name("not.a.glyph")];
+    let diffs = vec![Object::Int(65), Object::name("W"), Object::Int(87), Object::name("A"), Object::name("uni03A9"), Object::name("not.a.glyph")];
     enc.set(b"Differences".to_vec(), Object::Array(diffs));
-    let f = font(
-        &mut doc,
-        vec![("Subtype", Object::name("Type1")), ("BaseFont", Object::name("Helvetica")), ("Encoding", Object::Dict(enc.clone()))],
-    );
+    let f =
+        font(&mut doc, vec![("Subtype", Object::name("Type1")), ("BaseFont", Object::name("Helvetica")), ("Encoding", Object::Dict(enc.clone()))]);
     let m = Metrics::from_dict(&doc, &f);
     assert_eq!((m.width(65), m.width(87)), (0.944, 0.667), "A and W swap their widths");
     // Omega has no WinAnsi code and the last name reads as nothing: both keep their code's width.
@@ -467,12 +459,7 @@ fn composite_subset_glyphs_of_the_default_width_are_present() {
         }
         desc.set(
             b"W".to_vec(),
-            Object::Array(vec![
-                Object::Int(0x55),
-                Object::Array(vec![Object::Int(333)]),
-                Object::Int(0x57),
-                Object::Array(vec![Object::Int(277)]),
-            ]),
+            Object::Array(vec![Object::Int(0x55), Object::Array(vec![Object::Int(333)]), Object::Int(0x57), Object::Array(vec![Object::Int(277)])]),
         );
         let f = font(
             &mut doc,

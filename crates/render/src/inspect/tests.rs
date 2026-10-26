@@ -173,10 +173,8 @@ fn compressed_object_container_chain_does_not_recurse() {
 
 #[test]
 fn compressed_objects_and_indirect_stream_length_still_load() {
-    let pdf = compressed_length_pdf(
-        &[(3, 4, 0), (5, 4, 1)],
-        &[(4, b"<< /Type /ObjStm /N 2 /First 8 /Length 17 >>\nstream\n3 0 5 2 5 (value)\nendstream")],
-    );
+    let pdf =
+        compressed_length_pdf(&[(3, 4, 0), (5, 4, 1)], &[(4, b"<< /Type /ObjStm /N 2 /First 8 /Length 17 >>\nstream\n3 0 5 2 5 (value)\nendstream")]);
     let doc = Document::load_mem_with_options(&pdf, LoadOptions { strict: true, ..Default::default() }).unwrap();
     assert_eq!(doc.get_object((3, 0)).unwrap().as_i64().unwrap(), 5);
     assert_eq!(doc.get_object((5, 0)).unwrap().as_str().unwrap(), b"value");
@@ -187,8 +185,7 @@ fn compressed_objects_and_indirect_stream_length_still_load() {
 fn compressed_length_in_a_container_with_an_indirect_length_still_loads() {
     // Two hops, as in a valid file: stream 2's /Length (3) is compressed in container 4, whose own /Length (5) is
     // a plain indirect integer.
-    let pdf =
-        compressed_length_pdf(&[(3, 4, 0)], &[(4, b"<< /Type /ObjStm /N 1 /First 4 /Length 5 0 R >>\nstream\n3 0 5\nendstream"), (5, b"5")]);
+    let pdf = compressed_length_pdf(&[(3, 4, 0)], &[(4, b"<< /Type /ObjStm /N 1 /First 4 /Length 5 0 R >>\nstream\n3 0 5\nendstream"), (5, b"5")]);
     let doc = Document::load_mem_with_options(&pdf, LoadOptions { strict: true, ..Default::default() }).unwrap();
     assert_eq!(doc.get_object((3, 0)).unwrap().as_i64().unwrap(), 5);
     assert_eq!(doc.get_object((5, 0)).unwrap().as_i64().unwrap(), 5);
@@ -356,9 +353,7 @@ fn label_info(nums: Vec<Object>, kids: Vec<Object>) -> DocInfo {
     doc.objects.insert((1, 0), Object::Dictionary(catalog));
     doc.trailer.set("Root", Object::Reference((1, 0)));
     let mut info = DocInfo {
-        pages: (1..=3)
-            .map(|n| PageInfo { width: 200.0, height: 300.0, crop: [0.0, 0.0, 200.0, 300.0], rotation: 0, label: n.to_string() })
-            .collect(),
+        pages: (1..=3).map(|n| PageInfo { width: 200.0, height: 300.0, crop: [0.0, 0.0, 200.0, 300.0], rotation: 0, label: n.to_string() }).collect(),
         ..Default::default()
     };
     Inspector::new(&doc).fill(&mut info);
@@ -442,11 +437,7 @@ fn page_label_prefix_spaces_survive_public_inspection() {
                 }
             })
             .collect();
-        assert_eq!(
-            info.pages.iter().map(|p| p.label.clone()).collect::<Vec<_>>(),
-            expected,
-            "{prefix:?}, decimal={decimal}, indirect={indirect}"
-        );
+        assert_eq!(info.pages.iter().map(|p| p.label.clone()).collect::<Vec<_>>(), expected, "{prefix:?}, decimal={decimal}, indirect={indirect}");
         assert!(info.warnings.is_empty(), "{:?}", info.warnings);
         assert_eq!(info.title.as_deref(), Some("Metadata title"), "page-prefix decoding must not change metadata normalization");
     }
@@ -454,12 +445,9 @@ fn page_label_prefix_spaces_survive_public_inspection() {
 
 #[test]
 fn page_label_limits_keep_normal_pdf_numbering() {
-    for (style, first, expected) in [
-        ("r", 4, ["iv", "v", "vi"]),
-        ("R", 1994, ["MCMXCIV", "MCMXCV", "MCMXCVI"]),
-        ("a", 26, ["z", "aa", "bb"]),
-        ("A", 52, ["ZZ", "AAA", "BBB"]),
-    ] {
+    for (style, first, expected) in
+        [("r", 4, ["iv", "v", "vi"]), ("R", 1994, ["MCMXCIV", "MCMXCV", "MCMXCVI"]), ("a", 26, ["z", "aa", "bb"]), ("A", 52, ["ZZ", "AAA", "BBB"])]
+    {
         let info = label_info(vec![Object::Integer(0), label_spec(style, Vec::new(), first)], Vec::new());
         assert_eq!(info.pages.iter().map(|p| p.label.as_str()).collect::<Vec<_>>(), expected);
         assert!(info.warnings.is_empty(), "{:?}", info.warnings);
@@ -537,9 +525,8 @@ fn page_label_limits_bound_total_custom_output_atomically() {
     let mut catalog = Dictionary::new();
     catalog.set("PageLabels", Object::Dictionary(tree));
     let count = MAX_LABEL_TOTAL_BYTES / MAX_LABEL_BYTES + 1;
-    let mut pages: Vec<_> = (1..=count)
-        .map(|n| PageInfo { width: 200.0, height: 300.0, crop: [0.0, 0.0, 200.0, 300.0], rotation: 0, label: n.to_string() })
-        .collect();
+    let mut pages: Vec<_> =
+        (1..=count).map(|n| PageInfo { width: 200.0, height: 300.0, crop: [0.0, 0.0, 200.0, 300.0], rotation: 0, label: n.to_string() }).collect();
     let err = Inspector::new(&doc).page_labels(&catalog, &mut pages).unwrap_err();
     assert!(err.contains("4 MiB"), "{err}");
     assert!(pages.iter().enumerate().all(|(i, p)| p.label == (i + 1).to_string()));
@@ -1491,8 +1478,7 @@ fn xfa_dynamic_render_is_read_from_config_acrobat7_only() {
     );
     assert_eq!(text(&xdp).as_deref(), Some("required"));
     // Only in the data, or nested in the template: no configuration at all.
-    let xdp =
-        format!("<xdp:xdp><xfa:datasets><xfa:data>{}</xfa:data></xfa:datasets></xdp:xdp>", config("<dynamicRender>forbidden</dynamicRender>"));
+    let xdp = format!("<xdp:xdp><xfa:datasets><xfa:data>{}</xfa:data></xfa:datasets></xdp:xdp>", config("<dynamicRender>forbidden</dynamicRender>"));
     assert_eq!(text(&xdp), None);
     let xdp = format!("<xdp:xdp><template>{}</template></xdp:xdp>", config("<dynamicRender>forbidden</dynamicRender>"));
     assert_eq!(text(&xdp), None);

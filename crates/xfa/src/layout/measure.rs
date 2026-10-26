@@ -1,5 +1,5 @@
-use super::field::auto_check_reserve;
 use super::common::clamp_opt;
+use super::field::auto_check_reserve;
 use super::*;
 
 impl Layouter<'_> {

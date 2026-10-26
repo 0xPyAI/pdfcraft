@@ -1,7 +1,7 @@
 use super::document::{field_object, get_field, get_nth_field_name, noop, num_fields, page_num_get, page_num_set, print, reset_form, submit_form};
+use super::format::{printd, printf, printx, scand};
 use super::host::{arg, function, host, s, text, text_line};
 use super::model::{DISPLAY_HIDDEN, DISPLAY_NO_PRINT, DISPLAY_NO_VIEW, DISPLAY_VISIBLE, Event, Panel, Request};
-use super::format::{printd, printf, printx, scand};
 use super::*;
 
 // ── app, util, console ──────────────────────────────────────────────────────────────────────

@@ -489,13 +489,7 @@ fn keyboard_find_step_is_explicit_and_a_late_text_layer_cannot_undo_it() {
 
     let ctx = egui::Context::default();
     ctx.input_mut(|i| {
-        i.events.push(egui::Event::Key {
-            key: egui::Key::G,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers::COMMAND,
-        });
+        i.events.push(egui::Event::Key { key: egui::Key::G, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND });
     });
     shortcuts(&mut v, &ctx, Default::default());
 
@@ -1453,10 +1447,7 @@ fn many_open_documents_share_one_raster_allowance_and_close_releases_handles() {
     assert_eq!(app.active_ids().map(|(index, _)| index), Some(5));
     assert!(app.views.iter().zip(&expected).all(|(view, (request, dimensions))| {
         view.thumbs.len() == 1
-            && view
-                .thumbs
-                .get(&0)
-                .is_some_and(|thumb| thumb.tag == request.tag && thumb.tex.size() == [dimensions.0 as usize, dimensions.1 as usize])
+            && view.thumbs.get(&0).is_some_and(|thumb| thumb.tag == request.tag && thumb.tex.size() == [dimensions.0 as usize, dimensions.1 as usize])
     }));
 
     app.finish_render_frame(&ctx);
@@ -1902,13 +1893,8 @@ fn destinations_set_the_zoom_mode_and_the_point_to_show() {
 fn page_text_failure_preserves_valid_search_match_without_jitter() {
     let mut v = view(3, PageLayout::Single, true);
     v.current = 1;
-    v.find = Some(Find {
-        query: "test".into(),
-        case_query: "test".into(),
-        matches: vec![(0, 0..4), (1, 5..9)],
-        current: Some(0),
-        ..Default::default()
-    });
+    v.find =
+        Some(Find { query: "test".into(), case_query: "test".into(), matches: vec![(0, 0..4), (1, 5..9)], current: Some(0), ..Default::default() });
     let req = RenderRequest { page: 0, kind: RequestKind::Text, ..Default::default() };
     v.last_queue = vec![req];
     let ctx = egui::Context::default();

@@ -215,10 +215,7 @@ fn page_panic_retires_shared_generation_and_healthy_pages_use_private_parsers() 
     // in the shared generation first (then only one parse would happen).
     let gate = render_gate(1, true);
     *lock(&pool.shared.render_gates) = vec![gate.clone()];
-    pool.set_queue(vec![
-        RenderRequest { page: 0, scale: 1.0, ..Default::default() },
-        RenderRequest { page: 1, scale: 1.0, ..Default::default() },
-    ]);
+    pool.set_queue(vec![RenderRequest { page: 0, scale: 1.0, ..Default::default() }, RenderRequest { page: 1, scale: 1.0, ..Default::default() }]);
     let crashed = receive_before_deadline(&pool);
     if gate.claimed.load(Ordering::Acquire) {
         gate.entered.wait();
@@ -394,8 +391,7 @@ fn a_failed_page_stays_refused_at_every_scale_and_generation_but_other_pages_ren
     let pool = RenderPool::new(Arc::new(ONE_PAGE_TWICE.to_vec()), 1, RenderConfig::default());
     let bad = RenderRequest { page: 0, scale: 1.0, tag: 70, ..Default::default() };
     lock(&pool.shared.stuck).insert(bad.into());
-    for req in [bad, RenderRequest { scale: 0.5, tag: 71, ..bad }, RenderRequest { tile: Some(Tile { x: 0, y: 0, w: 8, h: 8 }), tag: 72, ..bad }]
-    {
+    for req in [bad, RenderRequest { scale: 0.5, tag: 71, ..bad }, RenderRequest { tile: Some(Tile { x: 0, y: 0, w: 8, h: 8 }), tag: 72, ..bad }] {
         pool.set_queue(vec![req]);
         let failed = receive_before_deadline(&pool);
         assert_eq!(failed.request, req);
@@ -478,14 +474,7 @@ fn worker_reuses_parser_and_releases_source_after_rendering() {
     }
     assert_eq!(
         pool.stats(),
-        RenderStats {
-            parser_builds: 1,
-            page_interpretations: 2,
-            render_requests: 3,
-            tile_requests: 0,
-            text_interpretations: 1,
-            rasterizations: 2
-        }
+        RenderStats { parser_builds: 1, page_interpretations: 2, render_requests: 3, tile_requests: 0, text_interpretations: 1, rasterizations: 2 }
     );
     drop(pool);
     let until = std::time::Instant::now() + std::time::Duration::from_secs(8);
@@ -806,12 +795,8 @@ fn indexed_palettes_over_lab_keep_their_colours() {
     // Palette entry 1 is <80 CC B2>: L* = 128/255·100, a* = -100 + 204/255·200,
     // b* = -100 + 178/255·200, about Lab (50.2 60 39.6): a warm red.
     let indexed = render("/I cs 1 sc 0 0 200 200 re f");
-    let direct = render(&format!(
-        "/L cs {} {} {} sc 0 0 200 200 re f",
-        128.0 / 255.0 * 100.0,
-        -100.0 + 204.0 / 255.0 * 200.0,
-        -100.0 + 178.0 / 255.0 * 200.0
-    ));
+    let direct =
+        render(&format!("/L cs {} {} {} sc 0 0 200 200 re f", 128.0 / 255.0 * 100.0, -100.0 + 204.0 / 255.0 * 200.0, -100.0 + 178.0 / 255.0 * 200.0));
     for (channel, (got, want)) in indexed.iter().zip(direct).enumerate() {
         assert!(got.abs_diff(want) <= 1, "channel {channel}: indexed {indexed:?}, direct {direct:?}");
     }
@@ -1033,9 +1018,8 @@ fn re_sent_queues_render_each_page_once() {
     }
     pdf += "trailer << /Root 1 0 R >>\n%%EOF";
     let pool = RenderPool::new(Arc::new(pdf.into_bytes()), 3, RenderConfig::default());
-    let wanted: Vec<RenderRequest> = (0..pages)
-        .map(|page| RenderRequest { page, kind: RequestKind::Pixels, tile: None, scale: 2.0, tag: 2000, ..Default::default() })
-        .collect();
+    let wanted: Vec<RenderRequest> =
+        (0..pages).map(|page| RenderRequest { page, kind: RequestKind::Pixels, tile: None, scale: 2.0, tag: 2000, ..Default::default() }).collect();
     // The canvas's loop: take what arrived, then queue every page still missing whenever
     // that list changes (requests already rendering included).
     let mut got = vec![0; pages];
@@ -1298,14 +1282,7 @@ fn heavy_vector_fixture_preserves_trailing_text_and_raster_output() {
     assert!(text.text.is_some_and(|page| page.plain_text().contains("TRAILING_MARKER")));
     assert_eq!(
         renderer.stats(),
-        RenderStats {
-            parser_builds: 1,
-            page_interpretations: 1,
-            render_requests: 2,
-            tile_requests: 0,
-            text_interpretations: 1,
-            rasterizations: 1
-        }
+        RenderStats { parser_builds: 1, page_interpretations: 1, render_requests: 2, tile_requests: 0, text_interpretations: 1, rasterizations: 1 }
     );
 }
 
@@ -3783,14 +3760,7 @@ fn pages_in_one_object_stream(pages: usize) -> Vec<u8> {
         (1, "<< /Type /Catalog /Pages 2 0 R >>".to_string()),
         (2, format!("<< /Type /Pages /Kids [{}] /Count {pages} >>", kids.join(" "))),
         (3, format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len())),
-        (
-            4,
-            format!(
-                "<< /Type /ObjStm /N {pages} /First {} /Length {} >>\nstream\n{index}{body}\nendstream",
-                index.len(),
-                index.len() + body.len()
-            ),
-        ),
+        (4, format!("<< /Type /ObjStm /N {pages} /First {} /Length {} >>\nstream\n{index}{body}\nendstream", index.len(), index.len() + body.len())),
     ] {
         offsets.push(pdf.len());
         pdf.extend_from_slice(format!("{num} 0 obj\n{obj}\nendobj\n").as_bytes());
@@ -4236,11 +4206,13 @@ fn sampled_functions_with_billions_of_samples_are_refused() {
     let mut pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 40 40] /Contents 4 0 R /Resources << /Shading << /Sh0 5 0 R >> >> >> endobj\n".to_vec();
     pdf.extend_from_slice(format!("4 0 obj << /Length {} >> stream\n", page_content.len()).as_bytes());
     pdf.extend_from_slice(page_content);
+    pdf.extend_from_slice(b"\nendstream endobj\n5 0 obj << /ShadingType 2 /ColorSpace /DeviceGray /Coords [0 0 40 0] /Function 6 0 R >> endobj\n");
     pdf.extend_from_slice(
-        b"\nendstream endobj\n5 0 obj << /ShadingType 2 /ColorSpace /DeviceGray /Coords [0 0 40 0] /Function 6 0 R >> endobj\n",
-    );
-    pdf.extend_from_slice(
-        format!("6 0 obj << /FunctionType 0 /Domain [0 1] /Range [0 1] /Size [1073741824] /BitsPerSample 1 /Filter /FlateDecode /Length {} >> stream\n", bomb.len()).as_bytes(),
+        format!(
+            "6 0 obj << /FunctionType 0 /Domain [0 1] /Range [0 1] /Size [1073741824] /BitsPerSample 1 /Filter /FlateDecode /Length {} >> stream\n",
+            bomb.len()
+        )
+        .as_bytes(),
     );
     pdf.extend_from_slice(&bomb);
     pdf.extend_from_slice(b"\nendstream endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n");
@@ -4278,10 +4250,8 @@ fn shadings_with_large_sampled_functions_paint_quickly() {
 
     const SAMPLES: usize = 1 << 21;
     let samples = zlib_zeros(SAMPLES);
-    let function = format!(
-        "<< /FunctionType 0 /Domain [0 1] /Range [0 1] /Size [{SAMPLES}] /BitsPerSample 8 /Filter /FlateDecode /Length {} >>",
-        samples.len()
-    );
+    let function =
+        format!("<< /FunctionType 0 /Domain [0 1] /Range [0 1] /Size [{SAMPLES}] /BitsPerSample 8 /Filter /FlateDecode /Length {} >>", samples.len());
     // Black ramp on the left half, 30 times over; a red square after it.
     let content = "q 0 0 20 40 re W n /Sh0 sh Q\n".repeat(30) + "1 0 0 rg 36 36 4 4 re f";
     let mut pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 40 40] /Contents 4 0 R /Resources << /Shading << /Sh0 5 0 R >> >> >> endobj\n".to_vec();
@@ -5341,10 +5311,7 @@ fn raw_crop_unit_floor_reciprocal_does_not_trigger_letter_fallback() {
         let page = pdf.pages().first().expect("one page");
         let (width, height) = page.base_dimensions();
         // In f32, the nearest reciprocal of 41 or 47 multiplies back to 0.99999994.
-        assert!(
-            width * page.user_unit() >= 1.0 && height * page.user_unit() >= 1.0,
-            "unit={unit}: floor must not round below one physical point"
-        );
+        assert!(width * page.user_unit() >= 1.0 && height * page.user_unit() >= 1.0, "unit={unit}: floor must not round below one physical point");
         let info = crate::inspect(Arc::new(bytes), None).expect("inspect the same small crop");
         let page = &info.pages[0];
         assert!(
@@ -5979,8 +5946,7 @@ fn print_preview_requests_render_with_reading_colors_off() {
 /// flash wrong colours at tile seams.
 #[test]
 fn reading_colors_tiles_match_full_render() {
-    let mut r =
-        PageRenderer::new(Arc::new(ONE_PAGE.to_vec()), RenderConfig { reading_colors: ReadingColors::WHITE_ON_BLACK, ..Default::default() });
+    let mut r = PageRenderer::new(Arc::new(ONE_PAGE.to_vec()), RenderConfig { reading_colors: ReadingColors::WHITE_ON_BLACK, ..Default::default() });
     let full = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: None, scale: 2.0, tag: 0, preview: false });
     let tile = Tile { x: 30, y: 40, w: 50, h: 30 };
     let part = r.render(RenderRequest { page: 0, kind: RequestKind::Pixels, tile: Some(tile), scale: 2.0, tag: 0, preview: false });
@@ -6342,8 +6308,7 @@ fn spot_colour_images_run_their_tint_transform_once_per_sample_value() {
         data.len()
     );
     let function = format!("<< /FunctionType 4 /Domain [0 1] /Range [0 1 0 1 0 1] /Length {} >>", program.len());
-    let pdf =
-        image_cache_pdf("q 130 0 0 70 0 0 cm /A Do Q", "<< /XObject << /A 5 0 R >> >>", &[(&image, &data), (&function, program.as_bytes())]);
+    let pdf = image_cache_pdf("q 130 0 0 70 0 0 cm /A Do Q", "<< /XObject << /A 5 0 R >> >>", &[(&image, &data), (&function, program.as_bytes())]);
     // The count is per thread, and this render runs on this one.
     let before = hayro::hayro_interpret::color::tint_transform_runs();
     let out = render_first_page(pdf);
@@ -6790,12 +6755,7 @@ endstream endobj
     let reference = render(sampled("{ pop 10 sub 4 div }"));
     for (x, expected) in [(2, 0), (9, 0), (10, 32), (11, 96), (12, 159), (13, 223), (14, 255), (30, 255)] {
         assert!((grey(&native, x) - expected).abs() <= 4, "axial, x {x}: {} instead of {expected}", grey(&native, x));
-        assert!(
-            (grey(&native, x) - grey(&reference, x)).abs() <= 4,
-            "axial, x {x}: native {} vs sampled {}",
-            grey(&native, x),
-            grey(&reference, x)
-        );
+        assert!((grey(&native, x) - grey(&reference, x)).abs() <= 4, "axial, x {x}: native {} vs sampled {}", grey(&native, x), grey(&reference, x));
     }
 
     // An extended radial shading matches the sampled one everywhere.

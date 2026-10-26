@@ -68,9 +68,9 @@ mod state;
 mod tools;
 mod workflows;
 
-pub(crate) use app::{MAX_AUTHOR_CHARS, copy_refused, date_text_for_pdf, print_refused};
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use app::same_file;
+pub(crate) use app::{MAX_AUTHOR_CHARS, copy_refused, date_text_for_pdf, print_refused};
 use canvas::autoscroll;
 use canvas::crop;
 use canvas::fling;

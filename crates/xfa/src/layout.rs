@@ -20,10 +20,10 @@ use crate::model::{
 };
 use crate::text::{self, Block, Face, Span};
 
+mod common;
 mod draw;
 mod field;
 mod flow;
-mod common;
 mod items;
 mod measure;
 mod pages;

@@ -279,11 +279,8 @@ fn ordinary_paths_are_not_mail_copies() {
 
 /// A one-page document with a proper xref table.
 fn one_page_pdf() -> Vec<u8> {
-    let objs = [
-        "<< /Type /Catalog /Pages 2 0 R >>",
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>",
-        "<< /Type /Page /Parent 2 0 R >>",
-    ];
+    let objs =
+        ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>", "<< /Type /Page /Parent 2 0 R >>"];
     let mut out = b"%PDF-1.7\n".to_vec();
     let mut offsets = Vec::new();
     for (i, o) in objs.iter().enumerate() {
@@ -308,14 +305,8 @@ fn save_commits_the_open_text_box() {
     app.open_bytes("a.pdf", None, one_page_pdf()).unwrap();
     app.save_override = Some(dest.to_string_lossy().into_owned());
     let style = crate::content_ui::default_style();
-    app.views[0].content.draft = Some(crate::content_ui::TextDraft {
-        page: 0,
-        index: None,
-        rect: [20.0, 20.0, 120.0, 40.0],
-        text: "Typed text".into(),
-        style,
-        focus: true,
-    });
+    app.views[0].content.draft =
+        Some(crate::content_ui::TextDraft { page: 0, index: None, rect: [20.0, 20.0, 120.0, 40.0], text: "Typed text".into(), style, focus: true });
 
     assert!(app.save_active(SaveTarget::InPlace));
     let id = app.views[0].id;

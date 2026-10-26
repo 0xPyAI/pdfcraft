@@ -253,10 +253,7 @@ fn numbers_format_like_acrobat() {
     assert_eq!(make_number("(7)"), Some(-7.0));
     assert_eq!(make_number("abc"), None);
     assert_eq!(keystroke(&n(2, 0, 0, "$", true), "Total", "$1,000"), Ok("1000".into()));
-    assert_eq!(
-        keystroke(&n(2, 0, 0, "$", true), "Total", "ten"),
-        Err("The value entered does not match the format of the field [ Total ]".into())
-    );
+    assert_eq!(keystroke(&n(2, 0, 0, "$", true), "Total", "ten"), Err("The value entered does not match the format of the field [ Total ]".into()));
     // Blank input clears a formatted field (#1323); without a format it is text like any other.
     assert_eq!(keystroke(&n(2, 0, 0, "$", true), "Total", " \t"), Ok(String::new()));
     assert_eq!(keystroke(&Format::None, "Name", " \t"), Ok(" \t".into()));

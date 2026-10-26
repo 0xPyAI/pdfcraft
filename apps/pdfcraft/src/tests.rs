@@ -92,10 +92,7 @@ fn unquoted_paths_with_spaces_are_rejoined() {
     let exists = |p: &str| have.contains(&p);
     let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     // The case an office program produced: one path, split at its space.
-    assert_eq!(
-        super::rejoin_split_paths(args(&["P:\\Archive\\00042A26", "Contract.PDF"]), exists),
-        args(&["P:\\Archive\\00042A26 Contract.PDF"])
-    );
+    assert_eq!(super::rejoin_split_paths(args(&["P:\\Archive\\00042A26", "Contract.PDF"]), exists), args(&["P:\\Archive\\00042A26 Contract.PDF"]));
     // The longest run wins; files that exist on their own are left alone.
     assert_eq!(super::rejoin_split_paths(args(&["C:\\a", "b", "c.pdf", "C:\\a.pdf"]), exists), args(&["C:\\a b c.pdf", "C:\\a.pdf"]));
     assert_eq!(super::rejoin_split_paths(args(&["C:\\a.pdf", "C:\\x", "y.pdf"]), exists), args(&["C:\\a.pdf", "C:\\x y.pdf"]));
@@ -159,9 +156,7 @@ fn a_software_renderer_is_shown_to_the_user() {
 fn gpu_setup_avoids_vulkan_and_stretched_resizes_on_windows_and_prefers_low_power() {
     let mut native = eframe::NativeOptions::default();
     super::configure_gpu(&mut native);
-    let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &native.wgpu_options.wgpu_setup else {
-        panic!("default setup creates its own instance")
-    };
+    let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &native.wgpu_options.wgpu_setup else { panic!("default setup creates its own instance") };
     if std::env::var_os("WGPU_POWER_PREF").is_none() {
         assert_eq!(setup.power_preference, eframe::wgpu::PowerPreference::LowPower);
     }
@@ -270,15 +265,9 @@ fn a_window_larger_than_the_gpu_limit_gets_a_surface_within_it() {
 #[test]
 fn surface_fit_never_empties_or_overflows_a_surface() {
     use eframe::egui_wgpu::winit::surface_fit;
-    for (w, h, max) in [
-        (1, u32::MAX, 8192),
-        (u32::MAX, 1, 2048),
-        (u32::MAX, u32::MAX, 16384),
-        (0, u32::MAX, 8192),
-        (u32::MAX, 0, 8192),
-        (5, 7, 0),
-        (40_000, 3, 1),
-    ] {
+    for (w, h, max) in
+        [(1, u32::MAX, 8192), (u32::MAX, 1, 2048), (u32::MAX, u32::MAX, 16384), (0, u32::MAX, 8192), (u32::MAX, 0, 8192), (5, 7, 0), (40_000, 3, 1)]
+    {
         let (fw, fh, scale) = surface_fit(w, h, max);
         assert!(fw <= max.max(1) && fh <= max.max(1), "{w} x {h} in {max}: {fw} x {fh}");
         // A side that wasn't zero stays non-zero (`Surface::configure` rejects an empty one),
@@ -327,9 +316,7 @@ fn a_gpu_error_while_a_window_is_set_up_is_returned_not_a_panic() {
     use eframe::wgpu;
     let _gpu = gpu();
     let native = super::native_options(false, false, eframe::Renderer::Wgpu);
-    let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &native.wgpu_options.wgpu_setup else {
-        panic!("default setup creates its own instance")
-    };
+    let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &native.wgpu_options.wgpu_setup else { panic!("default setup creates its own instance") };
     let instance = pollster::block_on(native.wgpu_options.wgpu_setup.new_instance());
     let options = wgpu::RequestAdapterOptions { power_preference: setup.power_preference, ..Default::default() };
     // CI runners have a software adapter (WARP, llvmpipe); a machine without any skips.
@@ -398,8 +385,8 @@ fn pipeline_creation_error_is_returned_and_device_remains_usable() {
         eprintln!("skipping pipeline regression: no GPU adapter");
         return;
     };
-    let (device, queue) = pollster::block_on(adapter.request_device(&(setup.device_descriptor)(&adapter)))
-        .expect("the selected adapter must provide a test device");
+    let (device, queue) =
+        pollster::block_on(adapter.request_device(&(setup.device_descriptor)(&adapter))).expect("the selected adapter must provide a test device");
     native.wgpu_options.wgpu_setup =
         egui_wgpu::WgpuSetup::Existing(egui_wgpu::WgpuSetupExisting { instance: instance.clone(), adapter, device, queue });
     // Three samples is invalid on every backend, so this reproduces a pipeline error
@@ -519,8 +506,7 @@ fn pick_adapter_keeps_the_integrated_gpu_on_hybrid_laptops() {
 fn pick_adapter_prefers_the_discrete_gpu_on_desktops_with_a_monitor_on_each() {
     // Issue #445: one monitor on the Intel iGPU, one on the NVIDIA card, no built-in panel.
     use eframe::wgpu::DeviceType;
-    let desktop =
-        [(INTEL_IGPU.0, INTEL_IGPU.1, DeviceType::IntegratedGpu), (NVIDIA.0, NVIDIA.1, DeviceType::DiscreteGpu), (0, 0, DeviceType::Cpu)];
+    let desktop = [(INTEL_IGPU.0, INTEL_IGPU.1, DeviceType::IntegratedGpu), (NVIDIA.0, NVIDIA.1, DeviceType::DiscreteGpu), (0, 0, DeviceType::Cpu)];
     assert_eq!(super::pick_adapter(&desktop, &[monitor(INTEL_IGPU), monitor(NVIDIA)], None), Some(1));
     assert_eq!(super::pick_adapter(&desktop, &[monitor(NVIDIA), monitor(INTEL_IGPU)], None), Some(1));
     // A GPU driving no display still loses to one that does.

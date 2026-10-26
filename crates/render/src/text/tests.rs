@@ -415,8 +415,7 @@ fn encoded_pages(pages: &[(lopdf::Object, &[u8])]) -> Pdf {
     let pages_id = doc.new_object_id();
     let mut kids = Vec::new();
     for (encoding, content) in pages {
-        let font =
-            doc.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "Encoding" => encoding.clone() });
+        let font = doc.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "Encoding" => encoding.clone() });
         let content = doc.add_object(Stream::new(dictionary! {}, content.to_vec()));
         let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages_id, "MediaBox" => vec![Object::Integer(0), Object::Integer(0), Object::Integer(300), Object::Integer(300)], "Resources" => dictionary! {"Font" => dictionary! {"F1" => font}}, "Contents" => content });
         kids.push(Object::Reference(page));
@@ -455,8 +454,7 @@ fn the_annex_d2_alias_codes_read_as_an_ordinary_hyphen_and_space() {
         (name("MacRomanEncoding"), &b"BT /F1 20 Tf 1 0 0 1 20 150 Tm (a\xcab) Tj ET"[..]),
         (differences, &b"BT /F1 20 Tf 1 0 0 1 20 150 Tm (aXbYc) Tj ET"[..]),
     ]);
-    let texts =
-        |page| extract_page(&pdf, page, &InterpreterSettings::default()).unwrap().glyphs.iter().map(|g| g.text.clone()).collect::<Vec<_>>();
+    let texts = |page| extract_page(&pdf, page, &InterpreterSettings::default()).unwrap().glyphs.iter().map(|g| g.text.clone()).collect::<Vec<_>>();
     assert_eq!(texts(0), ["a", "-", "b", " ", "c"], "WinAnsi 0xAD and 0xA0");
     assert_eq!(texts(1), ["a", " ", "b"], "MacRoman 0xCA");
     assert_eq!(texts(2), ["a", "\u{ad}", "b", "\u{a0}", "c"], "a named glyph keeps its glyph list value");
