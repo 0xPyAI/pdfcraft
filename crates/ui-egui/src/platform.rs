@@ -10,3 +10,4 @@ pub(super) mod open_worker;
 pub(super) mod pickers;
 pub mod portable;
 pub mod ui_scale;
+pub mod updates;

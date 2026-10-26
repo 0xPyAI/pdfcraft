@@ -58,7 +58,6 @@ mod recovery;
 mod system_fonts;
 mod tab_context;
 pub mod theme;
-pub mod updates;
 mod widgets;
 pub mod window_controls;
 #[cfg(not(target_arch = "wasm32"))]
@@ -124,6 +123,7 @@ use platform::open_worker;
 use platform::pickers;
 pub use platform::portable;
 pub use platform::ui_scale;
+pub use platform::updates;
 #[cfg(test)]
 use state::CopyPage;
 #[cfg(not(target_arch = "wasm32"))]
