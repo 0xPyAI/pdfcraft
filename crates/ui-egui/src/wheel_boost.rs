@@ -130,6 +130,9 @@ pub(crate) fn accumulate(events: &[egui::Event], line_points: f32, single_paging
             }
             egui::MouseWheelUnit::Point => out.precise += *delta,
             egui::MouseWheelUnit::Line => {
+                // Judged on the raw delta: the Shift sum (0.5 + 0.5) and the clamp (10.5 → 10)
+                // can turn fractions into whole lines.
+                let touch = touchpad_lines(*delta, *source);
                 let lines = if modifiers.shift {
                     let sum = delta.x + delta.y;
                     if !sum.is_finite() {
@@ -139,7 +142,7 @@ pub(crate) fn accumulate(events: &[egui::Event], line_points: f32, single_paging
                 } else {
                     Vec2::new(clamp(delta.x), clamp(delta.y))
                 };
-                if touchpad_lines(lines, *source) {
+                if touch {
                     out.precise += lines * line_points;
                 } else {
                     out.line.x += lines.x * line_points;
@@ -452,6 +455,26 @@ mod tests {
         assert_eq!(input.line, egui::vec2(-100.0, 0.0));
         let input = accumulate(&[shifted(Page, 1.0, -2.0)], 100.0, false);
         assert_eq!(input.page, egui::vec2(-1.0, 0.0));
+    }
+
+    /// Touchpad motion is told from a wheel's by the raw delta: fractions that add up to a whole
+    /// line under Shift, or clamp to one past the per-event limit, are still touchpad motion and
+    /// never advance the burst.
+    #[test]
+    fn fractions_summed_or_clamped_to_whole_lines_stay_touchpad_motion() {
+        use egui::MouseWheelUnit::Line;
+        let input = accumulate(&[shifted(Line, 0.5, 0.5)], 100.0, false);
+        assert_eq!((input.precise, input.line), (egui::vec2(100.0, 0.0), egui::Vec2::ZERO));
+        let input = accumulate(&[wheel(Line, 0.0, -10.5)], 100.0, false);
+        assert_eq!((input.precise, input.line), (egui::vec2(0.0, -MAX_EVENT_UNITS * 100.0), egui::Vec2::ZERO));
+        let mut bx = WheelBoost::default();
+        let mut by = WheelBoost::default();
+        for i in 0..30 {
+            let input = accumulate(&[shifted(Line, 0.5, 0.5), wheel(Line, 0.0, -10.5)], 100.0, false);
+            assert_eq!(boost_extra(input, &mut bx, &mut by, 1.0 + f64::from(i) / 60.0), egui::Vec2::ZERO, "frame {i}");
+        }
+        // A whole notch right after starts from an unboosted burst.
+        assert_eq!(boost_extra(accumulate(&[wheel(Line, 0.0, -1.0)], 100.0, false), &mut bx, &mut by, 2.0), egui::Vec2::ZERO);
     }
 
     /// Check that NaN, zero, negative or infinite scales and non-wheel events add nothing.
