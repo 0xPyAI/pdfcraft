@@ -8,3 +8,4 @@ pub(super) mod create_ui;
 pub(super) mod export_ui;
 pub(super) mod files;
 pub(super) mod js_ui;
+pub(super) mod ocr_ui;
