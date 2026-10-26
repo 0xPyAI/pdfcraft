@@ -13,6 +13,7 @@ mod bookmarks;
 pub(super) mod comments_panel;
 mod edit;
 pub(super) mod format_text_ui;
+pub(super) mod organize_panel;
 mod pages;
 mod right;
 mod tools;

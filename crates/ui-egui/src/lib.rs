@@ -69,7 +69,6 @@ pub mod i18n;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod open_worker;
-mod organize_panel;
 pub mod portable;
 mod recovery;
 #[cfg(not(target_arch = "wasm32"))]
@@ -126,6 +125,7 @@ pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn
 use panels::all_tools_ui;
 use panels::comments_panel;
 use panels::format_text_ui;
+use panels::organize_panel;
 #[cfg(test)]
 use state::CopyPage;
 #[cfg(not(target_arch = "wasm32"))]
