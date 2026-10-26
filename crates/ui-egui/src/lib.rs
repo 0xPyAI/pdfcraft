@@ -51,7 +51,6 @@ mod js_ui;
 #[cfg(target_os = "macos")]
 mod macos_association;
 mod marks_ui;
-mod measure_ui;
 mod menus;
 mod ocr_ui;
 mod optimize_ui;
@@ -166,6 +165,7 @@ pub use tools::field_table_ui;
 pub use tools::fill_sign;
 pub use tools::forms_ui;
 use tools::link_ui;
+use tools::measure_ui;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {

@@ -8,3 +8,4 @@ pub mod field_table_ui;
 pub mod fill_sign;
 pub mod forms_ui;
 pub(super) mod link_ui;
+pub(super) mod measure_ui;
