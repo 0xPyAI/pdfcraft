@@ -321,6 +321,33 @@ fn line_spacing(h: &Harness<'_, PdfCraftApp>) -> Option<f64> {
     h.state().views[0].line_editor.as_ref().map(|e| e.extras.line_spacing)
 }
 
+/// #3881: Tab in an open paragraph adds space to its text, as in a word processor. egui's own
+/// Tab moved the keyboard to the next control, so typing stopped and the paragraph closed on the
+/// next key; a tab character never reaches the text, which no PDF font could draw.
+#[test]
+fn tab_in_an_open_paragraph_adds_space_and_keeps_the_keyboard() {
+    let mut h = open(text_pdf());
+    edit_paragraph(&mut h);
+    let editor_id = egui::Id::unique("edit-text-line-input");
+    let before = h.state().views[0].line_editor.as_ref().unwrap().text.clone();
+    h.key_press(egui::Key::Tab);
+    h.run_steps(2);
+    let text = h.state().views[0].line_editor.as_ref().expect("the paragraph stays open").text.clone();
+    assert!(!text.contains('\t'), "no tab character: {text:?}");
+    assert_eq!(text.replacen("    ", "", 1), before, "a tab stop of spaces went in: {text:?}");
+    assert!(h.ctx.memory(|m| m.has_focus(editor_id)), "the paragraph keeps the keyboard");
+    assert!(!h.state().palette_open, "nothing else opened");
+    // Shift+Tab neither outdents nor moves the keyboard.
+    h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+    h.run_steps(2);
+    assert_eq!(h.state().views[0].line_editor.as_ref().expect("still open").text, text);
+    assert!(h.ctx.memory(|m| m.has_focus(editor_id)));
+    // Typing goes on in the paragraph.
+    h.event(egui::Event::Text("x".into()));
+    h.run_steps(2);
+    assert!(h.state().views[0].line_editor.as_ref().expect("still open").text.contains("x"));
+}
+
 #[test]
 fn mouse_click_on_format_text_keeps_the_paragraph_open() {
     // Control for the tap below.
