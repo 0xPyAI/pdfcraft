@@ -75,7 +75,6 @@ pub use link_ui::LinkDraft;
 pub use optimize_ui::{OptimizeDraft, OptimizeTab};
 pub use sign_ui::{DigitalIdEntry, SignDraft, SignGraphic, SignStep};
 mod bidi;
-pub mod bulk_fields;
 mod dialogs;
 mod edit_text_ui;
 pub mod field_table_ui;
@@ -141,6 +140,7 @@ use theme::{ThemeKind, ThemePreference};
 mod app;
 mod hooks;
 mod state;
+mod tools;
 
 pub(crate) use app::{MAX_AUTHOR_CHARS, copy_refused, date_text_for_pdf, print_refused};
 #[cfg(not(target_arch = "wasm32"))]
@@ -165,6 +165,7 @@ pub use state::{
     PendingRemoteLink, PropsTab, QuickTool, RecentFile, RightPanel, UnlockPrompt,
 };
 use state::{DocumentCopyJob, GridFile};
+pub use tools::bulk_fields;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
