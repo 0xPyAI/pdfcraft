@@ -150,8 +150,17 @@ fn edges_are_primary_finite_in_order_and_capped() {
 }
 
 /// The page modules: the per-page chain in `canvas::document_area` and what it calls.
-const PAGE_MODULES: [&str; 18] = [
+const PAGE_MODULES: [&str; 27] = [
     "canvas.rs",
+    "canvas/area.rs",
+    "canvas/bars.rs",
+    "canvas/cache.rs",
+    "canvas/find.rs",
+    "canvas/navigation.rs",
+    "canvas/organize.rs",
+    "canvas/selection.rs",
+    "canvas/xform.rs",
+    "canvas/zoom.rs",
     "comments.rs",
     "forms_ui.rs",
     "prepare.rs",
@@ -200,12 +209,12 @@ const RAW_READS: [&str; 21] = [
 /// Functions in the page modules that are not page input and read egui's pointer state
 /// themselves: (file, function, why).
 const NOT_PAGE_INPUT: [(&str, &str, &str); 11] = [
-    ("canvas.rs", "zoom_anchor", "a pinch zooms the whole view, and is read before the pages' widget exists"),
-    ("canvas.rs", "drawing_edge_pointer", "scrolls the view at its edges, read before the pages' widget exists"),
-    ("canvas.rs", "glide_interrupted", "a press anywhere stops the touchpad's glide"),
-    ("canvas.rs", "presentation_click", "full screen's click to turn the page, read before the pages' widget exists"),
-    ("canvas.rs", "page_size_hint", "the page size hint sits in the view's corner, not on a page"),
-    ("canvas.rs", "organize_grid", "Organize Pages shows thumbnails, not pages"),
+    ("canvas/area.rs", "zoom_anchor", "a pinch zooms the whole view, and is read before the pages' widget exists"),
+    ("canvas/area.rs", "drawing_edge_pointer", "scrolls the view at its edges, read before the pages' widget exists"),
+    ("canvas/area.rs", "glide_interrupted", "a press anywhere stops the touchpad's glide"),
+    ("canvas/area.rs", "presentation_click", "full screen's click to turn the page, read before the pages' widget exists"),
+    ("canvas/bars.rs", "page_size_hint", "the page size hint sits in the view's corner, not on a page"),
+    ("canvas/organize.rs", "organize_grid", "Organize Pages shows thumbnails, not pages"),
     ("comments.rs", "keys", "keyboard handling after the pages: a drag cancelled with Escape ends once no button is down"),
     ("forms_ui.rs", "overlay", "the field editor is an Area of its own over the page"),
     ("content_ui.rs", "editor", "the added-text editor is an Area of its own over the page"),
