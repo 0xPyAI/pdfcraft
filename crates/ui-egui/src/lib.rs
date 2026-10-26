@@ -39,7 +39,6 @@ mod combine_ui;
 pub use combine_ui::{Columns as CombineColumns, CombineView, Lock as CombineLock, SortKey};
 mod commands;
 mod comment_props;
-pub mod comments;
 mod comments_panel;
 mod compare_ui;
 pub mod control;
@@ -166,6 +165,7 @@ use state::{DocumentCopyJob, GridFile};
 pub use tools::bulk_fields;
 use tools::calc_order_ui;
 use tools::camera_ui;
+pub use tools::comments;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
