@@ -72,7 +72,6 @@ pub use optimize_ui::{OptimizeDraft, OptimizeTab};
 pub use sign_ui::{DigitalIdEntry, SignDraft, SignGraphic, SignStep};
 mod bidi;
 mod dialogs;
-pub mod field_table_ui;
 pub use edit_text_ui::CropMode;
 mod editing;
 #[cfg(not(target_arch = "wasm32"))]
@@ -166,6 +165,7 @@ use tools::camera_ui;
 pub use tools::comments;
 use tools::content_ui;
 use tools::edit_text_ui;
+pub use tools::field_table_ui;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
