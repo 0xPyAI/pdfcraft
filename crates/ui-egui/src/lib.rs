@@ -66,7 +66,6 @@ mod panels;
 #[cfg(not(target_arch = "wasm32"))]
 mod pickers;
 pub mod units;
-mod word_count_ui;
 pub use print_ui::{Handling as PrintHandling, OptionsSource, PrintDraft, PrinterSource, Which as PrintWhich, system_printers};
 pub use redact_ui::{HiddenDraft, PagesDraft as RedactPagesDraft, RedactPrefs, SearchDraft as RedactSearchDraft, SearchMode as RedactSearchMode};
 pub mod i18n;
@@ -125,6 +124,7 @@ use dialogs::pageboxes;
 use dialogs::palette;
 use dialogs::protect;
 use dialogs::standards_ui;
+use dialogs::word_count_ui;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;
