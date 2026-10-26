@@ -46,7 +46,6 @@ pub use edit_text_ui::CropMode;
 mod editing;
 pub mod folders_ui;
 mod home;
-pub mod last_session;
 pub mod last_view;
 mod panels;
 pub mod units;
@@ -75,6 +74,7 @@ use theme::{ThemeKind, ThemePreference};
 
 mod app;
 mod hooks;
+mod persist;
 mod platform;
 mod state;
 mod tools;
@@ -110,6 +110,7 @@ use panels::organize_panel;
 use panels::page_selection_ui;
 use panels::search_ui;
 pub use panels::side_panels;
+pub use persist::last_session;
 use platform::drag_pointer;
 #[cfg(not(target_arch = "wasm32"))]
 pub use platform::file_watch;
