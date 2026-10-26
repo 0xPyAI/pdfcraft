@@ -55,8 +55,6 @@ mod system_fonts;
 mod tab_context;
 pub mod theme;
 mod widgets;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod window_state;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod open_worker_tests;
@@ -111,6 +109,8 @@ pub use persist::last_session;
 pub use persist::last_view;
 use persist::recovery;
 pub use persist::units;
+#[cfg(not(target_arch = "wasm32"))]
+pub use persist::window_state;
 use platform::drag_pointer;
 #[cfg(not(target_arch = "wasm32"))]
 pub use platform::file_watch;
