@@ -58,7 +58,6 @@ pub mod icons;
 pub mod last_session;
 pub mod last_view;
 pub mod motion;
-mod page_selection_ui;
 mod panels;
 #[cfg(not(target_arch = "wasm32"))]
 mod pickers;
@@ -126,6 +125,7 @@ use panels::all_tools_ui;
 use panels::comments_panel;
 use panels::format_text_ui;
 use panels::organize_panel;
+use panels::page_selection_ui;
 #[cfg(test)]
 use state::CopyPage;
 #[cfg(not(target_arch = "wasm32"))]
