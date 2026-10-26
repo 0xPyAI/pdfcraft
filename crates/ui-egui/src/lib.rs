@@ -93,7 +93,6 @@ pub mod units;
 mod web_print;
 mod word_count_ui;
 pub use print_ui::{Handling as PrintHandling, OptionsSource, PrintDraft, PrinterSource, Which as PrintWhich, system_printers};
-mod redact_ui;
 pub use redact_ui::{HiddenDraft, PagesDraft as RedactPagesDraft, RedactPrefs, SearchDraft as RedactSearchDraft, SearchMode as RedactSearchMode};
 pub mod i18n;
 
@@ -166,6 +165,7 @@ use tools::link_ui;
 use tools::measure_ui;
 use tools::object_ui;
 pub use tools::prepare;
+use tools::redact_ui;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
