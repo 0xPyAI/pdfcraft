@@ -150,7 +150,7 @@ fn edges_are_primary_finite_in_order_and_capped() {
 }
 
 /// The page modules: the per-page chain in `canvas::document_area` and what it calls.
-const PAGE_MODULES: [&str; 28] = [
+const PAGE_MODULES: [&str; 34] = [
     "canvas.rs",
     "canvas/area.rs",
     "canvas/bars.rs",
@@ -162,6 +162,12 @@ const PAGE_MODULES: [&str; 28] = [
     "canvas/xform.rs",
     "canvas/zoom.rs",
     "comments.rs",
+    "comments/composer.rs",
+    "comments/geometry.rs",
+    "comments/input.rs",
+    "comments/menu.rs",
+    "comments/paint.rs",
+    "comments/state.rs",
     "forms_ui.rs",
     "prepare.rs",
     "fill_sign.rs",
@@ -216,7 +222,7 @@ const NOT_PAGE_INPUT: [(&str, &str, &str); 11] = [
     ("canvas/area.rs", "presentation_click", "full screen's click to turn the page, read before the pages' widget exists"),
     ("canvas/bars.rs", "page_size_hint", "the page size hint sits in the view's corner, not on a page"),
     ("canvas/organize.rs", "organize_grid", "Organize Pages shows thumbnails, not pages"),
-    ("comments.rs", "keys", "keyboard handling after the pages: a drag cancelled with Escape ends once no button is down"),
+    ("comments/input.rs", "keys", "keyboard handling after the pages: a drag cancelled with Escape ends once no button is down"),
     ("forms_ui.rs", "overlay", "the field editor is an Area of its own over the page"),
     ("content_ui.rs", "editor", "the added-text editor is an Area of its own over the page"),
     ("edit_text_ui.rs", "overlay", "the paragraph editor is an Area of its own over the page"),
