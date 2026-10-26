@@ -34,7 +34,6 @@ mod calc_order_ui;
 pub mod canvas;
 mod chrome;
 mod combine_grid;
-mod image_pick;
 mod tags_ui;
 pub use combine_grid::ThumbState as CombineThumb;
 mod combine_ui;
@@ -155,6 +154,7 @@ pub(crate) use app::same_file;
 use canvas::autoscroll;
 use canvas::crop;
 use canvas::fling;
+use canvas::image_pick;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;

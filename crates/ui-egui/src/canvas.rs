@@ -23,6 +23,7 @@ mod cache;
 pub(super) mod crop;
 mod find;
 pub(super) mod fling;
+pub(super) mod image_pick;
 mod navigation;
 mod organize;
 mod selection;
