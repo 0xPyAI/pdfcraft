@@ -150,7 +150,7 @@ fn edges_are_primary_finite_in_order_and_capped() {
 }
 
 /// The page modules: the per-page chain in `canvas::document_area` and what it calls.
-const PAGE_MODULES: [&str; 34] = [
+const PAGE_MODULES: [&str; 35] = [
     "canvas.rs",
     "canvas/area.rs",
     "canvas/bars.rs",
@@ -171,6 +171,7 @@ const PAGE_MODULES: [&str; 34] = [
     "forms_ui.rs",
     "prepare.rs",
     "fill_sign.rs",
+    "fill_sign/scan.rs",
     "sign_ui.rs",
     "crop.rs",
     "zoom_snap.rs",
@@ -226,7 +227,7 @@ const NOT_PAGE_INPUT: [(&str, &str, &str); 11] = [
     ("forms_ui.rs", "overlay", "the field editor is an Area of its own over the page"),
     ("content_ui.rs", "editor", "the added-text editor is an Area of its own over the page"),
     ("edit_text_ui.rs", "overlay", "the paragraph editor is an Area of its own over the page"),
-    ("fill_sign.rs", "scan_tab", "the signature dialog's Scan tab"),
+    ("fill_sign/scan.rs", "scan_tab", "the signature dialog's Scan tab"),
 ];
 
 /// The function a `fn` line declares, laid out as rustfmt does (`pub`, `const` and the like
