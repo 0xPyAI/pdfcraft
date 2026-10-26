@@ -25,7 +25,6 @@ macro_rules! tl_ctx {
         $crate::i18n::tr_ctx($crate::i18n::current(), $context, $s)
     };
 }
-mod actions_ui;
 mod all_tools_ui;
 mod appearance;
 pub mod canvas;
@@ -166,6 +165,7 @@ use tools::sign_ui;
 use tools::stamps_ui;
 use tools::tags_ui;
 use workflows::a11y_ui;
+use workflows::actions_ui;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
