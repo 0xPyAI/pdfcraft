@@ -88,7 +88,6 @@ mod palette;
 mod panels;
 #[cfg(not(target_arch = "wasm32"))]
 mod pickers;
-pub mod prepare;
 mod print_ui;
 pub mod units;
 mod web_print;
@@ -166,6 +165,7 @@ pub use tools::forms_ui;
 use tools::link_ui;
 use tools::measure_ui;
 use tools::object_ui;
+pub use tools::prepare;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
