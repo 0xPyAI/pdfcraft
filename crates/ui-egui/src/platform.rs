@@ -11,3 +11,4 @@ pub(super) mod pickers;
 pub mod portable;
 pub mod ui_scale;
 pub mod updates;
+pub mod window_controls;

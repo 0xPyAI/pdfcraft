@@ -59,7 +59,6 @@ mod system_fonts;
 mod tab_context;
 pub mod theme;
 mod widgets;
-pub mod window_controls;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod window_state;
 
@@ -124,6 +123,7 @@ use platform::pickers;
 pub use platform::portable;
 pub use platform::ui_scale;
 pub use platform::updates;
+pub use platform::window_controls;
 #[cfg(test)]
 use state::CopyPage;
 #[cfg(not(target_arch = "wasm32"))]
