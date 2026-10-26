@@ -26,7 +26,6 @@ macro_rules! tl_ctx {
     };
 }
 mod all_tools_ui;
-mod appearance;
 pub mod canvas;
 mod chrome;
 pub use combine_grid::ThumbState as CombineThumb;
@@ -125,6 +124,7 @@ use canvas::signature_drag;
 use canvas::wheel_boost;
 use canvas::wheel_pager;
 use canvas::zoom_snap;
+use dialogs::appearance;
 pub use hooks::{FailedInbox, HostDirtyFn, HostSaveFn, Inbox, OsEvent, OsEventsFn};
 #[cfg(test)]
 use state::CopyPage;
