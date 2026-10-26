@@ -77,7 +77,6 @@ mod editing;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_watch;
 mod files;
-pub mod fill_sign;
 pub mod folders_ui;
 mod format_text_ui;
 pub mod forms_ui;
@@ -166,6 +165,7 @@ pub use tools::comments;
 use tools::content_ui;
 use tools::edit_text_ui;
 pub use tools::field_table_ui;
+pub use tools::fill_sign;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
