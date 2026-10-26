@@ -37,7 +37,6 @@ mod comments_panel;
 pub mod control;
 mod credits;
 mod drag_pointer;
-mod export_ui;
 mod js_ui;
 #[cfg(target_os = "macos")]
 mod macos_association;
@@ -165,6 +164,7 @@ use workflows::combine_grid;
 use workflows::combine_ui;
 use workflows::compare_ui;
 use workflows::create_ui;
+use workflows::export_ui;
 
 /// Files dropped on a document's page grid or its Pages panel.
 struct GridDrop {
