@@ -418,14 +418,19 @@ mod tests {
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap();
-            // Test modules (which build their own fixtures) come last in each file.
-            let code = text.split("\n#[cfg(test)]").next().unwrap_or("");
+            // Inline test modules (which build their own fixtures) come last in each file. A
+            // `#[cfg(test)]` on a `use` line or a `mod tests;` declaration doesn't start one.
+            let code = text
+                .match_indices("\n#[cfg(test)]\nmod ")
+                .find(|(at, m)| text[at + m.len()..].lines().next().is_some_and(|l| l.trim_end().ends_with('{')))
+                .map_or(text.as_str(), |(at, _)| &text[..at]);
             let lines: Vec<&str> = code.lines().collect();
             for (n, line) in lines.iter().enumerate() {
                 let trimmed = line.trim_start();
                 // A `use` line only names a helper; the call is checked where it is made.
                 if trimmed.starts_with("//")
                     || trimmed.starts_with("use ")
+                    || (trimmed.starts_with("pub") && trimmed.contains(" use "))
                     || !(trimmed.contains("std::fs")
                         || trimmed.contains("File::open")
                         || trimmed.contains("File::create")
