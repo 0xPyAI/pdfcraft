@@ -35,7 +35,6 @@ mod drag_pointer;
 #[cfg(target_os = "macos")]
 mod macos_association;
 mod menus;
-pub mod side_panels;
 /// Header & footer / watermark / background dialog types (tests and automation).
 pub mod marks {
     pub use crate::marks_ui::{MarksDraft, PageRange, Subset};
@@ -126,6 +125,7 @@ use panels::format_text_ui;
 use panels::organize_panel;
 use panels::page_selection_ui;
 use panels::search_ui;
+pub use panels::side_panels;
 #[cfg(test)]
 use state::CopyPage;
 #[cfg(not(target_arch = "wasm32"))]
