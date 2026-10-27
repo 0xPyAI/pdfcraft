@@ -650,7 +650,7 @@ fn dialog_properties(ui: &mut egui::Ui, app: &mut PdfCraftApp, req: &mut Pending
                         if sec.pending {
                             tl!("— (protection is applied when you save)").to_string()
                         } else if sec.owner {
-                            tl!("Owner password (no restrictions req.apply)").to_string()
+                            tl!("Owner password (no restrictions apply)").to_string()
                         } else {
                             tl!("User password").to_string()
                         },
@@ -1449,7 +1449,7 @@ fn dialog_shortcuts(ui: &mut egui::Ui) -> bool {
         (pair(FIND_NEXT, FIND_PREV), tl!("Next / previous match").to_string()),
         (key(COPY), tl!("Copy selected text").to_string()),
         (named("Double-click"), tl!("Select a word").to_string()),
-        (crate::i18n::key_name("Esc").to_string(), tl!("Clear selection / req.close find").to_string()),
+        (crate::i18n::key_name("Esc").to_string(), tl!("Clear selection / close find").to_string()),
         (key(ACTUAL_SIZE), tl!("Actual size").to_string()),
         (key(PAGE_LEVEL), tl!("Zoom to page level").to_string()),
         (key(FIT_WIDTH), tl!("Fit to width").to_string()),
