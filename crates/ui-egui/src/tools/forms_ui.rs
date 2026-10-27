@@ -629,6 +629,7 @@ fn settle_text_editor(
     ui: &mut egui::Ui,
     fx: &mut Focus,
     r: &egui::Response,
+    primary_down: bool,
     laid_out: Option<(std::sync::Arc<egui::Galley>, Pos2)>,
     fitted: Option<(&form_appearance::TextBox, String)>,
 ) {
@@ -653,7 +654,7 @@ fn settle_text_editor(
         let at = galley.cursor_from_pos(press - pos + vec2(galley.rect.left(), 0.0));
         st.cursor.set_char_range(Some(egui::text::CCursorRange::one(at)));
         st.store(ui.ctx(), r.id);
-        if ui.input(|i| i.pointer.primary_down()) {
+        if primary_down {
             ui.ctx().set_dragged_id(r.id);
         }
     }
@@ -725,11 +726,12 @@ pub(crate) fn overlay(
     view: &mut DocView,
     info: &DocInfo,
     form: &[FormField],
+    primary_down: bool,
     text_box: Option<&form_appearance::TextBox>,
     today: (i64, u32, u32),
 ) -> Option<Edit> {
     let pressed = view.forms.pressed;
-    if !ctx.input(|i| i.pointer.primary_down()) {
+    if !primary_down {
         view.forms.pressed = false;
     }
     let toggle = std::mem::take(&mut view.forms.toggle);
@@ -808,7 +810,7 @@ pub(crate) fn overlay(
                         })
                         // The form field's own logical name; not a visual/preordered label.
                         .accessible_name(f.name.clone());
-                    settle_text_editor(ui, fx, &r, laid_out, text_box.zip(before));
+                    settle_text_editor(ui, fx, &r, primary_down, laid_out, text_box.zip(before));
                     let lost = crate::edit_text_ui::lost_focus_once(&r, &mut fx.had_focus);
                     let (enter, esc, tab, shift) = ui.input(|i| {
                         (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Tab), i.modifiers.shift)

@@ -886,6 +886,7 @@ struct PageOut {
     open_initials: bool,
     open_signature: bool,
     open_table: Option<(usize, [f64; 4])>,
+    primary_down: bool,
     refused: Option<String>,
     stamp_placed: bool,
 }
@@ -1908,6 +1909,7 @@ fn draw_pages(
         open_initials,
         open_signature,
         open_table,
+        primary_down: _,
         refused,
         stamp_placed,
     } = page_out;
@@ -2081,6 +2083,7 @@ fn draw_pages(
         open_initials,
         open_signature,
         open_table,
+        primary_down: ptr.primary_down,
         refused,
         stamp_placed,
     };
@@ -2542,7 +2545,7 @@ fn track_scroll<T>(ui: &egui::Ui, view: &mut DocView, out: &egui::containers::sc
 
 /// The hover tip, find bar, size hint and the in-place editors drawn over the pages. Whether the
 /// text editor was finished.
-fn frame_overlays(ui: &mut egui::Ui, view: &mut DocView, env: &PageEnv<'_>, hover_text: Option<(Pos2, String)>) -> bool {
+fn frame_overlays(ui: &mut egui::Ui, view: &mut DocView, env: &PageEnv<'_>, primary_down: bool, hover_text: Option<(Pos2, String)>) -> bool {
     let PageEnv { added, author, avail, can_modify, doc, form, info, prefs, t, today, tool, units, unobstructed, .. } = *env;
     if let Some((pos, text)) = hover_text {
         // Click-through, as a tooltip is: the pages lose the pointer under anything that isn't.
@@ -2566,7 +2569,7 @@ fn frame_overlays(ui: &mut egui::Ui, view: &mut DocView, env: &PageEnv<'_>, hove
         view.pending_edit = Some(e);
     }
     let text_box = crate::forms_ui::text_box(doc, view, form);
-    if let Some(e) = crate::forms_ui::overlay(ui.ctx(), view, info, form, text_box.as_ref(), today) {
+    if let Some(e) = crate::forms_ui::overlay(ui.ctx(), view, info, form, primary_down, text_box.as_ref(), today) {
         view.pending_edit = Some(e);
     }
     if let Some(e) = crate::fill_sign::type_box(ui.ctx(), view, info, author) {
@@ -3077,6 +3080,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         open_initials,
         open_signature,
         open_table,
+        primary_down,
         mut refused,
         stamp_placed,
     } = page_out;
@@ -3103,7 +3107,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let pan_held = track_scroll(ui, view, &out, glide);
     plan_renders(ui, view, info, out.inner, &RenderPlan { visible_pages: &visible_pages, tag, scale, sharp_held, pan_held, hand });
 
-    let text_done = frame_overlays(ui, view, &env, hover_text);
+    let text_done = frame_overlays(ui, view, &env, primary_down, hover_text);
     if let Some(why) = view.objects.notice.take() {
         refused = Some(why);
     }
