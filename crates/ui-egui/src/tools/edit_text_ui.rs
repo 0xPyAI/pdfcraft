@@ -20,7 +20,7 @@ mod layout;
 
 pub(crate) use background::TextBackground;
 pub use image::{CropMode, ImageSelection};
-pub(crate) use image::{ImageAction, image_input, image_owns_pointer};
+pub(crate) use image::{ImageAction, ImageCx, image_input, image_owns_pointer};
 #[cfg(test)]
 use image::{rotate_knob, turn_degrees};
 #[cfg(test)]
