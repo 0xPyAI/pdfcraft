@@ -1,7 +1,9 @@
 use super::changes::classify_changes;
 use super::listing::{DigestCache, list, nums, sig_fields, text};
 use super::types::{Detail, Fill, Modification, Status, TrustStore};
-use super::*;
+use super::{
+    Certificate, Dict, DigestAlg, Document, HashSet, ObjRef, Object, SignError, SignatureInfo, SignedData, Time, build_chain, build_chain_noted,
+};
 
 /// Validate one signature dictionary.
 pub fn validate(doc: &Document, bytes: &[u8], trust: &TrustStore, field: &str) -> Option<SignatureInfo> {
