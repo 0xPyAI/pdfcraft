@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    AddedContent, Arc, Edit, EditError, FieldValue, ImageEdit, NewAnnotation, Shape, a11y, copy_image, decode_data_file, embed_image, fit_picture,
+    image_content_type, is_xfa_data_file, js, mark_source, measure, open_source, strip_xfa, unrestricted, xfa, xfa_after_data_change,
+};
 
 /// Whether the opening password allows an edit (§7.6.4.2, Table 22).
 pub(crate) fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), EditError> {
