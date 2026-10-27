@@ -1,5 +1,5 @@
 use super::create::normalize;
-use super::*;
+use super::{ObjRef, appearance};
 
 pub type Rgb = [f64; 3];
 
