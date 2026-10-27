@@ -1071,6 +1071,18 @@ struct PageInput {
     area_tool: bool,
 }
 
+/// Common geometry and pointer state for a tool acting on one page.
+#[derive(Clone, Copy)]
+pub(crate) struct PageToolContext<'a> {
+    pub ui: &'a egui::Ui,
+    pub resp: &'a egui::Response,
+    pub xf: &'a PageXform,
+    pub ptr: &'a PagePointer,
+    pub page: usize,
+    pub doc: &'a pdfcraft_engine::Document,
+    pub info: &'a DocInfo,
+}
+
 /// Comments: tools, selection, moving and resizing come before text selection. Form fields take
 /// clicks first with the Select tool (as Acrobat fills fields in every viewing mode); then
 /// comments; then text selection.
@@ -1105,6 +1117,7 @@ fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<
     } = frame.env;
     let PageSlot { i, xf, .. } = *slot;
     let PageFrame { resp, ptr, pointer, .. } = *frame;
+    let cx = PageToolContext { ui, resp, xf: &xf, ptr, page: i, doc, info };
     let pcx = comments::PageCx { page: i, xf: &xf, ptr, info, tool, prefs, allowed, hidden: comments_hidden, redact_mark };
     if let QuickTool::Measure(measure_tool) = tool {
         crate::measure_ui::page_input(ui, resp, doc, view, &pcx, measure_tool, units);
@@ -1162,20 +1175,17 @@ fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<
         && !comments::fill_grabs(&pcx, view)
     {
         match crate::fill_sign::page_input(
-            ui,
-            resp,
-            &xf,
-            ptr,
-            i,
-            info,
-            ft,
-            fill_text_size,
+            cx,
+            crate::fill_sign::PageInput {
+                tool: ft,
+                text_size: fill_text_size,
+                signature: signature.as_ref(),
+                initials: initials.as_ref(),
+                preview: frame.signature_preview,
+                author,
+                date_text,
+            },
             view,
-            signature.as_ref(),
-            initials.as_ref(),
-            frame.signature_preview,
-            author,
-            date_text,
         ) {
             Some(crate::fill_sign::FillAction::Edit(e)) => view.pending_edit = Some(*e),
             Some(crate::fill_sign::FillAction::Signature(e)) => {
@@ -1197,7 +1207,9 @@ fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<
     if tool == QuickTool::EnhanceCamera {
         crate::camera_ui::page_input(ui, resp, &xf, ptr, i, view, can_modify);
     }
-    if tool == QuickTool::Crop && crate::crop::page_input(ui, resp, &xf, ptr, i, info, view, can_crop) {
+    if tool == QuickTool::Crop
+        && crate::crop::page_input(ui, crate::crop::CropPageInput { resp, xf: &xf, ptr, page: i, info, view, allowed: can_crop })
+    {
         view.current = i;
         frame.out.open_boxes = true;
     }
@@ -1209,7 +1221,7 @@ fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<
         };
         // While a table is being set up, nothing else is drawn or moved.
         let allowed = can_modify && table_preview.is_none() && frame.out.open_table.is_none();
-        let o = crate::prepare::page_input(ui, resp, &xf, ptr, i, info, form, field_tool, allowed, view);
+        let o = crate::prepare::page_input(cx, form, field_tool, allowed, view);
         frame.out.field_props |= o.properties;
         frame.out.field_placed |= o.placed;
         frame.out.open_table = frame.out.open_table.or(o.table);
@@ -1220,7 +1232,7 @@ fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<
             && !(editing_content && can_modify && crate::content_ui::select_grabs(&xf, ptr, i, info, added, view))
             && !comments::select_grabs(&pcx, view)
         {
-            crate::forms_ui::page_input(ui, resp, &xf, ptr, i, info, form, can_fill, view)
+            crate::forms_ui::page_input(cx, form, can_fill, view)
         } else {
             FieldPointer::Away
         };
@@ -1234,11 +1246,10 @@ fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<
             let (vx, vy) = xf.screen_to_view(p);
             text.as_ref().is_some_and(|t| t.glyphs.iter().any(|g| vx >= g.rect[0] && vx <= g.rect[2] && vy >= g.rect[1] && vy <= g.rect[3]))
         };
-        crate::redact_ui::page_input(ui, resp, &xf, ptr, i, info, over_text, view)
+        crate::redact_ui::page_input(cx, over_text, view)
     };
     let image_owns_pointer = tool == QuickTool::EditText && crate::edit_text_ui::image_owns_pointer(ui, &xf, ptr, i, info, view);
-    let on_objects =
-        !image_owns_pointer && tool == QuickTool::EditText && can_modify && crate::object_ui::page_input(ui, resp, &xf, ptr, i, doc, view);
+    let on_objects = !image_owns_pointer && tool == QuickTool::EditText && can_modify && crate::object_ui::page_input(cx, view);
     let lines = if matches!(tool, QuickTool::AddText | QuickTool::EditText) && can_modify {
         let generation = doc.edit_generation();
         match view.edit_lines.get(&i) {
@@ -1267,12 +1278,7 @@ fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<
     let on_content = !on_objects && editing_content && can_modify && {
         source_blocked
             || crate::content_ui::page_input(
-                ui,
-                resp,
-                &xf,
-                ptr,
-                i,
-                info,
+                cx,
                 added,
                 tool == QuickTool::AddText && !over_source,
                 matches!(tool, QuickTool::AddText | QuickTool::EditText),
@@ -1299,7 +1305,7 @@ fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<
         };
         // Editable text takes precedence over background/overlapping artwork. Both
         // inventories are painted every frame, even when text owns the pointer.
-        let text_used = crate::edit_text_ui::page_input(ui, resp, &xf, ptr, i, doc, &lines, view, !others_own_pointer && !image_owns_pointer);
+        let text_used = crate::edit_text_ui::page_input(cx, &lines, view, !others_own_pointer && !image_owns_pointer);
         let image_cx = crate::edit_text_ui::ImageCx {
             ui,
             resp,
@@ -1312,7 +1318,7 @@ fn page_tool_input(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<
         let image_used = crate::edit_text_ui::image_input(&image_cx, &images, view, &mut frame.out.image_action);
         !others_own_pointer && (text_used || image_used)
     };
-    let on_link = tool == QuickTool::Link && can_modify && crate::link_ui::page_input(ui, resp, &xf, ptr, i, info, doc_links, view);
+    let on_link = tool == QuickTool::Link && can_modify && crate::link_ui::page_input(cx, doc_links, view);
     if tool == QuickTool::Select
         && resp.secondary_clicked()
         && can_modify
@@ -1558,6 +1564,7 @@ fn page_overlays(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<'_
     let PageSlot { i, xf, .. } = *slot;
     let PageFrame { resp, ptr, pointer, .. } = *frame;
     let painter = ui.painter();
+    let tool_cx = PageToolContext { ui, resp, xf: &xf, ptr, page: i, doc, info };
     let pcx = comments::PageCx { page: i, xf: &xf, ptr, info, tool, prefs, allowed, hidden: comments_hidden, redact_mark };
     if tool == QuickTool::Select && !input.consumed {
         crate::image_pick::page_input(resp, &xf, i, info, doc, pointer, view);
@@ -1585,13 +1592,13 @@ fn page_overlays(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<'_
         crate::link_ui::paint(painter, &xf, i, info, doc_links, view, pointer);
     }
     if preparing {
-        crate::prepare::paint_page(ui, painter, &xf, i, info, form, view, pointer);
+        crate::prepare::paint_page(tool_cx, form, view);
         if let Some(preview) = &table_preview {
             crate::field_table_ui::paint_preview(painter, &xf, i, preview);
         }
         if calc_order {
             let selected = view.prepare.selected.as_ref().map(|(name, _)| name.as_str());
-            if let Some(name) = crate::calc_order_ui::paint_page(painter, &xf, i, info, form, &view.calc_order, generation, selected, pointer) {
+            if let Some(name) = crate::calc_order_ui::paint_page(tool_cx, form, &view.calc_order, generation, selected) {
                 frame.calc_hover = Some(name);
             }
         }

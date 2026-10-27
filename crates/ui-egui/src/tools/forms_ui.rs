@@ -13,8 +13,7 @@ use egui::{Color32, CornerRadius, Pos2, Rect, Stroke, vec2};
 use pdfcraft_engine::{Edit, FieldValue, FormField, FormFieldKind, FormWidget, field_flags, form_appearance};
 use pdfcraft_render::DocInfo;
 
-use crate::canvas::{DocView, PageXform};
-use crate::page_pointer::PagePointer;
+use crate::canvas::{DocView, PageToolContext, PageXform};
 use crate::theme::Tokens;
 
 const FOCUS_BLUE: Color32 = Color32::from_rgb(0x14, 0x73, 0xE6);
@@ -165,18 +164,8 @@ pub(crate) enum FieldPointer {
 }
 
 /// Clicks on form widgets of one page.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn page_input(
-    ui: &egui::Ui,
-    resp: &egui::Response,
-    xf: &PageXform,
-    ptr: &PagePointer,
-    page: usize,
-    info: &DocInfo,
-    form: &[FormField],
-    allowed: bool,
-    view: &mut DocView,
-) -> FieldPointer {
+pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], allowed: bool, view: &mut DocView) -> FieldPointer {
+    let PageToolContext { ui, resp, xf, ptr, page, info, .. } = cx;
     let Some(p) = ptr.within(xf.rect) else { return FieldPointer::Away };
     let hit = form.iter().find_map(|f| {
         f.widgets
@@ -319,8 +308,17 @@ pub(crate) fn commit(view: &mut DocView, form: &[FormField]) {
 
 /// The text box of an editable combo box, over the field. What is typed becomes the value when
 /// Enter, Tab or a click away commits it; a pick from the list still sets an option.
-#[allow(clippy::too_many_arguments)]
-fn combo_editor(ctx: &egui::Context, view: &mut DocView, form: &[FormField], f: &FormField, w: &FormWidget, rect: Rect, zoom: f32, widget: usize) {
+struct ComboEditor<'a> {
+    form: &'a [FormField],
+    field: &'a FormField,
+    widget: &'a FormWidget,
+    rect: Rect,
+    zoom: f32,
+    index: usize,
+}
+
+fn combo_editor(ctx: &egui::Context, view: &mut DocView, editor: ComboEditor<'_>) {
+    let ComboEditor { form, field: f, widget: w, rect, zoom, index: widget } = editor;
     let mut enter = false;
     egui::Area::new(egui::Id::unique(("form-editor", view.id.0)))
         .fade_in(false)
@@ -847,7 +845,7 @@ pub(crate) fn overlay(
             // An editable combo box has a text box over the field as well as its list (ISO
             // 32000-2 Table 233, Edit).
             if editable_combo(f) {
-                combo_editor(ctx, view, form, f, w, rect, zoom, focus.widget);
+                combo_editor(ctx, view, ComboEditor { form, field: f, widget: w, rect, zoom, index: focus.widget });
             }
             let resp = egui::Area::new(egui::Id::unique(("form-choices", view.id.0)))
                 .order(egui::Order::Foreground)
