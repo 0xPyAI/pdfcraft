@@ -1,4 +1,4 @@
-use super::*;
+use super::{BTreeSet, MAX_FOLDER_DEPTH, MAX_FOLDER_FILES, Ordering, SystemTime};
 
 /// The PDFs, images and text files in `dir` (and, if `recursive`, the folders inside it, not
 /// following links), in natural order, at most [`MAX_FOLDER_FILES`]; and whether there were more.
