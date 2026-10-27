@@ -1,6 +1,9 @@
 use super::ast::{Expr, Idx};
 use super::value::{Val, num_text, parse_num};
-use super::*;
+use super::{
+    CLOCK_EVERY, HNode, HashSet, Interp, LIST_TOO_LONG, MAX_LIST, MAX_PARSE_DEPTH, MAX_STEPS, R, RAN_TOO_LONG, child_named, descendants_named,
+    instances, resolve_som,
+};
 
 impl Interp<'_> {
     pub(super) fn step(&mut self) -> R<()> {
