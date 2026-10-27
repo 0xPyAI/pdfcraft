@@ -1,7 +1,7 @@
 use super::error::{Result, ToolError, failed};
 use super::json::{Args, document_attachment_keys, info, one_based, parse_style_ranges, security, summary};
 use super::paths::{read_input, write_atomic};
-use super::*;
+use super::{Arc, Automation, Edit, Value, block_overlapping, comments, json, tools};
 
 /// One piece of a tool's result.
 #[derive(Clone, Debug, PartialEq)]
