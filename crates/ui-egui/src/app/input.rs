@@ -1,4 +1,4 @@
-use super::*;
+use super::{GridDrop, GridFile, OpenRequest, PdfCraftApp, open_worker};
 
 /// Read a file dropped on a page grid (see [`GridFile`]).
 fn read_grid_file((name, source): GridFile) -> Result<(String, Vec<u8>), (String, String)> {

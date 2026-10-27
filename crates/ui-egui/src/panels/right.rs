@@ -1,6 +1,8 @@
 use super::bookmarks::{BmAction, OutlineCtx, outline_item, outline_matches};
 use super::pages::{page_tools, pages, thumbnail_size};
-use super::*;
+use super::{
+    Align, Align2, Color32, DocInfo, FieldKind, Layout, Nav, PdfCraftApp, Rect, RightPanel, Sense, Stroke, Tokens, human_size, icons, theme, vec2,
+};
 
 /// Draw the selected right-hand panel and apply its navigation, layer, bookmark or edit actions.
 pub fn right_panel(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
