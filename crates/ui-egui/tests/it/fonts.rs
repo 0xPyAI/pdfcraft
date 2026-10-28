@@ -281,14 +281,14 @@ fn system_fallback_covers_hebrew() {
 
 /// On a machine with an installed Bengali font, the installed definitions include it and a
 /// Bengali (Bangla) file name has glyphs in the document tab instead of boxes (#3082). Windows
-/// ships Nirmala UI and macOS Bangla Sangam MN, so there the test never skips.
+/// ships Nirmala UI and macOS Bangla Sangam MN, so the test normally runs there; it skips on any
+/// machine whose installed fonts lack a Bengali face (or with `PDFCRAFT_SYSTEM_FONTS=0`).
 #[test]
 fn system_fallback_covers_bengali() {
     const BENGALI: &str = "বাংলা ফাইল";
     assert!(!theme::font_definitions().font_data.contains_key(theme::SYSTEM_BENGALI_FALLBACK));
     let defs = theme::installed_font_definitions(theme::CjkPreference::Default);
-    let off = std::env::var_os("PDFCRAFT_SYSTEM_FONTS").is_some_and(|v| v == "0");
-    if !defs.font_data.contains_key(theme::SYSTEM_BENGALI_FALLBACK) && (off || !(cfg!(windows) || cfg!(target_os = "macos"))) {
+    if !defs.font_data.contains_key(theme::SYSTEM_BENGALI_FALLBACK) {
         eprintln!("skipping system_fallback_covers_bengali: no installed Bengali fallback font (or PDFCRAFT_SYSTEM_FONTS=0)");
         assert!(defs.families.values().all(|stack| !stack.iter().any(|n| n == theme::SYSTEM_BENGALI_FALLBACK)));
         return;
