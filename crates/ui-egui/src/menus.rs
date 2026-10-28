@@ -254,7 +254,7 @@ fn english(labeled: Labeled<'_>) -> Option<String> {
 }
 
 fn translate(english: &'static str) -> String {
-    if english == "⋯" { tl!("More").to_owned() } else { tl!(english).to_owned() }
+    tl!(english).to_owned()
 }
 
 /// The layouts' own labels (About, Quit, Window…) through the app's translations.

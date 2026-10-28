@@ -546,8 +546,11 @@ fn check_one_object(
     let ty = dict.name(b"Type");
     let subtype = dict.name(b"Subtype");
     check_actions(doc, dict, issue);
-    if is_annotation(dict, ty, subtype) {
-        check_annotation(doc, dict, subtype, page_of(reference), issue);
+    if is_annotation(dict, ty, subtype) && check_annotation(doc, dict, subtype, page_of(reference), issue) {
+        // A forbidden annotation stops every later check for its object, as the scan did before
+        // it was split into helpers: the rest of its own checks and the form field, font, stream
+        // and embedded file below all came after that `continue`.
+        return;
     }
     if dict.get(b"FT").is_some() && dict.get(b"AA").is_some() && ty != Some(b"Annot") {
         issue("6.5.2", "A form field has additional actions", None, None, true);
@@ -583,11 +586,11 @@ fn check_annotation(
     subtype: Option<&[u8]>,
     page: Option<usize>,
     issue: &mut impl FnMut(&'static str, &'static str, Option<String>, Option<usize>, bool),
-) {
+) -> bool {
     let name = subtype.map(|bytes| String::from_utf8_lossy(bytes).into_owned()).unwrap_or_default();
     if subtype.is_some_and(|value| FORBIDDEN_ANNOTS.contains(&value)) {
         issue("6.3.1", "{} annotations aren't allowed", Some(name), page, true);
-        return;
+        return true;
     }
     let flags = dict.int(b"F").unwrap_or(0);
     if subtype != Some(b"Popup") && (flags & 4 == 0 || flags & (1 | 2 | 32) != 0) {
@@ -597,6 +600,7 @@ fn check_annotation(
     if dict.get(b"AA").is_some() {
         issue("6.5.2", "A {} annotation has additional actions", Some(name), page, true);
     }
+    false
 }
 
 fn check_annotation_appearance(
