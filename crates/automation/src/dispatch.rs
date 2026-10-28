@@ -1,9 +1,6 @@
 use super::error::{Result, ToolError, failed};
 use super::json::{Args, document_attachment_keys, info, one_based, parse_style_ranges, security, summary};
 use super::paths::{read_input, write_atomic};
-// The digital-ID listing tools are macOS (Keychain) and Windows (certificate store) only.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-use super::signing;
 use super::{Arc, Automation, Edit, Value, block_overlapping, comments, json, tools};
 
 /// One piece of a tool's result.
@@ -745,7 +742,7 @@ impl Automation {
                 let ids: Vec<Value> = pdfcraft_engine::sign::keychain::identities(None)
                     .map_err(failed)?
                     .iter()
-                    .map(|id| json!({ "id": pdfcraft_engine::sign::keychain::reference(&id.certificate), "certificate": signing::cert_json(&id.certificate) }))
+                    .map(|id| json!({ "id": pdfcraft_engine::sign::keychain::reference(&id.certificate), "certificate": super::signing::cert_json(&id.certificate) }))
                     .collect();
                 #[cfg(not(target_os = "macos"))]
                 let ids: Vec<Value> = Vec::new();
@@ -758,7 +755,7 @@ impl Automation {
                     let ids = listing
                         .ids
                         .iter()
-                        .map(|id| json!({ "id": pdfcraft_engine::sign::windows::reference(&id.certificate), "certificate": signing::cert_json(&id.certificate) }))
+                        .map(|id| json!({ "id": pdfcraft_engine::sign::windows::reference(&id.certificate), "certificate": super::signing::cert_json(&id.certificate) }))
                         .collect();
                     let unusable = listing
                         .unusable
