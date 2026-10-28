@@ -1,6 +1,9 @@
 use super::error::{Result, ToolError, failed};
 use super::json::{Args, document_attachment_keys, info, one_based, parse_style_ranges, security, summary};
 use super::paths::{read_input, write_atomic};
+// The digital-ID listing tools are macOS (Keychain) and Windows (certificate store) only.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use super::signing;
 use super::{Arc, Automation, Edit, Value, block_overlapping, comments, json, tools};
 
 /// One piece of a tool's result.
